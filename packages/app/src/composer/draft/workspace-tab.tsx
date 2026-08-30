@@ -631,7 +631,7 @@ export function WorkspaceDraftAgentTab({
   const inputAreaWrapperStyle = useMemo(
     () => [
       animatedStaticStyles.inputAreaWrapper,
-      { paddingBottom: insets.bottom },
+      { paddingBottom: isWeb ? 0 : insets.bottom },
       composerKeyboardStyle,
     ],
     [insets.bottom, composerKeyboardStyle],
