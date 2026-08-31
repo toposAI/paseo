@@ -12,7 +12,7 @@ import {
   isChecksHiddenByLegacyRowItem,
   type SidebarRowItems,
 } from "@/components/sidebar/display-preferences/row-items";
-import { isNative } from "@/constants/platform";
+import { isNative, isWeb } from "@/constants/platform";
 import {
   FONT_SIZE,
   PLUGIN_THEME_PREFERENCE,
@@ -44,15 +44,26 @@ export const DEFAULT_THEME_PREFERENCE = "auto" satisfies ThemePreference;
 export const DEFAULT_TERMINAL_SCROLLBACK_LINES = 10_000;
 export const MIN_TERMINAL_SCROLLBACK_LINES = 0;
 export const MAX_TERMINAL_SCROLLBACK_LINES = 1_000_000;
+// Matches the `sm` breakpoint in styles/unistyles.ts (useIsCompactFormFactor's
+// threshold) — mobile Safari/Chrome tabs never exceed this, and there is no
+// window resize event to react to, so a one-time check at module load is fine.
+const MOBILE_WEB_VIEWPORT_BREAKPOINT = 576;
+
+function isCompactWebViewport(): boolean {
+  return (
+    isWeb && typeof window !== "undefined" && window.innerWidth < MOBILE_WEB_VIEWPORT_BREAKPOINT
+  );
+}
+
 export function defaultUiBaseFontSize(native: boolean): number {
-  return native ? 18 : FONT_SIZE.base;
+  return native || isCompactWebViewport() ? 18 : FONT_SIZE.base;
 }
 
 export const DEFAULT_UI_BASE_FONT_SIZE = defaultUiBaseFontSize(isNative);
 export const MIN_UI_BASE_FONT_SIZE = 10;
 export const MAX_UI_BASE_FONT_SIZE = 21;
 export function defaultContentFontSize(native: boolean): number {
-  return native ? 18 : FONT_SIZE.content;
+  return native || isCompactWebViewport() ? 18 : FONT_SIZE.content;
 }
 
 export const DEFAULT_CONTENT_FONT_SIZE = defaultContentFontSize(isNative);

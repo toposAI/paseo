@@ -654,15 +654,26 @@ describe("appearance settings", () => {
     expect((await loadAppSettingsFromStorage(deps)).sidebarChecksDisplay).toBe("icon");
   });
 
-  it("uses a 15px mobile base and a 14px web base", () => {
-    expect(defaultUiBaseFontSize(true)).toBe(15);
+  it("uses an 18px mobile base and a 14px desktop web base", () => {
+    expect(defaultUiBaseFontSize(true)).toBe(18);
     expect(defaultUiBaseFontSize(false)).toBe(14);
   });
 
-  it("uses a 15px content default on mobile and web", () => {
-    expect(defaultContentFontSize(true)).toBe(15);
+  it("uses an 18px mobile content default and a 15px desktop web default", () => {
+    expect(defaultContentFontSize(true)).toBe(18);
     expect(defaultContentFontSize(false)).toBe(15);
     expect(DEFAULT_CONTENT_FONT_SIZE).toBe(defaultContentFontSize(false));
+  });
+
+  it("treats a narrow web viewport (mobile browser) like native for font defaults", () => {
+    const originalWindow = (globalThis as { window?: unknown }).window;
+    (globalThis as { window?: unknown }).window = { innerWidth: 390 };
+    try {
+      expect(defaultUiBaseFontSize(false)).toBe(18);
+      expect(defaultContentFontSize(false)).toBe(18);
+    } finally {
+      (globalThis as { window?: unknown }).window = originalWindow;
+    }
   });
 
   it("derives and persists content size from an existing interface-size preference", async () => {
