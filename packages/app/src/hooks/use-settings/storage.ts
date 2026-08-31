@@ -45,14 +45,14 @@ export const DEFAULT_TERMINAL_SCROLLBACK_LINES = 10_000;
 export const MIN_TERMINAL_SCROLLBACK_LINES = 0;
 export const MAX_TERMINAL_SCROLLBACK_LINES = 1_000_000;
 export function defaultUiBaseFontSize(native: boolean): number {
-  return native ? 15 : FONT_SIZE.base;
+  return native ? 18 : FONT_SIZE.base;
 }
 
 export const DEFAULT_UI_BASE_FONT_SIZE = defaultUiBaseFontSize(isNative);
 export const MIN_UI_BASE_FONT_SIZE = 10;
 export const MAX_UI_BASE_FONT_SIZE = 21;
 export function defaultContentFontSize(native: boolean): number {
-  return native ? 15 : FONT_SIZE.content;
+  return native ? 18 : FONT_SIZE.content;
 }
 
 export const DEFAULT_CONTENT_FONT_SIZE = defaultContentFontSize(isNative);
