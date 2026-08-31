@@ -90,6 +90,7 @@ import { normalizeWorkspaceTabTarget, workspaceTabTargetsEqual } from "@/workspa
 import { useVisibleAgentIds } from "./visible-agent-ids";
 import {
   getHostRuntimeStore,
+  useHostRegistryLoaded,
   useHostRuntimeClient,
   useHostRuntimeIsConnected,
   useHostRuntimeSnapshot,
@@ -1562,6 +1563,17 @@ function WorkspaceScreenContent({
   useWorkspaceTerminalSessionRetention({
     scopeKey: workspaceTerminalScopeKey,
   });
+
+  const hostRegistryLoaded = useHostRegistryLoaded();
+  useEffect(() => {
+    if (!normalizedServerId) return;
+    // hostRegistryLoaded is a dep (not just a read) so this re-acquires once the host
+    // registry finishes its async load — acquiring before then silently no-ops
+    // (host-runtime.ts's acquireDirectoryDemand returns early when directorySyncByServer
+    // has no entry yet) and normalizedServerId alone never changes to retry it.
+    const release = getHostRuntimeStore().acquireDirectoryDemand(normalizedServerId);
+    return release;
+  }, [normalizedServerId, hostRegistryLoaded]);
 
   const client = useHostRuntimeClient(normalizedServerId);
   const isConnected = useHostRuntimeIsConnected(normalizedServerId);
