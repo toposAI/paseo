@@ -6,6 +6,11 @@ polyfillCrypto();
 import { polyfillScreenOrientation } from "./src/polyfills/screen-orientation";
 polyfillScreenOrientation();
 
+// Track the true visible viewport height on iOS Safari/standalone, where
+// `100%` resolves against the layout viewport and leaves stale bottom space.
+import { applyVisualViewportHeight } from "./src/polyfills/visual-viewport-height";
+applyVisualViewportHeight();
+
 // Configure Unistyles before Expo Router pulls in any components using StyleSheet.
 import "./src/styles/unistyles";
 import "expo-router/entry";
