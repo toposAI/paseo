@@ -33,7 +33,14 @@ describe("applyVisualViewportHeight", () => {
         listeners[event] = handler;
       }),
     };
-    (globalThis as { window?: unknown }).window = { visualViewport };
+    const windowAddEventListener = vi.fn();
+    (globalThis as { window?: unknown }).window = {
+      visualViewport,
+      scrollX: 0,
+      scrollY: 0,
+      scrollTo: vi.fn(),
+      addEventListener: windowAddEventListener,
+    };
     (globalThis as { document?: unknown }).document = {
       documentElement: { style: { setProperty } },
     };
@@ -42,10 +49,38 @@ describe("applyVisualViewportHeight", () => {
 
     expect(setProperty).toHaveBeenCalledWith("--paseo-vvh", "640px");
     expect(visualViewport.addEventListener).toHaveBeenCalledWith("resize", expect.any(Function));
+    expect(visualViewport.addEventListener).toHaveBeenCalledWith("scroll", expect.any(Function));
+    expect(windowAddEventListener).toHaveBeenCalledWith("scroll", expect.any(Function));
 
     visualViewport.height = 560;
     listeners.resize();
 
     expect(setProperty).toHaveBeenLastCalledWith("--paseo-vvh", "560px");
+  });
+
+  it("scrolls the window back to origin when the visualViewport pans", () => {
+    const listeners: Record<string, () => void> = {};
+    const visualViewport = {
+      height: 640,
+      addEventListener: vi.fn((event: string, handler: () => void) => {
+        listeners[event] = handler;
+      }),
+    };
+    const scrollTo = vi.fn();
+    (globalThis as { window?: unknown }).window = {
+      visualViewport,
+      scrollX: 0,
+      scrollY: 120,
+      scrollTo,
+      addEventListener: vi.fn(),
+    };
+    (globalThis as { document?: unknown }).document = {
+      documentElement: { style: { setProperty: vi.fn() } },
+    };
+
+    applyVisualViewportHeight();
+    listeners.scroll();
+
+    expect(scrollTo).toHaveBeenCalledWith(0, 0);
   });
 });

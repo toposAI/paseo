@@ -25,6 +25,18 @@ export function applyVisualViewportHeight() {
     );
   };
 
+  // iOS Safari pans its internal visualViewport to bring a focused input
+  // into view, which offsets `#root` (fixed to the layout viewport's
+  // top-left) upward until the page is scrolled back. Undo that pan
+  // whenever the visualViewport moves so the app shell never drifts.
+  const resetScroll = () => {
+    if (window.scrollX !== 0 || window.scrollY !== 0) {
+      window.scrollTo(0, 0);
+    }
+  };
+
   updateHeight();
   visualViewport.addEventListener("resize", updateHeight);
+  visualViewport.addEventListener("scroll", resetScroll);
+  window.addEventListener("scroll", resetScroll);
 }

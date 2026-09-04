@@ -49,6 +49,17 @@
       /* These styles make the root element full-height */
       #root {
         display: flex;
+        /* Pinned to the layout viewport's top-left instead of flowing in
+           `body`. iOS Safari focuses a text input by panning its internal
+           visualViewport (not by scrolling `body`, which `overflow: hidden`
+           already blocks), which shifts an in-flow `#root` off-screen until
+           the page is scrolled back. Fixed positioning keeps `#root` glued
+           to the viewport regardless of that pan; see
+           src/polyfills/visual-viewport-height.ts for the accompanying
+           scroll-reset. */
+        position: fixed;
+        top: 0;
+        left: 0;
         width: 100%;
         /* var(--paseo-vvh) tracks window.visualViewport.height (set in
            src/polyfills/visual-viewport-height.ts) so the app shell matches
