@@ -1855,13 +1855,17 @@ describe("ClaudeAgentSession context window usage", () => {
     };
   }
 
-  function createMessageDeltaEvent(outputTokens: number): Record<string, unknown> {
+  function createMessageDeltaEvent(
+    outputTokens: number,
+    usage: Record<string, unknown> = {},
+  ): Record<string, unknown> {
     return {
       type: "stream_event",
       event: {
         type: "message_delta",
         usage: {
           output_tokens: outputTokens,
+          ...usage,
         },
       },
       session_id: "session-1",
@@ -2591,6 +2595,123 @@ describe("ClaudeAgentSession context window usage", () => {
           provider: "claude",
           usage: {
             contextWindowUsedTokens: 175,
+          },
+        }),
+      );
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("message_delta input usage replaces an empty message_start count", async () => {
+    // Translating gateways (LiteLLM in front of an OpenAI-compatible backend) do not know the
+    // prompt size when message_start is emitted, so they report input_tokens: 0 there and send
+    // the cumulative counts on message_delta, as the Anthropic Messages API allows.
+    const session = await createSessionForTurns([
+      [
+        createInitMessage(),
+        createMessageStartEvent({
+          input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        }),
+        createMessageDeltaEvent(64, { input_tokens: 20_236 }),
+        createSuccessResult({
+          usage: {
+            input_tokens: 20_236,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            output_tokens: 64,
+            iterations: [],
+          },
+        }),
+      ],
+    ]);
+
+    try {
+      const events = await collectStreamEvents(session);
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "usage_updated",
+          provider: "claude",
+          usage: {
+            contextWindowUsedTokens: 20_300,
+          },
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "turn_completed",
+          usage: expect.objectContaining({
+            inputTokens: 20_236,
+            outputTokens: 64,
+            contextWindowUsedTokens: 20_300,
+          }),
+        }),
+      );
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("message_delta without cache counters keeps the message_start cache usage", async () => {
+    const session = await createSessionForTurns([
+      [
+        createInitMessage(),
+        createMessageStartEvent({
+          input_tokens: 5,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 1_000,
+        }),
+        createMessageDeltaEvent(64, { input_tokens: 5 }),
+        createSuccessResult(),
+      ],
+    ]);
+
+    try {
+      const events = await collectStreamEvents(session);
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "usage_updated",
+          provider: "claude",
+          usage: {
+            contextWindowUsedTokens: 1_069,
+          },
+        }),
+      );
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("message_delta without any input counters keeps the message_start input usage", async () => {
+    // Native-Anthropic backends report the real input on message_start and send delta usage with
+    // only output_tokens. The merge must not wipe the message_start input: a delta carrying no
+    // input field keeps it, so the count stays 1_050 (input 1_000 + output 50), never just 50.
+    const session = await createSessionForTurns([
+      [
+        createInitMessage(),
+        createMessageStartEvent({
+          input_tokens: 1_000,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        }),
+        createMessageDeltaEvent(50),
+        createSuccessResult(),
+      ],
+    ]);
+
+    try {
+      const events = await collectStreamEvents(session);
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "usage_updated",
+          provider: "claude",
+          usage: {
+            contextWindowUsedTokens: 1_050,
           },
         }),
       );
