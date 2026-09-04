@@ -450,7 +450,7 @@ function QueryProvider({ children }: { children: ReactNode }) {
 
 const rowStyle = { flex: 1, flexDirection: "row" } as const;
 const flexStyle = { flex: 1 } as const;
-const MOBILE_WEB_GESTURE_TOUCH_ACTION = isWeb ? "auto" : "pan-y";
+const MOBILE_WEB_GESTURE_TOUCH_ACTION = "pan-y";
 
 interface AppContainerProps {
   children: ReactNode;
