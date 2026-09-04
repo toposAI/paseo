@@ -3943,7 +3943,10 @@ export class AgentManager {
         this.onStreamThreadStarted(agent);
         return undefined;
       case "usage_updated":
-        agent.lastUsage = event.usage;
+        // usage_updated carries only context-window fields (used/max tokens) and
+        // omits totalCostUsd and raw token counts. Merge (not overwrite) so the
+        // accumulated cost from turn_completed survives streaming/interrupted turns.
+        agent.lastUsage = { ...agent.lastUsage, ...event.usage };
         this.emitState(agent);
         return undefined;
       case "mode_changed":
