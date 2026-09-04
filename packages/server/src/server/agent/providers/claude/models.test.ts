@@ -171,8 +171,11 @@ describe("getClaudeModels", () => {
     ["claude-sonnet-5-20260101", true, "high"],
     ["claude-fable-5", false, "high"],
     ["claude-haiku-4-5", false, undefined],
-    ["openrouter/anthropic/claude-opus-4-8", false, undefined],
-    [null, false, undefined],
+    // Non-manifest / custom / runtime models treat disabled thinking as supported:
+    // custom providers (e.g. DeepSeek/DeepInfra via a custom ANTHROPIC_BASE_URL) honor
+    // thinking:{type:"disabled"}, which is harmless on any Anthropic-compatible endpoint.
+    ["openrouter/anthropic/claude-opus-4-8", true, undefined],
+    [null, true, undefined],
   ])("resolves disabled thinking for model %s", (modelId, supported, fallbackThinkingOptionId) => {
     expect(resolveClaudeDisabledThinkingForModel(modelId)).toEqual({
       supported,

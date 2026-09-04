@@ -1064,8 +1064,9 @@ describe("ClaudeAgentSession features", () => {
   test.each([
     ["supported model", "claude-opus-4-8", { type: "disabled" }, undefined],
     ["unsupported model", "claude-fable-5", { type: "adaptive" }, "high"],
-    ["custom model", "openrouter/anthropic/claude-opus-4-8", undefined, undefined],
-    ["provider default", null, undefined, undefined],
+    // Custom / runtime models now support disabled thinking, so Off is kept as-is.
+    ["custom model", "openrouter/anthropic/claude-opus-4-8", { type: "disabled" }, undefined],
+    ["provider default", null, { type: "disabled" }, undefined],
   ])("reconciles Off when switching to a %s", async (_label, modelId, thinking, effort) => {
     const { queryFactory, launches } = createQueryMock();
     const client = new ClaudeAgentClient({

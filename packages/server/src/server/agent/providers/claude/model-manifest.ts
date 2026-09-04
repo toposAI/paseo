@@ -265,8 +265,12 @@ export interface ClaudeDisabledThinkingResolution {
 }
 
 /**
- * Resolve the disabled-thinking capability from the curated manifest only. Runtime/provider
- * model aliases intentionally do not inherit this capability.
+ * Resolve the disabled-thinking capability for a model. First-party models listed in the
+ * curated manifest remain gated by their `supportsThinkingDisabled` flag. Custom/runtime
+ * models not in the manifest are treated as supporting disabled thinking: they typically
+ * route to Anthropic-compatible endpoints (e.g. DeepSeek/DeepInfra via a custom
+ * ANTHROPIC_BASE_URL) for which `thinking:{type:"disabled"}` is harmless — it is the
+ * default off state on any such provider.
  */
 export function resolveClaudeDisabledThinkingForModel(
   modelId: string | null | undefined,
@@ -277,7 +281,7 @@ export function resolveClaudeDisabledThinkingForModel(
     : undefined;
   return {
     supported:
-      !!model && "supportsThinkingDisabled" in model && model.supportsThinkingDisabled === true,
+      !model || ("supportsThinkingDisabled" in model && model.supportsThinkingDisabled === true),
     fallbackThinkingOptionId:
       model && "effortLevels" in model ? CLAUDE_DEFAULT_THINKING_OPTION_ID : undefined,
   };
