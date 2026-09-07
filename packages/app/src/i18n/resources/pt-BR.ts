@@ -110,6 +110,19 @@ export const ptBR: TranslationResources = {
       stopAgent: "Parar agente",
       interrupt: "Interromper",
     },
+    autoQueue: {
+      halted: "O envio automático de mensagens na fila foi interrompido: {{reason}}",
+      haltedReason: {
+        dispatchTimeout: "o envio demorou muito para começar; a mensagem pode já ter sido enviada",
+        turnActivationTimeout: "o agente não começou a responder a tempo",
+        cancelled: "o agente foi cancelado",
+        queueItemMissing: "a mensagem na fila não estava mais disponível",
+        sendFailed: "falha no envio: {{message}}",
+        unexpectedError:
+          "ocorreu um erro inesperado; a mensagem pode já ter sido enviada ({{message}})",
+      },
+      resume: "Retomar",
+    },
     voice: {
       enableVoiceMode: "Ativar modo de voz",
       voiceMode: "Modo de voz",

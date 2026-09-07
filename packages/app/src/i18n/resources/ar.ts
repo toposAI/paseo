@@ -110,6 +110,18 @@ export const ar: TranslationResources = {
       stopAgent: "توقف الوكيل",
       interrupt: "مقاطعة",
     },
+    autoQueue: {
+      halted: "توقف الإرسال التلقائي للرسائل في قائمة الانتظار: {{reason}}",
+      haltedReason: {
+        dispatchTimeout: "استغرق بدء الإرسال وقتًا طويلاً جدًا. ربما تم إرسال الرسالة بالفعل",
+        turnActivationTimeout: "لم يبدأ الوكيل في الاستجابة في الوقت المحدد",
+        cancelled: "تم إلغاء الوكيل",
+        queueItemMissing: "لم تعد الرسالة في قائمة الانتظار متاحة",
+        sendFailed: "فشل الإرسال: {{message}}",
+        unexpectedError: "حدث خطأ غير متوقع. ربما تم إرسال الرسالة بالفعل ({{message}})",
+      },
+      resume: "استئناف",
+    },
     voice: {
       enableVoiceMode: "تمكين الوضع الصوتي",
       voiceMode: "وضع الصوت",

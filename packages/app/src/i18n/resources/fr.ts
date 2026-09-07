@@ -112,6 +112,20 @@ export const fr: TranslationResources = {
       stopAgent: "Agent d'arrêt",
       interrupt: "Interrompre",
     },
+    autoQueue: {
+      halted: "L'envoi automatique des messages en file d'attente s'est arrêté : {{reason}}",
+      haltedReason: {
+        dispatchTimeout:
+          "l'envoi a mis trop de temps à démarrer ; le message a peut-être déjà été envoyé",
+        turnActivationTimeout: "l'agent n'a pas commencé à répondre à temps",
+        cancelled: "l'agent a été annulé",
+        queueItemMissing: "le message en file d'attente n'était plus disponible",
+        sendFailed: "l'envoi a échoué : {{message}}",
+        unexpectedError:
+          "une erreur inattendue s'est produite ; le message a peut-être déjà été envoyé ({{message}})",
+      },
+      resume: "Reprendre",
+    },
     voice: {
       enableVoiceMode: "Activer le mode vocal",
       voiceMode: "Mode vocal",

@@ -25,6 +25,7 @@ import {
   isAttachmentSelectedForForgeItem,
   openComposerAttachment,
   pickAndPersistImages,
+  pickNextQueuedMessage,
   queueComposerMessage,
   removeComposerAttachmentAtIndex,
   sendQueuedComposerMessageNow,
@@ -749,6 +750,23 @@ describe("queueComposerMessage", () => {
       { kind: "image", metadata: image },
       review,
     ]);
+  });
+});
+
+describe("pickNextQueuedMessage", () => {
+  it("returns null for an empty queue", () => {
+    expect(pickNextQueuedMessage([])).toBeNull();
+  });
+
+  it("returns the only entry for a single-item queue", () => {
+    const item: QueuedComposerMessage = { id: "msg-1", text: "hello", attachments: [] };
+    expect(pickNextQueuedMessage([item])).toBe(item);
+  });
+
+  it("returns the head entry for a multi-item queue", () => {
+    const first: QueuedComposerMessage = { id: "msg-1", text: "first", attachments: [] };
+    const second: QueuedComposerMessage = { id: "msg-2", text: "second", attachments: [] };
+    expect(pickNextQueuedMessage([first, second])).toBe(first);
   });
 });
 

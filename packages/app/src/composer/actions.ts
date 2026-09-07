@@ -244,6 +244,12 @@ export function queueComposerMessage(input: QueueComposerMessageInput): QueueCom
   return { queued: item };
 }
 
+export function pickNextQueuedMessage(
+  queued: readonly QueuedComposerMessage[],
+): QueuedComposerMessage | null {
+  return queued[0] ?? null;
+}
+
 export interface EditQueuedComposerMessageInput {
   agentId: string;
   messageId: string;

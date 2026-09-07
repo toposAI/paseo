@@ -110,6 +110,18 @@ export const zhCN: TranslationResources = {
       stopAgent: "停止 Agent",
       interrupt: "中断",
     },
+    autoQueue: {
+      halted: "排队消息的自动发送已停止：{{reason}}",
+      haltedReason: {
+        dispatchTimeout: "发送启动耗时过长，消息可能已经发送",
+        turnActivationTimeout: "Agent 未能及时开始响应",
+        cancelled: "Agent 已取消",
+        queueItemMissing: "队列中的消息已不存在",
+        sendFailed: "发送失败：{{message}}",
+        unexpectedError: "发生意外错误，消息可能已经发送（{{message}}）",
+      },
+      resume: "恢复",
+    },
     voice: {
       enableVoiceMode: "启用语音模式",
       voiceMode: "语音模式",

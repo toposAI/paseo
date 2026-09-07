@@ -107,6 +107,19 @@ export const en = {
       stopAgent: "Stop agent",
       interrupt: "Interrupt",
     },
+    autoQueue: {
+      halted: "Automatic sending of queued messages stopped: {{reason}}",
+      haltedReason: {
+        dispatchTimeout: "the send took too long to start; the message may have already been sent",
+        turnActivationTimeout: "the agent didn't start responding in time",
+        cancelled: "the agent was cancelled",
+        queueItemMissing: "the queued message was no longer available",
+        sendFailed: "send failed: {{message}}",
+        unexpectedError:
+          "an unexpected error occurred; the message may have already been sent ({{message}})",
+      },
+      resume: "Resume",
+    },
     voice: {
       enableVoiceMode: "Enable Voice mode",
       voiceMode: "Voice mode",

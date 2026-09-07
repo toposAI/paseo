@@ -110,6 +110,20 @@ export const ko: TranslationResources = {
       stopAgent: "에이전트 중지",
       interrupt: "중단",
     },
+    autoQueue: {
+      halted: "대기열 메시지 자동 전송이 중지되었습니다: {{reason}}",
+      haltedReason: {
+        dispatchTimeout:
+          "전송을 시작하는 데 시간이 너무 오래 걸렸습니다. 메시지가 이미 전송되었을 수 있습니다",
+        turnActivationTimeout: "에이전트가 제시간에 응답을 시작하지 않았습니다",
+        cancelled: "에이전트가 취소되었습니다",
+        queueItemMissing: "대기열의 메시지를 더 이상 찾을 수 없습니다",
+        sendFailed: "전송에 실패했습니다: {{message}}",
+        unexpectedError:
+          "예기치 않은 오류가 발생했습니다. 메시지가 이미 전송되었을 수 있습니다({{message}})",
+      },
+      resume: "재개",
+    },
     voice: {
       enableVoiceMode: "음성 모드 켜기",
       voiceMode: "음성 모드",

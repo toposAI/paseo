@@ -110,6 +110,19 @@ export const ru: TranslationResources = {
       stopAgent: "Остановить агента",
       interrupt: "Прервать",
     },
+    autoQueue: {
+      halted: "Автоматическая отправка сообщений из очереди остановлена: {{reason}}",
+      haltedReason: {
+        dispatchTimeout: "отправка началась слишком поздно; сообщение, возможно, уже отправлено",
+        turnActivationTimeout: "агент не начал отвечать вовремя",
+        cancelled: "агент был отменён",
+        queueItemMissing: "сообщение в очереди больше не найдено",
+        sendFailed: "не удалось отправить: {{message}}",
+        unexpectedError:
+          "произошла непредвиденная ошибка; сообщение, возможно, уже отправлено ({{message}})",
+      },
+      resume: "Возобновить",
+    },
     voice: {
       enableVoiceMode: "Включить голосовой режим",
       voiceMode: "Голосовой режим",

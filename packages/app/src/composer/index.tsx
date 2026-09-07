@@ -97,6 +97,7 @@ import {
 import { resolveAgentControlsMode } from "@/composer/agent-controls/mode";
 import { resolveComposerInputMode, type ComposerInputMode } from "@/composer/input-mode";
 import { resolveActiveSendBehavior } from "./input/state";
+import { autoDrainHaltReasonKey, useComposerAutoDrainQueue } from "./auto-drain";
 import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
 import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
@@ -1501,6 +1502,29 @@ function ComposerContentImpl({
     [serverId, setQueuedMessages],
   );
 
+  const submitQueuedMessage = useCallback(
+    ({
+      text: queuedText,
+      attachments: queuedAttachments,
+    }: {
+      text: string;
+      attachments: ComposerAttachment[];
+    }) => submitMessage(queuedText, queuedAttachments),
+    [submitMessage],
+  );
+
+  const { autoDrainState, resumeAutoDrain } = useComposerAutoDrainQueue({
+    agentId,
+    activeSendBehavior,
+    isCancellingAgent,
+    isConnected,
+    isAgentRunning,
+    queuedMessages,
+    queue: queueWriter,
+    submitMessage: submitQueuedMessage,
+    failedToSendMessage: t("composer.errors.failedToSend"),
+  });
+
   const queueMessage = useCallback(
     (queuedMessage: string, queuedAttachments: ComposerAttachment[]) => {
       const result = queueComposerMessage({
@@ -2249,6 +2273,36 @@ function ComposerContentImpl({
       ) : null,
     [sendError],
   );
+  const autoDrainHaltedNode = useMemo(
+    () =>
+      autoDrainState.phase === "halted" ? (
+        <View style={styles.autoDrainHaltedRow}>
+          <Text accessibilityRole="alert" style={styles.autoDrainHaltedText}>
+            {t("composer.autoQueue.halted", {
+              reason: t(
+                autoDrainHaltReasonKey(autoDrainState.reason.code),
+                "message" in autoDrainState.reason
+                  ? { message: autoDrainState.reason.message }
+                  : undefined,
+              ),
+            })}
+          </Text>
+          <Pressable
+            onPress={resumeAutoDrain}
+            disabled={isCancellingAgent}
+            style={[
+              styles.autoDrainResumeButton,
+              isCancellingAgent ? styles.buttonDisabled : undefined,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={t("composer.autoQueue.resume")}
+          >
+            <Text style={styles.autoDrainResumeText}>{t("composer.autoQueue.resume")}</Text>
+          </Pressable>
+        </View>
+      ) : null,
+    [autoDrainState, resumeAutoDrain, t, isCancellingAgent],
+  );
   const githubEmptyText = githubSearchResultsQuery.isFetching
     ? t("composer.github.searching")
     : t("composer.github.noResults");
@@ -2273,6 +2327,7 @@ function ComposerContentImpl({
           <View style={styles.inputAreaContent}>
             {queueList}
             {sendErrorNode}
+            {autoDrainHaltedNode}
 
             <View ref={messageInputContainerRef} style={styles.messageInputContainer}>
               <ComposerAutocomplete
@@ -2494,6 +2549,27 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   sendErrorText: {
     color: theme.colors.palette.red[500],
+    fontSize: theme.fontSize.base,
+  },
+  autoDrainHaltedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[2],
+  },
+  autoDrainHaltedText: {
+    flexShrink: 1,
+    color: theme.colors.palette.red[500],
+    fontSize: theme.fontSize.base,
+  },
+  autoDrainResumeButton: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.surface2,
+  },
+  autoDrainResumeText: {
+    color: theme.colors.foreground,
     fontSize: theme.fontSize.base,
   },
 })) as unknown as Record<string, object>;

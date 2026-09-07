@@ -110,6 +110,20 @@ export const ja: TranslationResources = {
       stopAgent: "エージェントを停止",
       interrupt: "中断",
     },
+    autoQueue: {
+      halted: "キューメッセージの自動送信を停止しました: {{reason}}",
+      haltedReason: {
+        dispatchTimeout:
+          "送信の開始に時間がかかりすぎました。メッセージは送信済みの可能性があります",
+        turnActivationTimeout: "エージェントが時間内に応答を開始しませんでした",
+        cancelled: "エージェントがキャンセルされました",
+        queueItemMissing: "キュー内のメッセージが見つかりませんでした",
+        sendFailed: "送信に失敗しました: {{message}}",
+        unexpectedError:
+          "予期しないエラーが発生しました。メッセージは送信済みの可能性があります({{message}})",
+      },
+      resume: "再開",
+    },
     voice: {
       enableVoiceMode: "音声モードを有効にする",
       voiceMode: "音声モード",

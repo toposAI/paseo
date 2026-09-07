@@ -110,6 +110,20 @@ export const es: TranslationResources = {
       stopAgent: "detener agente",
       interrupt: "Interrumpir",
     },
+    autoQueue: {
+      halted: "Se detuvo el envío automático de mensajes en cola: {{reason}}",
+      haltedReason: {
+        dispatchTimeout:
+          "el envío tardó demasiado en iniciarse; es posible que el mensaje ya se haya enviado",
+        turnActivationTimeout: "el agente no comenzó a responder a tiempo",
+        cancelled: "se canceló el agente",
+        queueItemMissing: "el mensaje en cola ya no estaba disponible",
+        sendFailed: "el envío falló: {{message}}",
+        unexpectedError:
+          "ocurrió un error inesperado; es posible que el mensaje ya se haya enviado ({{message}})",
+      },
+      resume: "Reanudar",
+    },
     voice: {
       enableVoiceMode: "Habilitar el modo de voz",
       voiceMode: "Modo de voz",
