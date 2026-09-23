@@ -1211,8 +1211,9 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const selectionRef = useRef({ start: value.length, end: value.length });
     const appliedTextReplacementKeyRef = useRef(textReplacement.key);
     const webTextareaRef = useRef<HTMLElement | null>(null);
+    const getLiveText = useCallback(() => valueRef.current, []);
     const composerHeight = useComposerHeight({
-      value,
+      getText: getLiveText,
       textareaRef: webTextareaRef,
       minHeight: MIN_INPUT_HEIGHT,
       maxHeight: maxInputHeight,
@@ -1240,7 +1241,11 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         valueRef.current = nextText;
         updateLiveTextPresence(nextText);
         selectionRef.current = selection ?? { start: nextText.length, end: nextText.length };
-        textInputRef.current?.replaceText(nextText, selection);
+        if (nextText === "") {
+          textInputRef.current?.reset();
+        } else {
+          textInputRef.current?.replaceText(nextText, selection);
+        }
         onChangeText(nextText);
       },
       [onChangeText, updateComposerHeightForText, updateLiveTextPresence],
@@ -1292,7 +1297,11 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       updateComposerHeightForText?.(valueRef.current, textReplacement.text);
       valueRef.current = textReplacement.text;
       updateLiveTextPresence(textReplacement.text);
-      textInputRef.current?.replaceText(textReplacement.text);
+      if (textReplacement.text === "") {
+        textInputRef.current?.reset();
+      } else {
+        textInputRef.current?.replaceText(textReplacement.text);
+      }
     }, [textReplacement, updateComposerHeightForText, updateLiveTextPresence]);
 
     useEffect(() => {
@@ -1901,9 +1910,11 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
 
 const styles = StyleSheet.create((theme: Theme) => ({
   container: {
+    flexShrink: 1,
     position: "relative",
   },
   inputWrapper: {
+    flexShrink: 1,
     flexDirection: "column",
     gap: theme.spacing[3],
     backgroundColor: theme.colors.surface1,
@@ -1932,6 +1943,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderStyle: "dotted",
   },
   textInputScrollWrapper: {
+    flexShrink: 1,
     position: "relative",
   },
   focusHintText: {
@@ -1943,13 +1955,19 @@ const styles = StyleSheet.create((theme: Theme) => ({
     opacity: 0.5,
   },
   textInput: {
+    // Preserve the controls when an ancestor constrains an overlong draft.
+    flexShrink: 1,
     width: "100%",
     color: theme.colors.foreground,
     fontSize: theme.fontSize.content,
     fontWeight: theme.fontWeight.normal,
-    lineHeight: theme.fontSize.content * 1.4,
+    // No lineHeight on native. React Native applies it as a span over the text, and an
+    // empty trailing line is laid out from the font's own metrics on some devices, so
+    // the input jumps when the first character lands on a new line. The font's natural
+    // line box is the same for every line. Web keeps the CSS value.
     ...(isWeb
       ? ({
+          lineHeight: theme.fontSize.content * 1.4,
           outlineStyle: "none",
           outlineWidth: 0,
           outlineColor: "transparent",
@@ -1964,6 +1982,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foregroundMuted,
   },
   buttonRow: {
+    flexShrink: 0,
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",

@@ -85,7 +85,7 @@ interface PersistedRelationship {
     daemonId: string;
     idempotencyKey?: string;
     hubOrigin: string;
-    scopes: string[];
+    permissions: string[];
   };
   credential?: { secret: string };
   enrollment?: { token: string };
@@ -160,7 +160,9 @@ class MemoryHubSocket extends EventEmitter implements WebSocketLike, HubSocketCo
     if (typeof data !== "string") return;
     const frame = JSON.parse(data) as { type: "session"; message: SessionOutboundMessage };
     this.sent.push(frame.message);
-    this.messageObserved.resolve();
+    const observed = this.messageObserved;
+    this.messageObserved = deferred<void>();
+    observed.resolve();
   }
 
   close(code = 1000): void {
@@ -192,7 +194,6 @@ class MemoryHubSocket extends EventEmitter implements WebSocketLike, HubSocketCo
       );
       if (message) return message;
       await this.messageObserved.promise;
-      this.messageObserved = deferred<void>();
     }
   }
 
@@ -203,7 +204,6 @@ class MemoryHubSocket extends EventEmitter implements WebSocketLike, HubSocketCo
       const message = this.sent.find(predicate);
       if (message) return message;
       await this.messageObserved.promise;
-      this.messageObserved = deferred<void>();
     }
   }
 }
@@ -296,7 +296,7 @@ class InMemoryHubRelationships implements HubRelationshipRemote {
   private enrollmentObserved = deferred<void>();
   private socketObserved = deferred<void>();
   private enrollmentRejection: 401 | 403 | null = null;
-  private enrollmentScopes = ["hub.execution.*"];
+  private enrollmentPermissions: string[] | null = null;
   private revokeFailures = 0;
   private revocationGate: Deferred<void> | null = null;
   private readonly relationships = new Set<string>();
@@ -313,13 +313,13 @@ class InMemoryHubRelationships implements HubRelationshipRemote {
     this.enrollmentRejection = statusCode;
   }
 
-  returnEnrollmentScopes(scopes: string[]): void {
-    this.enrollmentScopes = scopes.slice();
+  returnEnrollmentPermissions(permissions: string[]): void {
+    this.enrollmentPermissions = permissions.slice();
   }
 
   async enroll(input: HubEnrollment): Promise<HubEnrollmentResult> {
     this.enrollmentSnapshots.push(this.captureRelationship());
-    this.enrollments.push({ ...input, scopes: input.scopes.slice() });
+    this.enrollments.push({ ...input, permissions: input.permissions.slice() });
     this.relationships.add(input.idempotencyKey);
     this.enrollmentObserved.resolve();
     if (this.enrollmentRejection) {
@@ -387,6 +387,15 @@ class InMemoryHubRelationships implements HubRelationshipRemote {
     }
   }
 
+  async updatePermissions(input: {
+    daemonId: string;
+    hubOrigin: string;
+    credential: string;
+    permissions: string[];
+  }): Promise<{ permissions: string[] }> {
+    return { permissions: input.permissions.slice() };
+  }
+
   openSocket(input: HubSocketCredentials, events: HubSocketEvents): HubSocketConnection {
     this.socketSnapshots.push(this.captureRelationship());
     const attempt = { input: { ...input }, events, socket: new MemoryHubSocket() };
@@ -410,13 +419,13 @@ class InMemoryHubRelationships implements HubRelationshipRemote {
   private enrollmentResult(input: HubEnrollment): HubEnrollmentResult {
     return {
       daemonId: input.daemonId,
-      scopes: this.enrollmentScopes.slice(),
+      permissions: this.enrollmentPermissions?.slice() ?? input.permissions.slice(),
       webSocketUrl: SOCKET_URL,
     };
   }
 }
 
-interface CliProcess {
+interface RelationshipOperation {
   result: Promise<Record<string, unknown>>;
 }
 
@@ -445,7 +454,7 @@ export class HubRelationshipHarness {
   private host = "";
   private readonly logs: string[] = [];
   private readonly providerPrompts: AgentPromptInput[] = [];
-  private readonly cliProcesses = new Set<Promise<unknown>>();
+  private readonly operations = new Set<Promise<unknown>>();
   private readonly claimedCliSockets = new Set<WebSocket>();
   private readonly promptsToFail = new Set<string>();
   private failNextSessionClose = false;
@@ -505,22 +514,44 @@ export class HubRelationshipHarness {
     this.remote.holdEnrollment();
   }
 
-  beginConnect(token = "ceremony-token", hubUrl = HUB_ORIGIN): CliProcess {
+  beginConnect(
+    token = "ceremony-token",
+    hubUrl = HUB_ORIGIN,
+    execute = true,
+  ): RelationshipOperation {
     return {
-      result: this.runCli(["hub", "connect", hubUrl, "--api-key", `hub-contract-api-key:${token}`]),
+      result: this.withClient(
+        async (client) =>
+          (await client.connectHub(hubUrl, token, execute ? ["hub.execute"] : [])).status,
+      ),
     };
   }
 
   async status(): Promise<Record<string, unknown>> {
-    return this.runCli(["hub", "status"]);
+    return this.withClient(async (client) => (await client.getHubStatus()).status);
   }
 
   async disconnect(force = false): Promise<Record<string, unknown>> {
-    return this.runCli(["hub", "disconnect", ...(force ? ["--force"] : [])]);
+    return this.withClient(async (client) => {
+      const { status, warning } = await client.disconnectHub(force);
+      return { ...status, ...(warning ? { warning } : {}) };
+    });
   }
 
-  beginDisconnect(force = false): CliProcess {
-    return { result: this.runCli(["hub", "disconnect", ...(force ? ["--force"] : [])]) };
+  async grantPermission(permission: string): Promise<Record<string, unknown>> {
+    return this.withClient(
+      async (client) => (await client.updateHubPermissions({ grant: [permission] })).status,
+    );
+  }
+
+  async revokePermission(permission: string): Promise<Record<string, unknown>> {
+    return this.withClient(
+      async (client) => (await client.updateHubPermissions({ revoke: [permission] })).status,
+    );
+  }
+
+  beginDisconnect(force = false): RelationshipOperation {
+    return { result: this.disconnect(force) };
   }
 
   async relationshipStateBecomes(expected: string | null): Promise<void> {
@@ -590,6 +621,7 @@ export class HubRelationshipHarness {
           requestId: "browser-hub-connect",
           hubUrl: HUB_ORIGIN,
           token: "browser-token",
+          permissions: [],
         },
       }),
     );
@@ -606,8 +638,8 @@ export class HubRelationshipHarness {
     this.remote.completeEnrollment();
   }
 
-  returnEnrollmentScopes(scopes: string[]): void {
-    this.remote.returnEnrollmentScopes(scopes);
+  returnEnrollmentPermissions(permissions: string[]): void {
+    this.remote.returnEnrollmentPermissions(permissions);
   }
 
   loseEnrollmentResponse(): void {
@@ -652,7 +684,18 @@ export class HubRelationshipHarness {
 
   connectLatestSocket(): void {
     const socket = this.latestSocket();
-    socket.events.connected(socket.socket);
+    socket.events.connected(socket.socket, "session-v1");
+    socket.socket.receiveEnvelope({
+      type: "hello",
+      clientId: `hub:${socket.input.daemonId}`,
+      clientType: "hub",
+      protocolVersion: 1,
+    });
+  }
+
+  connectLatestLegacySocket(): void {
+    const socket = this.latestSocket();
+    socket.events.connected(socket.socket, "legacy");
   }
 
   rejectLatestSocket(statusCode: 401 | 403): void {
@@ -676,7 +719,13 @@ export class HubRelationshipHarness {
   connectSocket(index: number): void {
     const socket = this.remote.sockets[index];
     if (!socket) throw new Error(`Socket ${index} does not exist`);
-    socket.events.connected(socket.socket);
+    socket.events.connected(socket.socket, "session-v1");
+    socket.socket.receiveEnvelope({
+      type: "hello",
+      clientId: `hub:${socket.input.daemonId}`,
+      clientType: "hub",
+      protocolVersion: 1,
+    });
   }
 
   closeSocket(index: number, code: number): void {
@@ -684,6 +733,16 @@ export class HubRelationshipHarness {
     if (!socket) throw new Error(`Socket ${index} does not exist`);
     socket.events.closed(code);
     socket.socket.close(code);
+  }
+
+  async requestOrdinary(message: {
+    type: string;
+    requestId: string;
+    [key: string]: unknown;
+  }): Promise<SessionOutboundMessage> {
+    const socket = this.latestSocket().socket;
+    socket.receive(message);
+    return socket.messageFor(message.requestId);
   }
 
   sendHubRequestOnLatest(message: unknown): SessionOutboundMessage[] {
@@ -1143,6 +1202,16 @@ export class HubRelationshipHarness {
     );
   }
 
+  serverInfoPermissions(): string[][] {
+    return this.remote.sockets.flatMap(({ socket }) =>
+      socket.sent.flatMap((message) =>
+        message.type === "status" && message.payload.status === "server_info"
+          ? [message.payload.permissions ?? []]
+          : [],
+      ),
+    );
+  }
+
   probeTrustedHello(): number | null {
     const socket = this.latestSocket().socket;
     socket.receiveEnvelope({
@@ -1234,7 +1303,10 @@ export class HubRelationshipHarness {
   }
 
   enrollmentAttempts(): HubEnrollment[] {
-    return this.remote.enrollments.map((input) => ({ ...input, scopes: input.scopes.slice() }));
+    return this.remote.enrollments.map((input) => ({
+      ...input,
+      permissions: input.permissions.slice(),
+    }));
   }
 
   enrollmentInvocation(index = 0): RelationshipInvocationSnapshot {
@@ -1307,7 +1379,7 @@ export class HubRelationshipHarness {
 
   async close(): Promise<void> {
     await this.stopDaemon();
-    await Promise.allSettled(this.cliProcesses);
+    await Promise.allSettled(this.operations);
     await Promise.all(
       [...this.claimedCliSockets].map((socket) => this.closeClaimedCliSocket(socket)),
     );
@@ -1368,8 +1440,21 @@ export class HubRelationshipHarness {
     this.daemon = null;
   }
 
-  private runCli(args: string[]): Promise<Record<string, unknown>> {
-    return this.trackCli(this.executeCli(args));
+  private withClient<T>(action: (client: DaemonClient) => Promise<T>): Promise<T> {
+    return this.trackOperation(
+      (async () => {
+        const client = await this.trustedClient();
+        try {
+          return await action(client);
+        } finally {
+          await client.close();
+        }
+      })(),
+    );
+  }
+
+  runCli(args: string[]): Promise<Record<string, unknown>> {
+    return this.trackOperation(this.executeCli(args));
   }
 
   private async executeCli(args: string[]): Promise<Record<string, unknown>> {
@@ -1393,11 +1478,11 @@ export class HubRelationshipHarness {
     return parsed as Record<string, unknown>;
   }
 
-  private trackCli<T>(process: Promise<T>): Promise<T> {
-    this.cliProcesses.add(process);
+  private trackOperation<T>(process: Promise<T>): Promise<T> {
+    this.operations.add(process);
     void process.then(
-      () => this.cliProcesses.delete(process),
-      () => this.cliProcesses.delete(process),
+      () => this.operations.delete(process),
+      () => this.operations.delete(process),
     );
     return process;
   }
@@ -1517,7 +1602,6 @@ export class HubRelationshipHarness {
       appVersion: "0.1.106",
     });
     await client.connect();
-    await client.fetchAgents({ subscribe: { subscriptionId: "hub-relationship-trusted" } });
     return client;
   }
 

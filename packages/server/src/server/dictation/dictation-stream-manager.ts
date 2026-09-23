@@ -134,6 +134,7 @@ export class DictationStreamManager {
   private readonly language: string;
   private readonly finalTimeoutMs: number;
   private readonly autoCommitSeconds: number;
+  private readonly onIdle: (() => void) | undefined;
   private readonly streams = new Map<string, DictationStreamState>();
 
   constructor(params: {
@@ -144,7 +145,9 @@ export class DictationStreamManager {
     language?: string;
     finalTimeoutMs?: number;
     autoCommitSeconds?: number;
+    onIdle?: () => void;
   }) {
+    this.onIdle = params.onIdle;
     this.logger = params.logger.child({ component: "dictation-stream-manager" });
     this.emit = params.emit;
     this.sessionId = params.sessionId;
@@ -157,10 +160,20 @@ export class DictationStreamManager {
       DEFAULT_DICTATION_AUTO_COMMIT_SECONDS;
   }
 
+  get hasDemand(): boolean {
+    return this.streams.size > 0;
+  }
+
   public cleanupAll(): void {
+    const failures: unknown[] = [];
     for (const dictationId of this.streams.keys()) {
-      this.cleanupDictationStream(dictationId);
+      try {
+        this.cleanupDictationStream(dictationId);
+      } catch (error) {
+        failures.push(error);
+      }
     }
+    if (failures.length) throw new AggregateError(failures, "Dictation cleanup failed");
   }
 
   public async handleStart(dictationId: string, format: string): Promise<void> {
@@ -186,79 +199,6 @@ export class DictationStreamManager {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.failDictationStream(dictationId, message, false);
-      return;
-    }
-
-    stt.on("committed", ({ segmentId }) => {
-      const state = this.streams.get(dictationId);
-      if (!state) {
-        return;
-      }
-      if (state.inFlightCommitCount > 0) {
-        state.inFlightCommitCount -= 1;
-      }
-      state.committedSegmentIds.push(segmentId);
-
-      if (state.finishRequested && state.awaitingFinalCommit) {
-        state.awaitingFinalCommit = false;
-      }
-
-      this.maybeFinalizeDictationStream(dictationId);
-    });
-
-    stt.on("transcript", ({ segmentId, transcript, isFinal }) => {
-      const state = this.streams.get(dictationId);
-      if (!state) {
-        return;
-      }
-      state.transcriptsBySegmentId.set(segmentId, transcript);
-      if (isFinal) {
-        state.finalTranscriptSegmentIds.add(segmentId);
-      }
-
-      if (state.finishRequested && state.awaitingFinalCommit && isFinal) {
-        state.awaitingFinalCommit = false;
-      }
-
-      const orderedIds = state.committedSegmentIds.includes(segmentId)
-        ? state.committedSegmentIds
-        : [...state.committedSegmentIds, segmentId];
-      const partialText = orderedIds
-        .map((id) => state.transcriptsBySegmentId.get(id) ?? "")
-        .join(" ")
-        .trim();
-      this.emitDictationPartial(dictationId, partialText);
-
-      this.maybeSealDictationStreamFinish(dictationId);
-      this.maybeFinalizeDictationStream(dictationId);
-    });
-
-    stt.on("error", (err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      const state = this.streams.get(dictationId);
-      if (state && state.finishRequested && isBufferTooSmallError(message)) {
-        if (state.inFlightCommitCount > 0) {
-          state.inFlightCommitCount -= 1;
-        }
-        if (state.awaitingFinalCommit) {
-          state.awaitingFinalCommit = false;
-        }
-        this.maybeFinalizeDictationStream(dictationId);
-        return;
-      }
-      void this.failAndCleanupDictationStream(dictationId, message, true);
-    });
-
-    try {
-      await stt.connect();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.failDictationStream(dictationId, message, true);
-      try {
-        stt.close();
-      } catch {
-        // no-op
-      }
       return;
     }
 
@@ -321,6 +261,78 @@ export class DictationStreamManager {
       finalSeq: null,
       finalTimeout: null,
     });
+
+    stt.on("committed", ({ segmentId }) => {
+      const state = this.streams.get(dictationId);
+      if (state?.stt !== stt) {
+        return;
+      }
+      if (state.inFlightCommitCount > 0) {
+        state.inFlightCommitCount -= 1;
+      }
+      state.committedSegmentIds.push(segmentId);
+
+      if (state.finishRequested && state.awaitingFinalCommit) {
+        state.awaitingFinalCommit = false;
+      }
+
+      this.maybeFinalizeDictationStream(dictationId);
+    });
+
+    stt.on("transcript", ({ segmentId, transcript, isFinal }) => {
+      const state = this.streams.get(dictationId);
+      if (state?.stt !== stt) {
+        return;
+      }
+      state.transcriptsBySegmentId.set(segmentId, transcript);
+      if (isFinal) {
+        state.finalTranscriptSegmentIds.add(segmentId);
+      }
+
+      if (state.finishRequested && state.awaitingFinalCommit && isFinal) {
+        state.awaitingFinalCommit = false;
+      }
+
+      const orderedIds = state.committedSegmentIds.includes(segmentId)
+        ? state.committedSegmentIds
+        : [...state.committedSegmentIds, segmentId];
+      const partialText = orderedIds
+        .map((id) => state.transcriptsBySegmentId.get(id) ?? "")
+        .join(" ")
+        .trim();
+      this.emitDictationPartial(dictationId, partialText);
+
+      this.maybeSealDictationStreamFinish(dictationId);
+      this.maybeFinalizeDictationStream(dictationId);
+    });
+
+    stt.on("error", (err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      const state = this.streams.get(dictationId);
+      if (state?.stt !== stt) return;
+      if (state.finishRequested && isBufferTooSmallError(message)) {
+        if (state.inFlightCommitCount > 0) {
+          state.inFlightCommitCount -= 1;
+        }
+        if (state.awaitingFinalCommit) {
+          state.awaitingFinalCommit = false;
+        }
+        this.maybeFinalizeDictationStream(dictationId);
+        return;
+      }
+      void this.failAndCleanupDictationStream(dictationId, message, true);
+    });
+
+    try {
+      await stt.connect();
+    } catch (error) {
+      if (this.streams.get(dictationId)?.stt !== stt) return;
+      const message = error instanceof Error ? error.message : String(error);
+      this.failDictationStream(dictationId, message, true);
+      this.cleanupDictationStream(dictationId);
+      return;
+    }
+    if (this.streams.get(dictationId)?.stt !== stt) return;
 
     this.emitDictationAck(dictationId, -1);
   }
@@ -528,7 +540,9 @@ export class DictationStreamManager {
     error: string,
     retryable: boolean,
   ): Promise<void> {
+    const state = this.streams.get(dictationId);
     const debugRecordingPath = await this.maybePersistDictationStreamAudio(dictationId);
+    if (!state || this.streams.get(dictationId) !== state) return;
     this.emit({
       type: "dictation_stream_error",
       payload: {
@@ -561,12 +575,12 @@ export class DictationStreamManager {
     if (state.finalTimeout) {
       clearTimeout(state.finalTimeout);
     }
+    this.streams.delete(dictationId);
     try {
       state.stt.close();
-    } catch {
-      // no-op
+    } finally {
+      if (this.streams.size === 0) this.onIdle?.();
     }
-    this.streams.delete(dictationId);
   }
 
   private estimateFinalizationTimeout(state: DictationStreamState): {
@@ -579,17 +593,7 @@ export class DictationStreamManager {
     const pendingCommittedSegments = state.committedSegmentIds.reduce((count, segmentId) => {
       return state.finalTranscriptSegmentIds.has(segmentId) ? count : count + 1;
     }, 0);
-    const committedSet = new Set(state.committedSegmentIds);
-    const pendingUncommittedTranscriptSegments = Array.from(
-      state.transcriptsBySegmentId.keys(),
-    ).reduce((count, segmentId) => {
-      if (committedSet.has(segmentId)) {
-        return count;
-      }
-      return state.finalTranscriptSegmentIds.has(segmentId) ? count : count + 1;
-    }, 0);
-    const pendingSegments =
-      pendingCommittedSegments + pendingUncommittedTranscriptSegments + state.inFlightCommitCount;
+    const pendingSegments = pendingCommittedSegments + state.inFlightCommitCount;
     const pendingAudioSeconds = Math.ceil(Math.max(0, state.bytesSinceCommit) / bytesPerSecond);
     const missingSeqCount =
       state.finalSeq === null ? 0 : Math.max(0, state.finalSeq - state.ackSeq);
@@ -670,16 +674,6 @@ export class DictationStreamManager {
         state.bytesSinceCommit = 0;
         state.peakSinceCommit = 0;
         state.awaitingFinalCommit = false;
-        const droppedSegments = this.dropUncommittedNonFinalTranscripts(state);
-        if (droppedSegments > 0) {
-          this.logger.debug(
-            {
-              dictationId,
-              droppedSegments,
-            },
-            "Dictation finish: dropped uncommitted non-final transcript segments after silence clear",
-          );
-        }
       } else {
         state.awaitingFinalCommit = true;
         try {
@@ -732,6 +726,14 @@ export class DictationStreamManager {
       return;
     }
 
+    const droppedSegments = this.dropUncommittedNonFinalTranscripts(state);
+    if (droppedSegments > 0) {
+      this.logger.debug(
+        { dictationId, droppedSegments },
+        "Dropped abandoned non-final dictation transcript segments before finalization",
+      );
+    }
+
     const committedSet = new Set(state.committedSegmentIds);
     const orderedSegmentIds: string[] = [...state.committedSegmentIds];
     for (const segmentId of state.transcriptsBySegmentId.keys()) {
@@ -743,6 +745,7 @@ export class DictationStreamManager {
     if (orderedSegmentIds.length === 0) {
       void (async () => {
         const debugRecordingPath = await this.maybePersistDictationStreamAudio(dictationId);
+        if (this.streams.get(dictationId) !== state) return;
         this.emit({
           type: "dictation_stream_final",
           payload: {
@@ -782,6 +785,7 @@ export class DictationStreamManager {
 
     void (async () => {
       const debugRecordingPath = await this.maybePersistDictationStreamAudio(dictationId);
+      if (this.streams.get(dictationId) !== state) return;
       this.emit({
         type: "dictation_stream_final",
         payload: {
