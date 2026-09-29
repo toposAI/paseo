@@ -12,3 +12,9 @@ pre-commit:
       run: npm run lint -- {staged_files}
     - name: typecheck
       run: npm run typecheck
+
+# 自動マージコミットではpre-commitが走らないため、上流マージ後の型崩れ(2026-09-29事故)を止める
+pre-merge-commit:
+  jobs:
+    - name: typecheck
+      run: npm run typecheck
