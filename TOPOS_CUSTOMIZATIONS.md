@@ -30,3 +30,13 @@ git push --force-with-lease origin topos-customizations
   モバイルでサイドバーを一度も開かずチャット画面を直接開くと`hasHydratedAgents`が永久falseに固着しChatが
   無限ローディングになる不具合の修正。iOS SimulatorでのコールドスタートA/Bで解消を確認、fable-review
   round3-4で収束(コミットc299486a6)。実機での確認はまだ。
+- `packages/server/src/server/agent/providers/claude/agent.ts` の `claudeModeCatalog()`:
+  既定 permission mode を upstream の `"auto"` から **`"bypassPermissions"`** へ変更(2026-10-02)。
+  この fork の Claude 系プロバイダ(claude/deepseek/deepinfra/opencodego)は 147 gateway 経由で
+  DeepSeek/DeepInfra/OpenCode Go を既定にするため、Anthropic API 前提の `auto`(model classifier)が
+  使えないケースがあることが動機。呼び出し元が `allowDangerouslySkipPermissions: true` を常に渡すので
+  SDK 側の前提は満たされる。critical path の `rm`/`rmdir` 回路ブレーカーと PreToolUse hook の `deny` は
+  `bypassPermissions` でも有効(2026-10-01 実機実測)。`claudeAutoModeUnavailableOn` 側
+  (Bedrock/Vertex)の分岐は upstream のまま `"default"` を残している。
+  ※ アプリ側のピッカーは「その provider で最後に選んだ mode」(`providerPrefs.mode`)を
+  provider 既定より優先するため、既に mode を選んだことのある環境では表示が変わらない場合がある。

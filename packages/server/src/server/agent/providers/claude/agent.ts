@@ -958,7 +958,13 @@ function claudeModeCatalog(env: NodeJS.ProcessEnv): {
   if (claudeAutoModeUnavailableOn(env)) {
     return { modes: DEFAULT_MODES.filter((mode) => mode.id !== "auto"), defaultModeId: "default" };
   }
-  return { modes: DEFAULT_MODES, defaultModeId: "auto" };
+  // Topos 改造 (topos-customizations): 既定の permission mode を upstream の "auto" から
+  // "bypassPermissions" へ変更する。理由: この fork の Claude 系プロバイダは 147 gateway 経由で
+  // DeepSeek/DeepInfra/OpenCode Go を既定にしているため、Anthropic API 前提の "auto"
+  // (model classifier) が使えないケースがある。呼び出し元は allowDangerouslySkipPermissions を
+  // 常に渡すので SDK 側の前提は満たされる。critical path の rm/rmdir 回路ブレーカーと
+  // PreToolUse hook の deny は bypassPermissions でも有効 (2026-10-01 実機実測)。
+  return { modes: DEFAULT_MODES, defaultModeId: "bypassPermissions" };
 }
 
 function coerceSessionMetadata(metadata: AgentMetadata | undefined): Partial<AgentSessionConfig> {
