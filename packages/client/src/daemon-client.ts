@@ -3561,12 +3561,15 @@ export class DaemonClient {
     return payload.notice ?? null;
   }
 
-  async setAgentModel(agentId: string, modelId: string | null): Promise<void> {
+  async setAgentModel(agentId: string, modelId: string | null, providerId?: string): Promise<void> {
     const requestId = this.createRequestId();
     const message = SessionInboundMessageSchema.parse({
       type: "set_agent_model_request",
       agentId,
       modelId,
+      // TOPOS custom: omitted = model-only (upstream behaviour); set = rebuild
+      // the session on that provider and resume the same conversation.
+      ...(providerId ? { provider: providerId } : {}),
       requestId,
     });
     const payload = await this.sendRequest({

@@ -591,6 +591,19 @@ function isTurnTerminalEvent(event: AgentStreamEvent): boolean {
   );
 }
 
+// TOPOS custom: an explicit provider override wins over the persisted handle's
+// provider, so a reload can move a thread onto another provider (the handle's
+// sessionId still points at the same conversation, and the per-provider client
+// injects its own provider id into the resume call). Extracted so the reload
+// path's complexity stays under the lint budget.
+function resolveReloadProvider(
+  override: AgentProvider | undefined,
+  handle: AgentPersistenceHandle | null,
+  fallback: AgentProvider,
+): AgentProvider {
+  return override ?? handle?.provider ?? fallback;
+}
+
 function abortMessage(reason: unknown, fallbackMessage: string): string {
   if (typeof reason === "string") return reason;
   if (reason instanceof Error) return reason.message;
@@ -1544,7 +1557,7 @@ export class AgentManager {
     const preservedLastError = existing.lastError;
     const preservedAttention = existing.attention;
     const handle = existing.persistence;
-    const provider = handle?.provider ?? existing.provider;
+    const provider = resolveReloadProvider(overrides?.provider, handle, existing.provider);
     const client = this.requireClient(provider);
     const refreshConfig = {
       ...existing.config,
@@ -1951,10 +1964,34 @@ export class AgentManager {
     return notice;
   }
 
-  async setAgentModel(agentId: string, modelId: string | null): Promise<void> {
+  async setAgentModel(
+    agentId: string,
+    modelId: string | null,
+    providerId?: string | null,
+  ): Promise<void> {
     const agent = this.requireSessionAgent(agentId);
     const normalizedModelId =
       typeof modelId === "string" && modelId.trim().length > 0 ? modelId : null;
+    const normalizedProviderId =
+      typeof providerId === "string" && providerId.trim().length > 0
+        ? (providerId.trim() as AgentProvider)
+        : null;
+
+    if (normalizedProviderId && normalizedProviderId !== agent.provider) {
+      // TOPOS custom: a provider is fixed when its process is spawned (the
+      // provider's `ANTHROPIC_BASE_URL` is part of the spawned env), so there is
+      // no live "set provider" the way there is `setModel`. Rebuild the session
+      // on the new provider instead; the persisted native sessionId is resumed
+      // there, so the conversation carries over. `thinkingOptionId` is dropped
+      // because a thinking option only means anything against the model that
+      // offers it, and that model no longer applies.
+      await this.reloadAgentSession(agentId, {
+        provider: normalizedProviderId,
+        model: normalizedModelId ?? undefined,
+        thinkingOptionId: undefined,
+      });
+      return;
+    }
 
     if (agent.session.setModel) {
       await agent.session.setModel(normalizedModelId);

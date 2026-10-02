@@ -4956,6 +4956,108 @@ test("model changes persist the resolved thinking and fresh provider handle befo
   }
 });
 
+test("setAgentModel with a different provider rebuilds the session on it and resumes the same conversation", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-provider-switch-"));
+  let closedOriginalSession = false;
+  class ClosingSession extends TestAgentSession {
+    override async close(): Promise<void> {
+      closedOriginalSession = true;
+    }
+  }
+  class CodexClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new ClosingSession(config);
+    }
+  }
+  class ClaudeSession extends TestAgentSession {
+    override describePersistence() {
+      return { provider: "claude", sessionId: this.id };
+    }
+  }
+  class ClaudeClient extends TestAgentClient {
+    readonly resumedHandles: AgentPersistenceHandle[] = [];
+    override async resumeSession(
+      handle: AgentPersistenceHandle,
+      config?: Partial<AgentSessionConfig>,
+    ): Promise<AgentSession> {
+      this.resumedHandles.push(handle);
+      this.resumeOverrides.push(config);
+      return new ClaudeSession({
+        provider: "claude",
+        cwd: config?.cwd ?? process.cwd(),
+      });
+    }
+  }
+
+  const codexClient = new CodexClient("codex");
+  const claudeClient = new ClaudeClient("claude");
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const manager = new AgentManager({
+    clients: { codex: codexClient, claude: claudeClient },
+    registry: storage,
+    logger,
+  });
+  try {
+    const agent = await manager.createAgent(
+      { provider: "codex", cwd: workdir, model: "source", thinkingOptionId: "medium" },
+      undefined,
+      { workspaceId: undefined },
+    );
+    const originalSessionId = (await storage.get(agent.id))?.persistence?.sessionId;
+
+    await manager.setAgentModel(agent.id, "claude-model", "claude");
+    await manager.flush();
+
+    // The old provider's process is gone and the conversation was handed to the
+    // new provider's client via resume — not a fresh session.
+    expect(closedOriginalSession).toBe(true);
+    expect(claudeClient.resumedHandles).toHaveLength(1);
+    expect(claudeClient.resumedHandles[0]?.sessionId).toBe(originalSessionId);
+
+    const stored = await storage.get(agent.id);
+    expect(stored?.config?.model).toBe("claude-model");
+    // A thinking option only means anything against the model that offers it.
+    expect(stored?.config?.thinkingOptionId).toBeUndefined();
+    expect(stored?.persistence?.provider).toBe("claude");
+    expect(manager.getAgent(agent.id)?.provider).toBe("claude");
+  } finally {
+    for (const agent of manager.listAgents()) await manager.closeAgent(agent.id);
+    await manager.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("setAgentModel with the agent's own provider stays model-only (no session rebuild)", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-provider-same-"));
+  const codexClient = new SessionRecordingAgentClient("codex");
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const manager = new AgentManager({
+    clients: { codex: codexClient },
+    registry: storage,
+    logger,
+  });
+  try {
+    const agent = await manager.createAgent(
+      { provider: "codex", cwd: workdir, model: "source" },
+      undefined,
+      { workspaceId: undefined },
+    );
+    const sessionsBefore = codexClient.sessions.length;
+
+    await manager.setAgentModel(agent.id, "target", "codex");
+    await manager.flush();
+
+    // Same provider: the live session is reused, exactly like a model-only call.
+    expect(codexClient.sessions).toHaveLength(sessionsBefore);
+    expect(codexClient.resumeOverrides).toHaveLength(0);
+    expect((await storage.get(agent.id))?.config?.model).toBe("target");
+  } finally {
+    for (const agent of manager.listAgents()) await manager.closeAgent(agent.id);
+    await manager.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("later explicit config mutations win over events emitted by earlier mutations", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-config-mutation-order-"));
   class ConfigMutationSession extends TestAgentSession {

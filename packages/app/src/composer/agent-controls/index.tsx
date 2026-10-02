@@ -1575,15 +1575,20 @@ export const AgentControls = memo(function AgentControls({
     () => buildAgentProviderModels(agent?.provider, models),
     [agent?.provider, models],
   );
+  // TOPOS custom: offer every enabled provider, not just the agent's own.
+  // Picking a model under another provider switches the thread onto it — the
+  // daemon rebuilds the session on that provider and resumes the same native
+  // conversation — so this mirrors what the draft composer already offers.
   const agentModelSelectorProviders = useMemo(() => {
-    if (snapshotSelectedEntry) {
-      return buildSelectableProviderSelectorProviders([snapshotSelectedEntry]);
+    const selectable = buildSelectableProviderSelectorProviders(snapshotEntries);
+    if (selectable.length > 0) {
+      return selectable;
     }
     return buildProviderSelectorProviders({
       providerDefinitions: agentProviderDefinitions,
       modelsByProvider: agentProviderModels,
     });
-  }, [agentProviderDefinitions, agentProviderModels, snapshotSelectedEntry]);
+  }, [agentProviderDefinitions, agentProviderModels, snapshotEntries]);
 
   const modelSelection = resolveAgentModelSelection({
     models,
@@ -1627,6 +1632,33 @@ export const AgentControls = memo(function AgentControls({
     },
     [agentId, agentProvider, client, toast, updatePreferences],
   );
+  // TOPOS custom: provider + model chosen together. When `provider` differs
+  // from the agent's current one the daemon rebuilds the session on it and
+  // resumes the same conversation; when it matches, this is an ordinary model
+  // change. Preferences are filed under the target provider so the picker
+  // remembers the model for the provider actually in use.
+  const handleSelectProviderAndModel = useCallback(
+    async (provider: string, modelId: string) => {
+      if (!client) {
+        return;
+      }
+      try {
+        await client.setAgentModel(agentId, modelId, provider);
+        await updatePreferences((current) =>
+          mergeProviderPreferences({
+            preferences: current,
+            provider,
+            updates: { model: modelId },
+          }),
+        );
+      } catch (error) {
+        console.warn("[AgentControls] setAgentModel with provider failed", error);
+        toast.error(toErrorMessage(error));
+      }
+    },
+    [agentId, client, toast, updatePreferences],
+  );
+
   const handleSelectCommandCenterModel = useCallback(
     (_provider: AgentProvider, modelId: string) => handleSelectModel(modelId),
     [handleSelectModel],
@@ -1783,6 +1815,7 @@ export const AgentControls = memo(function AgentControls({
         modelOptions={modelOptions}
         selectedModelId={modelSelection.activeModelId ?? undefined}
         onSelectModel={handleSelectModel}
+        onSelectProviderAndModel={handleSelectProviderAndModel}
         agentProfiles={agentProfiles}
         onApplyAgentProfile={agentProfiles?.applyProfile}
         onEditAgentProfiles={handleEditAgentProfiles}

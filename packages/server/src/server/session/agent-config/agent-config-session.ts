@@ -27,7 +27,13 @@ export interface AgentConfigSessionHost {
 export interface AgentConfigOperations {
   ensureLoaded(agentId: string): Promise<void>;
   setMode(agentId: string, modeId: string): Promise<AgentProviderNotice | null>;
-  setModel(agentId: string, modelId: string | null): Promise<void>;
+  /**
+   * `providerId` is the TOPOS custom provider switch: when it names a provider
+   * other than the agent's current one, the session is rebuilt on that provider
+   * (its env carries a different base URL) and the same native conversation is
+   * resumed there. Omitted = model-only.
+   */
+  setModel(agentId: string, modelId: string | null, providerId?: string): Promise<void>;
   setFeature(agentId: string, featureId: string, value: unknown): Promise<void>;
   setThinking(
     agentId: string,
@@ -87,15 +93,15 @@ export class AgentConfigSession {
   handleSetAgentModelRequest(
     msg: Extract<SessionInboundMessage, { type: "set_agent_model_request" }>,
   ): Promise<void> {
-    const { agentId, modelId, requestId } = msg;
+    const { agentId, modelId, provider, requestId } = msg;
     return this.applyConfigChange({
       agentId,
       requestId,
       logLabel: "set_agent_model_request",
-      logFields: { agentId, modelId, requestId },
+      logFields: { agentId, modelId, provider, requestId },
       failureText: "Failed to set agent model",
       run: async () => {
-        await this.operations.setModel(agentId, modelId);
+        await this.operations.setModel(agentId, modelId, provider);
         return undefined;
       },
       emitResponse: (payload) => this.host.emit({ type: "set_agent_model_response", payload }),

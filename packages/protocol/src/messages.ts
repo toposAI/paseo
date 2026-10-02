@@ -1920,6 +1920,14 @@ export const SetAgentModelRequestMessageSchema = z.object({
   type: z.literal("set_agent_model_request"),
   agentId: z.string(),
   modelId: z.string().nullable(),
+  /**
+   * Optional provider switch (TOPOS custom). A provider is fixed at process
+   * spawn because its `ANTHROPIC_BASE_URL` lives in the spawned env, so a
+   * request naming a different provider rebuilds the session on that provider
+   * and resumes the same native conversation there. Omitted = model-only, the
+   * upstream behaviour.
+   */
+  provider: z.string().optional(),
   requestId: z.string(),
 });
 

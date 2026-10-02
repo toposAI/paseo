@@ -11,7 +11,11 @@ import type { SessionOutboundMessage } from "../../messages.js";
 class FakeAgentConfigOperations implements AgentConfigOperations {
   readonly loadedAgentIds: string[] = [];
   readonly modeCalls: Array<{ agentId: string; modeId: string }> = [];
-  readonly modelCalls: Array<{ agentId: string; modelId: string | null }> = [];
+  readonly modelCalls: Array<{
+    agentId: string;
+    modelId: string | null;
+    providerId?: string;
+  }> = [];
   readonly featureCalls: Array<{ agentId: string; featureId: string; value: unknown }> = [];
   readonly thinkingCalls: Array<{ agentId: string; thinkingOptionId: string | null }> = [];
   /** Cross-operation ordering, which the per-operation arrays above cannot show. */
@@ -33,8 +37,8 @@ class FakeAgentConfigOperations implements AgentConfigOperations {
     return this.modeNotice;
   }
 
-  async setModel(agentId: string, modelId: string | null): Promise<void> {
-    this.modelCalls.push({ agentId, modelId });
+  async setModel(agentId: string, modelId: string | null, providerId?: string): Promise<void> {
+    this.modelCalls.push({ agentId, modelId, providerId });
     this.callLog.push("model");
     if (this.failWith) throw this.failWith;
   }
@@ -177,6 +181,41 @@ describe("AgentConfigSession", () => {
         payload: { requestId: "req-1", agentId: "agent-1", accepted: true, error: null },
       },
     ]);
+  });
+
+  test("set model: forwards the requested provider through to the mutation", async () => {
+    const { subsystem, emitted, operations } = makeSubsystem();
+
+    await subsystem.handleSetAgentModelRequest({
+      type: "set_agent_model_request",
+      agentId: "agent-1",
+      modelId: "deepseek-flash",
+      provider: "deepseek",
+      requestId: "req-1",
+    });
+
+    expect(operations.modelCalls).toEqual([
+      { agentId: "agent-1", modelId: "deepseek-flash", providerId: "deepseek" },
+    ]);
+    expect(emitted).toEqual([
+      {
+        type: "set_agent_model_response",
+        payload: { requestId: "req-1", agentId: "agent-1", accepted: true, error: null },
+      },
+    ]);
+  });
+
+  test("set model: an omitted provider stays undefined (model-only, upstream behaviour)", async () => {
+    const { subsystem, operations } = makeSubsystem();
+
+    await subsystem.handleSetAgentModelRequest({
+      type: "set_agent_model_request",
+      agentId: "agent-1",
+      modelId: "claude-opus-4-8",
+      requestId: "req-1",
+    });
+
+    expect(operations.modelCalls[0]?.providerId).toBeUndefined();
   });
 
   test("set model: a failed mutation reports the model-specific failure text", async () => {

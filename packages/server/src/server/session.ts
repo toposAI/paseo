@@ -1018,7 +1018,8 @@ export class Session {
         },
         setMode: async (agentId, modeId) =>
           (await setAgentModeCommand({ agentManager }, { agentId, modeId })).notice,
-        setModel: (agentId, modelId) => agentManager.setAgentModel(agentId, modelId),
+        setModel: (agentId, modelId, providerId) =>
+          agentManager.setAgentModel(agentId, modelId, providerId),
         setFeature: (agentId, featureId, value) =>
           agentManager.setAgentFeature(agentId, featureId, value),
         setThinking: (agentId, thinkingOptionId) =>

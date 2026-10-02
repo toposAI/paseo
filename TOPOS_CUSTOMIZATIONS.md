@@ -40,3 +40,26 @@ git push --force-with-lease origin topos-customizations
   (Bedrock/Vertex)の分岐は upstream のまま `"default"` を残している。
   ※ アプリ側のピッカーは「その provider で最後に選んだ mode」(`providerPrefs.mode`)を
   provider 既定より優先するため、既に mode を選んだことのある環境では表示が変わらない場合がある。
+- **スレッド途中でのプロバイダ切り替え**(2026-10-03)。従来 Paseo は「1 provider = 1 process」で、
+  provider は起動時に spawn される env(`ANTHROPIC_BASE_URL` 等)に焼き込まれるため、スレッド途中で
+  変更できなかった(provider は `SerializableConfig` にも存在しない)。OpenCode Go の枠が埋まった
+  瞬間に同一スレッドのまま DeepSeek 本家へ移りたい、という運用要求のために以下を追加した:
+  - `packages/protocol/src/messages.ts`: `set_agent_model_request` に任意の `provider` を追加。
+    省略時=モデルのみ変更(upstream 挙動)。
+  - `packages/server/src/server/agent/agent-manager.ts` の `setAgentModel`: 指定 provider が現在と
+    異なる場合、`reloadAgentSession` でセッションを新 provider 上に再構築し、永続化済みのネイティブ
+    sessionId をそのまま resume する(会話は持ち越し)。`thinkingOptionId` は破棄(そのモデル固有の
+    ため)。`reloadAgentSessionInternal` の provider 決定を `overrides.provider ?? handle.provider ??
+existing.provider` に変更した。
+  - `packages/client/src/daemon-client.ts` / `agent-config-session.ts` / `session.ts`: 上記
+    optional provider の中継。
+  - `packages/app/src/composer/agent-controls/index.tsx`: 実行中エージェントのモデルピッカーで
+    「その agent 自身の provider」だけでなく**有効な全 provider** を出す。別 provider のモデルを選ぶと
+    `onSelectProviderAndModel` 経由で上記の切り替えが走る(ドラフト composer と同じ見え方に揃えた)。
+  - 検証: spike(`/tmp/paseo-provider-switch-spike/`)で deepinfra→deepseek / deepinfra→opencodego の
+    クロスプロバイダ resume が成立することを実機確認済み。DeepSeek 系の thinking ブロックは
+    **signature を持たない**ため、主要な失敗モードは無い。ユニットテストは
+    `agent-manager.test.ts`(切り替え/同一 provider 据え置き)と
+    `agent-config-session.test.ts`(provider 中継)に追加。
+  - 既知の未検証: Anthropic 本家(thinking signature を検証する)との相互切り替え方向は未検証。
+    失敗した場合の緩和策(resume 失敗時に履歴から thinking ブロックを落として再試行)は未実装。
