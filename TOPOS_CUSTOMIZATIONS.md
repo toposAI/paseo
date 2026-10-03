@@ -56,10 +56,18 @@ existing.provider` に変更した。
   - `packages/app/src/composer/agent-controls/index.tsx`: 実行中エージェントのモデルピッカーで
     「その agent 自身の provider」だけでなく**有効な全 provider** を出す。別 provider のモデルを選ぶと
     `onSelectProviderAndModel` 経由で上記の切り替えが走る(ドラフト composer と同じ見え方に揃えた)。
+  - `packages/app/src/composer/agent-controls/provider-model-select.ts`: モデルピッカー経路と
+    **コマンドセンター経路**をこの 1 実装に集約した。コマンドセンターも全 provider を並べるのに、
+    選択ハンドラが受け取った provider を捨てて `setAgentModel` を 2 引数で呼んでいたため、別 provider の
+    モデルを選んでもセッションは元の provider のままだった(「選べるのに切り替わらない」)。
+    ハンドラが 2 箇所に分かれて再びドリフトしないよう、両経路が同じ関数を通る形にしている。
   - 検証: spike(`/tmp/paseo-provider-switch-spike/`)で deepinfra→deepseek / deepinfra→opencodego の
     クロスプロバイダ resume が成立することを実機確認済み。DeepSeek 系の thinking ブロックは
     **signature を持たない**ため、主要な失敗モードは無い。ユニットテストは
     `agent-manager.test.ts`(切り替え/同一 provider 据え置き)と
-    `agent-config-session.test.ts`(provider 中継)に追加。
+    `agent-config-session.test.ts`(provider 中継)、および app 側は
+    `provider-model-select.test.ts`(provider が渡ること・切替失敗時に preference を書かないこと)に追加。
   - 既知の未検証: Anthropic 本家(thinking signature を検証する)との相互切り替え方向は未検証。
     失敗した場合の緩和策(resume 失敗時に履歴から thinking ブロックを落として再試行)は未実装。
+  - 既知の未検証: コマンドセンター経由の切り替えは型チェックとユニットテストのみで、実機の
+    クリック操作では未確認(修正の性質上、経路が同じ `selectProviderModel` に合流したことの確認まで)。

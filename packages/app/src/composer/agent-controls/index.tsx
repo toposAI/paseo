@@ -81,6 +81,7 @@ import { ComposerControlLayoutProvider } from "@/composer/agent-controls/layout-
 import { ComposerToolbarGlyph } from "@/composer/agent-controls/glyph";
 import { AgentControlTrigger } from "@/composer/agent-controls/control";
 import { CompactModelSheet } from "@/composer/agent-controls/model-sheet";
+import { selectProviderModel } from "@/composer/agent-controls/provider-model-select";
 import {
   useAgentProfileEditor,
   useAgentProfilePicker,
@@ -1611,57 +1612,64 @@ export const AgentControls = memo(function AgentControls({
   const agentProvider = agent?.provider;
   const activeModelId = modelSelection.activeModelId;
 
-  const handleSelectModel = useCallback(
-    async (modelId: string) => {
-      if (!client || !agentProvider) {
-        return;
-      }
-      try {
-        await client.setAgentModel(agentId, modelId);
-        await updatePreferences((current) =>
-          mergeProviderPreferences({
-            preferences: current,
-            provider: agentProvider,
-            updates: { model: modelId },
-          }),
-        );
-      } catch (error) {
-        console.warn("[AgentControls] setAgentModel or persist preference failed", error);
-        toast.error(toErrorMessage(error));
-      }
-    },
-    [agentId, agentProvider, client, toast, updatePreferences],
-  );
   // TOPOS custom: provider + model chosen together. When `provider` differs
   // from the agent's current one the daemon rebuilds the session on it and
   // resumes the same conversation; when it matches, this is an ordinary model
   // change. Preferences are filed under the target provider so the picker
   // remembers the model for the provider actually in use.
-  const handleSelectProviderAndModel = useCallback(
-    async (provider: string, modelId: string) => {
+  //
+  // The model picker and the command center both come through here. They used
+  // to carry separate copies, and the command center's dropped the provider —
+  // it listed every provider's models and switched nothing when one was picked.
+  const runModelSelection = useCallback(
+    async (provider: string, modelId: string, failureMessage: string) => {
       if (!client) {
         return;
       }
       try {
-        await client.setAgentModel(agentId, modelId, provider);
-        await updatePreferences((current) =>
-          mergeProviderPreferences({
-            preferences: current,
-            provider,
-            updates: { model: modelId },
-          }),
+        await selectProviderModel(
+          {
+            setAgentModel: (targetAgentId, targetModelId, targetProvider) =>
+              client.setAgentModel(targetAgentId, targetModelId, targetProvider),
+            persistModelPreference: async (targetProvider, targetModelId) => {
+              await updatePreferences((current) =>
+                mergeProviderPreferences({
+                  preferences: current,
+                  provider: targetProvider,
+                  updates: { model: targetModelId },
+                }),
+              );
+            },
+          },
+          { agentId, provider, modelId },
         );
       } catch (error) {
-        console.warn("[AgentControls] setAgentModel with provider failed", error);
+        console.warn(failureMessage, error);
         toast.error(toErrorMessage(error));
       }
     },
     [agentId, client, toast, updatePreferences],
   );
 
+  const handleSelectModel = useCallback(
+    (modelId: string) => {
+      if (!agentProvider) {
+        return Promise.resolve();
+      }
+      return runModelSelection(agentProvider, modelId, "[AgentControls] setAgentModel failed");
+    },
+    [agentProvider, runModelSelection],
+  );
+
+  const handleSelectProviderAndModel = useCallback(
+    (provider: string, modelId: string) =>
+      runModelSelection(provider, modelId, "[AgentControls] setAgentModel with provider failed"),
+    [runModelSelection],
+  );
+
   const handleSelectCommandCenterModel = useCallback(
-    (_provider: AgentProvider, modelId: string) => handleSelectModel(modelId),
-    [handleSelectModel],
+    (provider: AgentProvider, modelId: string) => handleSelectProviderAndModel(provider, modelId),
+    [handleSelectProviderAndModel],
   );
 
   // A running agent is one provider's process, so only that provider's profiles
