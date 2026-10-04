@@ -8,6 +8,7 @@ import {
   type PreparedToolCallHistory,
   type ToolCallDetailLevel,
 } from "@/tool-calls/detail-level/projection";
+import { mergeAdjacentThoughts } from "./thinking-merge";
 
 interface PresentationInput {
   tail: StreamItem[];
@@ -141,8 +142,8 @@ export function createStreamPresentation() {
       // One rendering path: history splits the same way the live head does, and
       // `blocksBySource` keeps both the live block identities and the split cost
       // from being paid again when only the tail's array identity changed.
-      historyRows = projectPluginTimelineItems(input.tail, input.transform).flatMap<StreamItem>(
-        nativeBlocks,
+      historyRows = mergeAdjacentThoughts(
+        projectPluginTimelineItems(input.tail, input.transform).flatMap<StreamItem>(nativeBlocks),
       );
       historySource = input.tail;
       historyTransform = input.transform;
@@ -176,7 +177,7 @@ export function createStreamPresentation() {
     return projectToolCallDetailLevel({
       level: input.level,
       tail: displayTail,
-      head,
+      head: mergeAdjacentThoughts(head),
       preparedHistory,
       isTurnActive: input.isTurnActive,
     });

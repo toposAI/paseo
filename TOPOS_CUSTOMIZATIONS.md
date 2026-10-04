@@ -71,3 +71,13 @@ existing.provider` に変更した。
     失敗した場合の緩和策(resume 失敗時に履歴から thinking ブロックを落として再試行)は未実装。
   - 既知の未検証: コマンドセンター経由の切り替えは型チェックとユニットテストのみで、実機の
     クリック操作では未確認(修正の性質上、経路が同じ `selectProviderModel` に合流したことの確認まで)。
+- **連続するThinkingの結合**(2026-10-04)。`packages/app/src/agent-stream/thinking-merge.ts` を新設し、
+  `packages/app/src/agent-stream/presentation.ts` から履歴行とライブheadの両方に適用する。
+  Claude系プロバイダは `TaskCreate`/`TaskUpdate`/`TaskList` のたびに `tool_call` をタイムラインへ記録するが、
+  クライアントはそれを描画せず捨てる(`types/stream.ts`)。ただし「捨てる」判定より前に、ストリーミング中の
+  思考を確定してtailへ送るフラッシュが走る(`shouldFlushHead`)ため、次の思考は新しい行として始まり、
+  間に何も表示されない「Thinking」が縦に並んでいた。表示層で隣接するthought(`turnId` が同一のもの)を
+  `\n\n` で連結して1行にまとめる。間にツール呼び出し等の可視行がある場合は従来どおり別行のまま。
+  先頭のidを保つので find / scroll の宛先は変わらない。サーバ側の `mergeReasoningChunks` は
+  seq連続を結合条件にしているため履歴側では元から分裂しており、そちらは変更していない。
+  テスト: `thinking-merge.test.ts` と `presentation.test.ts` の `adjacent thinking rows`。

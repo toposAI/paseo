@@ -578,3 +578,76 @@ describe("timeline presentation", () => {
     expect(projectTimelineItems([source], () => [])).toEqual([]);
   });
 });
+
+function reasoning(text: string): AgentStreamEventPayload {
+  return { type: "timeline", provider: "claude", item: { type: "reasoning", text } };
+}
+
+// Claude records a tool call for every task-list call, but the reducer drops it. It
+// still flushes the streaming head, so reasoning on either side of it used to arrive as
+// two adjacent thought items with nothing rendered between them.
+function claudeTaskToolCall(callId: string, name = "TaskUpdate"): AgentStreamEventPayload {
+  return {
+    type: "timeline",
+    provider: "claude",
+    item: {
+      type: "tool_call",
+      callId,
+      name,
+      status: "completed",
+      error: null,
+      detail: { type: "unknown", input: { callId }, output: { callId } },
+    },
+  };
+}
+
+describe("adjacent thinking rows", () => {
+  it("collapses reasoning split by a discarded task tool call into one Thinking row", () => {
+    const harness = streamHarness();
+    harness.send(reasoning("First thought."));
+    harness.send(claudeTaskToolCall("call-1"));
+    harness.send(reasoning("Second thought."));
+    const result = harness.send({ type: "turn_completed", provider: "claude" });
+
+    const thoughts = rows(result).filter((item) => item.kind === "thought");
+    expect(thoughts).toMatchObject([
+      { kind: "thought", text: "First thought.\n\nSecond thought.", status: "ready" },
+    ]);
+  });
+
+  it("keeps the first thought's identity so find and scroll still address the row", () => {
+    const harness = streamHarness();
+    const firstId = rows(harness.send(reasoning("First thought."))).find(
+      (item) => item.kind === "thought",
+    )?.id;
+    harness.send(claudeTaskToolCall("call-1"));
+    harness.send(reasoning("Second thought."));
+    const result = harness.send({ type: "turn_completed", provider: "claude" });
+
+    const thoughts = rows(result).filter((item) => item.kind === "thought");
+    expect(thoughts).toHaveLength(1);
+    expect(thoughts[0]?.id).toBe(firstId);
+  });
+
+  it("still breaks the run at a rendered tool call", () => {
+    const harness = streamHarness();
+    harness.send(reasoning("Before the tool."));
+    harness.send({
+      type: "timeline",
+      provider: "codex",
+      item: {
+        type: "tool_call",
+        callId: "call-2",
+        name: "bash",
+        status: "completed",
+        error: null,
+        detail: { type: "unknown", input: {}, output: {} },
+      },
+    });
+    harness.send(reasoning("After the tool."));
+    const result = harness.send({ type: "turn_completed", provider: "claude" });
+
+    const thoughts = rows(result).filter((item) => item.kind === "thought");
+    expect(thoughts).toMatchObject([{ text: "Before the tool." }, { text: "After the tool." }]);
+  });
+});
