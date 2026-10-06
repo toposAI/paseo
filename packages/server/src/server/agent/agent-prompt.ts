@@ -71,11 +71,19 @@ async function startOrReplaceRun(
   agentId: string,
   prompt: AgentPromptInput,
   options: StartAgentRunOptions | undefined,
+  logger: Logger,
 ): Promise<{
   iterator: AsyncGenerator<import("./agent-sdk-types.js").AgentStreamEvent>;
   replaced: boolean;
 }> {
   const replaced = Boolean(options?.replaceRunning && agentManager.hasBlockingRun(agentId));
+  if (replaced) {
+    // Interrupt-style send on a busy agent: kills background subagents (see steerOrReplaceActiveTurn).
+    logger.info(
+      { agentId, activeTurnBehavior: options?.activeTurnBehavior ?? "interrupt" },
+      "agent.dispatch.interrupt_replacing_run",
+    );
+  }
   const iterator = replaced
     ? await agentManager.replaceAgentRun(agentId, prompt, options?.runOptions)
     : agentManager.streamAgent(agentId, prompt, options?.runOptions);
@@ -142,7 +150,7 @@ async function startAgentRunInner(
   }
   const { iterator, replaced } = steered
     ? { iterator: steered.iterator, replaced: true }
-    : await startOrReplaceRun(agentManager, agentId, prompt, options);
+    : await startOrReplaceRun(agentManager, agentId, prompt, options, logger);
   logger.trace(
     {
       agentId,
@@ -163,7 +171,7 @@ async function startAgentRunInner(
           "Provider session went stale; reopening from persistence",
         );
         await agentManager.reloadAgentSession(agentId);
-        const retry = await startOrReplaceRun(agentManager, agentId, prompt, options);
+        const retry = await startOrReplaceRun(agentManager, agentId, prompt, options, logger);
         await drainAgentRunIterator(retry.iterator);
       }
       logger.trace(

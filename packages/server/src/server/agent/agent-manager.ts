@@ -2823,6 +2823,18 @@ export class AgentManager {
       return { status: "inactive" };
     }
 
+    // Replacement interrupts the provider query, which also kills background subagents.
+    // Logged at info so an unexpected bg death can be traced to this fallback.
+    this.logger.info(
+      {
+        agentId,
+        provider: agent.provider,
+        expectedTurnId,
+        steerAvailable: Boolean(agent.session.steerActiveTurn),
+        steerResult: result.status,
+      },
+      "agent.dispatch.steer_unavailable_replacing_turn",
+    );
     await this.beforeSteerUnavailableFallback?.({ agentId, expectedTurnId });
     this.assertSteerAdmissionOwnsTurn(agent, expectedTurnId);
     return {
