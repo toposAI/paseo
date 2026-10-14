@@ -67,8 +67,27 @@ existing.provider` に変更した。
     `agent-manager.test.ts`(切り替え/同一 provider 据え置き)と
     `agent-config-session.test.ts`(provider 中継)、および app 側は
     `provider-model-select.test.ts`(provider が渡ること・切替失敗時に preference を書かないこと)に追加。
-  - 既知の未検証: Anthropic 本家(thinking signature を検証する)との相互切り替え方向は未検証。
-    失敗した場合の緩和策(resume 失敗時に履歴から thinking ブロックを落として再試行)は未実装。
+  - **Anthropic 本家 ⇄ DeepSeek 系の相互切り替え**(2026-10-14 実機で再現・修正)。切り替え操作自体は
+    受理されるが、**Claude → DeepSeek 系だけ**、切替後の毎ターンが `422 ... messages[1].content: unknown
+variant \`tool_definition\`, expected \`tool_reference\``で失敗していた。原因は thinking signature では
+なく、本家で書かれた transcript の`deferred_tools_delta`attachment(ToolSearch で遅延ロードする
+ツール名の告知)。resume 時に Claude Code がこれを`tool_definition`ブロックへ描画し、DeepSeek 系の
+    Anthropic 互換エンドポイントが未知バリアントとして拒否する。DeepSeek 系 → Claude は元から成立
+    (DeepSeek の thinking ブロックは空本文+gateway生成の signature で、本家は resume で受理した)。
+    - 修正:`packages/server/src/server/agent/providers/claude/transcript-provider-switch.ts`を新設。
+     `ClaudeAgentClient.resumeSession`が、起動 env の`ANTHROPIC_BASE_URL`が`anthropic.com`以外のとき
+      resume 前に transcript から`deferred_tools_delta`エントリだけを除去し、子の`parentUuid` を繋ぎ直す
+      (ユーザー発言・assistant 本文・tool 結果は不変。原子的に tmp→rename。失敗は warn して resume は続行)。
+      provider id でなく env で判定するので、`extends: claude`の任意の派生 provider に効く。
+      本家へ戻すと Claude Code が告知を再生成するため、往復しても毎回この除去が効く。
+    - 検証: 隔離した試験 daemon(別 home・ポート 6790・修正版ソース)で使い捨て agent を
+      claude→deepseek→claude→deepseek→claude→deepseek と 5 回往復し、全ホップで 422 なし・合言葉と
+      Bash tool 結果の文脈が継続することを確認。ユニットテストは`transcript-provider-switch.test.ts`。
+    - 未検証(出口レビュー指摘, 2026-10-14): 対処は `deferred_tools_delta`のみ。WebSearch の
+     `server_tool_use`・`redacted_thinking`・画像/PDF・`/compact` 後の Claude セッションを DeepSeek へ切り替える
+      ケース、ツール実行途中(thinking 付き tool_use)での DeepSeek→Claude、DeepSeek 区間での delta の新規生成は
+      実機未検証。`anthropic-escape` 経路を provider に使う場合は host 判定で非Anthropic扱いになり、除去が走る
+    (告知は再生成されるので実害は小さい)。
   - 既知の未検証: コマンドセンター経由の切り替えは型チェックとユニットテストのみで、実機の
     クリック操作では未確認(修正の性質上、経路が同じ `selectProviderModel` に合流したことの確認まで)。
 - **連続するThinkingの結合**(2026-10-04)。`packages/app/src/agent-stream/thinking-merge.ts` を新設し、

@@ -86,6 +86,10 @@ import {
 } from "./rewind.js";
 import { normalizeProviderReplayTimestamp } from "../../provider-history-timestamps.js";
 import { claudeConfigDir, claudeProjectDirSync, claudeTranscriptPathSync } from "./project-dir.js";
+import {
+  isNonAnthropicEndpoint,
+  stripDeferredToolsDeltaFromTranscript,
+} from "./transcript-provider-switch.js";
 import { THINKING_APPLIES_NEXT_TURN_NOTICE } from "../../provider-notices.js";
 import {
   isProviderImageMarkdown,
@@ -1587,6 +1591,7 @@ export class ClaudeAgentClient implements AgentClient {
       cwd: merged.cwd,
     };
     const claudeConfig = this.assertConfig(mergedConfig);
+    await this.prepareTranscriptForEndpoint(handle, claudeConfig.cwd, launchContext?.env);
     return new ClaudeAgentSession(claudeConfig, {
       defaults: this.defaults,
       runtimeSettings: this.runtimeSettings,
@@ -1598,6 +1603,38 @@ export class ClaudeAgentClient implements AgentClient {
       resolveBinary: this.resolveBinary,
       rewindSdk: this.rewindSdk,
     });
+  }
+
+  // TOPOS custom: a conversation started on Anthropic's endpoint and resumed on a
+  // DeepSeek-family one (mid-thread provider switch) must not carry Anthropic-only
+  // transcript entries. Best effort: a failure here must not block the resume.
+  private async prepareTranscriptForEndpoint(
+    handle: AgentPersistenceHandle,
+    cwd: string,
+    launchEnv?: Record<string, string>,
+  ): Promise<void> {
+    const env = this.buildProviderEnv(launchEnv);
+    if (!isNonAnthropicEndpoint(env)) {
+      return;
+    }
+    try {
+      const removed = await stripDeferredToolsDeltaFromTranscript({
+        cwd,
+        sessionId: handle.sessionId,
+        configDir: claudeConfigDir(env),
+      });
+      if (removed > 0) {
+        this.logger.info(
+          { sessionId: handle.sessionId, removed },
+          "Dropped Anthropic-only deferred_tools_delta entries before resuming on a non-Anthropic endpoint",
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        { err: error },
+        "Failed to prepare Claude transcript for non-Anthropic endpoint",
+      );
+    }
   }
 
   async getCatalogCacheKey(_options: FetchCatalogOptions): Promise<string> {
