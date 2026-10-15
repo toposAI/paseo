@@ -56,6 +56,8 @@ type ScrollBehaviorLike = "auto" | "smooth";
 const WEB_BOTTOM_SETTLE_TIMEOUT_MS = 200;
 const USER_SCROLL_DELTA_EPSILON = 1;
 const BOTTOM_OVERSCROLL_TOLERANCE_PX = 2;
+import { useToposComposerCollapse } from "@/composer/topos-collapse-store";
+
 const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 64;
 const AUTO_SCROLL_RESUME_THRESHOLD_PX = 1;
 const HISTORY_START_SETTLE_FRAMES = 2;
@@ -197,6 +199,12 @@ function syncNearBottom(
   }
   const nextValue = isScrollContainerNearBottom(scrollContainer);
   onNearBottomChange(nextValue);
+  useToposComposerCollapse
+    .getState()
+    .reportScrollDistance(
+      scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop,
+      nextValue,
+    );
   return nextValue;
 }
 

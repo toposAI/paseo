@@ -372,10 +372,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const toposCollapsed = useToposComposerCollapse((state) => state.collapsed);
     const setToposCollapsed = useToposComposerCollapse((state) => state.setCollapsed);
     useEffect(() => {
-      // Fold the composer while reading back; restore it once the user is at the bottom again.
-      setToposCollapsed(toposChatStyle && !isNearBottom);
+      // Folding is driven by the scroll distance (see topos-collapse-store); here we only reset.
+      if (!toposChatStyle) setToposCollapsed(false);
       return () => setToposCollapsed(false);
-    }, [toposChatStyle, isNearBottom, setToposCollapsed]);
+    }, [toposChatStyle, setToposCollapsed]);
     const handleToposExpandComposer = useCallback(
       () => setToposCollapsed(false),
       [setToposCollapsed],

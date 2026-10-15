@@ -85,6 +85,7 @@ import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import { openWorkspaceChanges } from "@/workspace-tabs/open-supporting-view";
 import { useSettings } from "@/hooks/use-settings";
+import { useToposComposerCollapse } from "@/composer/topos-collapse-store";
 import type { Theme } from "@/styles/theme";
 import type { PendingPermission } from "@/types/shared";
 import type { StreamItem, TodoEntry } from "@/types/stream";
@@ -1153,6 +1154,9 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   onOpenWorkspaceFile?: (request: WorkspaceFileOpenRequest) => void;
 }) {
   const { t } = useTranslation();
+  const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
+  const toposCollapsed = useToposComposerCollapse((state) => state.collapsed);
+  const toposFolded = toposChatStyle && toposCollapsed;
   const subagentRows = useSubagentsForParent({ serverId, parentAgentId: agentId });
   const tasks = useSessionStore((state): TodoEntry[] | undefined =>
     state.sessions[serverId]?.agentTasks.get(agentId),
@@ -1251,7 +1255,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
           onOpenWorkspaceFile={onOpenWorkspaceFile}
         />
       </RenderProfile>
-      {hasActiveComposer ? (
+      {hasActiveComposer && !toposFolded ? (
         <AgentTracks
           serverId={serverId}
           workspaceId={workspaceId}

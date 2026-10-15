@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useUnistyles } from "react-native-unistyles";
 import { createAssistantSelectionClipboardContent } from "@/assistant-selection-copy/content.web";
@@ -16,6 +23,47 @@ const BAR_WIDTH = 264;
 const BAR_HEIGHT = 44;
 const EDGE = 8;
 const SENT_FLASH_MS = 900;
+const COMMENT_HEIGHT_ESTIMATE = 170;
+const DESKTOP_MIN_WIDTH = 768;
+
+/**
+ * Per-form-factor tuning for the comment card. Same component, different knobs:
+ * - anchor "screen-left": pinned to the left screen edge under the bar (phone).
+ * - anchor "selection": opens right under the selection (desktop).
+ * - draggable: grab the handle on top to move the card; rememberPosition reuses the last drop spot.
+ */
+const LAYOUT = {
+  mobile: { commentWidth: 340, anchor: "screen-left", draggable: false, rememberPosition: false },
+  desktop: { commentWidth: 420, anchor: "selection", draggable: true, rememberPosition: true },
+} as const;
+
+type Layout = (typeof LAYOUT)[keyof typeof LAYOUT];
+
+function currentLayout(): Layout {
+  return window.innerWidth >= DESKTOP_MIN_WIDTH ? LAYOUT.desktop : LAYOUT.mobile;
+}
+
+interface CardPosition {
+  top: number;
+  left: number;
+}
+
+let rememberedPosition: CardPosition | null = null;
+
+function clampCard(position: CardPosition, width: number): CardPosition {
+  return {
+    top: Math.min(Math.max(EDGE, position.top), Math.max(EDGE, window.innerHeight - 60)),
+    left: Math.min(Math.max(EDGE, position.left), Math.max(EDGE, window.innerWidth - width - EDGE)),
+  };
+}
+
+function initialCardPosition(pick: { top: number; left: number }, layout: Layout): CardPosition {
+  const width = Math.min(layout.commentWidth, window.innerWidth - EDGE * 2);
+  if (layout.rememberPosition && rememberedPosition) return clampCard(rememberedPosition, width);
+  const left = layout.anchor === "selection" ? pick.left : EDGE;
+  const top = Math.min(pick.top, window.innerHeight - COMMENT_HEIGHT_ESTIMATE - EDGE);
+  return clampCard({ top, left }, width);
+}
 
 interface ToposSelectionActionsProps {
   serverId: string;
@@ -68,6 +116,9 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
   const [pick, setPick] = useState<Pick | null>(null);
   const [commenting, setCommenting] = useState(false);
   const [comment, setComment] = useState("");
+  const [cardPos, setCardPos] = useState<CardPosition | null>(null);
+  const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const latestPosRef = useRef<CardPosition | null>(null);
   const [status, setStatus] = useState<"idle" | "sent" | "error">("idle");
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const commentingRef = useRef(false);
@@ -150,7 +201,35 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
     window.getSelection()?.removeAllRanges();
     close();
   }, [close, pick]);
-  const handleStartComment = useCallback(() => setCommenting(true), []);
+  const handleStartComment = useCallback(() => {
+    if (pick) setCardPos(initialCardPosition(pick, currentLayout()));
+    setCommenting(true);
+  }, [pick]);
+  const handleDragStart = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!cardPos) return;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      dragRef.current = { dx: event.clientX - cardPos.left, dy: event.clientY - cardPos.top };
+    },
+    [cardPos],
+  );
+  const handleDragMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const layout = currentLayout();
+    const width = Math.min(layout.commentWidth, window.innerWidth - EDGE * 2);
+    const next = clampCard({ top: event.clientY - drag.dy, left: event.clientX - drag.dx }, width);
+    latestPosRef.current = next;
+    setCardPos(next);
+  }, []);
+  const handleDragEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (latestPosRef.current && currentLayout().rememberPosition) {
+      rememberedPosition = latestPosRef.current;
+    }
+  }, []);
 
   if (!enabled || !pick) return null;
 
@@ -191,16 +270,39 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
   }
 
   if (commenting) {
+    const layout = currentLayout();
     return (
       <div
         style={{
           ...panel,
-          left: EDGE,
-          width: Math.min(340, window.innerWidth - EDGE * 2),
+          top: cardPos?.top ?? pick.top,
+          left: cardPos?.left ?? EDGE,
+          width: Math.min(layout.commentWidth, window.innerWidth - EDGE * 2),
           padding: 8,
         }}
         data-testid="topos-selection-comment"
       >
+        {layout.draggable ? (
+          <div
+            onPointerDown={handleDragStart}
+            onPointerMove={handleDragMove}
+            onPointerUp={handleDragEnd}
+            style={{
+              height: 16,
+              margin: "-4px 0 4px",
+              cursor: "grab",
+              touchAction: "none",
+              textAlign: "center",
+              color: colors.foregroundMuted,
+              fontSize: 12,
+              lineHeight: "16px",
+              userSelect: "none",
+            }}
+            data-testid="topos-selection-comment-handle"
+          >
+            ⋯⋯
+          </div>
+        ) : null}
         <textarea
           autoFocus
           value={comment}
