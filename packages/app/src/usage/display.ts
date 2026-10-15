@@ -5,6 +5,7 @@ import { useUsageHostReports } from "./queries";
 import {
   isUsagePinned,
   setUsageDisplayAs,
+  setUsageOrder,
   toggleUsagePin,
   type UsageDisplayAs,
   type UsagePin,
@@ -18,6 +19,8 @@ export interface UsageDisplay {
   setDisplayAs: (displayAs: UsageDisplayAs) => void;
   isPinned: (pin: UsagePin) => boolean;
   togglePin: (pin: UsagePin) => void;
+  order: readonly string[] | undefined;
+  setOrder: (order: string[]) => void;
 }
 
 interface UsagePreferencesState {
@@ -49,14 +52,22 @@ export function useUsageDisplay(reports: readonly UsageReportEntry[]): UsagePref
     },
     [updateSettings, reports],
   );
+  const setOrder = useCallback(
+    (order: string[]) => {
+      void updateSettings((current) => ({ usage: setUsageOrder(current.usage, order) }));
+    },
+    [updateSettings],
+  );
   const display = useMemo<UsageDisplay>(
     () => ({
       displayAs: preferences.displayAs,
       setDisplayAs,
       isPinned: (pin) => isUsagePinned(preferences, pin, reports),
       togglePin,
+      order: preferences.order,
+      setOrder,
     }),
-    [preferences, reports, setDisplayAs, togglePin],
+    [preferences, reports, setDisplayAs, togglePin, setOrder],
   );
   return { preferences, display };
 }

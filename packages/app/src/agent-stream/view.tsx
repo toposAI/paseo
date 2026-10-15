@@ -14,6 +14,7 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  ActivityIndicator,
   View,
   Text,
   Pressable,
@@ -26,7 +27,7 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useMutation } from "@tanstack/react-query";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
-import { Check, ChevronDown, X } from "lucide-react-native";
+import { Check, ChevronDown, MessageCircle, X } from "lucide-react-native";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import { openExplorerSidebarView } from "@/workspace-tabs/explorer-sidebar";
 import {
@@ -56,6 +57,8 @@ import { useRevealedText } from "@/hooks/use-revealed-text";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
 import { resolveContentMaxWidth, useSettings } from "@/hooks/use-settings";
+import { useToposComposerCollapse } from "@/composer/topos-collapse-store";
+import { ToposSelectionActions } from "@/topos-selection/selection-actions";
 import type { ToastApi } from "@/components/toast-host";
 import { returnToTimelineTail } from "./timeline-tail-navigation";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
@@ -365,6 +368,21 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [isMobile],
     );
     const [isNearBottom, setIsNearBottom] = useState(true);
+    const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
+    const toposCollapsed = useToposComposerCollapse((state) => state.collapsed);
+    const setToposCollapsed = useToposComposerCollapse((state) => state.setCollapsed);
+    useEffect(() => {
+      // Fold the composer while reading back; restore it once the user is at the bottom again.
+      setToposCollapsed(toposChatStyle && !isNearBottom);
+      return () => setToposCollapsed(false);
+    }, [toposChatStyle, isNearBottom, setToposCollapsed]);
+    const handleToposExpandComposer = useCallback(
+      () => setToposCollapsed(false),
+      [setToposCollapsed],
+    );
+    // Green dot: something new arrived while the composer was folded away.
+    const [toposHasNew, setToposHasNew] = useState(false);
+    const toposBaselineRef = useRef<{ items: unknown; head: unknown } | null>(null);
     const [expandedInlineToolCallIds, setExpandedInlineToolCallIds] = useState<Set<string>>(
       new Set(),
     );
@@ -935,6 +953,22 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       () => Array.from(pendingPermissions.values()).filter((perm) => perm.agentId === agentId),
       [pendingPermissions, agentId],
     );
+    const toposHasPendingAsk = pendingPermissionItems.length > 0;
+    useEffect(() => {
+      if (!toposChatStyle || !toposCollapsed) {
+        toposBaselineRef.current = null;
+        setToposHasNew(false);
+        return;
+      }
+      const baseline = toposBaselineRef.current;
+      if (!baseline) {
+        toposBaselineRef.current = { items: streamItems, head: streamHead };
+        return;
+      }
+      if (baseline.items !== streamItems || baseline.head !== streamHead) {
+        setToposHasNew(true);
+      }
+    }, [toposChatStyle, toposCollapsed, streamItems, streamHead]);
 
     const pendingPermissionsNode = useMemo(
       () =>
@@ -1140,6 +1174,33 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               activePrompt={chatOutline.activePrompt}
               onJumpToPrompt={chatOutline.jumpToPrompt}
             />
+            <ToposSelectionActions serverId={resolvedServerId} agentId={agentId} />
+            {toposChatStyle && toposCollapsed ? (
+              <View style={stylesheet.toposFabContainer} pointerEvents="box-none">
+                <Pressable
+                  style={stylesheet.toposFab}
+                  onPress={handleToposExpandComposer}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("composer.toposExpand")}
+                  testID="topos-composer-fab"
+                >
+                  {isTurnActive ? (
+                    <ActivityIndicator size="small" color={stylesheet.scrollToBottomIcon.color} />
+                  ) : (
+                    <MessageCircle size={24} color={stylesheet.scrollToBottomIcon.color} />
+                  )}
+                  {toposHasPendingAsk || toposHasNew ? (
+                    <View
+                      style={[
+                        stylesheet.toposFabDot,
+                        toposHasPendingAsk ? stylesheet.toposFabDotAsk : stylesheet.toposFabDotNew,
+                      ]}
+                      testID={toposHasPendingAsk ? "topos-fab-dot-ask" : "topos-fab-dot-new"}
+                    />
+                  ) : null}
+                </Pressable>
+              </View>
+            ) : null}
             {(!isNearBottom || isTimelineDetached) && (
               <View style={scrollToBottomContainerStyle} pointerEvents="box-none">
                 <Animated.View entering={scrollIndicatorFadeIn} exiting={scrollIndicatorFadeOut}>
@@ -1700,6 +1761,38 @@ const stylesheet = StyleSheet.create((theme) => ({
   },
   scrollToBottomIcon: {
     color: theme.colors.foreground,
+  },
+  toposFabContainer: {
+    position: "absolute",
+    right: theme.spacing[4],
+    bottom: theme.spacing[4],
+  },
+  toposFab: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: theme.colors.surface2,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    ...theme.shadow.md,
+  },
+  toposFabDot: {
+    position: "absolute",
+    top: 2,
+    right: 2,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: theme.colors.surface2,
+  },
+  toposFabDotAsk: {
+    backgroundColor: "#f97316",
+  },
+  toposFabDotNew: {
+    backgroundColor: "#22c55e",
   },
 }));
 

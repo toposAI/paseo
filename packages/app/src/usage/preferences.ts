@@ -18,6 +18,8 @@ export interface UsagePreferences {
   pins: UsagePin[] | null;
   /** The host the user picked to show usage for; null until they pick one. */
   serverId: string | null;
+  /** Report IDs in the order the user arranged them; reports not listed follow, sorted. */
+  order?: string[];
 }
 
 export const DEFAULT_USAGE_PREFERENCES: UsagePreferences = {
@@ -36,10 +38,16 @@ export const UsagePreferencesSchema = z
     // Old [] meant defaults. Read it only when the new selection is absent.
     pinned: pinsSchema.optional().catch([]),
     serverId: z.string().nullable().catch(null),
+    order: z.array(z.string()).optional().catch(undefined),
   })
-  .transform(({ displayAs, pins, pinned, serverId }): UsagePreferences => {
+  .transform(({ displayAs, pins, pinned, serverId, order }): UsagePreferences => {
     const legacyPins = pinned && pinned.length > 0 ? pinned : null;
-    return { displayAs, pins: pins === undefined ? legacyPins : pins, serverId };
+    const base: UsagePreferences = {
+      displayAs,
+      pins: pins === undefined ? legacyPins : pins,
+      serverId,
+    };
+    return order ? { ...base, order } : base;
   })
   .catch(DEFAULT_USAGE_PREFERENCES);
 
@@ -102,4 +110,8 @@ export function setUsageDisplayAs(
 
 export function setUsageHost(preferences: UsagePreferences, serverId: string): UsagePreferences {
   return { ...preferences, serverId };
+}
+
+export function setUsageOrder(preferences: UsagePreferences, order: string[]): UsagePreferences {
+  return { ...preferences, order };
 }

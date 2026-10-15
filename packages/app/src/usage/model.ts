@@ -185,3 +185,36 @@ export function resolveUsageModalHostId(choice: UsageHostChoice): string | null 
   const picked = connected.find((host) => host.serverId === choice.pickedServerId);
   return picked?.serverId ?? resolveUsageHostId(choice) ?? connected[0]?.serverId ?? null;
 }
+
+/**
+ * Reports in a fixed order. Reports stream in as each source answers, so arrival order changes
+ * between visits; the user's saved order wins, and the rest follow sorted by source then ID.
+ */
+export function sortUsageReports(
+  reports: readonly UsageReportEntry[],
+  order: readonly string[] | undefined,
+): UsageReportEntry[] {
+  const rank = (entry: UsageReportEntry) => {
+    const index = order?.indexOf(entry.id) ?? -1;
+    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  return [...reports].sort((a, b) => {
+    const byRank = rank(a) - rank(b);
+    if (byRank !== 0) return byRank;
+    return a.sourceId.localeCompare(b.sourceId) || a.id.localeCompare(b.id);
+  });
+}
+
+/** The saved order after moving one report a step up (-1) or down (1) among the shown ones. */
+export function moveReportInOrder(
+  shownIds: readonly string[],
+  reportId: string,
+  step: -1 | 1,
+): string[] {
+  const index = shownIds.indexOf(reportId);
+  const target = index + step;
+  if (index === -1 || target < 0 || target >= shownIds.length) return [...shownIds];
+  const next = [...shownIds];
+  [next[index], next[target]] = [next[target], next[index]];
+  return next;
+}

@@ -115,7 +115,18 @@ export const ja: TranslationResources = {
       settingOff: "オフ",
     },
   },
+  toposSelection: {
+    go: "go",
+    comment: "コメント",
+    copy: "コピー",
+    commentPlaceholder: "この箇所にコメント",
+    send: "送信",
+    cancel: "キャンセル",
+    sent: "送信しました",
+    failed: "送信に失敗しました",
+  },
   composer: {
+    toposExpand: "入力欄を開く",
     placeholders: {
       desktop: "エージェントにメッセージ、@ファイル、/コマンドや/スキルを入力",
       mobile: "メッセージ、@ファイル、/コマンド",
@@ -347,6 +358,7 @@ export const ja: TranslationResources = {
       copyCode: "コードをコピー",
       copyTurn: "ターンをコピー",
       copyMessage: "メッセージをコピー",
+      copyText: "テキストをコピー",
       forkMenu: "メッセージをフォーク",
       forkInNewTab: "新しいタブにフォーク",
       forkInNewWorkspace: "新しいワークスペースにフォーク",
@@ -2190,6 +2202,10 @@ export const ja: TranslationResources = {
       autoExpandReasoning: {
         label: "常に思考プロセスを展開",
         description: "デフォルトでAIのエージェント思考・推論ブロックを完全に展開して表示します",
+      },
+      toposChatStyle: {
+        label: "Topos風の会話表示",
+        description: "ユーザー発言の長押しで日時とコピーを表示し、回答を読むときは入力欄を畳みます",
       },
       toolCallDetail: {
         label: "ツール呼び出しの表示",

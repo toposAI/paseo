@@ -9,7 +9,7 @@ import { canBeginMobilePanelGesture, isMobilePanelGestureCurrent } from "./model
 import { useMobilePanelsRuntime } from "./provider";
 import { resolveMobilePanelGestureIntent } from "./gesture-intent";
 
-const MOBILE_WEB_EDGE_SWIPE_WIDTH = 32;
+const MOBILE_WEB_EDGE_SWIPE_WIDTH = 44;
 
 function isCurrentSelection(startedRevision: number): boolean {
   return usePanelStore.getState().mobilePanel.revision === startedRevision;

@@ -115,7 +115,18 @@ export const ptBR: TranslationResources = {
       settingOff: "Desligado",
     },
   },
+  toposSelection: {
+    go: "go",
+    comment: "Comentar",
+    copy: "Copiar",
+    commentPlaceholder: "Comentar esta passagem",
+    send: "Enviar",
+    cancel: "Cancelar",
+    sent: "Enviado",
+    failed: "Falha ao enviar",
+  },
   composer: {
+    toposExpand: "Show message input",
     placeholders: {
       desktop: "Envie uma mensagem ao agente, marque @files ou use /commands e /skills",
       mobile: "Mensagem, @files, /commands",
@@ -345,6 +356,7 @@ export const ptBR: TranslationResources = {
       copyCode: "Copiar código",
       copyTurn: "Copiar turno",
       copyMessage: "Copiar mensagem",
+      copyText: "Copy text",
       forkMenu: "Bifurcar mensagem",
       forkInNewTab: "Bifurcar em uma nova aba",
       forkInNewWorkspace: "Bifurcar em um novo workspace",
@@ -2204,6 +2216,11 @@ export const ptBR: TranslationResources = {
         label: "Sempre expandir raciocínio",
         description:
           "Mostrar os blocos de pensamento e raciocínio do agente totalmente expandidos por padrão",
+      },
+      toposChatStyle: {
+        label: "Topos-style chat",
+        description:
+          "Long-press your messages for time and copy; collapse the composer while reading answers",
       },
       toolCallDetail: {
         label: "Exibição de chamadas de ferramentas",

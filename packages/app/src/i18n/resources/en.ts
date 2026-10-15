@@ -110,7 +110,18 @@ export const en = {
       settingOff: "Off",
     },
   },
+  toposSelection: {
+    go: "go",
+    comment: "Comment",
+    copy: "Copy",
+    commentPlaceholder: "Comment on this passage",
+    send: "Send",
+    cancel: "Cancel",
+    sent: "Sent",
+    failed: "Failed to send",
+  },
   composer: {
+    toposExpand: "Show message input",
     placeholders: {
       desktop: "Message the agent, tag @files, or use /commands and /skills",
       mobile: "Message, @files, /commands",
@@ -338,6 +349,7 @@ export const en = {
       copyCode: "Copy code",
       copyTurn: "Copy turn",
       copyMessage: "Copy message",
+      copyText: "Copy text",
       forkMenu: "Fork chat from here",
       forkInNewTab: "Fork in a new tab",
       forkInNewWorkspace: "Fork in a new workspace",
@@ -2293,6 +2305,11 @@ export const en = {
       autoExpandReasoning: {
         label: "Always expand reasoning",
         description: "Show agent thinking and chain-of-thought blocks fully expanded by default",
+      },
+      toposChatStyle: {
+        label: "Topos-style chat",
+        description:
+          "Long-press your messages for time and copy; collapse the composer while reading answers",
       },
       toolCallDetail: {
         label: "Tool call display",

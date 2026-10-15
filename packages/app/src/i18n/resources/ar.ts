@@ -114,7 +114,18 @@ export const ar: TranslationResources = {
       settingOff: "إيقاف",
     },
   },
+  toposSelection: {
+    go: "go",
+    comment: "تعليق",
+    copy: "نسخ",
+    commentPlaceholder: "تعليق على هذا المقطع",
+    send: "إرسال",
+    cancel: "إلغاء",
+    sent: "تم الإرسال",
+    failed: "فشل الإرسال",
+  },
   composer: {
+    toposExpand: "Show message input",
     placeholders: {
       desktop: "أرسل رسالة إلى الوكيل أو ضع علامة على @files أو استخدم /commands و /skills",
       mobile: "الرسالة، @files ، /commands",
@@ -340,6 +351,7 @@ export const ar: TranslationResources = {
       copyCode: "نسخ الرمز",
       copyTurn: "نسخ بدوره",
       copyMessage: "انسخ الرسالة",
+      copyText: "Copy text",
       forkMenu: "تفريع الرسالة",
       forkInNewTab: "تفريع في تبويب جديد",
       forkInNewWorkspace: "تفريع في مساحة عمل جديدة",
@@ -2168,6 +2180,11 @@ export const ar: TranslationResources = {
       autoExpandReasoning: {
         label: "عرض التفكير دائماً",
         description: "إظهار تفكير الوكيل وخطوات الاستدلال بشكل كامل بشكل افتراضي",
+      },
+      toposChatStyle: {
+        label: "Topos-style chat",
+        description:
+          "Long-press your messages for time and copy; collapse the composer while reading answers",
       },
       toolCallDetail: {
         label: "عرض استدعاءات الأدوات",

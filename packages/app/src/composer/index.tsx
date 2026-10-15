@@ -115,7 +115,8 @@ import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
 import { submitAgentInput } from "@/composer/submit";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { ComposerKeyboardScopeProvider, useComposerKeyboardScope } from "@/composer/keyboard-scope";
-import { useAppSettings } from "@/hooks/use-settings";
+import { useAppSettings, useSettings } from "@/hooks/use-settings";
+import { useToposComposerCollapse } from "./topos-collapse-store";
 import { RenderProfile } from "@/utils/render-profiler";
 import { AfterPaintPublication } from "@/composer/after-paint-publication";
 import { isWeb, isNative } from "@/constants/platform";
@@ -1179,12 +1180,19 @@ function ComposerVoiceModeButton({
   );
 }
 
+const toposExpandedStyle = { flexShrink: 1 } as const;
+const toposCollapsedStyle = { display: "none" } as const;
+
 export function Composer({ isPaneFocused, ...props }: ComposerProps) {
+  const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
+  const toposCollapsed = useToposComposerCollapse((state) => state.collapsed);
   return (
     <ComposerKeyboardScopeProvider isActiveComposer={isPaneFocused}>
-      <RenderProfile id="ComposerContent">
-        <ComposerContent {...props} />
-      </RenderProfile>
+      <View style={toposChatStyle && toposCollapsed ? toposCollapsedStyle : toposExpandedStyle}>
+        <RenderProfile id="ComposerContent">
+          <ComposerContent {...props} />
+        </RenderProfile>
+      </View>
     </ComposerKeyboardScopeProvider>
   );
 }

@@ -116,7 +116,18 @@ export const fr: TranslationResources = {
       settingOff: "Désactivé",
     },
   },
+  toposSelection: {
+    go: "go",
+    comment: "Commenter",
+    copy: "Copier",
+    commentPlaceholder: "Commenter ce passage",
+    send: "Envoyer",
+    cancel: "Annuler",
+    sent: "Envoyé",
+    failed: "Échec de l'envoi",
+  },
   composer: {
+    toposExpand: "Show message input",
     placeholders: {
       desktop: "Écrivez à l’agent, mentionnez des @fichiers ou utilisez les /commandes et /skills",
       mobile: "Message, @fichiers, /commandes",
@@ -347,6 +358,7 @@ export const fr: TranslationResources = {
       copyCode: "Copier le code",
       copyTurn: "Copier l’échange",
       copyMessage: "Copier le message",
+      copyText: "Copy text",
       forkMenu: "Forker la conversation à partir d’ici",
       forkInNewTab: "Forker dans un nouvel onglet",
       forkInNewWorkspace: "Forker dans un nouvel espace de travail",
@@ -2218,6 +2230,11 @@ export const fr: TranslationResources = {
       autoExpandReasoning: {
         label: "Toujours afficher le raisonnement",
         description: "Afficher par défaut le raisonnement de l’agent entièrement déplié",
+      },
+      toposChatStyle: {
+        label: "Topos-style chat",
+        description:
+          "Long-press your messages for time and copy; collapse the composer while reading answers",
       },
       toolCallDetail: {
         label: "Affichage des appels d’outils",

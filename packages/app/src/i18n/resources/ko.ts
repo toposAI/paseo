@@ -114,7 +114,18 @@ export const ko: TranslationResources = {
       settingOff: "꺼짐",
     },
   },
+  toposSelection: {
+    go: "go",
+    comment: "댓글",
+    copy: "복사",
+    commentPlaceholder: "이 부분에 댓글",
+    send: "보내기",
+    cancel: "취소",
+    sent: "보냈습니다",
+    failed: "보내지 못했습니다",
+  },
   composer: {
+    toposExpand: "Show message input",
     placeholders: {
       desktop: "에이전트에게 메시지를 보내거나 @files 태그, /commands, /skills를 사용하세요",
       mobile: "메시지, @files, /commands",
@@ -343,6 +354,7 @@ export const ko: TranslationResources = {
       copyCode: "코드 복사",
       copyTurn: "턴 복사",
       copyMessage: "메시지 복사",
+      copyText: "Copy text",
       forkMenu: "여기에서 채팅 분기",
       forkInNewTab: "새 탭으로 분기",
       forkInNewWorkspace: "새 워크스페이스로 분기",
@@ -2181,6 +2193,11 @@ export const ko: TranslationResources = {
       autoExpandReasoning: {
         label: "추론 항상 펼치기",
         description: "에이전트의 사고 및 추론 블록을 기본적으로 모두 펼쳐 표시합니다.",
+      },
+      toposChatStyle: {
+        label: "Topos-style chat",
+        description:
+          "Long-press your messages for time and copy; collapse the composer while reading answers",
       },
       toolCallDetail: {
         label: "도구 호출 표시",

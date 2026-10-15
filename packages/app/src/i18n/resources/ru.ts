@@ -115,7 +115,18 @@ export const ru: TranslationResources = {
       settingOff: "Выкл",
     },
   },
+  toposSelection: {
+    go: "go",
+    comment: "Комментарий",
+    copy: "Копировать",
+    commentPlaceholder: "Комментарий к фрагменту",
+    send: "Отправить",
+    cancel: "Отмена",
+    sent: "Отправлено",
+    failed: "Не удалось отправить",
+  },
   composer: {
+    toposExpand: "Show message input",
     placeholders: {
       desktop: "Напишите агенту сообщение, отметьте @files или используйте /commands и /skills.",
       mobile: "Сообщение,@files,/commands",
@@ -345,6 +356,7 @@ export const ru: TranslationResources = {
       copyCode: "Скопировать код",
       copyTurn: "Скопировать ответ",
       copyMessage: "Копировать сообщение",
+      copyText: "Copy text",
       forkMenu: "Форкнуть чат отсюда",
       forkInNewTab: "Создать форк в новой вкладке",
       forkInNewWorkspace: "Создать форк в новом рабочем пространстве",
@@ -2205,6 +2217,11 @@ export const ru: TranslationResources = {
         label: "Всегда разворачивать размышления",
         description:
           "По умолчанию полностью разворачивать блоки размышлений и хода рассуждений агента",
+      },
+      toposChatStyle: {
+        label: "Topos-style chat",
+        description:
+          "Long-press your messages for time and copy; collapse the composer while reading answers",
       },
       toolCallDetail: {
         label: "Отображение вызовов инструментов",

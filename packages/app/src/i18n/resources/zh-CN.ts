@@ -114,7 +114,18 @@ export const zhCN: TranslationResources = {
       settingOff: "关",
     },
   },
+  toposSelection: {
+    go: "go",
+    comment: "评论",
+    copy: "复制",
+    commentPlaceholder: "评论这段内容",
+    send: "发送",
+    cancel: "取消",
+    sent: "已发送",
+    failed: "发送失败",
+  },
   composer: {
+    toposExpand: "Show message input",
     placeholders: {
       desktop: "给 Agent 发消息，标记 @files，或使用 /commands 和 /skills",
       mobile: "发消息，@files，/commands",
@@ -340,6 +351,7 @@ export const zhCN: TranslationResources = {
       copyCode: "复制代码",
       copyTurn: "复制回合",
       copyMessage: "复制消息",
+      copyText: "Copy text",
       forkMenu: "分叉消息",
       forkInNewTab: "分叉到新标签页",
       forkInNewWorkspace: "分叉到新工作区",
@@ -2143,6 +2155,11 @@ export const zhCN: TranslationResources = {
       autoExpandReasoning: {
         label: "始终展开推理过程",
         description: "默认情况下完全展开 AI 的思考和推理过程",
+      },
+      toposChatStyle: {
+        label: "Topos-style chat",
+        description:
+          "Long-press your messages for time and copy; collapse the composer while reading answers",
       },
       toolCallDetail: {
         label: "工具调用显示",

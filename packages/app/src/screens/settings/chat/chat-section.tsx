@@ -37,6 +37,10 @@ export function ChatSection() {
     (autoExpandReasoning: boolean) => void updateSettings({ autoExpandReasoning }),
     [updateSettings],
   );
+  const changeToposChatStyle = useCallback(
+    (toposChatStyle: boolean) => void updateSettings({ toposChatStyle }),
+    [updateSettings],
+  );
   const changeChatOutline = useCallback(
     (chatOutlineEnabled: boolean) => void updateSettings({ chatOutlineEnabled }),
     [updateSettings],
@@ -51,6 +55,12 @@ export function ChatSection() {
             hint={t("settings.general.autoExpandReasoning.description")}
             value={settings.autoExpandReasoning}
             onValueChange={changeAutoExpandReasoning}
+          />
+          <SettingsSwitch
+            label={t("settings.general.toposChatStyle.label")}
+            hint={t("settings.general.toposChatStyle.description")}
+            value={settings.toposChatStyle}
+            onValueChange={changeToposChatStyle}
           />
           <SettingsSelect
             label={t("settings.general.toolCallDetail.label")}

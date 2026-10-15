@@ -115,7 +115,18 @@ export const es: TranslationResources = {
       settingOff: "Desactivado",
     },
   },
+  toposSelection: {
+    go: "go",
+    comment: "Comentar",
+    copy: "Copiar",
+    commentPlaceholder: "Comentar este pasaje",
+    send: "Enviar",
+    cancel: "Cancelar",
+    sent: "Enviado",
+    failed: "Error al enviar",
+  },
   composer: {
+    toposExpand: "Show message input",
     placeholders: {
       desktop: "Envíe un mensaje al agente, etiquete@fileso use/commandsy/skills",
       mobile: "Mensaje,@files,/commands",
@@ -347,6 +358,7 @@ export const es: TranslationResources = {
       copyCode: "Copiar código",
       copyTurn: "Copiar turno",
       copyMessage: "Copiar mensaje",
+      copyText: "Copy text",
       forkMenu: "Bifurcar mensaje",
       forkInNewTab: "Bifurcar en una pestaña nueva",
       forkInNewWorkspace: "Bifurcar en un espacio de trabajo nuevo",
@@ -2222,6 +2234,11 @@ export const es: TranslationResources = {
         label: "Siempre expandir razonamiento",
         description:
           "Mostrar los bloques de pensamiento y razonamiento del agente totalmente expandidos de forma predeterminada",
+      },
+      toposChatStyle: {
+        label: "Topos-style chat",
+        description:
+          "Long-press your messages for time and copy; collapse the composer while reading answers",
       },
       toolCallDetail: {
         label: "Visualización de llamadas a herramientas",

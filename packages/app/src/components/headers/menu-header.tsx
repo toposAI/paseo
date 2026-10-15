@@ -1,12 +1,14 @@
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { View, type StyleProp, type ViewStyle } from "react-native";
+import { Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { PanelLeft } from "lucide-react-native";
 import { ScreenHeader } from "./screen-header";
 import { ScreenTitle } from "./screen-title";
 import { HeaderToggleButton, headerIconSlotStyle } from "./header-toggle-button";
 import { selectIsAgentListOpen, usePanelStore } from "@/stores/panel-store";
+import { useSettings } from "@/hooks/use-settings";
+import { useToposSidebarCounts } from "@/hooks/use-topos-sidebar-counts";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import { useHasWindowChromeObstruction, useOwnsWindowChromeCorner } from "@/utils/desktop-window";
@@ -40,6 +42,26 @@ function MobileMenuIcon({ color }: { color: string }) {
       <View style={lineStyle} />
       <View style={lineStyle} />
       <View style={shortLineStyle} />
+    </View>
+  );
+}
+
+function ToposThreadCounts() {
+  const enabled = useSettings((settings) => settings.toposChatStyle);
+  const { ask, fresh } = useToposSidebarCounts();
+  if (!enabled || (ask === 0 && fresh === 0)) return null;
+  return (
+    <View style={styles.countsRow} pointerEvents="none" testID="topos-thread-counts">
+      {ask > 0 ? (
+        <View style={[styles.countPill, styles.countPillAsk]} testID="topos-thread-count-ask">
+          <Text style={styles.countText}>{ask}</Text>
+        </View>
+      ) : null}
+      {fresh > 0 ? (
+        <View style={[styles.countPill, styles.countPillFresh]} testID="topos-thread-count-new">
+          <Text style={styles.countText}>{fresh}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -85,6 +107,7 @@ function SidebarMenuToggleButton({
       accessibilityLabel={isOpen ? t("shell.menu.close") : t("shell.menu.open")}
       accessibilityState={accessibilityState}
     >
+      <ToposThreadCounts />
       {isMobile ? (
         <MobileMenuIcon
           color={
@@ -184,5 +207,32 @@ const styles = StyleSheet.create((theme) => ({
   },
   mobileMenuLineShort: {
     width: MOBILE_MENU_LINE_SHORT_WIDTH,
+  },
+  countsRow: {
+    position: "absolute",
+    right: 1,
+    bottom: 3,
+    flexDirection: "row",
+    gap: 2,
+  },
+  countPill: {
+    minWidth: 14,
+    height: 14,
+    paddingHorizontal: 3,
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  countPillAsk: {
+    backgroundColor: "#f97316",
+  },
+  countPillFresh: {
+    backgroundColor: "#22c55e",
+  },
+  countText: {
+    color: "#ffffff",
+    fontSize: 10,
+    fontWeight: "700",
+    lineHeight: 12,
   },
 }));

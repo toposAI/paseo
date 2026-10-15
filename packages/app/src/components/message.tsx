@@ -76,6 +76,8 @@ import { colorMarkdownLinkChildren } from "@/components/markdown/link-children";
 import { createAssistantMarkdownParser } from "@/utils/assistant-markdown-parser";
 import { formatDuration, formatMessageTimestamp } from "@/utils/time";
 import { getTurnDurationLabel } from "./assistant-turn-footer-label";
+import { useSettings } from "@/hooks/use-settings";
+import { ToposUserMessageMenu } from "@/components/topos-user-message-menu";
 import { writeMarkdownToRichClipboard } from "@/utils/rich-clipboard";
 import { getDefaultMarkdownClipboardEnvironment } from "@/utils/rich-clipboard-default-environment";
 import { setAssistantMarkdownBlockHeight } from "@/utils/assistant-message-height-estimate";
@@ -455,7 +457,9 @@ export const UserMessage = memo(function UserMessage({
   const hasText = message.trim().length > 0;
   const hasImages = images.length > 0;
   const hasAttachments = attachments.length > 0;
-  const showTrailingRow = !isPending && hasText && (isCompact || isNative || isHovered);
+  const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
+  const showTrailingRow =
+    !toposChatStyle && !isPending && hasText && (isCompact || isNative || isHovered);
   const formattedTimestamp = useMemo(
     () => formatMessageTimestamp(new Date(timestamp)),
     [timestamp],
@@ -507,6 +511,54 @@ export const UserMessage = memo(function UserMessage({
     [showTrailingRow],
   );
 
+  const bubbleNode = (
+    <View style={userMessageStylesheet.bubble}>
+      {hasImages ? (
+        <View style={imagePreviewContainerStyle}>
+          {images.map((image) => (
+            <UserMessageImagePill
+              key={image.id}
+              image={image}
+              onOpen={setLightboxMetadata}
+              accessibilityLabel={t("composer.attachments.openImage")}
+            />
+          ))}
+        </View>
+      ) : null}
+      {hasAttachments ? (
+        <View style={attachmentPreviewContainerStyle}>
+          {attachments.map((attachment, index) => {
+            const content = getAgentAttachmentPillContent(attachment, t);
+            return (
+              <AttachmentFrame
+                key={`${attachment.type}:${"number" in attachment ? attachment.number : index}`}
+              >
+                <AttachmentLabel
+                  icon={content.icon}
+                  title={content.title}
+                  subtitle={content.subtitle}
+                />
+              </AttachmentFrame>
+            );
+          })}
+        </View>
+      ) : null}
+      {hasText ? (
+        <Text selectable style={userMessageStylesheet.text} dataSet={MESSAGE_TEXT_DATASET}>
+          {message}
+        </Text>
+      ) : null}
+    </View>
+  );
+  const bubbleOrMenu =
+    toposChatStyle && hasText && !isPending ? (
+      <ToposUserMessageMenu getContent={getMessageContent} timestampLabel={formattedTimestamp}>
+        {bubbleNode}
+      </ToposUserMessageMenu>
+    ) : (
+      bubbleNode
+    );
+
   return (
     <View style={containerStyle} testID="user-message" aria-busy={isPending}>
       <View
@@ -514,43 +566,7 @@ export const UserMessage = memo(function UserMessage({
         onPointerEnter={handlePointerEnter}
         onPointerLeave={handlePointerLeave}
       >
-        <View style={userMessageStylesheet.bubble}>
-          {hasImages ? (
-            <View style={imagePreviewContainerStyle}>
-              {images.map((image) => (
-                <UserMessageImagePill
-                  key={image.id}
-                  image={image}
-                  onOpen={setLightboxMetadata}
-                  accessibilityLabel={t("composer.attachments.openImage")}
-                />
-              ))}
-            </View>
-          ) : null}
-          {hasAttachments ? (
-            <View style={attachmentPreviewContainerStyle}>
-              {attachments.map((attachment, index) => {
-                const content = getAgentAttachmentPillContent(attachment, t);
-                return (
-                  <AttachmentFrame
-                    key={`${attachment.type}:${"number" in attachment ? attachment.number : index}`}
-                  >
-                    <AttachmentLabel
-                      icon={content.icon}
-                      title={content.title}
-                      subtitle={content.subtitle}
-                    />
-                  </AttachmentFrame>
-                );
-              })}
-            </View>
-          ) : null}
-          {hasText ? (
-            <Text selectable style={userMessageStylesheet.text} dataSet={MESSAGE_TEXT_DATASET}>
-              {message}
-            </Text>
-          ) : null}
-        </View>
+        {bubbleOrMenu}
         {hasText ? (
           <View
             style={trailingRowStyle}
