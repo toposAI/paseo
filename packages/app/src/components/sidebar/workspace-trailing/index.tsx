@@ -20,7 +20,9 @@ export function useSidebarWorkspaceTrailing(): SidebarWorkspaceTrailing {
   const {
     settings: { sidebarWorkspaceTrailing },
   } = useAppSettings();
-  return sidebarWorkspaceTrailing;
+  // Topos style: the +/- diff stat and timestamp are not wanted in the sidebar.
+  void sidebarWorkspaceTrailing;
+  return "none";
 }
 
 /** Whether the slot has anything to draw for this workspace under the current preference. */
