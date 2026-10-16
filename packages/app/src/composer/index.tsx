@@ -1529,12 +1529,14 @@ function ComposerContentImpl({
   useEffect(() => {
     if (focusRequest === lastFocusRequestRef.current) return;
     lastFocusRequestRef.current = focusRequest;
-    // The composer may have just unfolded from display:none; focus after it paints.
-    const timer = setTimeout(() => {
-      messageInputRef.current?.focus();
+    // The unfold and this request land in the same commit, so the field is already displayed:
+    // focus right away, and retry on the next frame in case it was not laid out yet.
+    messageInputRef.current?.focus();
+    const frame = requestAnimationFrame(() => {
+      if (document.activeElement?.tagName !== "TEXTAREA") messageInputRef.current?.focus();
       closeKeyboardWarmup();
-    }, 50);
-    return () => clearTimeout(timer);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [focusRequest]);
 
   const handleWorkspaceFileDropped = useCallback(
