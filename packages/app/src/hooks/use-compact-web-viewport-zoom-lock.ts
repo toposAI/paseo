@@ -5,8 +5,8 @@ import { isWeb } from "@/constants/platform";
 // public/index.html for why (it inflates env(safe-area-inset-*) into a
 // visible bottom gap on every screen).
 const COMPACT_WEB_VIEWPORT_CONTENT =
-  "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no";
-const DEFAULT_WEB_VIEWPORT_CONTENT = "width=device-width, initial-scale=1";
+  "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover";
+const DEFAULT_WEB_VIEWPORT_CONTENT = "width=device-width, initial-scale=1, viewport-fit=cover";
 
 export function useCompactWebViewportZoomLock(isCompactLayout: boolean) {
   useEffect(() => {
