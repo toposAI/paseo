@@ -1199,7 +1199,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                 </Pressable>
               </View>
             ) : null}
-            {(!isNearBottom || isTimelineDetached) && (
+            {(!isNearBottom || isTimelineDetached) && !(toposChatStyle && isMobile) && (
               <View style={scrollToBottomContainerStyle} pointerEvents="box-none">
                 <Animated.View entering={scrollIndicatorFadeIn} exiting={scrollIndicatorFadeOut}>
                   <Pressable
