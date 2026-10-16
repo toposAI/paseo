@@ -61,8 +61,8 @@ export function applyVisualViewportHeight() {
       root.setProperty(VISUAL_VIEWPORT_HEIGHT_CSS_PROPERTY, `${visualViewport.height}px`);
     }
   };
-  document.addEventListener("focusin", () => {
-    if (!isTyping() || window.innerHeight - visualViewport.height > SHRINK_MIN_PX) return;
+  const applyKeyboardGuess = () => {
+    if (window.innerHeight - visualViewport.height > SHRINK_MIN_PX) return;
     // Only phones: a coarse pointer means a software keyboard is about to appear.
     if (!window.matchMedia?.("(pointer: coarse)").matches) return;
     guessUntil = Date.now() + GUESS_WINDOW_MS;
@@ -71,7 +71,21 @@ export function applyVisualViewportHeight() {
       `${window.innerHeight - readKeyboardGuess()}px`,
     );
     setTimeout(updateHeight, GUESS_WINDOW_MS + 20);
+  };
+  document.addEventListener("focusin", () => {
+    if (isTyping()) applyKeyboardGuess();
   });
+  // Shrink before the focus itself: once iOS has decided the field is covered by the keyboard it
+  // pans the whole page up and back, which shows as a slide. With #root already short the field is
+  // visible and iOS has nothing to pan.
+  document.addEventListener(
+    "touchstart",
+    (event) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.("textarea, input, [contenteditable='true']")) applyKeyboardGuess();
+    },
+    { passive: true, capture: true },
+  );
 
   // iOS Safari pans its internal visualViewport to bring a focused input
   // into view, which offsets `#root` (fixed to the layout viewport's
