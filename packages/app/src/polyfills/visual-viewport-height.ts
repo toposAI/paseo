@@ -26,7 +26,9 @@ export function applyVisualViewportHeight() {
     return !!el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable);
   };
   const updateHeight = () => {
-    if (isTyping()) {
+    // Also require a real shrink: changing #root's height on focus, before the keyboard is up,
+    // shifts the layout mid-animation and can make iOS dismiss the keyboard again.
+    if (isTyping() && window.innerHeight - visualViewport.height > 120) {
       document.documentElement.style.setProperty(
         VISUAL_VIEWPORT_HEIGHT_CSS_PROPERTY,
         `${visualViewport.height}px`,
