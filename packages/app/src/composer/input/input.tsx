@@ -1,4 +1,5 @@
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { useSettings } from "@/hooks/use-settings";
 import {
   View,
   Text,
@@ -1197,6 +1198,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const voiceMuteToggleKeys = useShortcutKeys("voice-mute-toggle");
     const dictationToggleKeys = useShortcutKeys("dictation-toggle");
     const focusInputKeys = useShortcutKeys("focus-message-input");
+    const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
     const [isInputFocused, setIsInputFocused] = useState(false);
     // Web text is DOM-owned between deferred draft publications. The action button only needs
     // this boundary, so publish empty/non-empty transitions without rerendering for every key.
@@ -1819,7 +1821,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
               onSelectionChange={handleSelectionChange}
               onPasteImages={onPasteImages}
               onPasteError={handlePasteError}
-              focusHintVisible={isWeb && !isCompact && !isInputFocused && !value}
+              focusHintVisible={!toposChatStyle && isWeb && !isCompact && !isInputFocused && !value}
               focusInputKeys={focusInputKeys}
               focusHintLabel={t("composer.input.focusHint", {
                 shortcut: focusInputKeys ? formatShortcut(focusInputKeys[0], getShortcutOs()) : "",
