@@ -1524,6 +1524,16 @@ function ComposerContentImpl({
     }, 50);
   }, [agentId, clearQuoteRequest, quoteRequest, replaceUserInput, textSource]);
 
+  // Desktop right-click "resend": bring a sent prompt back into the composer to edit and send again.
+  const resendRequest = useToposComposerCollapse((state) => state.resendRequest);
+  const clearResendRequest = useToposComposerCollapse((state) => state.clearResendRequest);
+  useEffect(() => {
+    if (!resendRequest || resendRequest.agentId !== agentId) return;
+    replaceUserInput(resendRequest.text);
+    clearResendRequest();
+    setTimeout(() => messageInputRef.current?.focus(), 50);
+  }, [agentId, clearResendRequest, replaceUserInput, resendRequest]);
+
   const focusRequest = useToposComposerCollapse((state) => state.focusRequest);
   const lastFocusRequestRef = useRef(focusRequest);
   useEffect(() => {

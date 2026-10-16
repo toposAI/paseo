@@ -77,7 +77,9 @@ import { createAssistantMarkdownParser } from "@/utils/assistant-markdown-parser
 import { formatDuration, formatMessageTimestamp } from "@/utils/time";
 import { getTurnDurationLabel } from "./assistant-turn-footer-label";
 import { useSettings } from "@/hooks/use-settings";
+import { ToposUserMessageContextMenu } from "@/components/topos-user-message-context-menu";
 import { ToposUserMessageMenu } from "@/components/topos-user-message-menu";
+import { useToposComposerCollapse } from "@/composer/topos-collapse-store";
 import { writeMarkdownToRichClipboard } from "@/utils/rich-clipboard";
 import { getDefaultMarkdownClipboardEnvironment } from "@/utils/rich-clipboard-default-environment";
 import { setAssistantMarkdownBlockHeight } from "@/utils/assistant-message-height-estimate";
@@ -391,14 +393,6 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
     marginTop: 0,
     marginRight: -theme.spacing[1],
   },
-  toposBubbleCopyButton: {
-    position: "absolute",
-    right: theme.spacing[1],
-    bottom: theme.spacing[1],
-    padding: theme.spacing[1],
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.surface3,
-  },
   trailingRow: {
     alignSelf: "flex-end",
     flexDirection: "row",
@@ -467,9 +461,6 @@ export const UserMessage = memo(function UserMessage({
   const hasImages = images.length > 0;
   const hasAttachments = attachments.length > 0;
   const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
-  // Topos style drops the trailing row, so desktop gets a hover copy button inside the bubble.
-  const showBubbleCopy =
-    toposChatStyle && !isCompact && !isNative && !isPending && hasText && isHovered;
   const showTrailingRow =
     !toposChatStyle && !isPending && hasText && (isCompact || isNative || isHovered);
   const formattedTimestamp = useMemo(
@@ -560,23 +551,25 @@ export const UserMessage = memo(function UserMessage({
           {message}
         </Text>
       ) : null}
-      {showBubbleCopy ? (
-        <TurnCopyButton
-          getContent={getMessageContent}
-          containerStyle={userMessageStylesheet.toposBubbleCopyButton}
-          accessibilityLabel={t("message.actions.copyMessage")}
-        />
-      ) : null}
     </View>
   );
-  const bubbleOrMenu =
-    toposChatStyle && hasText && !isPending ? (
-      <ToposUserMessageMenu getContent={getMessageContent} timestampLabel={formattedTimestamp}>
-        {bubbleNode}
-      </ToposUserMessageMenu>
-    ) : (
-      bubbleNode
-    );
+  const handleResend = useCallback(() => {
+    if (agentId) useToposComposerCollapse.getState().requestResend(agentId, message);
+  }, [agentId, message]);
+  let bubbleOrMenu = bubbleNode;
+  if (toposChatStyle && hasText && !isPending) {
+    // Phones: long-press popup. Desktop web: right-click menu (copy / resend).
+    bubbleOrMenu =
+      isCompact || isNative ? (
+        <ToposUserMessageMenu getContent={getMessageContent} timestampLabel={formattedTimestamp}>
+          {bubbleNode}
+        </ToposUserMessageMenu>
+      ) : (
+        <ToposUserMessageContextMenu getContent={getMessageContent} onResend={handleResend}>
+          {bubbleNode}
+        </ToposUserMessageContextMenu>
+      );
+  }
 
   return (
     <View style={containerStyle} testID="user-message" aria-busy={isPending}>
