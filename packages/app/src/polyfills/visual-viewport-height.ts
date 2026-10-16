@@ -75,18 +75,6 @@ export function applyVisualViewportHeight() {
   document.addEventListener("focusin", () => {
     if (isTyping()) applyKeyboardGuess();
   });
-  // Shrink before the focus itself: once iOS has decided the field is covered by the keyboard it
-  // pans the whole page up and back, which shows as a slide. With #root already short the field is
-  // visible and iOS has nothing to pan.
-  document.addEventListener(
-    "touchstart",
-    (event) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest?.("textarea, input, [contenteditable='true']")) applyKeyboardGuess();
-    },
-    { passive: true, capture: true },
-  );
-
   // iOS Safari pans its internal visualViewport to bring a focused input
   // into view, which offsets `#root` (fixed to the layout viewport's
   // top-left) upward until the page is scrolled back. Undo that pan
