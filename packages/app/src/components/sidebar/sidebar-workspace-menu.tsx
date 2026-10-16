@@ -1,6 +1,6 @@
 import { useMemo, type ComponentProps, type PropsWithChildren, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { type PressableStateCallbackType } from "react-native";
+import { Pressable, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
   Archive,
@@ -14,6 +14,7 @@ import {
   Tag,
 } from "lucide-react-native";
 import { isWeb } from "@/constants/platform";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { getForgePresentation, normalizeForge } from "@/git/forge";
 import type { SidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
 import { useAppSettings } from "@/hooks/use-settings";
@@ -69,6 +70,21 @@ const markAsUnreadLeadingIcon = <ThemedCircle size={14} uniProps={foregroundMute
 const archiveLeadingIcon = <ThemedArchive size={14} uniProps={foregroundMutedColorMapping} />;
 const pinLeadingIcon = <ThemedPin size={14} uniProps={foregroundMutedColorMapping} />;
 const unpinLeadingIcon = <ThemedPinOff size={14} uniProps={foregroundMutedColorMapping} />;
+
+const mutedIconMapping = foregroundMutedColorMapping;
+
+function renderQuickPinIcon(isPinned: boolean) {
+  return function QuickPinIcon({ hovered }: { hovered?: boolean }) {
+    const Icon = isPinned ? ThemedPinOff : ThemedPin;
+    return <Icon size={14} uniProps={hovered ? foregroundColorMapping : mutedIconMapping} />;
+  };
+}
+const renderQuickPinOn = renderQuickPinIcon(true);
+const renderQuickPinOff = renderQuickPinIcon(false);
+
+function renderQuickArchiveIcon({ hovered }: { hovered?: boolean }) {
+  return <ThemedArchive size={14} uniProps={hovered ? foregroundColorMapping : mutedIconMapping} />;
+}
 
 function renderTriggerIcon({ hovered }: { hovered?: boolean }) {
   return (
@@ -277,45 +293,74 @@ export function SidebarWorkspaceMenu({
     [serverId, workspaceId, workspaceLabels],
   );
   const pages = useWorkspaceLabelMenuPages(workspaceTarget);
+  const isCompact = useIsCompactFormFactor();
+  // Desktop hover shows pin and archive next to the kebab; touch keeps the kebab alone.
+  const showQuickActions = isWeb && !isCompact;
   return (
-    <DropdownMenu compactMode="sheet" open={open} onOpenChange={onOpenChange}>
-      <DropdownMenuTrigger
-        hitSlop={8}
-        style={triggerStyle}
-        accessibilityRole={isWeb ? undefined : "button"}
-        accessibilityLabel={t("sidebar.workspace.actions.menu")}
-        testID={`sidebar-workspace-kebab-${workspaceKey}`}
-      >
-        {renderTriggerIcon}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        width={260}
-        pages={pages}
-        sheetTitle={t("sidebar.workspace.actions.menu")}
-      >
-        <SidebarWorkspaceMenuItems
-          surface="dropdown"
-          workspaceKey={workspaceKey}
-          serverId={serverId}
-          workspaceId={workspaceId}
-          workspaceLabels={workspaceLabels}
-          onCopyPath={onCopyPath}
-          onCopyBranchName={onCopyBranchName}
-          onRename={onRename}
-          onMarkAsRead={onMarkAsRead}
-          onMarkAsUnread={onMarkAsUnread}
-          onArchive={onArchive}
-          archiveLabel={archiveLabel}
-          archiveStatus={archiveStatus}
-          archivePendingLabel={archivePendingLabel}
-          archiveShortcutKeys={archiveShortcutKeys}
-          isPinned={isPinned}
-          onTogglePin={onTogglePin}
-          openInFileManagerPath={openInFileManagerPath}
-        />
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <View style={styles.menuRow}>
+      {showQuickActions && onTogglePin ? (
+        <Pressable
+          onPress={onTogglePin}
+          style={quickActionStyle}
+          accessibilityRole="button"
+          accessibilityLabel={
+            isPinned ? t("sidebar.workspace.actions.unpin") : t("sidebar.workspace.actions.pin")
+          }
+          testID={`sidebar-workspace-quick-pin-${workspaceKey}`}
+        >
+          {isPinned ? renderQuickPinOn : renderQuickPinOff}
+        </Pressable>
+      ) : null}
+      {showQuickActions ? (
+        <Pressable
+          onPress={onArchive}
+          style={quickActionStyle}
+          accessibilityRole="button"
+          accessibilityLabel={archiveLabel ?? t("sidebar.workspace.actions.archive")}
+          testID={`sidebar-workspace-quick-archive-${workspaceKey}`}
+        >
+          {renderQuickArchiveIcon}
+        </Pressable>
+      ) : null}
+      <DropdownMenu compactMode="sheet" open={open} onOpenChange={onOpenChange}>
+        <DropdownMenuTrigger
+          hitSlop={8}
+          style={triggerStyle}
+          accessibilityRole={isWeb ? undefined : "button"}
+          accessibilityLabel={t("sidebar.workspace.actions.menu")}
+          testID={`sidebar-workspace-kebab-${workspaceKey}`}
+        >
+          {renderTriggerIcon}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          width={260}
+          pages={pages}
+          sheetTitle={t("sidebar.workspace.actions.menu")}
+        >
+          <SidebarWorkspaceMenuItems
+            surface="dropdown"
+            workspaceKey={workspaceKey}
+            serverId={serverId}
+            workspaceId={workspaceId}
+            workspaceLabels={workspaceLabels}
+            onCopyPath={onCopyPath}
+            onCopyBranchName={onCopyBranchName}
+            onRename={onRename}
+            onMarkAsRead={onMarkAsRead}
+            onMarkAsUnread={onMarkAsUnread}
+            onArchive={onArchive}
+            archiveLabel={archiveLabel}
+            archiveStatus={archiveStatus}
+            archivePendingLabel={archivePendingLabel}
+            archiveShortcutKeys={archiveShortcutKeys}
+            isPinned={isPinned}
+            onTogglePin={onTogglePin}
+            openInFileManagerPath={openInFileManagerPath}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </View>
   );
 }
 
@@ -433,11 +478,24 @@ export function SidebarWorkspaceContextMenu({
   );
 }
 
+function quickActionStyle({ hovered = false }: PressableStateCallbackType & { hovered?: boolean }) {
+  return [styles.quickAction, hovered && styles.triggerHovered];
+}
+
 function triggerStyle({ hovered = false }: PressableStateCallbackType & { hovered?: boolean }) {
   return [styles.trigger, hovered && styles.triggerHovered];
 }
 
 const styles = StyleSheet.create((theme) => ({
+  menuRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  quickAction: {
+    padding: 2,
+    borderRadius: 4,
+    marginLeft: 2,
+  },
   trigger: {
     padding: 2,
     borderRadius: 4,
