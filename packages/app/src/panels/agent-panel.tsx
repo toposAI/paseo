@@ -1157,6 +1157,8 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
   const toposCollapsed = useToposComposerCollapse((state) => state.collapsed);
   const toposFolded = toposChatStyle && toposCollapsed;
+  // Phone layout: the subagent / diff pills just eat chat space, so Topos style drops them.
+  const toposHidePills = toposChatStyle && useIsCompactFormFactor();
   const subagentRows = useSubagentsForParent({ serverId, parentAgentId: agentId });
   const tasks = useSessionStore((state): TodoEntry[] | undefined =>
     state.sessions[serverId]?.agentTasks.get(agentId),
@@ -1255,7 +1257,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
           onOpenWorkspaceFile={onOpenWorkspaceFile}
         />
       </RenderProfile>
-      {hasActiveComposer && !toposFolded ? (
+      {hasActiveComposer && !toposFolded && !toposHidePills ? (
         <AgentTracks
           serverId={serverId}
           workspaceId={workspaceId}
@@ -1393,8 +1395,11 @@ const AgentStreamSection = memo(function AgentStreamSection({
 }) {
   const isCompactFormFactor = useIsCompactFormFactor();
   const hasWorkspaceDiffStat = useWorkspaceHasDiffStat(serverId, workspaceId);
+  const toposChatStyleForTracks = useSettings((settings) => settings.toposChatStyle);
   const hasVisibleComposerTracks =
-    hasActiveComposer && (hasVisibleAgentTracks || hasWorkspaceDiffStat);
+    hasActiveComposer &&
+    !(toposChatStyleForTracks && isCompactFormFactor) &&
+    (hasVisibleAgentTracks || hasWorkspaceDiffStat);
   const bottomOverlayTailClearance = hasVisibleComposerTracks
     ? resolveComposerTrackTailClearance(isCompactFormFactor)
     : 0;
