@@ -1,3 +1,5 @@
+import { installToposKeyboardDebug } from "./topos-keyboard-debug";
+
 const VISUAL_VIEWPORT_HEIGHT_CSS_PROPERTY = "--paseo-vvh";
 
 /**
@@ -183,4 +185,5 @@ export function applyVisualViewportHeight() {
   window.addEventListener("resize", updateHeight);
   window.addEventListener("pageshow", resyncAfterKeyboard);
   document.addEventListener("visibilitychange", resyncAfterKeyboard);
+  installToposKeyboardDebug();
 }
