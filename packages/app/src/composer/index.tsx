@@ -1182,6 +1182,28 @@ function ComposerVoiceModeButton({
 }
 
 const toposExpandedStyle = { flexShrink: 1 } as const;
+// While the phone keyboard is up the composer sits flush on it instead of keeping its resting gap.
+const toposKeyboardFlushStyle = { paddingBottom: 2 } as const;
+
+function useToposTypingOnTouch(enabled: boolean): boolean {
+  const [typing, setTyping] = useState(false);
+  useEffect(() => {
+    if (!enabled || !isWeb || typeof document === "undefined") return undefined;
+    if (!window.matchMedia?.("(pointer: coarse)").matches) return undefined;
+    const update = () => {
+      const el = document.activeElement;
+      setTyping(Boolean(el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT")));
+    };
+    document.addEventListener("focusin", update);
+    document.addEventListener("focusout", update);
+    update();
+    return () => {
+      document.removeEventListener("focusin", update);
+      document.removeEventListener("focusout", update);
+    };
+  }, [enabled]);
+  return typing;
+}
 const toposCollapsedStyle = { display: "none" } as const;
 
 function ToposMinimizeButton() {
@@ -2347,9 +2369,15 @@ function ComposerContentImpl({
     [githubSearchItems, selectedAttachments, handleToggleGithubItem],
   );
 
+  const toposChatStyleForGap = useSettings((settings) => settings.toposChatStyle);
+  const toposTyping = useToposTypingOnTouch(toposChatStyleForGap);
   const inputAreaContainerStyle = useMemo(
-    () => [styles.inputAreaContainer, isComposerLocked && styles.inputAreaLocked],
-    [isComposerLocked],
+    () => [
+      styles.inputAreaContainer,
+      isComposerLocked && styles.inputAreaLocked,
+      toposTyping && toposKeyboardFlushStyle,
+    ],
+    [isComposerLocked, toposTyping],
   );
 
   const attachmentTray = useMemo(
