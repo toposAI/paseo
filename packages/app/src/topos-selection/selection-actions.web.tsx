@@ -20,7 +20,8 @@ const CHAT_SCROLL_SELECTOR = '[data-testid="agent-chat-scroll"]';
 const GO_MESSAGE = "やって";
 const HIDE_DELAY_MS = 250;
 const PANEL_WIDTH = 340; // action bar and comment card share one width
-const BAR_WIDTH = PANEL_WIDTH;
+const BAR_WIDTH_DESKTOP = PANEL_WIDTH;
+const BAR_WIDTH_MOBILE = 190; // two buttons in an iOS-callout-style pill; copy is left to the native callout
 const SETTLE_DELAY_MS = 220;
 const HIGHLIGHT_COLOR = "rgba(80, 140, 255, 0.32)";
 const BAR_HEIGHT = 44;
@@ -51,6 +52,11 @@ const LAYOUT = {
 } as const;
 
 type Layout = (typeof LAYOUT)[keyof typeof LAYOUT];
+
+function barWidth(): number {
+  const width = window.innerWidth >= DESKTOP_MIN_WIDTH ? BAR_WIDTH_DESKTOP : BAR_WIDTH_MOBILE;
+  return Math.min(width, window.innerWidth - EDGE * 2);
+}
 
 function currentLayout(): Layout {
   return window.innerWidth >= DESKTOP_MIN_WIDTH ? LAYOUT.desktop : LAYOUT.mobile;
@@ -111,9 +117,9 @@ function readSelection(): Pick | null {
     createAssistantSelectionClipboardContent(selection)?.plainText ?? selection.toString();
   if (!quote.trim()) return null;
   const rect = range.getBoundingClientRect();
-  const barWidth = Math.min(BAR_WIDTH, window.innerWidth - EDGE * 2);
-  const maxLeft = Math.max(EDGE, window.innerWidth - barWidth - EDGE);
-  const left = Math.min(maxLeft, Math.max(EDGE, rect.left + rect.width / 2 - barWidth / 2));
+  const width = barWidth();
+  const maxLeft = Math.max(EDGE, window.innerWidth - width - EDGE);
+  const left = Math.min(maxLeft, Math.max(EDGE, rect.left + rect.width / 2 - width / 2));
   // Below the selection (the OS callout sits above it); flip above when there is no room.
   const below = rect.bottom + 28;
   const top =
@@ -251,12 +257,6 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
     const body = comment.trim();
     if (body) void send(body);
   }, [comment, send]);
-  const handleCopy = useCallback(() => {
-    // execCommand("copy") runs through the surface's onCopy handler (markdown-aware copy).
-    if (!document.execCommand("copy") && pick) void navigator.clipboard?.writeText(pick.quote);
-    window.getSelection()?.removeAllRanges();
-    close();
-  }, [close, pick]);
   const handleStartComment = useCallback(() => {
     if (pick) setCardPos(initialCardPosition(pick, currentLayout()));
     setCommenting(true);
@@ -416,29 +416,38 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
     );
   }
 
+  const barButton: CSSProperties = {
+    ...button,
+    fontSize: 17,
+    fontWeight: 400,
+    margin: 0,
+    height: BAR_HEIGHT,
+  };
   return (
     <div
       style={{
         ...panel,
-        width: Math.min(BAR_WIDTH, window.innerWidth - EDGE * 2),
+        width: barWidth(),
+        height: BAR_HEIGHT,
         display: "flex",
+        alignItems: "center",
+        borderRadius: BAR_HEIGHT / 2,
+        overflow: "hidden",
       }}
       onMouseDown={keepSelection}
       data-testid="topos-selection-bar"
     >
-      <button type="button" style={button} onClick={handleGo} data-testid="topos-selection-go">
+      <button type="button" style={barButton} onClick={handleGo} data-testid="topos-selection-go">
         {t("toposSelection.go")}
       </button>
+      <div style={{ width: 1, height: 22, background: colors.border }} />
       <button
         type="button"
-        style={button}
+        style={barButton}
         onClick={handleStartComment}
         data-testid="topos-selection-comment-button"
       >
         {t("toposSelection.comment")}
-      </button>
-      <button type="button" style={button} onClick={handleCopy} data-testid="topos-selection-copy">
-        {t("toposSelection.copy")}
       </button>
     </div>
   );
