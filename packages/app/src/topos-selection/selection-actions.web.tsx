@@ -13,7 +13,7 @@ import { resolveComposerAttachmentSubmitFormat } from "@/composer/attachments/su
 import { dispatchComposerAgentMessage } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { useSettings } from "@/hooks/use-settings";
-import { useToposComposerCollapse } from "@/composer/topos-collapse-store";
+import { openKeyboardWarmup, useToposComposerCollapse } from "@/composer/topos-collapse-store";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { encodeImages } from "@/utils/encode-images";
 
@@ -268,6 +268,7 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
     if (!pick) return;
     if (window.innerWidth < DESKTOP_MIN_WIDTH) {
       // Phone: use the regular prompt composer so the keyboard handling is the normal one.
+      openKeyboardWarmup();
       useToposComposerCollapse.getState().requestQuote(agentId, pick.quote);
       window.getSelection()?.removeAllRanges();
       close();
