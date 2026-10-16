@@ -398,6 +398,12 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
             autoFocus
             value={comment}
             onChange={(event) => setComment(event.target.value)}
+            onKeyDown={(event) => {
+              // Enter sends, Shift+Enter breaks the line; Enter that confirms an IME conversion must not send.
+              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+              event.preventDefault();
+              handleSendComment();
+            }}
             placeholder={t("toposSelection.commentPlaceholder")}
             rows={3}
             style={{
