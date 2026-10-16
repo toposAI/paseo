@@ -14,10 +14,21 @@ interface ToposComposerCollapseState {
   collapsed: boolean;
   setCollapsed: (collapsed: boolean) => void;
   reportScrollDistance: (distanceFromBottom: number, nearBottom: boolean) => void;
+  /** A quoted passage the selection bar wants dropped into the regular composer (phone layout). */
+  quoteRequest: { agentId: string; quote: string; nonce: number } | null;
+  requestQuote: (agentId: string, quote: string) => void;
+  clearQuoteRequest: () => void;
 }
 
 export const useToposComposerCollapse = create<ToposComposerCollapseState>((set) => ({
   collapsed: false,
+  quoteRequest: null,
+  requestQuote: (agentId, quote) =>
+    set((state) => ({
+      collapsed: false,
+      quoteRequest: { agentId, quote, nonce: (state.quoteRequest?.nonce ?? 0) + 1 },
+    })),
+  clearQuoteRequest: () => set({ quoteRequest: null }),
   setCollapsed: (collapsed) =>
     set((state) => (state.collapsed === collapsed ? state : { collapsed })),
   reportScrollDistance: (distanceFromBottom, nearBottom) =>

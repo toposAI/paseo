@@ -1479,6 +1479,25 @@ function ComposerContentImpl({
     });
   }, []);
 
+  // Phone layout: the selection bar's "comment" drops the quote into this regular composer
+  // (above the keyboard) instead of floating its own card.
+  const quoteRequest = useToposComposerCollapse((state) => state.quoteRequest);
+  const clearQuoteRequest = useToposComposerCollapse((state) => state.clearQuoteRequest);
+  useEffect(() => {
+    if (!quoteRequest || quoteRequest.agentId !== agentId) return;
+    const current = textSource.getSnapshot();
+    const quoted = quoteRequest.quote
+      .trim()
+      .split("\n")
+      .map((line) => `> ${line}`)
+      .join("\n");
+    const prefix = current.trim() ? `${current.replace(/\s+$/, "")}\n\n` : "";
+    replaceUserInput(`${prefix}${quoted}\n\n`);
+    clearQuoteRequest();
+    // The composer may have just unfolded from display:none; focus after it paints.
+    setTimeout(() => messageInputRef.current?.focus(), 50);
+  }, [agentId, clearQuoteRequest, quoteRequest, replaceUserInput, textSource]);
+
   const handleWorkspaceFileDropped = useCallback(
     (payload: WorkspaceFileDragPayload) => {
       if (!workspaceId) {
