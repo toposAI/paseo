@@ -38,6 +38,7 @@ describe("applyVisualViewportHeight", () => {
     const windowAddEventListener = vi.fn();
     (globalThis as { window?: unknown }).window = {
       visualViewport,
+      innerHeight: 900,
       scrollX: 0,
       scrollY: 0,
       scrollTo: vi.fn(),
