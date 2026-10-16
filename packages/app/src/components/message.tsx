@@ -352,6 +352,7 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
     marginBottom: theme.spacing[4],
   },
   bubble: {
+    position: "relative",
     backgroundColor: theme.colors.surface3,
     borderRadius: theme.borderRadius["2xl"],
     borderTopRightRadius: theme.borderRadius.sm,
@@ -389,6 +390,14 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
     paddingTop: theme.spacing[1],
     marginTop: 0,
     marginRight: -theme.spacing[1],
+  },
+  toposBubbleCopyButton: {
+    position: "absolute",
+    right: theme.spacing[1],
+    bottom: theme.spacing[1],
+    padding: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface3,
   },
   trailingRow: {
     alignSelf: "flex-end",
@@ -458,6 +467,9 @@ export const UserMessage = memo(function UserMessage({
   const hasImages = images.length > 0;
   const hasAttachments = attachments.length > 0;
   const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
+  // Topos style drops the trailing row, so desktop gets a hover copy button inside the bubble.
+  const showBubbleCopy =
+    toposChatStyle && !isCompact && !isNative && !isPending && hasText && isHovered;
   const showTrailingRow =
     !toposChatStyle && !isPending && hasText && (isCompact || isNative || isHovered);
   const formattedTimestamp = useMemo(
@@ -547,6 +559,13 @@ export const UserMessage = memo(function UserMessage({
         <Text selectable style={userMessageStylesheet.text} dataSet={MESSAGE_TEXT_DATASET}>
           {message}
         </Text>
+      ) : null}
+      {showBubbleCopy ? (
+        <TurnCopyButton
+          getContent={getMessageContent}
+          containerStyle={userMessageStylesheet.toposBubbleCopyButton}
+          accessibilityLabel={t("message.actions.copyMessage")}
+        />
       ) : null}
     </View>
   );
