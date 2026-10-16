@@ -24,6 +24,10 @@ interface ToposComposerCollapseState {
   quoteRequest: { agentId: string; quote: string; nonce: number } | null;
   requestQuote: (agentId: string, quote: string) => void;
   clearQuoteRequest: () => void;
+  /** Right-click "resend" on a sent prompt: put its text back into the composer (replacing the draft). */
+  resendRequest: { agentId: string; text: string; nonce: number } | null;
+  requestResend: (agentId: string, text: string) => void;
+  clearResendRequest: () => void;
   /** The bubble was tapped: open the composer and raise the keyboard straight away. */
   focusRequest: number;
   requestFocus: () => void;
@@ -50,6 +54,15 @@ export const useToposComposerCollapse = create<ToposComposerCollapseState>((set)
       quoteRequest: { agentId, quote, nonce: (state.quoteRequest?.nonce ?? 0) + 1 },
     })),
   clearQuoteRequest: () => set({ quoteRequest: null }),
+  resendRequest: null,
+  requestResend: (agentId, text) =>
+    set((state) => ({
+      collapsed: false,
+      pinnedOpen: true,
+      userMinimized: false,
+      resendRequest: { agentId, text, nonce: (state.resendRequest?.nonce ?? 0) + 1 },
+    })),
+  clearResendRequest: () => set({ resendRequest: null }),
   focusRequest: 0,
   requestFocus: () =>
     set((state) => ({
