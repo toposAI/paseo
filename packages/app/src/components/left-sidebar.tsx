@@ -238,7 +238,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
             {...sharedProps}
             active={active}
             insetsTop={insets.top}
-            insetsBottom={insets.bottom}
+            insetsBottom={0}
             closeSidebar={showMobileAgent}
             handleOpenProject={handleOpenProjectMobile}
             handleImportSession={handleImportSessionMobile}
