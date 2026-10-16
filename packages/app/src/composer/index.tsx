@@ -116,7 +116,7 @@ import { submitAgentInput } from "@/composer/submit";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { ComposerKeyboardScopeProvider, useComposerKeyboardScope } from "@/composer/keyboard-scope";
 import { useAppSettings, useSettings } from "@/hooks/use-settings";
-import { useToposComposerCollapse } from "./topos-collapse-store";
+import { closeKeyboardWarmup, useToposComposerCollapse } from "./topos-collapse-store";
 import { RenderProfile } from "@/utils/render-profiler";
 import { AfterPaintPublication } from "@/composer/after-paint-publication";
 import { isWeb, isNative } from "@/constants/platform";
@@ -1495,7 +1495,10 @@ function ComposerContentImpl({
     replaceUserInput(`${prefix}${quoted}\n\n`);
     clearQuoteRequest();
     // The composer may have just unfolded from display:none; focus after it paints.
-    setTimeout(() => messageInputRef.current?.focus(), 50);
+    setTimeout(() => {
+      messageInputRef.current?.focus();
+      closeKeyboardWarmup();
+    }, 50);
   }, [agentId, clearQuoteRequest, quoteRequest, replaceUserInput, textSource]);
 
   const handleWorkspaceFileDropped = useCallback(

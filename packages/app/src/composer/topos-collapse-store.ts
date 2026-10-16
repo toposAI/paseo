@@ -40,3 +40,28 @@ export const useToposComposerCollapse = create<ToposComposerCollapseState>((set)
       return state;
     }),
 }));
+
+let warmupInput: HTMLInputElement | null = null;
+
+/**
+ * iOS only raises the keyboard for focus() calls made inside the tap itself, but the real composer
+ * may be display:none or not yet mounted at that moment. Focus a throwaway input synchronously in
+ * the tap to bring the keyboard up; the composer then takes focus and the keyboard stays.
+ */
+export function openKeyboardWarmup(): void {
+  if (typeof document === "undefined" || warmupInput) return;
+  const input = document.createElement("input");
+  input.setAttribute("aria-hidden", "true");
+  input.style.cssText =
+    "position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0;";
+  document.body.appendChild(input);
+  input.focus();
+  warmupInput = input;
+  // Safety net: never leave the helper behind if the composer never claims focus.
+  setTimeout(closeKeyboardWarmup, 3000);
+}
+
+export function closeKeyboardWarmup(): void {
+  warmupInput?.remove();
+  warmupInput = null;
+}
