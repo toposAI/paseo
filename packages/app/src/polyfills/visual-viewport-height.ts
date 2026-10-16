@@ -26,9 +26,7 @@ export function applyVisualViewportHeight() {
     return !!el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable);
   };
   const updateHeight = () => {
-    // Also require a real shrink: changing #root's height on focus, before the keyboard is up,
-    // shifts the layout mid-animation and can make iOS dismiss the keyboard again.
-    if (isTyping() && window.innerHeight - visualViewport.height > 120) {
+    if (isTyping()) {
       document.documentElement.style.setProperty(
         VISUAL_VIEWPORT_HEIGHT_CSS_PROPERTY,
         `${visualViewport.height}px`,
@@ -42,7 +40,17 @@ export function applyVisualViewportHeight() {
   // into view, which offsets `#root` (fixed to the layout viewport's
   // top-left) upward until the page is scrolled back. Undo that pan
   // whenever the visualViewport moves so the app shell never drifts.
+  let lastFocusIn = 0;
+  document.addEventListener("focusin", () => {
+    lastFocusIn = Date.now();
+    // Undo the pan once iOS has finished scrolling the field into view.
+    setTimeout(() => resetScroll(), 700);
+  });
   const resetScroll = () => {
+    // Fighting iOS's own scroll while the keyboard is opening makes it dismiss the keyboard again.
+    if (Date.now() - lastFocusIn < 600) {
+      return;
+    }
     if (window.scrollX !== 0 || window.scrollY !== 0) {
       window.scrollTo(0, 0);
     }
