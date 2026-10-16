@@ -19,7 +19,10 @@ import { encodeImages } from "@/utils/encode-images";
 const CHAT_SCROLL_SELECTOR = '[data-testid="agent-chat-scroll"]';
 const GO_MESSAGE = "やって";
 const HIDE_DELAY_MS = 250;
-const BAR_WIDTH = 264;
+const PANEL_WIDTH = 340; // action bar and comment card share one width
+const BAR_WIDTH = PANEL_WIDTH;
+const SETTLE_DELAY_MS = 220;
+const HIGHLIGHT_COLOR = "rgba(80, 140, 255, 0.32)";
 const BAR_HEIGHT = 44;
 const EDGE = 8;
 const SENT_FLASH_MS = 900;
@@ -33,8 +36,18 @@ const DESKTOP_MIN_WIDTH = 768;
  * - draggable: grab the handle on top to move the card; rememberPosition reuses the last drop spot.
  */
 const LAYOUT = {
-  mobile: { commentWidth: 340, anchor: "screen-left", draggable: false, rememberPosition: false },
-  desktop: { commentWidth: 420, anchor: "selection", draggable: true, rememberPosition: true },
+  mobile: {
+    commentWidth: PANEL_WIDTH,
+    anchor: "screen-left",
+    draggable: false,
+    rememberPosition: false,
+  },
+  desktop: {
+    commentWidth: PANEL_WIDTH,
+    anchor: "selection",
+    draggable: true,
+    rememberPosition: true,
+  },
 } as const;
 
 type Layout = (typeof LAYOUT)[keyof typeof LAYOUT];
@@ -72,6 +85,7 @@ interface ToposSelectionActionsProps {
 
 interface Pick {
   quote: string;
+  range: Range;
   top: number;
   left: number;
 }
@@ -97,15 +111,16 @@ function readSelection(): Pick | null {
     createAssistantSelectionClipboardContent(selection)?.plainText ?? selection.toString();
   if (!quote.trim()) return null;
   const rect = range.getBoundingClientRect();
-  const maxLeft = Math.max(EDGE, window.innerWidth - BAR_WIDTH - EDGE);
-  const left = Math.min(maxLeft, Math.max(EDGE, rect.left + rect.width / 2 - BAR_WIDTH / 2));
+  const barWidth = Math.min(BAR_WIDTH, window.innerWidth - EDGE * 2);
+  const maxLeft = Math.max(EDGE, window.innerWidth - barWidth - EDGE);
+  const left = Math.min(maxLeft, Math.max(EDGE, rect.left + rect.width / 2 - barWidth / 2));
   // Below the selection (the OS callout sits above it); flip above when there is no room.
   const below = rect.bottom + 28;
   const top =
     below + BAR_HEIGHT + EDGE > window.innerHeight
       ? Math.max(EDGE, rect.top - BAR_HEIGHT - 12)
       : below;
-  return { quote, top, left };
+  return { quote, range: range.cloneRange(), top, left };
 }
 
 export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActionsProps) {
@@ -132,29 +147,70 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
 
   useEffect(() => {
     if (!enabled) return undefined;
-    const handleChange = () => {
-      if (commentingRef.current) return;
-      const next = readSelection();
+    let pointerDown = false;
+    const clearTimer = () => {
       if (hideTimerRef.current) {
         clearTimeout(hideTimerRef.current);
         hideTimerRef.current = null;
       }
+    };
+    // Show only once the selection has settled (pointer released / handles stopped moving),
+    // never while the user is still dragging it out.
+    const showSettled = () => {
+      if (commentingRef.current) return;
+      clearTimer();
+      const next = readSelection();
       if (next) {
         setStatus("idle");
         setPick(next);
-        return;
+      } else {
+        setPick(null);
       }
-      hideTimerRef.current = setTimeout(() => {
-        hideTimerRef.current = null;
-        if (!commentingRef.current) setPick(null);
-      }, HIDE_DELAY_MS);
+    };
+    const handleChange = () => {
+      if (commentingRef.current) return;
+      clearTimer();
+      setPick(null);
+      if (pointerDown) return;
+      hideTimerRef.current = setTimeout(showSettled, SETTLE_DELAY_MS);
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      if (commentingRef.current) return;
+      if ((event.target as Element | null)?.closest?.('[data-testid^="topos-selection-"]')) return;
+      pointerDown = true;
+    };
+    const handlePointerUp = () => {
+      if (!pointerDown) return;
+      pointerDown = false;
+      clearTimer();
+      hideTimerRef.current = setTimeout(showSettled, 0);
     };
     document.addEventListener("selectionchange", handleChange);
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("pointerup", handlePointerUp, true);
+    document.addEventListener("pointercancel", handlePointerUp, true);
     return () => {
       document.removeEventListener("selectionchange", handleChange);
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("pointerup", handlePointerUp, true);
+      document.removeEventListener("pointercancel", handlePointerUp, true);
+      clearTimer();
     };
   }, [enabled]);
+
+  // While the comment card is open the textarea steals focus and the native selection
+  // disappears, so paint the saved range ourselves and keep it aligned on scroll/resize.
+  const [, setRepaint] = useState(0);
+  useEffect(() => {
+    if (!commenting) return undefined;
+    const bump = () => setRepaint((n) => n + 1);
+    window.addEventListener("scroll", bump, true);
+    window.addEventListener("resize", bump);
+    return () => {
+      window.removeEventListener("scroll", bump, true);
+      window.removeEventListener("resize", bump);
+    };
+  }, [commenting]);
 
   const send = useCallback(
     async (body: string) => {
@@ -271,78 +327,102 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
 
   if (commenting) {
     const layout = currentLayout();
+    const highlightRects = Array.from(pick.range.getClientRects());
     return (
-      <div
-        style={{
-          ...panel,
-          top: cardPos?.top ?? pick.top,
-          left: cardPos?.left ?? EDGE,
-          width: Math.min(layout.commentWidth, window.innerWidth - EDGE * 2),
-          padding: 8,
-        }}
-        data-testid="topos-selection-comment"
-      >
-        {layout.draggable ? (
+      <>
+        {highlightRects.map((rect, index) => (
           <div
-            onPointerDown={handleDragStart}
-            onPointerMove={handleDragMove}
-            onPointerUp={handleDragEnd}
+            // eslint-disable-next-line react/no-array-index-key
+            key={index}
+            aria-hidden
             style={{
-              height: 16,
-              margin: "-4px 0 4px",
-              cursor: "grab",
-              touchAction: "none",
-              textAlign: "center",
-              color: colors.foregroundMuted,
-              fontSize: 12,
-              lineHeight: "16px",
-              userSelect: "none",
+              position: "fixed",
+              top: rect.top,
+              left: rect.left,
+              width: rect.width,
+              height: rect.height,
+              background: HIGHLIGHT_COLOR,
+              pointerEvents: "none",
+              zIndex: 999,
             }}
-            data-testid="topos-selection-comment-handle"
-          >
-            ⋯⋯
-          </div>
-        ) : null}
-        <textarea
-          autoFocus
-          value={comment}
-          onChange={(event) => setComment(event.target.value)}
-          placeholder={t("toposSelection.commentPlaceholder")}
-          rows={3}
+          />
+        ))}
+        <div
           style={{
-            width: "100%",
-            boxSizing: "border-box",
-            resize: "none",
-            border: `1px solid ${colors.border}`,
-            borderRadius: 8,
+            ...panel,
+            top: cardPos?.top ?? pick.top,
+            left: cardPos?.left ?? EDGE,
+            width: Math.min(layout.commentWidth, window.innerWidth - EDGE * 2),
             padding: 8,
-            background: colors.surface1,
-            color: colors.foreground,
-            fontSize: 16,
-            fontFamily: "inherit",
           }}
-          data-testid="topos-selection-comment-input"
-        />
-        <div style={{ display: "flex", marginTop: 4 }}>
-          <button type="button" style={button} onClick={close}>
-            {t("toposSelection.cancel")}
-          </button>
-          <button
-            type="button"
-            style={{ ...button, opacity: comment.trim() ? 1 : 0.4 }}
-            onClick={handleSendComment}
-            data-testid="topos-selection-comment-send"
-          >
-            {t("toposSelection.send")}
-          </button>
+          data-testid="topos-selection-comment"
+        >
+          {layout.draggable ? (
+            <div
+              onPointerDown={handleDragStart}
+              onPointerMove={handleDragMove}
+              onPointerUp={handleDragEnd}
+              style={{
+                height: 16,
+                margin: "-4px 0 4px",
+                cursor: "grab",
+                touchAction: "none",
+                textAlign: "center",
+                color: colors.foregroundMuted,
+                fontSize: 12,
+                lineHeight: "16px",
+                userSelect: "none",
+              }}
+              data-testid="topos-selection-comment-handle"
+            >
+              ⋯⋯
+            </div>
+          ) : null}
+          <textarea
+            autoFocus
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+            placeholder={t("toposSelection.commentPlaceholder")}
+            rows={3}
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              resize: "none",
+              border: `1px solid ${colors.border}`,
+              borderRadius: 8,
+              padding: 8,
+              background: colors.surface1,
+              color: colors.foreground,
+              fontSize: 16,
+              fontFamily: "inherit",
+            }}
+            data-testid="topos-selection-comment-input"
+          />
+          <div style={{ display: "flex", marginTop: 4 }}>
+            <button type="button" style={button} onClick={close}>
+              {t("toposSelection.cancel")}
+            </button>
+            <button
+              type="button"
+              style={{ ...button, opacity: comment.trim() ? 1 : 0.4 }}
+              onClick={handleSendComment}
+              data-testid="topos-selection-comment-send"
+            >
+              {t("toposSelection.send")}
+            </button>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   return (
     <div
-      style={{ ...panel, width: BAR_WIDTH, display: "flex" }}
+      style={{
+        ...panel,
+        width: Math.min(BAR_WIDTH, window.innerWidth - EDGE * 2),
+        display: "flex",
+      }}
       onMouseDown={keepSelection}
       data-testid="topos-selection-bar"
     >
