@@ -39,4 +39,20 @@ export function applyVisualViewportHeight() {
   visualViewport.addEventListener("resize", updateHeight);
   visualViewport.addEventListener("scroll", resetScroll);
   window.addEventListener("scroll", resetScroll);
+
+  // iOS sometimes skips the final visualViewport resize after the keyboard closes, leaving the
+  // variable at the keyboard-up height (blank band under the composer until the app is killed).
+  // Re-sync a few times after focus leaves a field, and when the page becomes visible again.
+  const resyncAfterKeyboard = () => {
+    for (const delay of [0, 120, 350, 800]) {
+      setTimeout(() => {
+        updateHeight();
+        resetScroll();
+      }, delay);
+    }
+  };
+  document.addEventListener("focusout", resyncAfterKeyboard);
+  window.addEventListener("resize", updateHeight);
+  window.addEventListener("pageshow", resyncAfterKeyboard);
+  document.addEventListener("visibilitychange", resyncAfterKeyboard);
 }
