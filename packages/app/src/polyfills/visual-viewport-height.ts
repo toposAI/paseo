@@ -18,11 +18,22 @@ export function applyVisualViewportHeight() {
     return;
   }
 
+  // Only follow the visual viewport while a text field is focused (keyboard up). With the keyboard
+  // closed, iOS can leave visualViewport.height stuck at the keyboard-up value, which left a blank
+  // band under the composer until the app was killed; `100dvh` in index.html is immune to that.
+  const isTyping = () => {
+    const el = document.activeElement as HTMLElement | null;
+    return !!el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable);
+  };
   const updateHeight = () => {
-    document.documentElement.style.setProperty(
-      VISUAL_VIEWPORT_HEIGHT_CSS_PROPERTY,
-      `${visualViewport.height}px`,
-    );
+    if (isTyping()) {
+      document.documentElement.style.setProperty(
+        VISUAL_VIEWPORT_HEIGHT_CSS_PROPERTY,
+        `${visualViewport.height}px`,
+      );
+    } else {
+      document.documentElement.style.removeProperty(VISUAL_VIEWPORT_HEIGHT_CSS_PROPERTY);
+    }
   };
 
   // iOS Safari pans its internal visualViewport to bring a focused input

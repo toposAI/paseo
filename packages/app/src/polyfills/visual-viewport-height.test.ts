@@ -24,8 +24,10 @@ describe("applyVisualViewportHeight", () => {
     expect(setProperty).not.toHaveBeenCalled();
   });
 
-  it("sets the CSS variable to the current visualViewport height and updates it on resize", () => {
+  it("follows the visualViewport height while typing and drops the variable when not", () => {
     const setProperty = vi.fn();
+    const removeProperty = vi.fn();
+    const activeElement: { tagName: string } = { tagName: "TEXTAREA" };
     const listeners: Record<string, () => void> = {};
     const visualViewport = {
       height: 640,
@@ -42,7 +44,9 @@ describe("applyVisualViewportHeight", () => {
       addEventListener: windowAddEventListener,
     };
     (globalThis as { document?: unknown }).document = {
-      documentElement: { style: { setProperty } },
+      documentElement: { style: { setProperty, removeProperty } },
+      activeElement,
+      addEventListener: vi.fn(),
     };
 
     applyVisualViewportHeight();
@@ -56,6 +60,11 @@ describe("applyVisualViewportHeight", () => {
     listeners.resize();
 
     expect(setProperty).toHaveBeenLastCalledWith("--paseo-vvh", "560px");
+
+    activeElement.tagName = "DIV";
+    listeners.resize();
+
+    expect(removeProperty).toHaveBeenLastCalledWith("--paseo-vvh");
   });
 
   it("scrolls the window back to origin when the visualViewport pans", () => {
@@ -75,7 +84,9 @@ describe("applyVisualViewportHeight", () => {
       addEventListener: vi.fn(),
     };
     (globalThis as { document?: unknown }).document = {
-      documentElement: { style: { setProperty: vi.fn() } },
+      documentElement: { style: { setProperty: vi.fn(), removeProperty: vi.fn() } },
+      activeElement: null,
+      addEventListener: vi.fn(),
     };
 
     applyVisualViewportHeight();
