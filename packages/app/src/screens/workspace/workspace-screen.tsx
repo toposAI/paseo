@@ -19,7 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, type Href } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import { useTranslation } from "react-i18next";
-import { ChevronDown } from "lucide-react-native";
+import { ChevronDown, Layers } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
@@ -249,6 +249,7 @@ function buildWorkspaceFileLocation(
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const ThemedChevronDown = withUnistyles(ChevronDown);
+const ThemedLayers = withUnistyles(Layers);
 
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
@@ -422,6 +423,8 @@ interface MobileWorkspaceTabSwitcherProps {
   onCloseTabsAbove: (tabId: string) => Promise<void> | void;
   onCloseTabsBelow: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
+  /** Topos phone layout: no tab row, just a small header button that opens the same switcher. */
+  compact?: boolean;
 }
 
 function MobileActiveTabTrigger({
@@ -657,6 +660,7 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
   onCloseTabsAbove,
   onCloseTabsBelow,
   onCloseOtherTabs,
+  compact = false,
 }: MobileWorkspaceTabSwitcherProps) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
@@ -735,6 +739,35 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
       onCloseOtherTabs,
     ],
   );
+
+  if (compact) {
+    return (
+      <>
+        <Pressable
+          ref={anchorRef}
+          testID="workspace-tab-switcher-compact-trigger"
+          accessibilityRole="button"
+          accessibilityLabel={t("workspace.tabs.switcher.trigger", { count: tabs.length })}
+          style={styles.compactSwitcherButton}
+          onPress={handleOpenSwitcher}
+        >
+          <ThemedLayers size={18} uniProps={mutedColorMapping} />
+        </Pressable>
+        <Combobox
+          options={tabSwitcherOptions}
+          value={activeTabKey}
+          onSelect={onSelectSwitcherTab}
+          searchable={false}
+          title={t("workspace.tabs.switcher.title")}
+          searchPlaceholder={t("workspace.tabs.switcher.searchPlaceholder")}
+          open={isOpen}
+          onOpenChange={setIsOpen}
+          anchorRef={anchorRef}
+          renderOption={renderTabOption}
+        />
+      </>
+    );
+  }
 
   return (
     <View style={styles.mobileTabsRow} testID="workspace-tabs-row">
@@ -3768,9 +3801,37 @@ function WorkspaceScreenContent({
     workspaceKey: persistenceKey,
   });
 
+  const toposChatStyleEnabled = useSettings((settings) => settings.toposChatStyle);
+  // Topos phone layout: the tab row is replaced by a small button in the header's top-right.
+  const toposTabsInHeader = toposChatStyleEnabled && isMobile && isWeb;
+  const headerTabSwitcher = toposTabsInHeader ? (
+    <MobileWorkspaceTabSwitcher
+      compact
+      tabs={tabs}
+      activeTabKey={activeTabKey}
+      activeTab={activeTabDescriptor}
+      tabSwitcherOptions={tabSwitcherOptions}
+      tabByKey={tabByKey}
+      normalizedServerId={normalizedServerId}
+      normalizedWorkspaceId={normalizedWorkspaceId}
+      onSelectSwitcherTab={handleSelectSwitcherTab}
+      onCopyResumeCommand={handleCopyResumeCommand}
+      onCopyAgentId={handleCopyAgentId}
+      onCopyTerminalId={handleCopyTerminalId}
+      onCopyFilePath={handleCopyFilePath}
+      onReloadAgent={handleReloadAgent}
+      onRenameTab={handleRenameTab}
+      onCloseTab={handleCloseTabById}
+      onCloseTabsAbove={handleCloseTabsToLeft}
+      onCloseTabsBelow={handleCloseTabsToRight}
+      onCloseOtherTabs={handleCloseOtherTabs}
+    />
+  ) : null;
+
   const headerRight = useMemo(
     () => (
       <View style={styles.headerRight}>
+        {headerTabSwitcher}
         <PluginHeaderButtons serverId={normalizedServerId} workspaceId={normalizedWorkspaceId} />
         {!isMobile && workspaceDescriptor && workspaceDescriptor.scripts.length > 0 ? (
           <WorkspaceScriptsButton
@@ -3819,6 +3880,7 @@ function WorkspaceScreenContent({
       </View>
     ),
     [
+      headerTabSwitcher,
       isMobile,
       workspaceDescriptor,
       normalizedServerId,
@@ -3837,7 +3899,6 @@ function WorkspaceScreenContent({
     ],
   );
 
-  const toposChatStyleEnabled = useSettings((settings) => settings.toposChatStyle);
   const toposKeyboardOpen = useToposKeyboardOpen(toposChatStyleEnabled && isMobile && isWeb);
   const showScreenHeader = useMemo(
     () => shouldShowWorkspaceScreenHeader({ isFocusModeEnabled, isMobile }),
@@ -4054,7 +4115,7 @@ function WorkspaceScreenContent({
     <View style={styles.centerColumn}>
       {rendersDesktopSplitContent || toposKeyboardOpen ? null : renderWorkspaceScreenHeader()}
 
-      {isMobile && !toposKeyboardOpen ? (
+      {isMobile && !toposKeyboardOpen && !toposTabsInHeader ? (
         <MobileWorkspaceTabSwitcher
           tabs={tabs}
           activeTabKey={activeTabKey}
@@ -4287,6 +4348,12 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
   },
   newTabTooltipShortcut: {},
+  compactSwitcherButton: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   mobileTabsRow: {
     backgroundColor: theme.colors.surface0,
     borderBottomWidth: theme.borderWidth[1],
