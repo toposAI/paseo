@@ -1184,37 +1184,37 @@ function ComposerVoiceModeButton({
 const toposExpandedStyle = { flexShrink: 1 } as const;
 const toposCollapsedStyle = { display: "none" } as const;
 
-export function Composer({ isPaneFocused, ...props }: ComposerProps) {
+function ToposMinimizeButton() {
   const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
-  const toposCollapsed = useToposComposerCollapse((state) => state.collapsed);
   const minimizeToposComposer = useToposComposerCollapse((state) => state.minimize);
-  const isCompactFormFactor = useIsCompactFormFactor();
-  const showMinimize = toposChatStyle && isWeb;
   const handleMinimize = useCallback(() => {
     // On phones the keyboard would otherwise stay up over the folded composer.
     if (typeof document !== "undefined") (document.activeElement as HTMLElement | null)?.blur?.();
     minimizeToposComposer();
   }, [minimizeToposComposer]);
+  if (!toposChatStyle || !isWeb) return null;
+  return (
+    <Pressable
+      style={styles.toposMinimizeButton}
+      onPress={handleMinimize}
+      accessibilityRole="button"
+      accessibilityLabel="入力欄を最小化"
+      testID="topos-composer-minimize"
+    >
+      <ThemedMinus size={16} uniProps={iconForegroundMutedMapping} />
+    </Pressable>
+  );
+}
+
+export function Composer({ isPaneFocused, ...props }: ComposerProps) {
+  const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
+  const toposCollapsed = useToposComposerCollapse((state) => state.collapsed);
   return (
     <ComposerKeyboardScopeProvider isActiveComposer={isPaneFocused}>
       <View style={toposChatStyle && toposCollapsed ? toposCollapsedStyle : toposExpandedStyle}>
         <RenderProfile id="ComposerContent">
           <ComposerContent {...props} />
         </RenderProfile>
-        {showMinimize ? (
-          <Pressable
-            style={[
-              styles.toposMinimizeButton,
-              isCompactFormFactor && styles.toposMinimizeButtonCompact,
-            ]}
-            onPress={handleMinimize}
-            accessibilityRole="button"
-            accessibilityLabel="入力欄を最小化"
-            testID="topos-composer-minimize"
-          >
-            <ThemedMinus size={16} uniProps={iconForegroundMutedMapping} />
-          </Pressable>
-        ) : null}
       </View>
     </ComposerKeyboardScopeProvider>
   );
@@ -2555,6 +2555,7 @@ function ComposerContentImpl({
                   submitLabel={submitLabel}
                 />
               </RenderProfile>
+              <ToposMinimizeButton />
               <Combobox
                 options={githubSearchOptions}
                 value=""
@@ -2595,9 +2596,10 @@ const animatedStaticStyles = RNStyleSheet.create({
 
 const styles = StyleSheet.create((theme: Theme) => ({
   toposMinimizeButton: {
+    // Inside the input card's top-right corner (messageInputContainer is position: relative).
     position: "absolute",
-    top: 14,
-    right: 34,
+    top: 8,
+    right: 8,
     width: 26,
     height: 26,
     borderRadius: 13,
@@ -2607,10 +2609,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
     alignItems: "center",
     justifyContent: "center",
     zIndex: 5,
-  },
-  toposMinimizeButtonCompact: {
-    top: 10,
-    right: 12,
   },
   borderSeparator: {
     height: theme.borderWidth[1],
