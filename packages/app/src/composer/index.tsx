@@ -1524,6 +1524,19 @@ function ComposerContentImpl({
     }, 50);
   }, [agentId, clearQuoteRequest, quoteRequest, replaceUserInput, textSource]);
 
+  const focusRequest = useToposComposerCollapse((state) => state.focusRequest);
+  const lastFocusRequestRef = useRef(focusRequest);
+  useEffect(() => {
+    if (focusRequest === lastFocusRequestRef.current) return;
+    lastFocusRequestRef.current = focusRequest;
+    // The composer may have just unfolded from display:none; focus after it paints.
+    const timer = setTimeout(() => {
+      messageInputRef.current?.focus();
+      closeKeyboardWarmup();
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [focusRequest]);
+
   const handleWorkspaceFileDropped = useCallback(
     (payload: WorkspaceFileDragPayload) => {
       if (!workspaceId) {
