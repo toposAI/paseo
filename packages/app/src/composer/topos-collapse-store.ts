@@ -12,6 +12,9 @@ export const TOPOS_COLLAPSE_DISTANCE_PX = 400;
 
 interface ToposComposerCollapseState {
   collapsed: boolean;
+  /** The user opened the composer by hand while scrolled up; stay open until back at the bottom. */
+  pinnedOpen: boolean;
+  pinOpen: () => void;
   setCollapsed: (collapsed: boolean) => void;
   reportScrollDistance: (distanceFromBottom: number, nearBottom: boolean) => void;
   /** A quoted passage the selection bar wants dropped into the regular composer (phone layout). */
@@ -22,19 +25,34 @@ interface ToposComposerCollapseState {
 
 export const useToposComposerCollapse = create<ToposComposerCollapseState>((set) => ({
   collapsed: false,
+  pinnedOpen: false,
+  pinOpen: () => set({ collapsed: false, pinnedOpen: true }),
   quoteRequest: null,
   requestQuote: (agentId, quote) =>
     set((state) => ({
       collapsed: false,
+      pinnedOpen: true,
       quoteRequest: { agentId, quote, nonce: (state.quoteRequest?.nonce ?? 0) + 1 },
     })),
   clearQuoteRequest: () => set({ quoteRequest: null }),
   setCollapsed: (collapsed) =>
-    set((state) => (state.collapsed === collapsed ? state : { collapsed })),
+    set((state) =>
+      state.collapsed === collapsed && (collapsed || !state.pinnedOpen)
+        ? state
+        : { collapsed, pinnedOpen: false },
+    ),
   reportScrollDistance: (distanceFromBottom, nearBottom) =>
     set((state) => {
-      if (nearBottom) return state.collapsed ? { collapsed: false } : state;
-      if (!state.collapsed && distanceFromBottom > TOPOS_COLLAPSE_DISTANCE_PX) {
+      if (nearBottom) {
+        return state.collapsed || state.pinnedOpen
+          ? { collapsed: false, pinnedOpen: false }
+          : state;
+      }
+      if (
+        !state.collapsed &&
+        !state.pinnedOpen &&
+        distanceFromBottom > TOPOS_COLLAPSE_DISTANCE_PX
+      ) {
         return { collapsed: true };
       }
       return state;
