@@ -1204,7 +1204,7 @@ export function Composer({ isPaneFocused, ...props }: ComposerProps) {
             accessibilityLabel="入力欄を最小化"
             testID="topos-composer-minimize"
           >
-            <Minus size={16} color="#8a8a8a" />
+            <ThemedMinus size={16} uniProps={iconForegroundMutedMapping} />
           </Pressable>
         ) : null}
       </View>
@@ -2573,11 +2573,14 @@ const animatedStaticStyles = RNStyleSheet.create({
 const styles = StyleSheet.create((theme: Theme) => ({
   toposMinimizeButton: {
     position: "absolute",
-    top: 6,
-    right: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    top: 14,
+    right: 34,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: theme.colors.surface2,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
     alignItems: "center",
     justifyContent: "center",
     zIndex: 5,
@@ -2733,6 +2736,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
 
 const ThemedAttachmentSpinner = withUnistyles(LoadingSpinner);
 const ThemedPencil = withUnistyles(Pencil);
+const ThemedMinus = withUnistyles(Minus);
 const ThemedArrowUp = withUnistyles(ArrowUp);
 const ThemedGitPullRequest = withUnistyles(GitPullRequest);
 const ThemedCircleDot = withUnistyles(CircleDot);
