@@ -72,9 +72,77 @@ export function applyVisualViewportHeight() {
     );
     setTimeout(updateHeight, GUESS_WINDOW_MS + 20);
   };
+  // WebKit reports the keyboard with a single resize that can arrive late, so also poll the viewport
+  // for a short while after focus and take the real height the moment it shrinks.
+  let pollTimer: ReturnType<typeof setInterval> | undefined;
+  const pollForKeyboard = () => {
+    if (pollTimer) clearInterval(pollTimer);
+    const startedAt = Date.now();
+    pollTimer = setInterval(() => {
+      if (!isTyping() || Date.now() - startedAt > GUESS_WINDOW_MS) {
+        clearInterval(pollTimer);
+        pollTimer = undefined;
+        return;
+      }
+      if (window.innerHeight - visualViewport.height > SHRINK_MIN_PX) {
+        updateHeight();
+        clearInterval(pollTimer);
+        pollTimer = undefined;
+      }
+    }, 50);
+  };
   document.addEventListener("focusin", () => {
-    if (isTyping()) applyKeyboardGuess();
+    if (isTyping()) {
+      applyKeyboardGuess();
+      pollForKeyboard();
+    }
   });
+  // iOS Safari pans the visual viewport to centre a tapped text field, then we had to pan it back
+  // (the two-step jolt). Like react-aria's usePreventScroll, take the focus over ourselves on a
+  // plain tap: cancel the native touchend and call focus({ preventScroll: true }), which keeps iOS
+  // from panning at all while still raising the keyboard (focus() inside touchend is a user gesture).
+  if (window.matchMedia?.("(pointer: coarse)").matches) {
+    const TAP_SLOP_PX = 10;
+    let tapStart: { x: number; y: number } | null = null;
+    const textFieldAt = (target: EventTarget | null): HTMLElement | null => {
+      const el = (target as HTMLElement | null)?.closest?.("textarea, input");
+      if (!el) return null;
+      const field = el as HTMLTextAreaElement | HTMLInputElement;
+      if (field.disabled || field.readOnly || field.getAttribute("aria-hidden") === "true") {
+        return null;
+      }
+      if (field.tagName === "INPUT") {
+        const type = (field as HTMLInputElement).type;
+        if (!["text", "search", "url", "email", "tel", "password", ""].includes(type)) return null;
+      }
+      return field;
+    };
+    document.addEventListener(
+      "touchstart",
+      (event) => {
+        const touch = event.touches[0];
+        tapStart =
+          event.touches.length === 1 && touch ? { x: touch.clientX, y: touch.clientY } : null;
+      },
+      { capture: true, passive: true },
+    );
+    document.addEventListener(
+      "touchend",
+      (event) => {
+        const start = tapStart;
+        tapStart = null;
+        const touch = event.changedTouches[0];
+        if (!start || !touch || event.touches.length > 0) return;
+        if (Math.hypot(touch.clientX - start.x, touch.clientY - start.y) > TAP_SLOP_PX) return;
+        const field = textFieldAt(event.target);
+        // Already focused: leave caret placement and selection handles to the browser.
+        if (!field || document.activeElement === field) return;
+        event.preventDefault();
+        field.focus({ preventScroll: true });
+      },
+      { capture: true, passive: false },
+    );
+  }
   // iOS Safari pans its internal visualViewport to bring a focused input
   // into view, which offsets `#root` (fixed to the layout viewport's
   // top-left) upward until the page is scrolled back. Undo that pan
