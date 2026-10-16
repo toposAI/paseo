@@ -165,6 +165,28 @@ export function applyVisualViewportHeight() {
     }
   };
 
+  // iOS pans the visual viewport (offsetTop > 0) to reveal a focused field and only we pan it back
+  // afterwards, which reads as the shell sliding up and dropping again. While the pan lasts, move
+  // #root down by the same amount so it stays glued to what is actually visible.
+  let transformFrame = 0;
+  const syncRootOffset = () => {
+    if (transformFrame) return;
+    transformFrame = window.requestAnimationFrame(() => {
+      transformFrame = 0;
+      const rootElement = document.getElementById("root");
+      if (!rootElement) return;
+      const offsetTop = isTyping() ? Math.max(0, Math.round(visualViewport.offsetTop)) : 0;
+      if (offsetTop > 0) {
+        rootElement.style.transform = `translateY(${offsetTop}px)`;
+      } else if (rootElement.style.transform) {
+        rootElement.style.removeProperty("transform");
+      }
+    });
+  };
+  visualViewport.addEventListener("scroll", syncRootOffset);
+  visualViewport.addEventListener("resize", syncRootOffset);
+  document.addEventListener("focusout", syncRootOffset);
+
   updateHeight();
   visualViewport.addEventListener("resize", updateHeight);
   visualViewport.addEventListener("scroll", resetScroll);

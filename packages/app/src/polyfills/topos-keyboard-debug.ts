@@ -38,7 +38,7 @@ export function installToposKeyboardDebug(): void {
     const vvh = document.documentElement.style.getPropertyValue("--paseo-vvh") || "-";
     box.textContent =
       `inner ${window.innerHeight} vv ${viewport.height.toFixed(0)} top ${viewport.offsetTop.toFixed(0)}\n` +
-      `scrollY ${window.scrollY.toFixed(0)} vvh ${vvh} act ${el?.tagName ?? "-"}\n` +
+      `scrollY ${window.scrollY.toFixed(0)} vvh ${vvh} tf ${document.getElementById("root")?.style.transform || "-"} act ${el?.tagName ?? "-"}\n` +
       lines.join("\n");
   };
   const on = (target: EventTarget, type: string, label: string, capture = true) => {
