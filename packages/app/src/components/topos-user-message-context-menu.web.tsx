@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
@@ -39,6 +40,7 @@ export function ToposUserMessageContextMenu({
 }: ToposUserMessageContextMenuProps) {
   const { theme } = useUnistyles();
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const handleContextMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -56,13 +58,18 @@ export function ToposUserMessageContextMenu({
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
     };
-    window.addEventListener("pointerdown", close, true);
+    // Pressing an item must not close the menu before its click lands.
+    const closeOutside = (event: Event) => {
+      if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
+      close();
+    };
+    window.addEventListener("pointerdown", closeOutside, true);
     window.addEventListener("wheel", close, { capture: true, passive: true });
     window.addEventListener("resize", close);
     window.addEventListener("blur", close);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("pointerdown", close, true);
+      window.removeEventListener("pointerdown", closeOutside, true);
       window.removeEventListener("wheel", close, true);
       window.removeEventListener("resize", close);
       window.removeEventListener("blur", close);
@@ -95,15 +102,13 @@ export function ToposUserMessageContextMenu({
     textAlign: "left",
     cursor: "pointer",
   };
-  // Stop the page's pointerdown-closes-menu listener from eating the click on an item.
-  const keepOpenUntilClick = (event: { stopPropagation: () => void }) => event.stopPropagation();
-
   return (
     <div style={{ display: "contents" }} onContextMenu={handleContextMenu}>
       {children}
       {menu
         ? createPortal(
             <div
+              ref={menuRef}
               style={{
                 position: "fixed",
                 top: menu.y,
@@ -124,7 +129,6 @@ export function ToposUserMessageContextMenu({
                 type="button"
                 style={item}
                 onClick={handleCopy}
-                onPointerDownCapture={keepOpenUntilClick}
                 data-testid="topos-user-message-context-copy"
               >
                 コピー
@@ -133,7 +137,6 @@ export function ToposUserMessageContextMenu({
                 type="button"
                 style={item}
                 onClick={handleResend}
-                onPointerDownCapture={keepOpenUntilClick}
                 data-testid="topos-user-message-context-resend"
               >
                 再送信(入力欄に戻す)
