@@ -14,6 +14,7 @@ import { dispatchComposerAgentMessage } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { useSettings } from "@/hooks/use-settings";
 import { openKeyboardWarmup, useToposComposerCollapse } from "@/composer/topos-collapse-store";
+import { isImeComposingKeyboardEvent } from "@/utils/keyboard-ime";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { encodeImages } from "@/utils/encode-images";
 
@@ -150,6 +151,7 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
   const [status, setStatus] = useState<"idle" | "sent" | "error">("idle");
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const commentingRef = useRef(false);
+  const lastCompositionEndRef = useRef(0);
   commentingRef.current = commenting;
 
   const close = useCallback(() => {
@@ -398,9 +400,15 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
             autoFocus
             value={comment}
             onChange={(event) => setComment(event.target.value)}
+            onCompositionEnd={() => {
+              lastCompositionEndRef.current = Date.now();
+            }}
             onKeyDown={(event) => {
-              // Enter sends, Shift+Enter breaks the line; Enter that confirms an IME conversion must not send.
-              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+              // Enter sends, Shift+Enter breaks the line. The Enter that confirms an IME conversion must
+              // not send: Safari reports it after compositionend with isComposing=false (keyCode 229).
+              if (event.key !== "Enter" || event.shiftKey) return;
+              if (isImeComposingKeyboardEvent(event.nativeEvent)) return;
+              if (Date.now() - lastCompositionEndRef.current < 100) return;
               event.preventDefault();
               handleSendComment();
             }}
