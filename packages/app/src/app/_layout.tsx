@@ -450,6 +450,18 @@ export function useHostRuntimeBootstrapState(): HostRuntimeBootstrapState {
 const rowStyle = { flex: 1, flexDirection: "row" } as const;
 const flexStyle = { flex: 1 } as const;
 const MOBILE_WEB_GESTURE_TOUCH_ACTION = "pan-y";
+// 左端の帯だけ touch-action: none にして、縦方向の動きが入ってもブラウザのネイティブ
+// スクロールにタッチを奪われない(pointercancelされない)ようにする。
+const EDGE_SWIPE_STRIP_WIDTH = 40;
+const edgeSwipeStripStyle = {
+  position: "absolute",
+  left: 0,
+  top: 0,
+  bottom: 0,
+  width: EDGE_SWIPE_STRIP_WIDTH,
+  zIndex: 1000,
+  touchAction: "none",
+} as const;
 
 interface AppContainerProps {
   children: ReactNode;
@@ -662,6 +674,7 @@ function MobileGestureWrapper({
     <GestureDetector gesture={openGesture} touchAction={MOBILE_WEB_GESTURE_TOUCH_ACTION}>
       <View collapsable={false} style={layoutStyles.surfaceFill}>
         {children}
+        {isWeb && chromeEnabled ? <View pointerEvents="auto" style={edgeSwipeStripStyle} /> : null}
       </View>
     </GestureDetector>
   );

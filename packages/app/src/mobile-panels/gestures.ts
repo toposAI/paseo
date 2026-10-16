@@ -9,7 +9,7 @@ import { canBeginMobilePanelGesture, isMobilePanelGestureCurrent } from "./model
 import { useMobilePanelsRuntime } from "./provider";
 import { resolveMobilePanelGestureIntent } from "./gesture-intent";
 
-const MOBILE_WEB_EDGE_SWIPE_WIDTH = 64;
+const MOBILE_WEB_EDGE_SWIPE_WIDTH = 40;
 // Opening the thread list from the edge commits on a short or slow drag; the stock thresholds
 // (a third of the screen or a fast flick) cancelled most thumb swipes.
 const OPEN_AGENT_LIST_COMMIT_FRACTION = 0.12;
