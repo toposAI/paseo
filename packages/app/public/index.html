@@ -18,7 +18,13 @@
       those areas itself and `env(safe-area-inset-*)` reports 0 everywhere,
       so no explicit compensation is needed.
     -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <!--
+      Topos: `viewport-fit=cover` is back on purpose. The workspace (chat) screen does not add
+      `insets.bottom`, so with `cover` the chat runs to the bottom edge instead of leaving a blank
+      band above the home indicator. Screens that do add `insets.bottom` (settings, welcome, page
+      layout) get the inset padding back.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>%WEB_TITLE%</title>
