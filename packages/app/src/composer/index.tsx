@@ -1189,7 +1189,12 @@ export function Composer({ isPaneFocused, ...props }: ComposerProps) {
   const toposCollapsed = useToposComposerCollapse((state) => state.collapsed);
   const minimizeToposComposer = useToposComposerCollapse((state) => state.minimize);
   const isCompactFormFactor = useIsCompactFormFactor();
-  const showMinimize = toposChatStyle && isWeb && !isCompactFormFactor;
+  const showMinimize = toposChatStyle && isWeb;
+  const handleMinimize = useCallback(() => {
+    // On phones the keyboard would otherwise stay up over the folded composer.
+    if (typeof document !== "undefined") (document.activeElement as HTMLElement | null)?.blur?.();
+    minimizeToposComposer();
+  }, [minimizeToposComposer]);
   return (
     <ComposerKeyboardScopeProvider isActiveComposer={isPaneFocused}>
       <View style={toposChatStyle && toposCollapsed ? toposCollapsedStyle : toposExpandedStyle}>
@@ -1198,8 +1203,11 @@ export function Composer({ isPaneFocused, ...props }: ComposerProps) {
         </RenderProfile>
         {showMinimize ? (
           <Pressable
-            style={styles.toposMinimizeButton}
-            onPress={minimizeToposComposer}
+            style={[
+              styles.toposMinimizeButton,
+              isCompactFormFactor && styles.toposMinimizeButtonCompact,
+            ]}
+            onPress={handleMinimize}
             accessibilityRole="button"
             accessibilityLabel="入力欄を最小化"
             testID="topos-composer-minimize"
@@ -2584,6 +2592,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
     alignItems: "center",
     justifyContent: "center",
     zIndex: 5,
+  },
+  toposMinimizeButtonCompact: {
+    top: 10,
+    right: 12,
   },
   borderSeparator: {
     height: theme.borderWidth[1],
