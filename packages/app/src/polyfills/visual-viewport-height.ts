@@ -1,4 +1,5 @@
 const VISUAL_VIEWPORT_HEIGHT_CSS_PROPERTY = "--paseo-vvh";
+export const KEYBOARD_INTENT_EVENT = "paseo-topos-keyboard-intent";
 
 /**
  * `#root` in public/index.html resolves its height from `html`/`body`'s
@@ -71,6 +72,10 @@ export function applyVisualViewportHeight() {
       `${window.innerHeight - readKeyboardGuess()}px`,
     );
     setTimeout(updateHeight, GUESS_WINDOW_MS + 20);
+    // Let the header hide in the same frame as the shrink, so the layout moves once instead of twice.
+    if (typeof window.dispatchEvent === "function") {
+      window.dispatchEvent(new Event(KEYBOARD_INTENT_EVENT));
+    }
   };
   document.addEventListener("focusin", () => {
     if (isTyping()) applyKeyboardGuess();

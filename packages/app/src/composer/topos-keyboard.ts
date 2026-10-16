@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { KEYBOARD_INTENT_EVENT } from "@/polyfills/visual-viewport-height";
 
 const KEYBOARD_MIN_SHRINK_PX = 120;
 
@@ -36,11 +37,19 @@ export function useToposKeyboardOpen(enabled: boolean): boolean {
     // polyfills/visual-viewport-height.ts, so the layout settles once instead of jumping later.
     const onFocusIn = () => setTimeout(() => setOpen(isTyping()), 0);
     const onFocusOut = () => setTimeout(update, 0);
+    // A touch on a text field is about to raise the keyboard: hide the header now (same frame as the
+    // #root shrink) and fall back to the real state if the field never got focus.
+    const onIntent = () => {
+      setOpen(true);
+      setTimeout(update, 900);
+    };
     update();
+    window.addEventListener(KEYBOARD_INTENT_EVENT, onIntent);
     viewport.addEventListener("resize", update);
     document.addEventListener("focusin", onFocusIn);
     document.addEventListener("focusout", onFocusOut);
     return () => {
+      window.removeEventListener(KEYBOARD_INTENT_EVENT, onIntent);
       viewport.removeEventListener("resize", update);
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("focusout", onFocusOut);
