@@ -27,6 +27,7 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useMutation } from "@tanstack/react-query";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
+import { useToposKeyboardOpen } from "@/composer/topos-keyboard";
 import { Check, ChevronDown, MessageCircle, X } from "lucide-react-native";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import { openExplorerSidebarView } from "@/workspace-tabs/explorer-sidebar";
@@ -369,6 +370,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
     const [isNearBottom, setIsNearBottom] = useState(true);
     const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
+    // Phone + Topos style: no scroll-to-bottom arrow while the keyboard is up.
+    const toposKeyboardOpen = useToposKeyboardOpen(toposChatStyle && isMobile);
     const toposCollapsed = useToposComposerCollapse((state) => state.collapsed);
     const setToposCollapsed = useToposComposerCollapse((state) => state.setCollapsed);
     useEffect(() => {
@@ -1199,7 +1202,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                 </Pressable>
               </View>
             ) : null}
-            {(!isNearBottom || isTimelineDetached) && !(toposChatStyle && isMobile) && (
+            {(!isNearBottom || isTimelineDetached) && !toposKeyboardOpen && (
               <View style={scrollToBottomContainerStyle} pointerEvents="box-none">
                 <Animated.View entering={scrollIndicatorFadeIn} exiting={scrollIndicatorFadeOut}>
                   <Pressable
