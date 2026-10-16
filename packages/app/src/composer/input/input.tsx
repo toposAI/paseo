@@ -1819,7 +1819,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
               onSelectionChange={handleSelectionChange}
               onPasteImages={onPasteImages}
               onPasteError={handlePasteError}
-              focusHintVisible={isWeb && !isInputFocused && !value}
+              focusHintVisible={isWeb && !isCompact && !isInputFocused && !value}
               focusInputKeys={focusInputKeys}
               focusHintLabel={t("composer.input.focusHint", {
                 shortcut: focusInputKeys ? formatShortcut(focusInputKeys[0], getShortcutOs()) : "",
