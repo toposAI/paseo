@@ -57,13 +57,13 @@ export function ToposUserMessageContextMenu({
       if (event.key === "Escape") close();
     };
     window.addEventListener("pointerdown", close, true);
-    window.addEventListener("scroll", close, true);
+    window.addEventListener("wheel", close, { capture: true, passive: true });
     window.addEventListener("resize", close);
     window.addEventListener("blur", close);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("pointerdown", close, true);
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("wheel", close, true);
       window.removeEventListener("resize", close);
       window.removeEventListener("blur", close);
       window.removeEventListener("keydown", onKey);
