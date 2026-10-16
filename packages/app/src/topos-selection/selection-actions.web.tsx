@@ -22,7 +22,7 @@ const GO_MESSAGE = "やって";
 const HIDE_DELAY_MS = 250;
 const PANEL_WIDTH = 340; // action bar and comment card share one width
 const BAR_WIDTH_DESKTOP = PANEL_WIDTH;
-const BAR_WIDTH_MOBILE = 190; // two buttons in an iOS-callout-style pill; copy is left to the native callout
+const BAR_WIDTH_MOBILE = 160; // two buttons in an iOS-callout-style pill; copy is left to the native callout
 const SETTLE_DELAY_MS = 220;
 const HIGHLIGHT_COLOR = "rgba(80, 140, 255, 0.32)";
 const BAR_HEIGHT = 44;
@@ -121,12 +121,18 @@ function readSelection(): Pick | null {
   const width = barWidth();
   const maxLeft = Math.max(EDGE, window.innerWidth - width - EDGE);
   const left = Math.min(maxLeft, Math.max(EDGE, rect.left + rect.width / 2 - width / 2));
-  // Below the selection (the OS callout sits above it); flip above when there is no room.
-  const below = rect.bottom + 28;
-  const top =
-    below + BAR_HEIGHT + EDGE > window.innerHeight
-      ? Math.max(EDGE, rect.top - BAR_HEIGHT - 12)
-      : below;
+  // The OS callout sits on the opposite side of the selection from where it has room: above
+  // when the selection is in the lower half, below when it is in the upper half. On phones we
+  // take the other side so the two never overlap; on desktop the OS callout is always above.
+  const isPhone = window.innerWidth < DESKTOP_MIN_WIDTH;
+  const selectionInUpperHalf = rect.top + rect.height / 2 < window.innerHeight / 2;
+  const wantAbove = isPhone && selectionInUpperHalf;
+  const aboveTop = rect.top - BAR_HEIGHT - 16;
+  const belowTop = rect.bottom + 28;
+  const fitsAbove = aboveTop >= EDGE;
+  const fitsBelow = belowTop + BAR_HEIGHT + EDGE <= window.innerHeight;
+  const useAbove = wantAbove ? fitsAbove || !fitsBelow : !fitsBelow && fitsAbove;
+  const top = useAbove ? Math.max(EDGE, aboveTop) : belowTop;
   return { quote, range: range.cloneRange(), top, left };
 }
 
@@ -425,22 +431,45 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
     );
   }
 
-  const barButton: CSSProperties = {
-    ...button,
-    fontSize: 17,
-    fontWeight: 400,
-    margin: 0,
-    height: BAR_HEIGHT,
+  // Phone: mimic the iOS edit-menu callout (measured off a screenshot: ~43pt tall, 15pt text,
+  // content-sized buttons, hairline separators, translucent dark blur). There is no official web copy.
+  const phone = window.innerWidth < DESKTOP_MIN_WIDTH;
+  const barButton: CSSProperties = phone
+    ? {
+        ...button,
+        flex: "none",
+        margin: 0,
+        padding: "0 20px",
+        height: 43,
+        fontSize: 15,
+        fontWeight: 400,
+        color: "#fff",
+      }
+    : { ...button, fontSize: 17, fontWeight: 400, margin: 0, height: BAR_HEIGHT };
+  const separator: CSSProperties = {
+    width: 1,
+    height: 20,
+    background: phone ? "rgba(255,255,255,0.22)" : colors.border,
   };
   return (
     <div
       style={{
         ...panel,
-        width: barWidth(),
-        height: BAR_HEIGHT,
+        ...(phone
+          ? {
+              width: "auto",
+              height: 43,
+              background: "rgba(44,44,46,0.86)",
+              backdropFilter: "blur(20px) saturate(180%)",
+              WebkitBackdropFilter: "blur(20px) saturate(180%)",
+              border: "none",
+              color: "#fff",
+              boxShadow: "0 2px 12px rgba(0,0,0,0.3)",
+            }
+          : { width: barWidth(), height: BAR_HEIGHT }),
         display: "flex",
         alignItems: "center",
-        borderRadius: BAR_HEIGHT / 2,
+        borderRadius: 999,
         overflow: "hidden",
       }}
       onMouseDown={keepSelection}
@@ -449,7 +478,7 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
       <button type="button" style={barButton} onClick={handleGo} data-testid="topos-selection-go">
         {t("toposSelection.go")}
       </button>
-      <div style={{ width: 1, height: 22, background: colors.border }} />
+      <div style={separator} />
       <button
         type="button"
         style={barButton}
