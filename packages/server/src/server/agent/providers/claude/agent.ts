@@ -2445,10 +2445,14 @@ class ClaudeAgentSession implements AgentSession {
       if (!this.input) {
         throw new Error("Claude session input stream not initialized");
       }
+      // Capture the input and push BEFORE starting the pump: the pump's own
+      // ensureQuery()/finally can null this.input, which made the old
+      // `this.input.push(...)` throw "Cannot read properties of null".
+      const input = this.input;
       this.activeForegroundQuery = this.query;
-      this.activeForegroundInput = this.input;
+      this.activeForegroundInput = input;
+      input.push(sdkMessage);
       this.startQueryPump();
-      this.input.push(sdkMessage);
       setTimeout(() => {
         if (this.activeForegroundTurnId === turnId) {
           this.emitSubmittedUserMessage(sdkMessage, turnId, options?.clientMessageId);
