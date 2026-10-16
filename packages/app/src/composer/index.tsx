@@ -39,6 +39,7 @@ import {
   Image as ImageIcon,
   ClipboardPaste,
   Paperclip,
+  Minus,
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
 import { FOOTER_HEIGHT } from "@/constants/layout";
@@ -1186,12 +1187,26 @@ const toposCollapsedStyle = { display: "none" } as const;
 export function Composer({ isPaneFocused, ...props }: ComposerProps) {
   const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
   const toposCollapsed = useToposComposerCollapse((state) => state.collapsed);
+  const minimizeToposComposer = useToposComposerCollapse((state) => state.minimize);
+  const isCompactFormFactor = useIsCompactFormFactor();
+  const showMinimize = toposChatStyle && isWeb && !isCompactFormFactor;
   return (
     <ComposerKeyboardScopeProvider isActiveComposer={isPaneFocused}>
       <View style={toposChatStyle && toposCollapsed ? toposCollapsedStyle : toposExpandedStyle}>
         <RenderProfile id="ComposerContent">
           <ComposerContent {...props} />
         </RenderProfile>
+        {showMinimize ? (
+          <Pressable
+            style={styles.toposMinimizeButton}
+            onPress={minimizeToposComposer}
+            accessibilityRole="button"
+            accessibilityLabel="入力欄を最小化"
+            testID="topos-composer-minimize"
+          >
+            <Minus size={16} color="#8a8a8a" />
+          </Pressable>
+        ) : null}
       </View>
     </ComposerKeyboardScopeProvider>
   );
@@ -2556,6 +2571,17 @@ const animatedStaticStyles = RNStyleSheet.create({
 });
 
 const styles = StyleSheet.create((theme: Theme) => ({
+  toposMinimizeButton: {
+    position: "absolute",
+    top: 6,
+    right: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 5,
+  },
   borderSeparator: {
     height: theme.borderWidth[1],
     backgroundColor: theme.colors.border,
