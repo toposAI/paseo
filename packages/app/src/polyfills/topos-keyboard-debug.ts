@@ -2,8 +2,7 @@ const DEBUG_STORAGE_KEY = "paseo-topos-kbdebug";
 const MAX_LOG_LINES = 8;
 
 /**
- * On-screen keyboard diagnostics for iPhone. Off by default; open the app once with `?kbdebug=1`
- * to turn it on (stored in localStorage) and `?kbdebug=0` to turn it off again.
+ * On-screen keyboard diagnostics for iPhone. Currently on by default (temporary); `?kbdebug=0` turns it off and `?kbdebug=1` back on.
  */
 export function installToposKeyboardDebug(): void {
   if (typeof window === "undefined" || typeof document === "undefined") return;
@@ -12,8 +11,10 @@ export function installToposKeyboardDebug(): void {
   try {
     const flag = new URLSearchParams(window.location.search).get("kbdebug");
     if (flag === "1") window.localStorage.setItem(DEBUG_STORAGE_KEY, "1");
-    if (flag === "0") window.localStorage.removeItem(DEBUG_STORAGE_KEY);
-    if (window.localStorage.getItem(DEBUG_STORAGE_KEY) !== "1") return;
+    if (flag === "0") window.localStorage.setItem(DEBUG_STORAGE_KEY, "0");
+    // TEMPORARY: on by default while the iPhone home-screen app (no URL bar, so no ?kbdebug=1) is
+    // being investigated. Flip back to `!== "1"` once the diagnosis is done.
+    if (window.localStorage.getItem(DEBUG_STORAGE_KEY) === "0") return;
   } catch {
     return;
   }
