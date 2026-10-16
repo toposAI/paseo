@@ -24,6 +24,15 @@ interface ToposComposerCollapseState {
   quoteRequest: { agentId: string; quote: string; nonce: number } | null;
   requestQuote: (agentId: string, quote: string) => void;
   clearQuoteRequest: () => void;
+  /** The bubble was tapped: open the composer and raise the keyboard straight away. */
+  focusRequest: number;
+  requestFocus: () => void;
+}
+
+function isTextFieldFocused(): boolean {
+  if (typeof document === "undefined") return false;
+  const el = document.activeElement as HTMLElement | null;
+  return !!el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable);
 }
 
 export const useToposComposerCollapse = create<ToposComposerCollapseState>((set) => ({
@@ -41,6 +50,14 @@ export const useToposComposerCollapse = create<ToposComposerCollapseState>((set)
       quoteRequest: { agentId, quote, nonce: (state.quoteRequest?.nonce ?? 0) + 1 },
     })),
   clearQuoteRequest: () => set({ quoteRequest: null }),
+  focusRequest: 0,
+  requestFocus: () =>
+    set((state) => ({
+      collapsed: false,
+      pinnedOpen: true,
+      userMinimized: false,
+      focusRequest: state.focusRequest + 1,
+    })),
   setCollapsed: (collapsed) =>
     set((state) =>
       state.collapsed === collapsed && (collapsed || !state.pinnedOpen)
@@ -55,9 +72,12 @@ export const useToposComposerCollapse = create<ToposComposerCollapseState>((set)
           ? { collapsed: false, pinnedOpen: false }
           : state;
       }
+      // While typing, the keyboard shrinks the viewport and inflates this distance; folding the
+      // composer then would unmount the field and drop the keyboard.
       if (
         !state.collapsed &&
         !state.pinnedOpen &&
+        !isTextFieldFocused() &&
         distanceFromBottom > TOPOS_COLLAPSE_DISTANCE_PX
       ) {
         return { collapsed: true };

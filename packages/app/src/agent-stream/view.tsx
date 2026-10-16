@@ -58,7 +58,7 @@ import { useRevealedText } from "@/hooks/use-revealed-text";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
 import { resolveContentMaxWidth, useSettings } from "@/hooks/use-settings";
-import { useToposComposerCollapse } from "@/composer/topos-collapse-store";
+import { openKeyboardWarmup, useToposComposerCollapse } from "@/composer/topos-collapse-store";
 import { ToposSelectionActions } from "@/topos-selection/selection-actions";
 import type { ToastApi } from "@/components/toast-host";
 import { returnToTimelineTail } from "./timeline-tail-navigation";
@@ -379,8 +379,12 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       if (!toposChatStyle) setToposCollapsed(false);
       return () => setToposCollapsed(false);
     }, [toposChatStyle, setToposCollapsed]);
-    const pinToposComposerOpen = useToposComposerCollapse((state) => state.pinOpen);
-    const handleToposExpandComposer = pinToposComposerOpen;
+    const requestToposComposerFocus = useToposComposerCollapse((state) => state.requestFocus);
+    const handleToposExpandComposer = useCallback(() => {
+      // Raise the keyboard inside the tap itself (iOS needs that), then the composer takes focus.
+      openKeyboardWarmup();
+      requestToposComposerFocus();
+    }, [requestToposComposerFocus]);
     // Green dot: something new arrived while the composer was folded away.
     const [toposHasNew, setToposHasNew] = useState(false);
     const toposBaselineRef = useRef<{ items: unknown; head: unknown } | null>(null);
