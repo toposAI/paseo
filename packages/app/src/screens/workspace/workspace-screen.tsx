@@ -25,6 +25,7 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
 import invariant from "tiny-invariant";
 import { SidebarMenuToggle } from "@/components/headers/menu-header";
+import { useToposKeyboardOpen } from "@/composer/topos-keyboard";
 import { ScreenHeader } from "@/components/headers/screen-header";
 import { ScreenTitle } from "@/components/headers/screen-title";
 import { HostBadge } from "@/hosts/host-badge";
@@ -3836,6 +3837,8 @@ function WorkspaceScreenContent({
     ],
   );
 
+  const toposChatStyleEnabled = useSettings((settings) => settings.toposChatStyle);
+  const toposKeyboardOpen = useToposKeyboardOpen(toposChatStyleEnabled && isMobile && isWeb);
   const showScreenHeader = useMemo(
     () => shouldShowWorkspaceScreenHeader({ isFocusModeEnabled, isMobile }),
     [isFocusModeEnabled, isMobile],
@@ -4049,9 +4052,9 @@ function WorkspaceScreenContent({
 
   const workspaceCenterColumn = (
     <View style={styles.centerColumn}>
-      {rendersDesktopSplitContent ? null : renderWorkspaceScreenHeader()}
+      {rendersDesktopSplitContent || toposKeyboardOpen ? null : renderWorkspaceScreenHeader()}
 
-      {isMobile ? (
+      {isMobile && !toposKeyboardOpen ? (
         <MobileWorkspaceTabSwitcher
           tabs={tabs}
           activeTabKey={activeTabKey}
