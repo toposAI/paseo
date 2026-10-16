@@ -376,10 +376,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       if (!toposChatStyle) setToposCollapsed(false);
       return () => setToposCollapsed(false);
     }, [toposChatStyle, setToposCollapsed]);
-    const handleToposExpandComposer = useCallback(
-      () => setToposCollapsed(false),
-      [setToposCollapsed],
-    );
+    const pinToposComposerOpen = useToposComposerCollapse((state) => state.pinOpen);
+    const handleToposExpandComposer = pinToposComposerOpen;
     // Green dot: something new arrived while the composer was folded away.
     const [toposHasNew, setToposHasNew] = useState(false);
     const toposBaselineRef = useRef<{ items: unknown; head: unknown } | null>(null);
