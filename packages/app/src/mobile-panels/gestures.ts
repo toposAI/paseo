@@ -9,7 +9,11 @@ import { canBeginMobilePanelGesture, isMobilePanelGestureCurrent } from "./model
 import { useMobilePanelsRuntime } from "./provider";
 import { resolveMobilePanelGestureIntent } from "./gesture-intent";
 
-const MOBILE_WEB_EDGE_SWIPE_WIDTH = 44;
+const MOBILE_WEB_EDGE_SWIPE_WIDTH = 64;
+// Opening the thread list from the edge commits on a short or slow drag; the stock thresholds
+// (a third of the screen or a fast flick) cancelled most thumb swipes.
+const OPEN_AGENT_LIST_COMMIT_FRACTION = 0.12;
+const OPEN_AGENT_LIST_COMMIT_VELOCITY = 150;
 
 function isCurrentSelection(startedRevision: number): boolean {
   return usePanelStore.getState().mobilePanel.revision === startedRevision;
@@ -101,7 +105,9 @@ export function useOpenAgentListGesture(enabled: boolean) {
           updateGesture(startedRevision.value, -event.translationX / windowWidth);
         })
         .onEnd((event, success) => {
-          const shouldOpen = event.translationX > windowWidth / 3 || event.velocityX > 500;
+          const shouldOpen =
+            event.translationX > windowWidth * OPEN_AGENT_LIST_COMMIT_FRACTION ||
+            event.velocityX > OPEN_AGENT_LIST_COMMIT_VELOCITY;
           const result = finishGesture({
             startedRevision: startedRevision.value,
             target: shouldOpen ? "agent-list" : "agent",
