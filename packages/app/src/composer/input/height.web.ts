@@ -75,12 +75,17 @@ export function useComposerHeight({
     const mirror = document.createElement("textarea");
     mirror.setAttribute("aria-hidden", "true");
     mirror.setAttribute("tabindex", "-1");
+    mirror.setAttribute("inert", "");
     mirror.readOnly = true;
     mirror.rows = 1;
     Object.assign(mirror.style, {
       position: "absolute",
-      top: "0",
-      left: "0",
+      // Parked far off-screen: at (0,0) iOS caret dragging snapped to this hidden field (the caret
+      // jumped to the screen's top-left when dragged past the start of the real text).
+      top: "-10000px",
+      left: "-10000px",
+      userSelect: "none",
+      webkitUserSelect: "none",
       visibility: "hidden",
       pointerEvents: "none",
       overflow: "hidden",
