@@ -155,9 +155,36 @@ export function applyVisualViewportHeight() {
     // Undo the pan once iOS has finished scrolling the field into view.
     setTimeout(() => resetScroll(), 700);
   });
+  // While the user places the caret / drags the loupe in a text field, iOS scrolls the page itself
+  // to keep the caret visible; scrolling back to 0 in the middle of that threw the caret to the
+  // previous line (tap at the left end of a wrapped line on the 139 app).
+  let lastTextTouch = 0;
+  let textTouching = false;
+  const markTextTouch = (event: TouchEvent, touching: boolean) => {
+    const el = (event.target as HTMLElement | null)?.closest?.("textarea, input");
+    if (!el) return;
+    textTouching = touching;
+    lastTextTouch = Date.now();
+    if (!touching) setTimeout(() => resetScroll(), 1100);
+  };
+  document.addEventListener("touchstart", (e) => markTextTouch(e, true), {
+    capture: true,
+    passive: true,
+  });
+  document.addEventListener("touchend", (e) => markTextTouch(e, false), {
+    capture: true,
+    passive: true,
+  });
+  document.addEventListener("touchcancel", (e) => markTextTouch(e, false), {
+    capture: true,
+    passive: true,
+  });
   const resetScroll = () => {
     // Fighting iOS's own scroll while the keyboard is opening makes it dismiss the keyboard again.
     if (Date.now() - lastFocusIn < 600) {
+      return;
+    }
+    if (textTouching || Date.now() - lastTextTouch < 1000) {
       return;
     }
     if (window.scrollX !== 0 || window.scrollY !== 0) {
