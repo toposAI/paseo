@@ -9,7 +9,9 @@ import { canBeginMobilePanelGesture, isMobilePanelGestureCurrent } from "./model
 import { useMobilePanelsRuntime } from "./provider";
 import { resolveMobilePanelGestureIntent } from "./gesture-intent";
 
-const MOBILE_WEB_EDGE_SWIPE_WIDTH = 40;
+// Narrower than the composer's text inset (~28px) so a touch at the left end of a line is not
+// claimed as a sidebar swipe (it moved the caret to the previous line on the 139 app).
+const MOBILE_WEB_EDGE_SWIPE_WIDTH = 24;
 // Opening the thread list from the edge commits on a short or slow drag; the stock thresholds
 // (a third of the screen or a fast flick) cancelled most thumb swipes.
 const OPEN_AGENT_LIST_COMMIT_FRACTION = 0.12;

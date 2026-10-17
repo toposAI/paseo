@@ -1650,6 +1650,21 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       t,
     });
 
+    // Topos style on touch: tapping the send button would blur the textarea and drop the
+    // keyboard. Cancelling the synthesized mousedown keeps focus (click still fires).
+    useEffect(() => {
+      if (!isWeb || !toposChatStyle || typeof document === "undefined") return undefined;
+      const handleMouseDown = (event: MouseEvent) => {
+        const target = event.target as Element | null;
+        const button = target?.closest?.('[role="button"]');
+        if (!button || button.getAttribute("aria-label") !== submitAccessibilityLabel) return;
+        if (!button.closest('[data-testid="message-input-root"]')) return;
+        if (document.activeElement?.tagName === "TEXTAREA") event.preventDefault();
+      };
+      document.addEventListener("mousedown", handleMouseDown, true);
+      return () => document.removeEventListener("mousedown", handleMouseDown, true);
+    }, [toposChatStyle, submitAccessibilityLabel]);
+
     const voiceButtonAccessibilityLabel = resolveVoiceAccessibilityLabel({
       isRealtimeVoiceForCurrentAgent,
       isMuted: Boolean(voice?.isMuted),
@@ -1737,8 +1752,14 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     // `fontFamily` here is silently dropped while every other property lands.
     // An inline style outranks both classes. See docs/unistyles.md.
     const textInputStyle = useMemo(
-      () => [styles.textInput, mode.isMonospace && styles.textInputMonospace, composerHeightStyle],
-      [composerHeightStyle, mode.isMonospace],
+      () => [
+        styles.textInput,
+        mode.isMonospace && styles.textInputMonospace,
+        composerHeightStyle,
+        // Keep text clear of the minimize button pinned to the card's top-right corner.
+        isWeb && toposChatStyle && styles.toposTextInputClearOfMinimize,
+      ],
+      [composerHeightStyle, mode.isMonospace, toposChatStyle],
     );
     // Static content has no textarea to mirror, so it grows with its own text
     // instead of the measured input height.
@@ -1983,6 +2004,9 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   textInputMonospace: {
     fontFamily: theme.fontFamily.mono,
+  },
+  toposTextInputClearOfMinimize: {
+    paddingRight: 34,
   },
   readOnlyText: {
     minHeight: MIN_INPUT_HEIGHT,
