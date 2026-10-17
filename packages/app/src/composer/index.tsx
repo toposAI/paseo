@@ -74,7 +74,7 @@ import type { DraftCommandTarget } from "@/hooks/use-agent-commands-query";
 import { encodeImages } from "@/utils/encode-images";
 import { focusWithRetries } from "@/utils/web-focus";
 import { captureCameraImage } from "@/utils/capture-camera-image";
-import { pickWebImages } from "@/utils/pick-web-images";
+import { isIosWeb, pickWebAnyFiles, pickWebImages } from "@/utils/pick-web-images";
 import { isElectronRuntime } from "@/desktop/host";
 import {
   cancelComposerAgent,
@@ -1997,6 +1997,41 @@ function ComposerContentImpl({
     [addFiles, client, t],
   );
 
+  const handleIosNativePick = useCallback(async () => {
+    const files = await pickWebAnyFiles();
+    if (!files) return;
+    const rasterTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    const images = files.filter((file) => rasterTypes.includes(file.type));
+    const others = files.filter((file) => !rasterTypes.includes(file.type));
+    if (images.length > 0) {
+      const newImages = await pickAndPersistImages({
+        pickImages: async () =>
+          images.map((file) => ({
+            source: { kind: "blob" as const, blob: file },
+            mimeType: file.type,
+            fileName: file.name || null,
+          })),
+        persister: composerImageAttachmentPersister,
+      });
+      if (newImages.length > 0) addImages(newImages);
+    }
+    if (others.length > 0) {
+      try {
+        await uploadSelectedFiles(
+          others.map((file) => ({
+            fileName: file.name,
+            mimeType: file.type || "application/octet-stream",
+            readBytes: async () => new Uint8Array(await file.arrayBuffer()),
+          })),
+        );
+      } catch (error) {
+        toastErrorRef.current(
+          error instanceof Error ? error.message : t("composer.errors.uploadFailed"),
+        );
+      }
+    }
+  }, [addImages, t, uploadSelectedFiles]);
+
   const handlePickFile = useCallback(async () => {
     if (!client) {
       toastErrorRef.current(t("composer.errors.daemonClientDisconnected"));
@@ -2327,6 +2362,16 @@ function ComposerContentImpl({
 
   const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
   const attachmentMenuItems = useMemo<AttachmentMenuItem[]>(() => {
+    if (toposChatStyle && isWeb && isIosWeb()) {
+      // iPhone/iPad: AttachmentDropdown renders a plain button that opens the iOS native sheet.
+      return [
+        {
+          id: "ios-native-picker",
+          label: "添付",
+          onSelect: () => void handleIosNativePick(),
+        },
+      ];
+    }
     if (toposChatStyle && isWeb) {
       const toposItems: AttachmentMenuItem[] = [
         { id: "image", label: "写真", onSelect: () => void handlePickImage() },
@@ -2398,6 +2443,7 @@ function ComposerContentImpl({
   }, [
     forgePresentation,
     toposChatStyle,
+    handleIosNativePick,
     handleCaptureImage,
     handlePasteImage,
     handlePickFile,
