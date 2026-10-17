@@ -402,8 +402,14 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
     return () => clearTimeout(timer);
   }, [query]);
 
-  useEffect(() => {
+  // iOS(WKWebView)はタップの処理中に同期でfocusしないとソフトキーボードを出さない。
+  // setTimeoutだけだとジェスチャから外れるので、コミット直後に同期でも一度focusする。
+  useLayoutEffect(() => {
     inputRef.current?.replaceText(pageInputValueRef.current);
+    inputRef.current?.focus();
+  }, [page.kind]);
+
+  useEffect(() => {
     const timer = setTimeout(() => inputRef.current?.focus(), 0);
     return () => clearTimeout(timer);
   }, [page.kind]);
