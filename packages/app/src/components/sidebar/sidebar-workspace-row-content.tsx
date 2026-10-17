@@ -27,6 +27,8 @@ import {
 import { shouldRenderSyncedStatusLoader } from "@/utils/status-loader";
 import { StatusRing } from "@/components/status-ring";
 import { resolveSidebarWorkspacePrimaryLabel } from "@/components/sidebar/sidebar-workspace-title";
+import { isWeb } from "@/constants/platform";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { TrailingActionScrim } from "@/components/ui/trailing-action-scrim";
 import { useWorkspaceLabelDefinitions } from "@/workspace-labels";
 
@@ -126,13 +128,15 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   // The workspace carries label names; their colors live in its host's catalog, so the row is
   // where the two meet — the meta line is handed finished definitions.
   const labels = useWorkspaceLabelDefinitions(workspace.serverId, workspace.labels);
+  const isCompact = useIsCompactFormFactor();
   const workspaceBranchTextStyle = useMemo(
     () => [
       styles.workspaceBranchText,
       isHovered && styles.workspaceBranchTextHovered,
+      isHovered && isWeb && !isCompact && styles.workspaceBranchTextClearOfActions,
       isCreating && styles.workspaceBranchTextCreating,
     ],
-    [isHovered, isCreating],
+    [isHovered, isCreating, isCompact],
   );
 
   return (
@@ -527,6 +531,10 @@ const styles = StyleSheet.create((theme) => ({
   },
   workspaceBranchTextHovered: {
     opacity: 1,
+  },
+  // Pin + archive + kebab float over the row's right edge on hover; keep the title clear of them.
+  workspaceBranchTextClearOfActions: {
+    marginRight: 66,
   },
   statusDotNeedsInput: {
     backgroundColor: getStatusDotColor({ theme, bucket: "needs_input" }) ?? undefined,
