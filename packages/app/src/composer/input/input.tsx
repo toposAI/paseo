@@ -1200,6 +1200,12 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const focusInputKeys = useShortcutKeys("focus-message-input");
     const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
     const [isInputFocused, setIsInputFocused] = useState(false);
+    // On phones the minimize button is hidden while typing, so its padding goes too.
+    const hidesMinimizeWhileTyping =
+      isInputFocused &&
+      isWeb &&
+      typeof window !== "undefined" &&
+      Boolean(window.matchMedia?.("(pointer: coarse)").matches);
     // Web text is DOM-owned between deferred draft publications. The action button only needs
     // this boundary, so publish empty/non-empty transitions without rerendering for every key.
     const initialHasLiveText = value.trim().length > 0;
@@ -1650,6 +1656,20 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       t,
     });
 
+    // Touches that start in the textarea must not reach ancestor gesture handlers (sidebar
+    // swipe etc.), which stole the caret-placing tap near the left edge on iPhone.
+    useEffect(() => {
+      if (!isWeb || !toposChatStyle) return undefined;
+      const el = getWebTextArea() as unknown as HTMLElement | null;
+      if (!el?.addEventListener) return undefined;
+      const stop = (event: Event) => event.stopPropagation();
+      const types = ["pointerdown", "touchstart", "touchmove"];
+      for (const type of types) el.addEventListener(type, stop);
+      return () => {
+        for (const type of types) el.removeEventListener(type, stop);
+      };
+    }, [toposChatStyle, getWebTextArea]);
+
     // Topos style on touch: tapping the send button would blur the textarea and drop the
     // keyboard. Cancelling the synthesized mousedown keeps focus (click still fires).
     useEffect(() => {
@@ -1757,9 +1777,12 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         mode.isMonospace && styles.textInputMonospace,
         composerHeightStyle,
         // Keep text clear of the minimize button pinned to the card's top-right corner.
-        isWeb && toposChatStyle && styles.toposTextInputClearOfMinimize,
+        isWeb &&
+          toposChatStyle &&
+          !hidesMinimizeWhileTyping &&
+          styles.toposTextInputClearOfMinimize,
       ],
-      [composerHeightStyle, mode.isMonospace, toposChatStyle],
+      [composerHeightStyle, mode.isMonospace, toposChatStyle, hidesMinimizeWhileTyping],
     );
     // Static content has no textarea to mirror, so it grows with its own text
     // instead of the measured input height.

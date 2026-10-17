@@ -1214,7 +1214,9 @@ function ToposMinimizeButton() {
     if (typeof document !== "undefined") (document.activeElement as HTMLElement | null)?.blur?.();
     minimizeToposComposer();
   }, [minimizeToposComposer]);
-  if (!toposChatStyle || !isWeb) return null;
+  const typing = useToposTypingOnTouch(toposChatStyle);
+  // While typing on a phone the button only covers text; the keyboard's own dismissal folds it.
+  if (!toposChatStyle || !isWeb || typing) return null;
   return (
     <Pressable
       style={styles.toposMinimizeButton}
