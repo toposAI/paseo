@@ -1267,8 +1267,7 @@ function ComposerRightControlsSlot({
     !isAgentRunning &&
     !hideVoiceForCompactInput;
   // 139番アプリ内でだけ、録音画面(139番の音声入力)を直接開くマイクを出す。
-  const showDictationButton =
-    showVoice && hasAgent && !hideVoiceForCompactInput && isWeb;
+  const showDictationButton = showVoice && hasAgent && isWeb;
   const dictationBridge = showDictationButton ? getDictation139Bridge() : null;
   if (!showVoiceModeButton && !dictationBridge) return null;
   return (
