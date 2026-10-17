@@ -43,7 +43,13 @@ import {
   Mic,
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
-import { getDictation139Bridge, openDictation139Recording } from "@/utils/dictation139-bridge";
+import {
+  getDictation139Bridge,
+  insertIntoComposer,
+  subscribeDictation139,
+  toggleDictation139Recording,
+  type Dictation139State,
+} from "@/utils/dictation139-bridge";
 import { FOOTER_HEIGHT } from "@/constants/layout";
 import {
   AgentControls,
@@ -1158,26 +1164,49 @@ function ComposerDictationButton({
   buttonIconSize: number;
   realtimeVoiceButtonStyle: ComposerVoiceModeButtonProps["realtimeVoiceButtonStyle"];
 }) {
+  const [state, setState] = useState<Dictation139State>("idle");
+  useEffect(
+    () =>
+      subscribeDictation139((event) => {
+        if (event.type === "state") setState(event.state);
+        else insertIntoComposer(event.text);
+      }),
+    [],
+  );
   const renderContent = useCallback(
-    ({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => (
-      <ThemedMic
-        size={buttonIconSize}
-        uniProps={hovered ? iconForegroundMapping : iconForegroundMutedMapping}
-      />
-    ),
-    [buttonIconSize],
+    ({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => {
+      if (state === "recording") return <Square size={buttonIconSize} color="white" fill="white" />;
+      if (state === "sending") return <LoadingSpinner size="small" color="white" />;
+      return (
+        <ThemedMic
+          size={buttonIconSize}
+          uniProps={hovered ? iconForegroundMapping : iconForegroundMutedMapping}
+        />
+      );
+    },
+    [buttonIconSize, state],
+  );
+  const style = useCallback(
+    (pressState: PressableStateCallbackType & { hovered?: boolean }) => [
+      ...realtimeVoiceButtonStyle(pressState),
+      state === "recording" ? composerDictationRecordingStyle : undefined,
+    ],
+    [realtimeVoiceButtonStyle, state],
   );
   return (
     <Pressable
-      onPress={openDictation139Recording}
+      onPress={toggleDictation139Recording}
+      disabled={state === "sending"}
       accessibilityLabel="139番の音声入力"
       accessibilityRole="button"
-      style={realtimeVoiceButtonStyle}
+      style={style}
     >
       {renderContent}
     </Pressable>
   );
 }
+
+const composerDictationRecordingStyle = { backgroundColor: "#d33" } as const;
 
 function ComposerVoiceModeButton({
   buttonIconSize,
