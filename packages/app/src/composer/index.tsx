@@ -40,8 +40,10 @@ import {
   ClipboardPaste,
   Paperclip,
   Minus,
+  Mic,
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
+import { getDictation139Bridge, openDictation139Recording } from "@/utils/dictation139-bridge";
 import { FOOTER_HEIGHT } from "@/constants/layout";
 import {
   AgentControls,
@@ -1132,11 +1134,48 @@ function ComposerRightControlsSlot({
   const hideVoiceForCompactInput = isCompact && hasSendableContent;
   const showVoiceModeButton =
     showVoice && !isVoiceModeForAgent && hasAgent && !isAgentRunning && !hideVoiceForCompactInput;
-  if (!showVoiceModeButton) return null;
+  // 139番アプリ内でだけ、録音画面(139番の音声入力)を直接開くマイクを出す。
+  const showDictationButton = showVoice && hasAgent && !hideVoiceForCompactInput && isWeb;
+  const dictationBridge = showDictationButton ? getDictation139Bridge() : null;
+  if (!showVoiceModeButton && !dictationBridge) return null;
   return (
     <View style={styles.rightControls}>
-      <ComposerVoiceModeButton {...voiceProps} />
+      {dictationBridge ? (
+        <ComposerDictationButton
+          buttonIconSize={voiceProps.buttonIconSize}
+          realtimeVoiceButtonStyle={voiceProps.realtimeVoiceButtonStyle}
+        />
+      ) : null}
+      {showVoiceModeButton ? <ComposerVoiceModeButton {...voiceProps} /> : null}
     </View>
+  );
+}
+
+function ComposerDictationButton({
+  buttonIconSize,
+  realtimeVoiceButtonStyle,
+}: {
+  buttonIconSize: number;
+  realtimeVoiceButtonStyle: ComposerVoiceModeButtonProps["realtimeVoiceButtonStyle"];
+}) {
+  const renderContent = useCallback(
+    ({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => (
+      <ThemedMic
+        size={buttonIconSize}
+        uniProps={hovered ? iconForegroundMapping : iconForegroundMutedMapping}
+      />
+    ),
+    [buttonIconSize],
+  );
+  return (
+    <Pressable
+      onPress={openDictation139Recording}
+      accessibilityLabel="139番の音声入力"
+      accessibilityRole="button"
+      style={realtimeVoiceButtonStyle}
+    >
+      {renderContent}
+    </Pressable>
   );
 }
 
@@ -2806,6 +2845,7 @@ const ThemedArrowUp = withUnistyles(ArrowUp);
 const ThemedGitPullRequest = withUnistyles(GitPullRequest);
 const ThemedCircleDot = withUnistyles(CircleDot);
 const ThemedAudioLines = withUnistyles(AudioLines);
+const ThemedMic = withUnistyles(Mic);
 const ThemedPaperclip = withUnistyles(Paperclip);
 const ThemedImageIcon = withUnistyles(ImageIcon);
 const ThemedClipboardPaste = withUnistyles(ClipboardPaste);
