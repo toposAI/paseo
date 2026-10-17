@@ -24,6 +24,7 @@ import { useTranslation } from "react-i18next";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
 import { ArrowUp, Mic, MicOff, CornerDownLeft, Plus, Square } from "lucide-react-native";
 import { useDictation } from "@/hooks/use-dictation";
+import { getDictation139Bridge } from "@/utils/dictation139-bridge";
 import { DictationOverlay } from "@/components/dictation-controls";
 import { RealtimeVoiceOverlay } from "@/components/realtime-voice-overlay";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
@@ -1893,7 +1894,8 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
             <View style={styles.rightButtonGroup}>
               {beforeVoiceContent}
               <VoiceButtonTooltip
-                visible={mode.showVoice}
+                // 139番アプリ内は、composer側の「139番の音声入力」マイクに一本化する。
+                visible={mode.showVoice && !getDictation139Bridge()}
                 onVoicePress={handleVoicePress}
                 isDictationStartEnabled={isDictationStartEnabled}
                 voiceButtonAccessibilityLabel={voiceButtonAccessibilityLabel}
