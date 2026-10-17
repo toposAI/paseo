@@ -21,7 +21,7 @@ import {
   type SharedValue,
 } from "react-native-reanimated";
 import { scheduleOnRN, scheduleOnUI } from "react-native-worklets";
-import { isNative } from "@/constants/platform";
+import { isNative, isWeb } from "@/constants/platform";
 import {
   usePanelStore,
   type MobilePanelSelection,
@@ -72,8 +72,12 @@ const MobilePanelActiveContext = createContext<MobilePanelView>("agent");
 export function MobilePanelsProvider({ children }: { children: ReactNode }) {
   const { width: windowWidth } = useWindowDimensions();
   const initialSelection = useRef(usePanelStore.getState().mobilePanel).current;
-  const position = useSharedValue(getMobilePanelAnchor(initialSelection.target));
-  const motionState = useSharedValue(createMobilePanelMotionState(initialSelection));
+  const position = useSharedValue(
+    getMobilePanelAnchor(initialSelection.target)
+  );
+  const motionState = useSharedValue(
+    createMobilePanelMotionState(initialSelection)
+  );
   const openGesturesBlocked = useSharedValue(false);
   const openGestureBlockersRef = useRef(new Set<symbol>());
   const leftOpenGestureRef = useRef<GestureType | undefined>(undefined);
@@ -91,19 +95,26 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
       }
       openGesturesBlocked.value = openGestureBlockersRef.current.size > 0;
     },
-    [openGesturesBlocked],
+    [openGesturesBlocked]
   );
 
-  const publishActivePanel = useCallback((panel: MobilePanelView, revision: number) => {
-    const selection = usePanelStore.getState().mobilePanel;
-    if (selection.revision !== revision || selection.target !== panel) {
-      return;
-    }
-    if (isNative && panel !== "agent") {
-      Keyboard.dismiss();
-    }
-    setActivePanel(panel);
-  }, []);
+  const publishActivePanel = useCallback(
+    (panel: MobilePanelView, revision: number) => {
+      const selection = usePanelStore.getState().mobilePanel;
+      if (selection.revision !== revision || selection.target !== panel) {
+        return;
+      }
+      if (isNative && panel !== "agent") {
+        Keyboard.dismiss();
+      }
+      // Web(139番アプリ含む)ではサイドバー側へ移ったら入力欄のフォーカスを外し、キーボードを閉じる。
+      if (isWeb && panel !== "agent" && typeof document !== "undefined") {
+        (document.activeElement as HTMLElement | null)?.blur?.();
+      }
+      setActivePanel(panel);
+    },
+    []
+  );
 
   useAnimatedReaction(
     () => ({ motionState: motionState.value, position: position.value }),
@@ -116,9 +127,13 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
         return;
       }
       motionState.value = settled.state;
-      scheduleOnRN(publishActivePanel, settled.state.settledTarget, settled.state.revision);
+      scheduleOnRN(
+        publishActivePanel,
+        settled.state.settledTarget,
+        settled.state.revision
+      );
     },
-    [motionState, position, publishActivePanel],
+    [motionState, position, publishActivePanel]
   );
 
   const animateTransition = useCallback(
@@ -133,7 +148,7 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
         easing: ANIMATION_EASING,
       });
     },
-    [position],
+    [position]
   );
 
   const applySelection = useCallback(
@@ -150,7 +165,7 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
       motionState.value = transition.state;
       animateTransition(transition);
     },
-    [animateTransition, motionState],
+    [animateTransition, motionState]
   );
 
   useEffect(() => {
@@ -178,7 +193,7 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
       cancelAnimation(position);
       return transition.state.gesture?.startedRevision ?? -1;
     },
-    [motionState, position],
+    [motionState, position]
   );
 
   const updateGesture = useCallback(
@@ -190,11 +205,15 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
       position.value = Math.max(-1, Math.min(1, nextPosition));
       return true;
     },
-    [motionState, position],
+    [motionState, position]
   );
 
   const finishGesture = useCallback(
-    ({ startedRevision, target, success }: FinishGestureInput): MobilePanelCommit | null => {
+    ({
+      startedRevision,
+      target,
+      success,
+    }: FinishGestureInput): MobilePanelCommit | null => {
       "worklet";
       const currentState = motionState.value;
       const transition = transitionMobilePanel(currentState, {
@@ -210,7 +229,7 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
       animateTransition(transition);
       return transition.commit ?? null;
     },
-    [animateTransition, motionState],
+    [animateTransition, motionState]
   );
 
   const value = useMemo<MobilePanelsRuntime>(
@@ -237,7 +256,7 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
       setOpenGestureBlocked,
       updateGesture,
       windowWidth,
-    ],
+    ]
   );
 
   return (
@@ -253,7 +272,9 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
 export function useMobilePanelsRuntime(): MobilePanelsRuntime {
   const context = useContext(MobilePanelsContext);
   if (!context) {
-    throw new Error("useMobilePanelsRuntime must be used within MobilePanelsProvider");
+    throw new Error(
+      "useMobilePanelsRuntime must be used within MobilePanelsProvider"
+    );
   }
   return context;
 }
