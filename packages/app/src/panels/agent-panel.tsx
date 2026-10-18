@@ -929,18 +929,18 @@ function ChatAgentContent({
     [agentId],
   );
 
+  const toposKeepsReadingPosition = useSettings((settings) => settings.toposChatStyle);
   const handleMessageSent = useCallback(() => {
     if (!agentId) {
       return;
     }
-    // A comment on a quoted passage keeps the reader where they were (same as the desktop card).
-    const collapse = useToposComposerCollapse.getState();
-    if (collapse.quoteCommentPending) {
-      collapse.setQuoteCommentPending(false);
+    // Topos style: sending never moves the reader. Already at the bottom, the stream keeps following.
+    if (toposKeepsReadingPosition) {
+      useToposComposerCollapse.getState().setQuoteCommentPending(false);
       return;
     }
     streamViewRef.current?.scrollToBottom("message-sent");
-  }, [agentId]);
+  }, [agentId, toposKeepsReadingPosition]);
 
   const handleRewindComplete = useCallback(() => {
     streamViewRef.current?.scrollToBottom("rewind");
