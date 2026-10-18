@@ -1613,6 +1613,7 @@ function ComposerContentImpl({
       .join("\n");
     const prefix = current.trim() ? `${current.replace(/\s+$/, "")}\n\n` : "";
     replaceUserInput(`${prefix}${quoted}\n\n`);
+    useToposComposerCollapse.getState().setQuoteCommentPending(true);
     clearQuoteRequest();
     // The composer may have just unfolded from display:none; focus after it paints.
     setTimeout(() => {

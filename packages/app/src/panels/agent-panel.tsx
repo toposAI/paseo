@@ -933,6 +933,12 @@ function ChatAgentContent({
     if (!agentId) {
       return;
     }
+    // A comment on a quoted passage keeps the reader where they were (same as the desktop card).
+    const collapse = useToposComposerCollapse.getState();
+    if (collapse.quoteCommentPending) {
+      collapse.setQuoteCommentPending(false);
+      return;
+    }
     streamViewRef.current?.scrollToBottom("message-sent");
   }, [agentId]);
 
