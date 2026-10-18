@@ -1,5 +1,5 @@
 import { supportsUsageReports } from "@getpaseo/client/internal/daemon-client";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   skipToken,
   useMutation,
@@ -34,6 +34,7 @@ import type { UsageReportEntry, UsageView } from "./types";
 // The daemon caches each report for five minutes, so re-reading it is cheap. Only
 // an explicit refresh passes `forceRefresh` and reaches the source's API.
 const REPORTS_STALE_TIME_MS = 60_000;
+const SIDEBAR_REFRESH_INTERVAL_MS = 5 * 60_000;
 
 /** Every report list of a host: its own and each agent's. */
 function hostUsageQueryKey(serverId: string) {
@@ -168,6 +169,16 @@ export function useUsageHostReports(serverId: string | null): UsageReportEntry[]
     dataShape: "list",
     staleTimeMs: REPORTS_STALE_TIME_MS,
   });
+  // The sidebar meters stay mounted, so they would otherwise only change once the usage page is
+  // opened. Force a fresh read every few minutes while the tab is visible.
+  useEffect(() => {
+    if (!serverId) return;
+    const timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void refreshReports(queryClient, serverId).catch(() => undefined);
+    }, SIDEBAR_REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [queryClient, serverId]);
   return query.data ?? NO_REPORTS;
 }
 
