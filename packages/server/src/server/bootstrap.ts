@@ -235,6 +235,7 @@ import { DaemonExecutions } from "./hub/daemon-executions.js";
 import { PluginService } from "./plugins/index.js";
 import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
 import { ManagedPluginSources } from "./plugins/managed-source.js";
+import { setupConfirmBox } from "./confirm-box/index.js";
 
 const MCP_DEBUG_BATCH_LIMIT = 10;
 const MCP_DEBUG_SECRET = "[redacted]";
@@ -799,6 +800,14 @@ export async function createPaseoDaemon(
   // Health check endpoint
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // topos-customizations: 確認箱(watchdog等の通知の受け皿)。詳細は TOPOS_CUSTOMIZATIONS.md。
+  const confirmBox = setupConfirmBox({
+    app,
+    logger,
+    version: daemonVersion,
+    getPushSender: () => config.pushNotificationSender ?? wsServer?.getPushNotificationSender(),
   });
 
   app.get("/api/status", (_req, res) => {
@@ -1790,6 +1799,7 @@ export async function createPaseoDaemon(
       // model loading doesn't block the server from accepting connections.
       speechService.start();
       scriptHealthMonitor.start();
+      confirmBox.start();
     } catch (error) {
       localCredential = null;
       await deleteLocalCredential(config.paseoHome);
@@ -1816,6 +1826,7 @@ export async function createPaseoDaemon(
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();
+    confirmBox.stop();
     // Freeze both ingress and registration before taking the agent closure snapshot.
     wsServer?.prepareForShutdown();
     agentManager.prepareForShutdown();

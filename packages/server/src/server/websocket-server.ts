@@ -1049,6 +1049,11 @@ export class VoiceAssistantWebSocketServer {
     }
   }
 
+  /** topos-customizations: 確認箱(confirm-box)が緊急通知のpushに使う。 */
+  public getPushNotificationSender(): PushNotificationSender {
+    return this.pushNotificationSender;
+  }
+
   public prepareForShutdown(): void {
     this.connectionLifecycle = "stopping";
   }

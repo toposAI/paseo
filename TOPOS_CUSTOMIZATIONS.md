@@ -100,3 +100,19 @@ variant \`tool_definition\`, expected \`tool_reference\``で失敗していた�
   先頭のidを保つので find / scroll の宛先は変わらない。サーバ側の `mergeReasoningChunks` は
   seq連続を結合条件にしているため履歴側では元から分裂しており、そちらは変更していない。
   テスト: `thinking-merge.test.ts` と `presentation.test.ts` の `adjacent thinking rows`。
+- **確認箱(confirm box)**(2026-10-19)。ToposAI-Mini-Project の watchdog/デーモンが出していたメール通知の
+  受け皿。`packages/server/src/server/confirm-box/`(store/push-policy/service/routes/page/index)を新設し、
+  `bootstrap.ts` から `setupConfirmBox()` を1回呼ぶだけで組み込む(`/api/health` の直後に登録、listen後に
+  `start()`、`stop()` で停止)。`websocket-server.ts` には緊急pushに使う `getPushNotificationSender()` を1つ追加。
+  - データ契約はPython側 `antigravity/utils/notify_box.py` と共有: `~/.local/state/toposai/confirm_box/`
+    (`TOPOS_CONFIRM_BOX_DIR` で変更可)の `events-YYYYMM.jsonl`(item/ack/ackall/push、O_APPEND単一write、
+    ロック不要)と `heartbeat.json`(約15秒毎に原子更新。Python日次死活検査 `confirm_box_liveness_watchdog` が読む)。
+  - API: `/api/confirm-box/`(モバイルHTML。緊急=オレンジ/通常=緑、既読/承認/すべて既読)、
+    `summary`、`items?view=active|all`、`items/:id/ack`、`ack-all`、`POST items`(外部受信)、`health`。
+    パスを `/api/` 配下にしたのは web-ui の SPA fallback が `/api/` を除外するため。認証は既存のbearerに従う。
+  - 緊急(未読・未push・6時間以内)のみ Expo push。5分間隔・1時間6回まで、複数は1通に集約、本文は件名のみ
+    (`push-policy.ts`)。通常はバッジのみ。**iPhone公式アプリにはフォークUIが届かない**ため、確認は
+    Safari→ホーム画面追加のPWA(`http://100.85.224.7:6767/api/confirm-box/`)+push通知で行う。
+    push は公式アプリのExpoトークンが登録されている場合だけ届く(トークン0件なら無通知)。
+  - `TOPOS_CONFIRM_BOX=0` で無効化。vitest実行中は `TOPOS_CONFIRM_BOX_DIR` 未指定なら無効(本番heartbeatを汚さない)。
+  - テスト: `confirm-box/confirm-box.test.ts`(store増分読込・Python契約形式・ack畳込み・push方針・HTTP)。
