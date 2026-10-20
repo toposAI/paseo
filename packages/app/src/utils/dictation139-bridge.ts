@@ -29,12 +29,50 @@ export function subscribeDictation139(listener: (event: Dictation139Event) => vo
   return () => window.removeEventListener("dictation139", handler);
 }
 
-/** 文字起こし結果を入力欄のカーソル位置へ挿入する(Reactの状態を通すためexecCommandを使う)。 */
-export function insertIntoComposer(text: string): void {
-  const el = document.querySelector<HTMLTextAreaElement>(
+/**
+ * composerの入力欄(可視・編集可のもの)を1つ選ぶ。
+ * `querySelector`で先頭一致を掴むと、高さ計測用の隠しtextareaを拾いうるため
+ * 「見えていて編集可能」なものだけを対象にする。
+ */
+function findComposerTextarea(): HTMLTextAreaElement | null {
+  const candidates = document.querySelectorAll<HTMLTextAreaElement>(
     '[data-testid="message-input-root"] textarea',
   );
-  if (!el) return;
+  for (const el of candidates) {
+    if (el.disabled || el.readOnly) continue;
+    if (el.getClientRects().length === 0) continue;
+    return el;
+  }
+  return null;
+}
+
+/**
+ * 文字起こし結果を入力欄のカーソル位置へ挿入する(DOM直操作のフォールバック)。
+ *
+ * **通常はこれを使わない。** composer側の`replaceUserInput`(Reactの状態を通す正規経路)が
+ * 使える場合はそちらを優先すること。この実装は
+ * `document.execCommand("insertText")` が「その時点でフォーカスされている編集可能要素」に
+ * しか効かないことに依存しており、iOS WKWebViewではユーザー操作由来でない`focus()`が
+ * 無視されるため、**マイクボタン押下でキーボードが閉じていると無言で何も起きない**
+ * (2026-10-21の「録音は始まるが文字が入らない」の主因と推定)。
+ *
+ * 呼び出し側が失敗を可視化できるよう、**挿入できたかどうかを返す**。
+ */
+export function insertIntoComposer(text: string): boolean {
+  const el = findComposerTextarea();
+  if (!el) return false;
+  const before = el.value;
   el.focus();
   document.execCommand("insertText", false, text);
+  if (el.value !== before) return true;
+
+  // execCommandが効かなかった場合の最後の手段: 値を直接差し替えて`input`を発火する
+  // (Reactはinputイベントを拾ってonChangeTextを呼ぶ)。それも駄目ならfalseを返す。
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+  if (!setter) return false;
+  const start = el.selectionStart ?? before.length;
+  const end = el.selectionEnd ?? start;
+  setter.call(el, before.slice(0, start) + text + before.slice(end));
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  return el.value !== before;
 }

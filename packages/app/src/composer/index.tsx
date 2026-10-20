@@ -41,6 +41,7 @@ import {
   Paperclip,
   Minus,
   Mic,
+  MicOff,
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
 import {
@@ -1131,6 +1132,8 @@ interface ComposerRightControlsSlotProps extends ComposerVoiceModeButtonProps {
   hasSendableContent: boolean;
   isCompact: boolean;
   showVoice: boolean;
+  /** 139番の文字起こし結果を入力欄へ挿入する(挿入できたかを返す)。 */
+  insertDictationText: (text: string) => boolean;
 }
 
 function ComposerRightControlsSlot({
@@ -1140,6 +1143,7 @@ function ComposerRightControlsSlot({
   hasSendableContent,
   isCompact,
   showVoice,
+  insertDictationText,
   ...voiceProps
 }: ComposerRightControlsSlotProps) {
   const hideVoiceForCompactInput = isCompact && hasSendableContent;
@@ -1155,6 +1159,7 @@ function ComposerRightControlsSlot({
         <ComposerDictationButton
           buttonIconSize={voiceProps.buttonIconSize}
           realtimeVoiceButtonStyle={voiceProps.realtimeVoiceButtonStyle}
+          insertText={insertDictationText}
         />
       ) : null}
       {showVoiceModeButton ? <ComposerVoiceModeButton {...voiceProps} /> : null}
@@ -1162,26 +1167,81 @@ function ComposerRightControlsSlot({
   );
 }
 
+/** 失敗表示(トースト+マイクのエラー表示)を出し続ける時間。 */
+const DICTATION_ERROR_FLASH_MS = 6000;
+
 function ComposerDictationButton({
   buttonIconSize,
   realtimeVoiceButtonStyle,
+  insertText,
 }: {
   buttonIconSize: number;
   realtimeVoiceButtonStyle: ComposerVoiceModeButtonProps["realtimeVoiceButtonStyle"];
+  insertText: (text: string) => boolean;
 }) {
   const [state, setState] = useState<Dictation139State>("idle");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toast = useToast();
+  const toastErrorRef = useRef(toast.error);
+  toastErrorRef.current = toast.error;
+  // 挿入関数はcomposer本体から渡される。参照が毎レンダー変わりうるので、
+  // 購読(subscribe)を張り直さずに済むようref経由で読む。
+  const insertTextRef = useRef(insertText);
+  insertTextRef.current = insertText;
+
+  // 2026-10-21: 139番の音声入力は「録音は始まるが文字が入らない」時に
+  // 何も表示されず、ユーザーからは無反応に見えていた(司令塔判断: 失敗が見えること自体が
+  // 修正)。原因は2つあり、どちらもここで可視化する:
+  //   (A) サーバーが空文字を返した(無音入力等) → アプリが`state:"error"`+messageで通知
+  //   (B) 文字起こしはできたが入力欄へ挿入できなかった → 下のinsert失敗で検知
+  // トーストだけだと見落とすので、マイクボタン自体も一定時間エラー表示にする。
+  const flashError = useCallback((message: string) => {
+    toastErrorRef.current(message);
+    setErrorMessage(message);
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = setTimeout(() => setErrorMessage(null), DICTATION_ERROR_FLASH_MS);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    },
+    [],
+  );
+
   useEffect(
     () =>
       subscribeDictation139((event) => {
-        if (event.type === "state") setState(event.state);
-        else insertIntoComposer(event.text);
+        if (event.type === "state") {
+          setState(event.state);
+          if (event.state === "error") {
+            flashError(event.message ?? "139番の音声入力を開始できませんでした");
+          }
+          return;
+        }
+        // composer本体のReact状態を通す経路を第一手段にし、使えなければDOM直操作へ落とす。
+        // どちらも失敗したら黙って捨てずにエラー表示する。
+        let inserted = false;
+        try {
+          inserted = insertTextRef.current(event.text);
+        } catch {
+          inserted = false;
+        }
+        if (!inserted) inserted = insertIntoComposer(event.text);
+        if (!inserted) flashError("文字起こしを入力欄へ挿入できませんでした");
       }),
-    [],
+    [flashError],
   );
+
+  const isError = errorMessage !== null;
   const renderContent = useCallback(
     ({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => {
       if (state === "recording") return <Square size={buttonIconSize} color="white" fill="white" />;
       if (state === "sending") return <LoadingSpinner size="small" color="white" />;
+      if (isError) {
+        return <ThemedMicOff size={buttonIconSize} uniProps={dictationErrorIconMapping} />;
+      }
       return (
         <ThemedMic
           size={buttonIconSize}
@@ -1189,7 +1249,7 @@ function ComposerDictationButton({
         />
       );
     },
-    [buttonIconSize, state],
+    [buttonIconSize, isError, state],
   );
   const style = useCallback(
     (pressState: PressableStateCallbackType & { hovered?: boolean }) => [
@@ -1203,6 +1263,7 @@ function ComposerDictationButton({
       onPress={toggleDictation139Recording}
       disabled={state === "sending"}
       accessibilityLabel="139番の音声入力"
+      accessibilityHint={errorMessage ?? undefined}
       accessibilityRole="button"
       style={style}
     >
@@ -1499,6 +1560,35 @@ function ComposerContentImpl({
       onChangeText(text);
     },
     [onChangeText],
+  );
+
+  /**
+   * 139番の文字起こし結果を、入力欄のカーソル位置へ挿入する。
+   *
+   * DOM直操作(`insertIntoComposer`)ではなく入力欄自身のAPI(`replaceText`)を通すのは、
+   * `document.execCommand("insertText")`が「その時点でフォーカスされている編集可能要素」
+   * にしか効かず、iOS WKWebViewではネイティブからのイベントがユーザー操作由来でないため
+   * `focus()`が無視されるから(2026-10-21の「録音は始まるが文字が入らない」の主因)。
+   * 挿入できたかを返し、呼び出し側が失敗を可視化できるようにする。
+   */
+  const insertDictationText = useCallback(
+    (text: string): boolean => {
+      const input = messageInputRef.current;
+      if (!input) return false;
+      try {
+        const snapshot = input.getInputSnapshot();
+        const { start, end } = snapshot.selection;
+        const caret = start + text.length;
+        replaceUserInput(snapshot.text.slice(0, start) + text + snapshot.text.slice(end), {
+          start: caret,
+          end: caret,
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [replaceUserInput],
   );
 
   const runClientSlashCommand = useCallback(
@@ -2266,12 +2356,14 @@ function ComposerContentImpl({
         isVoiceSwitching={isVoiceSwitching}
         realtimeVoiceButtonStyle={realtimeVoiceButtonStyle}
         voiceToggleKeys={voiceToggleKeys}
+        insertDictationText={insertDictationText}
         t={t}
       />
     ),
     [
       buttonIconSize,
       handleToggleRealtimeVoice,
+      insertDictationText,
       hasAgent,
       hasSendableContent,
       isAgentRunning,
@@ -2985,6 +3077,11 @@ const ThemedGitPullRequest = withUnistyles(GitPullRequest);
 const ThemedCircleDot = withUnistyles(CircleDot);
 const ThemedAudioLines = withUnistyles(AudioLines);
 const ThemedMic = withUnistyles(Mic);
+const ThemedMicOff = withUnistyles(MicOff);
+/** 139番の音声入力が失敗した時のマイク表示(失敗を無言にしないための色)。 */
+const dictationErrorIconMapping = (theme: Theme) => ({
+  color: theme.colors.destructive,
+});
 const ThemedPaperclip = withUnistyles(Paperclip);
 const ThemedImageIcon = withUnistyles(ImageIcon);
 const ThemedClipboardPaste = withUnistyles(ClipboardPaste);
