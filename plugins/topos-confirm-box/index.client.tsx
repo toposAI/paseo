@@ -73,7 +73,7 @@ export default function contribute(client: PluginClientContext) {
               registered.set(
                 workspaceId,
                 client.addHeaderButton({
-                  id: `box-${workspaceId}`,
+                  id: "box",
                   workspaceId,
                   button: {
                     title: "確認箱",
