@@ -1,11 +1,12 @@
 import * as Clipboard from "expo-clipboard";
 import { isWeb } from "@/constants/platform";
+import { copyPlainTextWeb } from "@/utils/ios-safe-copy";
 import type { MarkdownClipboardEnvironment, RichClipboardWriter } from "@/utils/rich-clipboard";
 
 export function getDefaultMarkdownClipboardEnvironment(): MarkdownClipboardEnvironment {
   return {
     richWriter: getWebRichClipboardWriter(),
-    writePlainText: (text) => Clipboard.setStringAsync(text),
+    writePlainText: (text) => (isWeb ? copyPlainTextWeb(text) : Clipboard.setStringAsync(text)),
   };
 }
 
