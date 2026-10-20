@@ -174,7 +174,7 @@ import { createRelayRuntime, type RelayRuntime } from "./relay-runtime.js";
 import type { PushNotificationSender } from "./push/index.js";
 import { getOrCreateServerId } from "./server-id.js";
 import { resolveDaemonVersion } from "./daemon-version.js";
-import type { AgentClient, AgentProvider } from "./agent/agent-sdk-types.js";
+import type { AgentClient, AgentProvider, AgentTimelineItem } from "./agent/agent-sdk-types.js";
 import type {
   AgentProfile,
   AgentSkillSelection,
@@ -236,6 +236,8 @@ import { PluginService } from "./plugins/index.js";
 import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
 import { ManagedPluginSources } from "./plugins/managed-source.js";
 import { setupConfirmBox } from "./confirm-box/index.js";
+import type { ConfirmBoxTimelineItem } from "./confirm-box/chat.js";
+import { sendPromptToAgent } from "./agent/agent-prompt.js";
 
 const MCP_DEBUG_BATCH_LIMIT = 10;
 const MCP_DEBUG_SECRET = "[redacted]";
@@ -808,6 +810,30 @@ export async function createPaseoDaemon(
     logger,
     version: daemonVersion,
     getPushSender: () => config.pushNotificationSender ?? wsServer?.getPushNotificationSender(),
+    getServerId: () => serverId,
+    // チャット欄(A案): 箱で聞かれた質問を元スレへ送り、返答を箱へ戻す。
+    // agentStorage(890行目) / agentManager(954行目) はこの呼び出しより**後**に生成されるため、
+    // 遅延getterで受ける(getPushSender と同じ形。呼ばれるのはリクエスト時点なので初期化は済んでいる)。
+    getThreadGateway: () => ({
+      send: async ({ agentId, question, clientMessageId }) => {
+        await sendPromptToAgent({
+          agentManager,
+          agentStorage,
+          agentId,
+          prompt: question,
+          // 返答の対応付けに要る。タイムラインの user_message にこの値が入る。
+          messageId: clientMessageId,
+          // 元スレが作業中でも**中断させない**(箱からの質問は割り込みではなく合流)。
+          // sendPromptToAgent は replaceRunning を常に true で渡すため、既定の "interrupt" の
+          // ままだと走っているターンを殺してしまう。
+          activeTurnBehavior: "steer",
+          logger,
+        });
+      },
+      // getTimeline は同期で、未ロードのエージェントには例外を投げる(デーモン再起動後など)。
+      // async で包むことで reject に変わり、ルート側が「返答を読めなかった」として扱える。
+      timeline: async (agentId) => projectConfirmBoxTimeline(agentManager.getTimeline(agentId)),
+    }),
   });
 
   app.get("/api/status", (_req, res) => {
@@ -1882,13 +1908,29 @@ export async function createPaseoDaemon(
 }
 
 /**
+ * 確認箱のチャット欄が要るのは user_message / assistant_message の2種類だけ。
+ * `AgentTimelineItem` の他のメンバー(reasoning・tool_call・todo・error・notification・
+ * compaction・plugin)は箱の型に無いので**ここで落とす**(箱は判断の材料になる発言だけ見せる)。
+ */
+function projectConfirmBoxTimeline(items: readonly AgentTimelineItem[]): ConfirmBoxTimelineItem[] {
+  const out: ConfirmBoxTimelineItem[] = [];
+  for (const item of items) {
+    if (item.type === "user_message") {
+      out.push({ type: "user_message", text: item.text, clientMessageId: item.clientMessageId });
+    } else if (item.type === "assistant_message") {
+      out.push({ type: "assistant_message", text: item.text });
+    }
+  }
+  return out;
+}
+
+/**
  * Closing an agent asks its provider to close the session and waits for the
  * answer. A provider that never answers must not hold the daemon open, so a
  * close that outlives this deadline is abandoned; `agentProviderRuntime`
  * shutdown runs next and rejects the request that was still pending.
  */
 const AGENT_CLOSE_TIMEOUT_MS = 5_000;
-
 async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promise<void> {
   const agents = agentManager.listAgents({ includeInternal: true });
   await Promise.all(
