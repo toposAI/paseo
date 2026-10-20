@@ -1,0 +1,6 @@
+{
+  "id": "topos-confirm-box",
+  "requirements": {
+    "paseo": ">=0.11.0"
+  }
+}
