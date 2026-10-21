@@ -2,7 +2,7 @@
  * サイドバーの子スレ行。1スレ=1行(`SidebarRow id=agentId`)。題名+状態を出し、
  * 押すと子スレ一覧画面を開く(そのスレを先頭で展開)。
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Text } from "react-native";
 import { useRpc, type PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
@@ -28,9 +28,10 @@ export function ChildThreadsSidebar({ currentScreen, openScreen }: PluginSidebar
     const tick = () =>
       list({})
         .then((r) => {
-          if (!alive) return;
+          if (!alive) return null;
           setThreads(r.threads);
           setFailed(false);
+          return null;
         })
         .catch(() => alive && setFailed(true));
     void tick();
@@ -44,30 +45,63 @@ export function ChildThreadsSidebar({ currentScreen, openScreen }: PluginSidebar
   const focusId = (currentScreen?.params as { focusId?: string } | undefined)?.focusId;
   const onScreen = currentScreen?.screenId === CHILD_THREADS_SCREEN_ID;
 
+  const openList = useCallback(
+    () => openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: {} }),
+    [openScreen],
+  );
+  const headerLabel = failed
+    ? `子スレ ${threads.length}件(取得失敗)`
+    : `子スレ ${threads.length}件`;
+
   return (
     <>
-      {threads.length === 0 ? (
-        <SidebarRow
-          id="child-threads-empty"
-          icon="ListTodo"
-          label={failed ? "子スレ(取得失敗)" : "子スレ 0件"}
-          active={onScreen}
-          onPress={() => openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: {} })}
-        />
-      ) : null}
+      <SidebarRow
+        id="child-threads-header"
+        icon="ListTodo"
+        label={headerLabel}
+        active={onScreen && !focusId}
+        onPress={openList}
+      />
       {threads.map((t) => (
-        <SidebarRow
+        <ThreadRow
           key={t.agentId}
-          id={t.agentId}
-          icon={ICON[t.status]}
-          label={t.title}
+          thread={t}
+          failed={failed}
           active={onScreen && focusId === t.agentId}
-          onPress={() =>
-            openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: { focusId: t.agentId } })
-          }
-          trailing={<Text>{failed ? `${t.status}(古い表示)` : t.status}</Text>}
+          openScreen={openScreen}
         />
       ))}
     </>
+  );
+}
+
+function ThreadRow({
+  thread: t,
+  failed,
+  active,
+  openScreen,
+}: {
+  thread: ChildThread;
+  failed: boolean;
+  active: boolean;
+  openScreen: PluginSidebarItemProps["openScreen"];
+}) {
+  const onPress = useCallback(
+    () => openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: { focusId: t.agentId } }),
+    [openScreen, t.agentId],
+  );
+  const trailing = useMemo(
+    () => <Text>{failed ? `${t.status}(古い表示)` : t.status}</Text>,
+    [failed, t.status],
+  );
+  return (
+    <SidebarRow
+      id={t.agentId}
+      icon={ICON[t.status]}
+      label={t.title}
+      active={active}
+      onPress={onPress}
+      trailing={trailing}
+    />
   );
 }
