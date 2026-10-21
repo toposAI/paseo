@@ -20,7 +20,12 @@ import type { ConfirmBoxDepth, ConfirmBoxItem, ConfirmBoxListOutput } from "../s
 
 const REFRESH_MS = 30_000;
 
-export function ConfirmBoxView({ theme }: Pick<PluginHostProps, "theme">) {
+export function ConfirmBoxView({
+  theme,
+  navigation,
+}: Pick<PluginHostProps, "theme"> & {
+  navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
+}) {
   const list = useRpc(confirmBoxListRpc);
   const decide = useRpc(confirmBoxDecideRpc);
   const permit = useRpc(confirmBoxPermitRpc);
@@ -67,6 +72,7 @@ export function ConfirmBoxView({ theme }: Pick<PluginHostProps, "theme">) {
       muted: { color: c.foregroundMuted, fontSize: 12 },
       text: { color: c.foreground, fontSize: 13 },
       badge: { color: c.accent, fontSize: 11 },
+      link: { color: c.accent, fontSize: 13, textDecorationLine: "underline" as const },
       row: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6 },
       btn: {
         backgroundColor: c.surface2,
@@ -92,6 +98,17 @@ export function ConfirmBoxView({ theme }: Pick<PluginHostProps, "theme">) {
     setDepth("expanded");
   }, []);
   const openBackground = useCallback(() => setDepth("background"), []);
+  const openChat = useCallback(
+    (item: ConfirmBoxItem) => {
+      setDepth("chat");
+      if (item.threadRef?.kind === "paseo_agent" && navigation) {
+        navigation.openAgent({ agentId: item.threadRef.id });
+      } else {
+        setNotice("この項目には開けるチャット(投函元スレ)がありません");
+      }
+    },
+    [navigation],
+  );
 
   const choose = useCallback(
     async (item: ConfirmBoxItem, optionId: string) => {
@@ -188,6 +205,7 @@ export function ConfirmBoxView({ theme }: Pick<PluginHostProps, "theme">) {
               showBackground={depth === "background"}
               onToggle={toggle}
               onBackground={openBackground}
+              onChat={openChat}
               onChoose={choose}
             />
           ))}
@@ -214,7 +232,7 @@ function BackgroundBlock({
   if (show) return <Text style={styles.text}>{item.background}</Text>;
   return (
     <Pressable accessibilityRole="button" onPress={onOpen}>
-      <Text style={styles.badge}>背景を開く</Text>
+      <Text style={styles.link}>▶ 背景を読む</Text>
     </Pressable>
   );
 }
@@ -249,6 +267,7 @@ function ItemCard({
   showBackground,
   onToggle,
   onBackground,
+  onChat,
   onChoose,
 }: {
   item: ConfirmBoxItem;
@@ -257,9 +276,11 @@ function ItemCard({
   showBackground: boolean;
   onToggle: (id: string) => void;
   onBackground: () => void;
+  onChat: (item: ConfirmBoxItem) => void;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
 }) {
   const toggle = useCallback(() => onToggle(item.id), [onToggle, item.id]);
+  const chat = useCallback(() => onChat(item), [onChat, item]);
   return (
     <View style={styles.card}>
       <Pressable accessibilityRole="button" onPress={toggle}>
@@ -274,6 +295,11 @@ function ItemCard({
           </Text>
         )}
       </Pressable>
+      <View style={styles.row}>
+        {item.options.map((o) => (
+          <OptionButton key={o.id} item={item} option={o} styles={styles} onChoose={onChoose} />
+        ))}
+      </View>
       {open ? (
         <>
           <Text style={styles.text}>{item.summary}</Text>
@@ -283,12 +309,12 @@ function ItemCard({
             show={showBackground}
             onOpen={onBackground}
           />
-          <View style={styles.row}>
-            {item.options.map((o) => (
-              <OptionButton key={o.id} item={item} option={o} styles={styles} onChoose={onChoose} />
-            ))}
-          </View>
         </>
+      ) : null}
+      {item.threadRef ? (
+        <Pressable accessibilityRole="button" onPress={chat}>
+          <Text style={styles.link}>💬 チャットで詳しく聞く</Text>
+        </Pressable>
       ) : null}
     </View>
   );
