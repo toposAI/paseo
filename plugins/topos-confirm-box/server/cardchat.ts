@@ -4,7 +4,12 @@
  * 以前は `card_chat_requests.jsonl` / `card_chat_replies.jsonl` の2ファイルだったが、
  * **書き手も読み手も居ない**(質問は書けるが返事を書くプロセスが無かった)ため、
  * 箱の正本 `events-YYYYMM.jsonl` に一本化した。PaseoコアのPWAが既に書いている
- * `{"t":"chat",…}` と同じ形なので、**どちらの画面から聞いても同じ返事が並ぶ**。
+ * `{"t":"chat",…}` と同じ形なので、**同じ箱に質問と返事が1本の列として残る**。
+ *
+ * 既知の残差(2026-10-22): コアPWA(`packages/server/.../confirm-box/store.ts`)の
+ * `applyLine` は `t:"reply"` を折り畳まない(`default: return false`)。よって
+ * **コアPWAの画面から聞くと、返事は箱に書かれるが見えない**(表示はこのプラグインUIのみ)。
+ * 直すにはコア側に `case "reply"` を足してサーバを作り直す必要がある(別スレの作業)。
  *
  * - 質問: `{t:"chat", id, key, ts, question, client_message_id}`
  * - 返事: `{t:"reply", id, key, ts, re, by, text}`(`re` = 質問の client_message_id)
@@ -25,7 +30,9 @@ export const LEGACY_REPLIES_FILE = "card_chat_replies.jsonl";
 const TEXT_MAX = 600;
 const ID_MAX = 200;
 const MESSAGES_SHOWN = 40;
-export const ACK_TEXT = "受け取りました。担当スレに確認します(返事が出たらここに表示されます)";
+// 受領の文言は中立にする。元スレが無い項目(保留中・手動投函)でも同じ文言が出るため、
+// 「担当スレに確認します」と言い切ると実態とずれる(2026-10-22レビュー)。
+export const ACK_TEXT = "受け取りました。返事を作ります(出たらここに表示されます)";
 
 export interface CardChatMessage {
   ts: number;
@@ -40,9 +47,11 @@ export interface CardChatTarget {
   key?: string | null;
 }
 
-function appendLine(dir: string, file: string, obj: unknown): void {
+/** 複数行を**1回のwrite**で書く(間に読み手が割り込むと、片方だけ見えて二重ackになる)。 */
+function appendLines(dir: string, file: string, objs: readonly unknown[]): void {
+  if (objs.length === 0) return;
   fs.mkdirSync(dir, { recursive: true });
-  fs.appendFileSync(path.join(dir, file), `${JSON.stringify(obj)}\n`, {
+  fs.appendFileSync(path.join(dir, file), objs.map((o) => `${JSON.stringify(o)}\n`).join(""), {
     encoding: "utf-8",
     mode: 0o600,
   });
@@ -121,25 +130,29 @@ export function sayToCard(
   const ts = Date.now();
   // 同じ項目に何度でも聞けるので、ms まで入れて一意にする(再起動をまたいでも衝突しない)。
   const clientMessageId = `cbui-${id}-${ts}`.slice(0, ID_MAX * 2);
-  appendLine(dir, chatsFile(), {
-    t: "chat",
-    id,
-    key,
-    ts,
-    question: clean,
-    client_message_id: clientMessageId,
-    source: "plugin",
-  });
+  // 質問と受領は**同じwrite**で書く。2回に分けると、その隙にワーカーが読んで
+  // 受領を二重に書くことがある(2026-10-22レビュー)。
   // fail-open: 本回答が来なくても「受け取った」は必ず1行返る(ユーザーに無反応を作らない)。
-  appendLine(dir, chatsFile(), {
-    t: "reply",
-    id,
-    key,
-    ts,
-    re: clientMessageId,
-    by: "ack",
-    text: ACK_TEXT,
-  });
+  appendLines(dir, chatsFile(), [
+    {
+      t: "chat",
+      id,
+      key,
+      ts,
+      question: clean,
+      client_message_id: clientMessageId,
+      source: "plugin",
+    },
+    {
+      t: "reply",
+      id,
+      key,
+      ts,
+      re: clientMessageId,
+      by: "ack",
+      text: ACK_TEXT,
+    },
+  ]);
   return { ok: true, message: "送りました" };
 }
 
