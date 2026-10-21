@@ -48,8 +48,8 @@ function useOpenCount(): number | null {
   return n;
 }
 
-function Screen({ theme }: PluginScreenProps) {
-  return <ConfirmBoxView theme={theme} />;
+function Screen({ theme, navigation }: PluginScreenProps) {
+  return <ConfirmBoxView theme={theme} navigation={navigation} />;
 }
 
 const popoverStyle = { height: 480 };
