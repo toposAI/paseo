@@ -629,6 +629,8 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
 
 const styles = StyleSheet.create((theme) => ({
   container: {
+    minWidth: 0,
+    maxWidth: "100%",
     padding: theme.spacing[3],
     borderRadius: theme.spacing[2],
     borderWidth: 1,
@@ -646,6 +648,9 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
   },
   questionText: {
+    minWidth: 0,
+    overflowWrap: "anywhere",
+    wordBreak: "break-word",
     flex: 1,
     fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
@@ -676,6 +681,7 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.normal,
   },
   optionItem: {
+    minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: theme.spacing[3],
@@ -686,21 +692,29 @@ const styles = StyleSheet.create((theme) => ({
     opacity: 0.9,
   },
   optionItemContent: {
+    minWidth: 0,
     flex: 1,
     flexDirection: "row",
     alignItems: "flex-start",
     gap: theme.spacing[2],
   },
   optionTextBlock: {
+    minWidth: 0,
     flex: 1,
     gap: theme.spacing[1],
   },
   optionLabel: {
+    minWidth: 0,
+    overflowWrap: "anywhere",
+    wordBreak: "break-word",
     fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
     lineHeight: 22,
   },
   optionDescription: {
+    minWidth: 0,
+    overflowWrap: "anywhere",
+    wordBreak: "break-word",
     fontSize: theme.fontSize.base,
     lineHeight: 20,
   },
