@@ -9,9 +9,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { getPaseoClient, useHosts } from "@getpaseo/plugin/client";
 import { BubbleIcon } from "./Icons.js";
+import { notifyBoxChanged } from "./events.js";
 
 /** このページ専用の会話スレッドの agent ID。総司令から連絡があり次第ここへ設定する。 */
-export const PRIORITY_CHAT_AGENT_ID: string | null = null;
+export const PRIORITY_CHAT_AGENT_ID: string | null = "887a6133-01de-498a-be7e-0262c61e0bc9";
 
 interface ChatLine {
   id: string;
@@ -70,16 +71,37 @@ export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: str
     if (!open || !agentId || !serverId) return undefined;
     const handle = getPaseoClient(serverId).agents.ref(agentId);
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // 履歴(開き直しても会話が残る)。失敗しても会話自体は続けられる。
+    handle.timeline
+      .refetch({ limit: 30 })
+      .then((res) => {
+        if (!alive) return null;
+        const past: ChatLine[] = [];
+        (res.entries ?? []).forEach((entry, idx) => {
+          const line = lineFromItem(entry.item as TimelineItemLike, `h${idx}`);
+          if (line) past.push(line);
+        });
+        setLines((cur) => (cur.length === 0 ? past : cur));
+        return null;
+      })
+      .catch(() => {});
     const sub = handle.timeline.subscribe((evt) => {
       if (!alive) return;
       const ev = (evt as { event?: { type?: string; item?: TimelineItemLike } }).event;
       if (ev?.type !== "timeline") return;
+      // ユーザー発言は送信時に表示済み(二重表示を避ける)。
+      if (ev.item?.type !== "assistant_message") return;
       seq.current += 1;
       const line = lineFromItem(ev.item, `s${seq.current}`);
       if (line) setLines((cur) => appendLine(cur, line));
+      // 台帳が更新されている可能性があるので、少し待って順位を再読込させる。
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => notifyBoxChanged(), 800);
     });
     return () => {
       alive = false;
+      if (timer) clearTimeout(timer);
       sub();
     };
   }, [open, agentId, serverId]);
