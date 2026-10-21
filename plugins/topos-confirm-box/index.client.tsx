@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import { Linking, Text, View } from "react-native";
 import {
   getPaseoClient,
   useHosts,
@@ -16,6 +16,16 @@ import { confirmBoxCountRpc } from "./shared/contract";
 
 const COUNT_MS = 30_000;
 const SCREEN_ID = "main";
+// 110番メール整理の Compose UI(launchd com.toposai.mailtriage_compose_ui、Tailscale IP限定バインド)。
+const MAIL_UI_URL = "http://100.85.224.7:8731/";
+
+function openMailUi() {
+  void Linking.openURL(MAIL_UI_URL);
+}
+
+function MailLink() {
+  return <SidebarRow icon="Mail" label="メール" onPress={openMailUi} />;
+}
 
 function useOpenCount(): number | null {
   const count = useRpc(confirmBoxCountRpc);
@@ -116,7 +126,8 @@ export default function contribute(client: PluginClientContext) {
   }
 
   client.addScreen({ id: SCREEN_ID, title: "確認箱", Component: Screen });
-  client.addSidebarHeaderItem({ id: "box", title: "確認箱", Component: Sidebar });
+  client.addSidebarFooterItem({ id: "box", title: "確認箱", Component: Sidebar });
+  client.addSidebarFooterItem({ id: "mail", title: "メール", Component: MailLink });
   return () => {
     for (const r of registered.values()) r.remove();
     registered.clear();
