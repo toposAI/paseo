@@ -5,7 +5,7 @@
  * 決定の記録は押した時だけ(自動では何も決めない)。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import {
   KIND_LABEL,
@@ -57,8 +57,12 @@ export function ConfirmBoxView({
   }, [reload]);
 
   const c = theme.colors;
-  const s = useMemo(
-    () => ({
+  // タッチ幅(iPhone等)ではタップ領域を44pt以上・間隔8pxに広げる。PC幅は従来の大きさ。
+  const { width } = useWindowDimensions();
+  const touch = width < 600;
+  const s = useMemo(() => {
+    const tap = touch ? { minHeight: 44, justifyContent: "center" as const } : {};
+    return {
       root: { flex: 1, backgroundColor: c.surface0 },
       body: { padding: 12, gap: 8 },
       card: {
@@ -74,8 +78,9 @@ export function ConfirmBoxView({
       text: { color: c.foreground, fontSize: 13 },
       badge: { color: c.accent, fontSize: 11 },
       link: { color: c.accent, fontSize: 13, textDecorationLine: "underline" as const },
-      row: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6 },
+      row: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: touch ? 8 : 6 },
       reporter: { color: c.foreground, fontSize: 13, fontWeight: "600" as const },
+      footBtn: { paddingHorizontal: touch ? 8 : 0, ...tap },
       footRow: {
         flexDirection: "row" as const,
         alignItems: "center" as const,
@@ -85,21 +90,22 @@ export function ConfirmBoxView({
       btn: {
         backgroundColor: c.surface2,
         borderRadius: 6,
-        paddingVertical: 6,
-        paddingHorizontal: 10,
+        paddingVertical: touch ? 10 : 6,
+        paddingHorizontal: touch ? 14 : 10,
+        ...tap,
       },
       btnRec: {
         backgroundColor: c.accent,
         borderRadius: 6,
-        paddingVertical: 6,
-        paddingHorizontal: 10,
+        paddingVertical: touch ? 10 : 6,
+        paddingHorizontal: touch ? 14 : 10,
+        ...tap,
       },
       btnText: { color: c.foreground, fontSize: 13 },
       btnRecText: { color: c.accentForeground, fontSize: 13 },
       warn: { color: c.statusWarning, fontSize: 12 },
-    }),
-    [c],
-  );
+    };
+  }, [c, touch]);
 
   const toggle = useCallback((id: string) => {
     setOpenId((cur) => (cur === id ? null : id));
@@ -315,13 +321,14 @@ function ItemCard({
           {created}
         </Text>
         {item.background ? (
-          <Pressable accessibilityRole="button" onPress={toggleBg}>
+          <Pressable accessibilityRole="button" style={styles.footBtn} onPress={toggleBg}>
             <Text style={styles.link}>{bgOpen ? "▼ 背景を閉じる" : "▶ 背景"}</Text>
           </Pressable>
         ) : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="このカードのチャット欄を開く"
+          style={styles.footBtn}
           onPress={toggleChat}
         >
           <Text style={styles.link}>{chatOpen ? "▼ 💬" : "💬"}</Text>
