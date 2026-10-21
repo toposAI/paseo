@@ -330,6 +330,10 @@ function IconTooltipContent({
   );
 }
 
+// Plugin footer items that render as icons in the bottom bar (next to Add project and Settings)
+// instead of as rows above it.
+const BAR_PLUGIN_ID = "topos-confirm-box";
+
 function SidebarFooter({
   theme,
   handleOpenProject,
@@ -353,6 +357,9 @@ function SidebarFooter({
 }) {
   const newAgentKeys = useShortcutKeys("new-agent");
   const settingsKeys = useShortcutKeys("toggle-settings");
+  const { items: footerItems } = useSidebarNavItems("footer");
+  const barRef = useRef<View | null>(null);
+  const barItems = footerItems.filter(isBarItem);
 
   // One line of icons: Add project, Usage, Hosts, then Help and Settings at the end.
   return (
@@ -369,6 +376,20 @@ function SidebarFooter({
             theme={theme}
           />
           <View style={styles.footerSpacer} />
+          <View ref={barRef} collapsable={false} style={styles.footerBarItems}>
+            {barItems.map((item) =>
+              item.kind === "plugin" ? (
+                <PluginSidebarItem
+                  key={item.key}
+                  group={item.group}
+                  section="footer"
+                  bar
+                  fallbackAnchorRef={barRef}
+                  onBeforeNavigate={onBeforeNavigate}
+                />
+              ) : null,
+            )}
+          </View>
           <FooterIconButton
             onPress={handleSettings}
             testID="sidebar-settings"
@@ -387,12 +408,16 @@ function SidebarFooter({
  * The footer rows in the user's `sidebarFooterItems` order: the Usage item and plugin rows. The
  * Usage item is left out while it has no summary to show.
  */
+function isBarItem(item: { kind: string; visible: boolean; group?: { pluginId?: string } }) {
+  return item.kind === "plugin" && item.visible && item.group?.pluginId === BAR_PLUGIN_ID;
+}
+
 function SidebarFooterRows({ onBeforeNavigate }: { onBeforeNavigate?: () => void }) {
   const { items } = useSidebarNavItems("footer");
   const hasUsageSummary = useHasUsageSummary();
   const rowsRef = useRef<View | null>(null);
   const visibleItems = items.filter(
-    (item) => item.visible && (item.kind === "plugin" || hasUsageSummary),
+    (item) => item.visible && !isBarItem(item) && (item.kind === "plugin" || hasUsageSummary),
   );
   if (visibleItems.length === 0) return null;
   return (
@@ -859,6 +884,10 @@ const styles = StyleSheet.create((theme) => ({
   // Pushes Help and Settings to the end of the icon line.
   footerSpacer: {
     flex: 1,
+  },
+  footerBarItems: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   // Usage and plugin rows sit above the footer's icon line, spaced like the header nav rows.
   footerRows: {

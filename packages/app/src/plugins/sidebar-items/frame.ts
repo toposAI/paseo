@@ -5,6 +5,8 @@ import type { PluginSidebarSection } from "../types";
 /** What the host tells the kit components about the sidebar item they render in. */
 export interface SidebarItemFrame {
   section: PluginSidebarSection;
+  /** Footer icon-bar slot: SidebarRow renders as an icon-only button with its trailing as a badge. */
+  bar?: boolean;
   title: string;
   testID: string;
   /** A row calls this before its `onPress`, so a popover that press opens anchors to it. */
