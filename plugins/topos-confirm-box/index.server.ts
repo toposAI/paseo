@@ -20,6 +20,8 @@ import {
 } from "./shared/contract.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
 import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/box.js";
+import { childThreadsListRpc } from "./shared/child-threads.js";
+import { readChildThreads } from "./server/child-threads.js";
 import { permitResponse, permitsToItems } from "./server/permits.js";
 import type { PermitAgentLike } from "./server/permits.js";
 
@@ -59,6 +61,12 @@ export default function contribute(server: PluginServerContext) {
   }
 
   server.handle(confirmBoxListRpc, async (_input, ctx) => collect(ctx));
+
+  server.handle(childThreadsListRpc, async () => {
+    const dir = resolveConfirmBoxDir();
+    const { items, dir: readDir } = readConfirmBox(dir);
+    return { threads: readChildThreads(dir, items), dir: readDir, generatedAt: Date.now() };
+  });
 
   server.handle(confirmBoxCountRpc, async (_input, ctx) => {
     const { items, sources, generatedAt } = await collect(ctx);

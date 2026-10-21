@@ -10,6 +10,8 @@ import {
   type PluginSidebarItemProps,
 } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
+import { ChildThreadsSidebar, CHILD_THREADS_SCREEN_ID } from "./client/ChildThreadsSidebar";
+import { ChildThreadsView } from "./client/ChildThreadsView";
 import { ConfirmBoxView } from "./client/ConfirmBoxView";
 import { confirmBoxCountRpc } from "./shared/contract";
 
@@ -37,6 +39,11 @@ function useOpenCount(): number | null {
 
 function Screen({ theme }: PluginScreenProps) {
   return <ConfirmBoxView theme={theme} />;
+}
+
+function ChildThreadsScreen({ theme, params }: PluginScreenProps) {
+  const focusId = (params as { focusId?: string } | undefined)?.focusId ?? null;
+  return <ChildThreadsView theme={theme} focusId={focusId} />;
 }
 
 const popoverStyle = { height: 480 };
@@ -105,6 +112,12 @@ export default function contribute(client: PluginClientContext) {
     );
   }
 
+  client.addScreen({ id: CHILD_THREADS_SCREEN_ID, title: "子スレ", Component: ChildThreadsScreen });
+  client.addSidebarHeaderItem({
+    id: "child-threads",
+    title: "子スレ",
+    Component: ChildThreadsSidebar,
+  });
   client.addScreen({ id: SCREEN_ID, title: "確認箱", Component: Screen });
   client.addSidebarHeaderItem({ id: "box", title: "確認箱", Component: Sidebar });
   return () => {
