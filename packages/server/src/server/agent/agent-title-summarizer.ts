@@ -1,0 +1,227 @@
+import { z } from "zod";
+import type { Logger } from "pino";
+import { MAX_EXPLICIT_AGENT_TITLE_CHARS } from "@getpaseo/protocol/agent-title-limits";
+import type { AgentTimelineItem } from "./agent-sdk-types.js";
+import type { AgentManagerEvent } from "./agent-manager.js";
+import { resolveCreateAgentTitles } from "./create-agent-title.js";
+
+/** Titles written by this service carry this label; any other title is treated as user-owned. */
+export const TITLE_SOURCE_LABEL = "paseo.title-source";
+export const TITLE_SOURCE_AUTO = "auto";
+/** Set to "1" (e.g. `paseo agent update <id> --label paseo.title-regenerate=1`) to force a re-summary on the next finished turn. */
+export const TITLE_REGENERATE_LABEL = "paseo.title-regenerate";
+
+const MAX_SUMMARY_TITLE_CHARS = 30;
+/** Finished-turn counts at which the title is (re)summarised; sparse on purpose so the sidebar stays calm. */
+const SUMMARY_TURN_MARKS = new Set([1, 5, 15, 40]);
+const GENERATION_TIMEOUT_MS = 120_000;
+
+const TITLE_SCHEMA = z.object({ title: z.string().min(1).max(MAX_EXPLICIT_AGENT_TITLE_CHARS) });
+
+export interface TitleSummaryInput {
+  currentTitle: string | null;
+  firstUserMessage: string | null;
+  recentUserMessages: string[];
+  lastAssistantMessage: string | null;
+}
+
+export function shouldSummarizeAtTurn(completedTurns: number): boolean {
+  return SUMMARY_TURN_MARKS.has(completedTurns);
+}
+
+function clip(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
+/** True when the title may be overwritten without clobbering a name a person or coordinator chose. */
+export function isAutoOwnedTitle(input: {
+  title: string | null;
+  labels: Record<string, string>;
+  firstUserMessage: string | null;
+}): boolean {
+  if (input.labels[TITLE_SOURCE_LABEL] === TITLE_SOURCE_AUTO) return true;
+  if (!input.title) return true;
+  // A title that is just the provisional first-prompt copy was never chosen by anyone.
+  const provisional = input.firstUserMessage
+    ? resolveCreateAgentTitles({ initialPrompt: input.firstUserMessage }).provisionalTitle
+    : null;
+  return provisional !== null && provisional === input.title;
+}
+
+export function buildTitleSummaryPrompt(input: TitleSummaryInput): string {
+  return [
+    "あなたはチャットスレッドの題名を付ける係です。サイドバーの一覧で「このスレが何をしているか」が一目で分かる日本語の題名を1つ作ってください。",
+    "",
+    "規則:",
+    `- 日本語で${MAX_SUMMARY_TITLE_CHARS}文字以内の短い句。英字のスラッグ、作業ID、ファイル名は使わない。固有名詞(F-80、Toposなど)は可。`,
+    "- 冒頭の依頼文・役割説明(「あなたは〜担当」「日本語で報告」「依頼元は〜」など)は題名にしない。スレが実際に取り組んでいる内容を書く。",
+    "- スレが司令塔として他のスレを束ねている場合は、短く安定した役割名にする(例: 「Topos司令塔」「F-80司令塔」「総司令塔」)。",
+    "- 現在の題名が今の内容をまだ正しく表しているなら、一字一句そのまま返す(頻繁に変えない)。役割や作業が明らかに変わったときだけ変える。",
+    '- JSON だけを返す: {"title": "..."}',
+    "",
+    `現在の題名: ${input.currentTitle ?? "(なし)"}`,
+    `最初のユーザー発言: ${input.firstUserMessage ? clip(input.firstUserMessage, 800) : "(なし)"}`,
+    "直近のユーザー発言:",
+    ...(input.recentUserMessages.length > 0
+      ? input.recentUserMessages.map((text) => `- ${clip(text, 300)}`)
+      : ["- (なし)"]),
+    `直近のアシスタント発言: ${
+      input.lastAssistantMessage ? clip(input.lastAssistantMessage, 500) : "(なし)"
+    }`,
+  ].join("\n");
+}
+
+/** Normalises model output; null means "unusable, keep the existing title". */
+export function sanitizeSummaryTitle(raw: string): string | null {
+  const firstLine = raw.split(/\r?\n/)[0] ?? "";
+  const cleaned = firstLine
+    .replace(/^[\s"'「『【[]+/, "")
+    .replace(/[\s"'」』】\]]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return null;
+  if (/^[A-Za-z0-9_.\-/]+$/.test(cleaned)) return null; // bare slug
+  if (cleaned.startsWith("あなたは")) return null; // prompt copy
+  return cleaned.length > MAX_SUMMARY_TITLE_CHARS
+    ? cleaned.slice(0, MAX_SUMMARY_TITLE_CHARS).trim()
+    : cleaned;
+}
+
+export function extractTitleSummaryInput(
+  timeline: readonly AgentTimelineItem[],
+  currentTitle: string | null,
+): TitleSummaryInput {
+  const userMessages: string[] = [];
+  let lastAssistantMessage: string | null = null;
+  for (const item of timeline) {
+    if (item.type === "user_message" && item.text.trim()) userMessages.push(item.text);
+    else if (item.type === "assistant_message" && item.text.trim()) {
+      lastAssistantMessage = item.text;
+    }
+  }
+  return {
+    currentTitle,
+    firstUserMessage: userMessages[0] ?? null,
+    recentUserMessages: userMessages.slice(-3),
+    lastAssistantMessage,
+  };
+}
+
+export interface AgentTitleSummarizerDeps {
+  subscribe(callback: (event: AgentManagerEvent) => void): () => void;
+  getTimeline(agentId: string): AgentTimelineItem[];
+  getStoredAgent(agentId: string): Promise<{
+    title?: string | null;
+    labels?: Record<string, string>;
+    cwd: string;
+    internal?: boolean;
+  } | null>;
+  updateAgentMetadata(
+    agentId: string,
+    updates: { title?: string; labels?: Record<string, string> },
+  ): Promise<void>;
+  generate(request: {
+    cwd: string;
+    prompt: string;
+    schema: typeof TITLE_SCHEMA;
+    schemaName: string;
+    agentTitle: string;
+  }): Promise<{ title: string }>;
+  logger: Logger;
+}
+
+/**
+ * Keeps agent titles meaningful: summarises what a thread is doing after chosen
+ * finished turns. Never throws into the agent pipeline; any failure leaves the
+ * existing title untouched.
+ */
+export function createAgentTitleSummarizer(deps: AgentTitleSummarizerDeps): {
+  start(): () => void;
+  /** Resolves when the queued work is done (tests). */
+  idle(): Promise<void>;
+} {
+  const completedTurns = new Map<string, number>();
+  let tail: Promise<void> = Promise.resolve();
+
+  async function summarize(agentId: string, forced: boolean): Promise<void> {
+    const stored = await deps.getStoredAgent(agentId);
+    if (!stored || stored.internal) return;
+    const labels = stored.labels ?? {};
+    const timeline = deps.getTimeline(agentId);
+    const input = extractTitleSummaryInput(timeline, stored.title ?? null);
+    if (
+      !forced &&
+      !isAutoOwnedTitle({
+        title: input.currentTitle,
+        labels,
+        firstUserMessage: input.firstUserMessage,
+      })
+    ) {
+      return;
+    }
+    if (!input.firstUserMessage) return;
+
+    const result = await Promise.race([
+      deps.generate({
+        cwd: stored.cwd,
+        prompt: buildTitleSummaryPrompt(input),
+        schema: TITLE_SCHEMA,
+        schemaName: "AgentTitle",
+        agentTitle: "Title generator",
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("title generation timed out")),
+          GENERATION_TIMEOUT_MS,
+        ).unref(),
+      ),
+    ]);
+    const title = sanitizeSummaryTitle(result.title);
+    if (!title) return;
+
+    // Re-check ownership: someone may have renamed the thread while the model was thinking.
+    const fresh = await deps.getStoredAgent(agentId);
+    if (!fresh) return;
+    const freshLabels = fresh.labels ?? {};
+    if (
+      !forced &&
+      !isAutoOwnedTitle({
+        title: fresh.title ?? null,
+        labels: freshLabels,
+        firstUserMessage: input.firstUserMessage,
+      })
+    ) {
+      return;
+    }
+    const labelUpdates: Record<string, string> = { [TITLE_SOURCE_LABEL]: TITLE_SOURCE_AUTO };
+    if (freshLabels[TITLE_REGENERATE_LABEL] === "1") labelUpdates[TITLE_REGENERATE_LABEL] = "done";
+    await deps.updateAgentMetadata(agentId, {
+      ...(title !== (fresh.title ?? null) ? { title } : {}),
+      labels: labelUpdates,
+    });
+  }
+
+  return {
+    start() {
+      return deps.subscribe((event) => {
+        if (event.type !== "agent_stream" || event.event.type !== "turn_completed") return;
+        const agentId = event.agentId;
+        const count = (completedTurns.get(agentId) ?? 0) + 1;
+        completedTurns.set(agentId, count);
+        // The regenerate label lives in storage, so resolve it inside the queue.
+        tail = tail
+          .then(async () => {
+            const stored = await deps.getStoredAgent(agentId);
+            const forced = stored?.labels?.[TITLE_REGENERATE_LABEL] === "1";
+            if (forced || shouldSummarizeAtTurn(count)) await summarize(agentId, forced);
+            return undefined;
+          })
+          .catch((error) => {
+            deps.logger.warn({ err: error, agentId }, "agent title summary failed; keeping title");
+          });
+      });
+    },
+    idle: () => tail,
+  };
+}

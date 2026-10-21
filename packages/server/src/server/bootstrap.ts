@@ -133,6 +133,8 @@ import type { RequestedSpeechProviders } from "./speech/speech-types.js";
 import { createSpeechService } from "./speech/speech-runtime.js";
 import { AgentManager } from "./agent/agent-manager.js";
 import { AgentStorage } from "./agent/agent-storage.js";
+import { createAgentTitleSummarizer } from "./agent/agent-title-summarizer.js";
+import { createAgentStructuredTextGeneration } from "./session/checkout/git-metadata-generator.js";
 import { attachAgentStoragePersistence } from "./persistence-hooks.js";
 import { createAgentMcpServer } from "./agent/mcp-server.js";
 import {
@@ -1006,6 +1008,20 @@ export async function createPaseoDaemon(
   );
   await agentStorage.initialize();
   logger.info({ elapsed: elapsed() }, "Agent storage initialized");
+  // Keeps sidebar titles meaningful (summarises what a thread is doing). Failures never touch the agent.
+  const detachAgentTitleSummarizer = createAgentTitleSummarizer({
+    subscribe: (callback) => agentManager.subscribe(callback, { replayState: false }),
+    getTimeline: (agentId) => agentManager.getTimeline(agentId),
+    getStoredAgent: (agentId) => agentStorage.get(agentId),
+    updateAgentMetadata: (agentId, updates) => agentManager.updateAgentMetadata(agentId, updates),
+    generate: createAgentStructuredTextGeneration({
+      agentManager,
+      providerSnapshotManager,
+      readDaemonConfig: () => ({ metadataGeneration: daemonConfigStore.get().metadataGeneration }),
+      getFocusedSelection: () => undefined,
+    }).generate,
+    logger,
+  }).start();
   await bootstrapWorkspaceRegistries({
     serverId,
     paseoHome: config.paseoHome,
@@ -1864,6 +1880,7 @@ export async function createPaseoDaemon(
     }).catch((error) => logger.warn({ err: error }, "Plugin lifecycle events did not finish"));
     await agentManager.flushForShutdown().catch(() => undefined);
     detachAgentStoragePersistence();
+    detachAgentTitleSummarizer();
     await agentStorage.flush().catch(() => undefined);
     await agentProviderRuntime.shutdown();
     await pluginRuntime.stopAllPlugins();
