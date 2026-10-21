@@ -37,7 +37,7 @@ export function ConfirmBoxView({
   const [notice, setNotice] = useState<string>("");
   const [tab, setTab] = useState<"items" | "priority">("items");
   const [prio, setPrio] = useState<string>("all");
-  const [grp, setGrp] = useState<string>("all");
+  const [filterOpen, setFilterOpen] = useState(false);
   const [sortNew, setSortNew] = useState(false);
   const [showDone, setShowDone] = useState(false);
 
@@ -64,6 +64,7 @@ export function ConfirmBoxView({
     const tap = touch ? { minHeight: 44, justifyContent: "center" as const } : {};
     return {
       root: { flex: 1, backgroundColor: c.surface0 },
+      flex: { flex: 1 },
       body: { padding: 12, gap: 8 },
       card: {
         backgroundColor: c.surface1,
@@ -80,35 +81,48 @@ export function ConfirmBoxView({
       link: { color: c.accent, fontSize: 13, textDecorationLine: "underline" as const },
       row: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: touch ? 8 : 6 },
       reporter: { color: c.foreground, fontSize: 13, fontWeight: "600" as const },
-      threadBtn: {
-        backgroundColor: c.surface2,
-        borderRadius: 6,
-        paddingVertical: touch ? 10 : 6,
-        paddingHorizontal: touch ? 14 : 10,
-        alignSelf: "flex-start" as const,
-        ...tap,
-      },
-      threadBtnOff: {
-        borderColor: c.border,
-        borderWidth: 1,
-        borderRadius: 6,
-        paddingVertical: touch ? 10 : 6,
-        paddingHorizontal: touch ? 14 : 10,
-        alignSelf: "flex-start" as const,
-        opacity: 0.6,
-        ...tap,
-      },
-      footBtn: {
-        paddingHorizontal: touch ? 8 : 0,
-        ...(touch ? { minWidth: 44, alignItems: "center" as const } : {}),
-        ...tap,
-      },
+      // サブ操作(背景・💬・元スレ)は小さめ。最下行は必ず1行に収める。
+      footBtn: { paddingVertical: 4, paddingHorizontal: 4 },
+      footBtnOff: { paddingVertical: 4, paddingHorizontal: 4, opacity: 0.45 },
+      footText: { color: c.accent, fontSize: 12 },
       footRow: {
+        flexDirection: "row" as const,
+        flexWrap: "nowrap" as const,
+        alignItems: "center" as const,
+        justifyContent: "space-between" as const,
+        gap: 4,
+      },
+      filterLine: {
         flexDirection: "row" as const,
         alignItems: "center" as const,
         justifyContent: "space-between" as const,
-        gap: 8,
+        backgroundColor: c.surface1,
+        borderColor: c.border,
+        borderWidth: 1,
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        ...tap,
       },
+      bottomBar: {
+        flexGrow: 0,
+        flexShrink: 0,
+        flexDirection: "row" as const,
+        borderTopWidth: 1,
+        borderTopColor: c.border,
+        backgroundColor: c.surface1,
+      },
+      tabBtn: {
+        minWidth: 72,
+        paddingHorizontal: 14,
+        paddingVertical: 6,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
+        gap: 2,
+        minHeight: 48,
+      },
+      tabIcon: { fontSize: 18 },
+      tabLabel: { color: c.foregroundMuted, fontSize: 11 },
+      tabLabelOn: { color: c.accent, fontSize: 11, fontWeight: "700" as const },
       btn: {
         backgroundColor: c.surface2,
         borderRadius: 6,
@@ -176,21 +190,12 @@ export function ConfirmBoxView({
     [decide, permit, depth, reload],
   );
 
-  const groups = useMemo(() => {
-    const set = new Set<string>();
-    for (const i of data?.items ?? []) set.add(i.group ?? "(なし)");
-    return [...set].sort();
-  }, [data]);
-
   const visible = useMemo(() => {
     const rows = (data?.items ?? []).filter(
-      (i) =>
-        (showDone || i.state !== "approved") &&
-        (prio === "all" || i.priority === prio) &&
-        (grp === "all" || (i.group ?? "(なし)") === grp),
+      (i) => (showDone || i.state !== "approved") && (prio === "all" || i.priority === prio),
     );
     return sortNew ? [...rows].sort((a, b) => b.ts - a.ts) : rows;
-  }, [data, showDone, prio, grp, sortNew]);
+  }, [data, showDone, prio, sortNew]);
 
   const chip = (label: string, on: boolean, press: () => void) => (
     <Pressable key={label} accessibilityRole="button" style={on ? s.btnRec : s.btn} onPress={press}>
@@ -198,57 +203,89 @@ export function ConfirmBoxView({
     </Pressable>
   );
 
+  const toggleFilter = useCallback(() => setFilterOpen((v) => !v), []);
+  const filterSummary = `${prio === "all" ? "全て" : PRIORITY_LABEL[prio as keyof typeof PRIORITY_LABEL]} · ${sortNew ? "新しい順" : "優先度順"}${showDone ? " · 決定済み含む" : ""} · ${visible.length}件`;
+
   return (
-    <ScrollView style={s.root} contentContainerStyle={s.body}>
-      <View style={s.row}>
-        {chip("判断待ち", tab === "items", () => setTab("items"))}
-        {chip("優先順位", tab === "priority", () => setTab("priority"))}
-      </View>
-      {tab === "priority" ? (
-        <PriorityView styles={s} colors={c} />
-      ) : (
-        <>
-          <View style={s.row}>
-            {chip("全て", prio === "all", () => setPrio("all"))}
-            {(Object.keys(PRIORITY_LABEL) as (keyof typeof PRIORITY_LABEL)[]).map((k) =>
-              chip(PRIORITY_LABEL[k], prio === k, () => setPrio(k)),
-            )}
-          </View>
-          <View style={s.row}>
-            {chip("全グループ", grp === "all", () => setGrp("all"))}
-            {groups.map((g) => chip(g, grp === g, () => setGrp(g)))}
-          </View>
-          <View style={s.row}>
-            {chip(sortNew ? "新しい順" : "優先度順", true, () => setSortNew((v) => !v))}
-            {chip("決定済みも表示", showDone, () => setShowDone((v) => !v))}
-            <Text style={s.muted}>{visible.length}件</Text>
-          </View>
-          {error ? <Text style={s.warn}>読み込めません: {error}</Text> : null}
-          {data?.sources
-            .filter((x) => !x.ok)
-            .map((x) => (
-              <Text key={x.id} style={s.warn}>
-                {x.label}: {x.detail}
-              </Text>
+    <View style={s.root}>
+      <ScrollView style={s.flex} contentContainerStyle={s.body}>
+        {tab === "priority" ? (
+          <PriorityView styles={s} colors={c} />
+        ) : (
+          <>
+            <Pressable accessibilityRole="button" style={s.filterLine} onPress={toggleFilter}>
+              <Text style={s.text}>{filterSummary}</Text>
+              <Text style={s.muted}>{filterOpen ? "▲" : "▼"}</Text>
+            </Pressable>
+            {filterOpen ? (
+              <View style={s.row}>
+                {chip("全て", prio === "all", () => setPrio("all"))}
+                {(Object.keys(PRIORITY_LABEL) as (keyof typeof PRIORITY_LABEL)[]).map((k) =>
+                  chip(PRIORITY_LABEL[k], prio === k, () => setPrio(k)),
+                )}
+                {chip(sortNew ? "新しい順" : "優先度順", true, () => setSortNew((v) => !v))}
+                {chip("決定済みも表示", showDone, () => setShowDone((v) => !v))}
+              </View>
+            ) : null}
+            {error ? <Text style={s.warn}>読み込めません: {error}</Text> : null}
+            {data?.sources
+              .filter((x) => !x.ok)
+              .map((x) => (
+                <Text key={x.id} style={s.warn}>
+                  {x.label}: {x.detail}
+                </Text>
+              ))}
+            {notice ? <Text style={s.muted}>{notice}</Text> : null}
+            {data && visible.length === 0 ? (
+              <Text style={s.muted}>判断待ちはありません</Text>
+            ) : null}
+            {visible.map((item) => (
+              <ItemCard
+                key={item.id}
+                item={item}
+                styles={s}
+                open={openId === item.id}
+                onToggle={toggle}
+                onBackground={openBackground}
+                onChat={openChat}
+                canNavigate={Boolean(navigation)}
+                onChoose={choose}
+              />
             ))}
-          {notice ? <Text style={s.muted}>{notice}</Text> : null}
-          {data && visible.length === 0 ? <Text style={s.muted}>判断待ちはありません</Text> : null}
-          {visible.map((item) => (
-            <ItemCard
-              key={item.id}
-              item={item}
-              styles={s}
-              open={openId === item.id}
-              onToggle={toggle}
-              onBackground={openBackground}
-              onChat={openChat}
-              canNavigate={Boolean(navigation)}
-              onChoose={choose}
-            />
-          ))}
-        </>
-      )}
-    </ScrollView>
+          </>
+        )}
+      </ScrollView>
+      <ScrollView horizontal style={s.bottomBar} showsHorizontalScrollIndicator={false}>
+        {TABS.map((tb) => (
+          <TabButton key={tb.id} tab={tb} on={tab === tb.id} styles={s} onSelect={setTab} />
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+const TABS: { id: "items" | "priority"; icon: string; label: string }[] = [
+  { id: "items", icon: "📥", label: "判断待ち" },
+  { id: "priority", icon: "📋", label: "優先順位" },
+];
+
+function TabButton({
+  tab,
+  on,
+  styles,
+  onSelect,
+}: {
+  tab: (typeof TABS)[number];
+  on: boolean;
+  styles: Styles;
+  onSelect: (id: "items" | "priority") => void;
+}) {
+  const press = useCallback(() => onSelect(tab.id), [onSelect, tab.id]);
+  return (
+    <Pressable accessibilityRole="tab" style={styles.tabBtn} onPress={press}>
+      <Text style={styles.tabIcon}>{tab.icon}</Text>
+      <Text style={on ? styles.tabLabelOn : styles.tabLabel}>{tab.label}</Text>
+    </Pressable>
   );
 }
 
@@ -295,7 +332,7 @@ function OptionButton({
     <Pressable accessibilityRole="button" style={rec ? styles.btnRec : styles.btn} onPress={press}>
       <Text style={rec ? styles.btnRecText : styles.btnText}>
         {option.label}
-        {rec ? "(推奨)" : ""}
+        {rec && !option.label.includes("推奨") ? "(推奨)" : ""}
       </Text>
     </Pressable>
   );
@@ -362,7 +399,7 @@ function ItemCard({
         </Text>
         {item.background ? (
           <Pressable accessibilityRole="button" style={styles.footBtn} onPress={toggleBg}>
-            <Text style={styles.link}>{bgOpen ? "▼ 背景を閉じる" : "▶ 背景"}</Text>
+            <Text style={styles.footText}>{bgOpen ? "▼背景" : "▶背景"}</Text>
           </Pressable>
         ) : null}
         <Pressable
@@ -371,18 +408,18 @@ function ItemCard({
           style={styles.footBtn}
           onPress={toggleChat}
         >
-          <Text style={styles.link}>{chatOpen ? "▼ 💬" : "💬"}</Text>
+          <Text style={styles.footText}>{chatOpen ? "▼💬" : "💬"}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="元のスレに戻る"
+          style={threadReason === null ? styles.footBtn : styles.footBtnOff}
+          onPress={thread}
+        >
+          <Text style={styles.footText}>↩ スレ</Text>
         </Pressable>
       </View>
-      <Pressable
-        accessibilityRole="button"
-        disabled={threadReason !== null}
-        style={threadReason === null ? styles.threadBtn : styles.threadBtnOff}
-        onPress={thread}
-      >
-        <Text style={threadReason === null ? styles.link : styles.muted}>↩ 元のスレに戻る</Text>
-      </Pressable>
-      {threadReason ? <Text style={styles.muted}>{threadReason}</Text> : null}
+      {threadReason && open ? <Text style={styles.muted}>{threadReason}</Text> : null}
     </View>
   );
 }
