@@ -42,7 +42,7 @@ import type { SidebarWorkspaceGroup } from "@/components/sidebar/sidebar-labels"
 import type { SidebarProjectIconTarget } from "@/utils/sidebar-project-row-model";
 import { type SidebarGroupMode, useSidebarViewStore } from "@/stores/sidebar-view-store";
 import { PluginSidebarItem } from "@/plugins/sidebar-items";
-import type { PluginSidebarNavItem } from "@/sidebar-nav/model";
+import { builtinSidebarNavLabelKey } from "@/sidebar-nav/model";
 import { useSidebarNavItems } from "@/sidebar-nav/use-sidebar-nav-items";
 import { usePanelStore } from "@/stores/panel-store";
 import { useOwnsWindowChromeCorner, WindowChromeSafeArea } from "@/utils/desktop-window";
@@ -50,7 +50,7 @@ import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { buildSettingsAddHostRoute, buildSettingsRoute } from "@/utils/host-routes";
 import { openHostOverview } from "@/navigation/settings-navigation";
-import { UsageSidebarRoot } from "@/usage";
+import { UsageSidebarItem, UsageSidebarRoot } from "@/usage";
 import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
@@ -89,6 +89,7 @@ interface SidebarLabels {
   hosts: string;
   settings: string;
   searchHosts: string;
+  usage: string;
   closeSidebar: string;
 }
 
@@ -195,6 +196,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       hosts: t("sidebar.actions.hosts"),
       settings: t("sidebar.actions.settings"),
       searchHosts: t("sidebar.host.searchPlaceholder"),
+      usage: t(builtinSidebarNavLabelKey("usage")),
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -347,6 +349,7 @@ function SidebarFooter({
     hosts: string;
     settings: string;
     searchHosts: string;
+    usage: string;
   };
   handleAddHost: () => void;
   handleOpenHostSettings: (serverId: string) => void;
@@ -358,7 +361,7 @@ function SidebarFooter({
   const barRef = useRef<View | null>(null);
   const barItems = footerItems.filter(isBarItem);
 
-  // One line of icons: Add project, the footer's bar items, then Settings at the end.
+  // One line of icons: Add project, Usage, Hosts, then Help and Settings at the end.
   return (
     <UsageSidebarRoot>
       <View style={styles.footerContainer} testID="sidebar-footer">
@@ -401,37 +404,35 @@ function SidebarFooter({
   );
 }
 
-/** Bar items render in the footer's icon line, not in the rows below it. */
+/**
+ * The footer rows in the user's `sidebarFooterItems` order: the Usage item and plugin rows. The
+ * Usage item is left out while it has no summary to show.
+ */
 function isBarItem(item: { kind: string; visible: boolean; group?: { pluginId?: string } }) {
   return item.kind === "plugin" && item.visible && item.group?.pluginId === BAR_PLUGIN_ID;
 }
 
-/**
- * The footer rows in the user's `sidebarFooterItems` order: plugin rows only. The built-in Usage
- * row stays out of the sidebar (Topos spec: no usage button there); its screen and data remain,
- * and `UsageSidebarRoot` still hosts the modal, though nothing in the sidebar opens it now. A new
- * built-in footer item must be wired here explicitly or it will not render.
- */
 function SidebarFooterRows({ onBeforeNavigate }: { onBeforeNavigate?: () => void }) {
   const { items } = useSidebarNavItems("footer");
   const rowsRef = useRef<View | null>(null);
-  const visibleItems = items.filter(
-    (item): item is PluginSidebarNavItem =>
-      item.kind === "plugin" && item.visible && !isBarItem(item),
-  );
+  const visibleItems = items.filter((item) => item.visible && !isBarItem(item));
   if (visibleItems.length === 0) return null;
   return (
     <>
       <View ref={rowsRef} collapsable={false} style={styles.footerRows}>
-        {visibleItems.map((item) => (
-          <PluginSidebarItem
-            key={item.key}
-            group={item.group}
-            section="footer"
-            fallbackAnchorRef={rowsRef}
-            onBeforeNavigate={onBeforeNavigate}
-          />
-        ))}
+        {visibleItems.map((item) =>
+          item.kind === "plugin" ? (
+            <PluginSidebarItem
+              key={item.key}
+              group={item.group}
+              section="footer"
+              fallbackAnchorRef={rowsRef}
+              onBeforeNavigate={onBeforeNavigate}
+            />
+          ) : (
+            <UsageSidebarItem key={item.key} />
+          ),
+        )}
       </View>
       <SidebarSeparator testID="sidebar-footer-separator" />
     </>
@@ -893,7 +894,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1.5],
   },
-  // Pushes the bar items and Settings to the end of the icon line.
+  // Pushes Help and Settings to the end of the icon line.
   footerSpacer: {
     flex: 1,
   },
@@ -901,7 +902,7 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
   },
-  // Plugin rows sit above the footer's icon line, spaced like the header nav rows.
+  // Usage and plugin rows sit above the footer's icon line, spaced like the header nav rows.
   footerRows: {
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1.5],
