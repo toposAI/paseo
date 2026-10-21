@@ -125,3 +125,38 @@ test("一覧は順序ファイルに従う", () => {
     ["done", "wait", "work"],
   );
 });
+
+test("親(子司令塔)ごとにまとめ、司令塔自身の行は出さず、親なしは最後", () => {
+  const list = normalizeChildThreads({
+    threads: [
+      row({ agent_id: "boss", status: "実装中", updated_at: 9 }),
+      row({
+        agent_id: "a1",
+        status: "完了",
+        updated_at: 5,
+        parent_agent_id: "boss",
+        parent_title: "B",
+      }),
+      row({ agent_id: "x1", status: "実装中", updated_at: 1 }),
+      row({
+        agent_id: "c1",
+        status: "ユーザー判断待ち",
+        updated_at: 2,
+        parent_agent_id: "other",
+        parent_title: "C",
+      }),
+      row({
+        agent_id: "a2",
+        status: "実装中",
+        updated_at: 8,
+        parent_agent_id: "boss",
+        parent_title: "B",
+      }),
+    ],
+  });
+  assert.deepEqual(
+    list.map((t) => t.agentId),
+    ["c1", "a2", "a1", "x1"],
+  );
+  assert.equal(list[0].parentTitle, "C");
+});

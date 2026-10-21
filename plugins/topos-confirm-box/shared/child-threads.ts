@@ -26,6 +26,10 @@ export const ChildThreadSchema = z.object({
   /** 完了まとめの確認状態(箱の state)。確認済み=read/approved。 */
   summaryState: z.string().nullable(),
   updatedAt: z.number(),
+  /** 親(子司令塔)のagent id。親が無い/不明は null(「その他」グループ)。 */
+  parentAgentId: z.string().nullable().default(null),
+  /** 親の題名(グループ見出し用)。 */
+  parentTitle: z.string().nullable().default(null),
 });
 export type ChildThread = z.infer<typeof ChildThreadSchema>;
 
@@ -37,6 +41,8 @@ export const childThreadsListRpc = defineRpc({
     /** 読み出し先(画面に出す。どこを見ているか分かるように)。 */
     dir: z.string(),
     generatedAt: z.number(),
+    /** 手動の並び順が保存されているか(「自動に戻す」を出す判断用)。 */
+    orderIsManual: z.boolean().default(false),
   }),
 });
 export type ChildThreadsListOutput = z.infer<typeof childThreadsListRpc.output>;
@@ -78,4 +84,30 @@ export const STATUS_RANK: Record<ChildThreadStatus, number> = {
 /** 表示順: ユーザー判断待ち → 実装中 → 完了、同じ状態の中は更新の新しい順。 */
 export function compareChildThreads(a: ChildThread, b: ChildThread): number {
   return STATUS_RANK[a.status] - STATUS_RANK[b.status] || b.updatedAt - a.updatedAt;
+}
+
+/**
+ * 既定の並び: 子司令塔(親)ごとにまとめ、グループは「最も急ぐ状態 → 更新の新しい順」、
+ * 親の無い「その他」は最後。グループ内は `compareChildThreads`。
+ * 確認箱の優先順位台帳はプロジェクト単位でスレに紐づかないため使わない(推測で優先度を作らない)。
+ */
+export function sortChildThreadsGrouped(threads: readonly ChildThread[]): ChildThread[] {
+  const groups = new Map<string, ChildThread[]>();
+  for (const t of threads) {
+    const key = t.parentAgentId ?? "";
+    const g = groups.get(key);
+    if (g) g.push(t);
+    else groups.set(key, [t]);
+  }
+  const meta = (g: ChildThread[]) => ({
+    rank: Math.min(...g.map((t) => STATUS_RANK[t.status])),
+    latest: Math.max(...g.map((t) => t.updatedAt)),
+  });
+  const ordered = [...groups.entries()].sort(([ka, a], [kb, b]) => {
+    if ((ka === "") !== (kb === "")) return ka === "" ? 1 : -1;
+    const ma = meta(a);
+    const mb = meta(b);
+    return ma.rank - mb.rank || mb.latest - ma.latest;
+  });
+  return ordered.flatMap(([, g]) => [...g].sort(compareChildThreads));
 }

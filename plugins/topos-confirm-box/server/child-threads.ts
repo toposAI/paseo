@@ -13,7 +13,7 @@ import {
   CHILD_THREAD_ORDER_FILE,
   CHILD_THREAD_ORDER_LIMIT,
   CHILD_THREAD_STATUSES,
-  compareChildThreads,
+  sortChildThreadsGrouped,
 } from "../shared/child-threads.js";
 import type { ChildThread, ChildThreadStatus } from "../shared/child-threads.js";
 import type { ConfirmBoxItem } from "../shared/contract.js";
@@ -50,9 +50,13 @@ export function normalizeChildThreads(
       summary: item ? item.background : null,
       summaryState: item ? item.state : null,
       updatedAt: typeof o.updated_at === "number" ? o.updated_at : 0,
+      parentAgentId: str(o.parent_agent_id).slice(0, 200) || null,
+      parentTitle: str(o.parent_title).slice(0, 120) || null,
     });
   }
-  return out.sort(compareChildThreads);
+  // 子を持つ行(司令塔)はグループ見出しになるので行としては出さない(固定済みと二重に出ない)。
+  const parents = new Set(out.map((t) => t.parentAgentId).filter((id) => id !== null));
+  return sortChildThreadsGrouped(out.filter((t) => !parents.has(t.agentId)));
 }
 
 export function readChildThreads(

@@ -263,13 +263,13 @@ it("splits the sidebar summary into one line per provider, Claude first", () => 
   const opencode = report({
     sourceId: "opencode-go-key",
     sourceLabel: "OpenCode Go",
-    windows: [{ id: "monthly", label: "Monthly", usedPct: 12, summary: true }],
+    windows: [{ id: "weekly", label: "Weekly", usedPct: 12, summary: true }],
   });
   const family = report({
     sourceId: "opencode-go-family",
     sourceLabel: "OpenCode Go (family)",
     account: "family",
-    windows: [{ id: "monthly", label: "Monthly", usedPct: 40, summary: true }],
+    windows: [{ id: "weekly", label: "Weekly", usedPct: 40, summary: true }],
   });
   const reports = [opencode, claude, family];
   const rows = splitPinnedUsageRows(resolvePinnedUsage(reports, preferences(null)), reports);
@@ -278,6 +278,20 @@ it("splits the sidebar summary into one line per provider, Claude first", () => 
     ["Claude", 1],
     ["OpenCode Go", 2],
   ]);
+});
+
+it("keeps only the 5h and weekly windows on the sidebar lines", () => {
+  const opencode = report({
+    sourceId: "opencode-go-key",
+    sourceLabel: "OpenCode Go",
+    windows: [
+      { id: "weekly", label: "Weekly", usedPct: 12, summary: true },
+      { id: "monthly", label: "Monthly", usedPct: 30, summary: true },
+    ],
+  });
+  const rows = splitPinnedUsageRows(resolvePinnedUsage([opencode], preferences(null)), [opencode]);
+  const shown = rows.flatMap((row) => row.sources).flatMap((source) => source.windows);
+  expect(shown.map((window) => window.shortLabel)).toEqual(["wk"]);
 });
 
 it("keeps unavailable and error reports out of the sidebar summary", () => {

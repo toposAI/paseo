@@ -5,6 +5,7 @@
  * 並び順はドラッグで変更でき、`child_threads_order.json` に保存される
  * (既存の `child_threads.json` は触らない)。保存が無ければサーバーの既定順。
  */
+import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text } from "react-native";
 import { useRpc, type PluginSidebarItemProps } from "@getpaseo/plugin/client";
@@ -13,6 +14,9 @@ import { childThreadsListRpc, childThreadsSetOrderRpc } from "../shared/child-th
 import type { ChildThread, ChildThreadStatus } from "../shared/child-threads.js";
 
 const POLL_MS = 30_000;
+const COLLAPSED_KEY = "topos-child-groups-collapsed";
+const OTHER_GROUP = "";
+const OTHER_LABEL = "その他";
 /** ドラッグ中は取得結果で一覧を差し替えない(キャンセル時に固まらないよう期限付き)。 */
 const DRAG_POLL_GATE_MS = 60_000;
 export const CHILD_THREADS_SCREEN_ID = "child-threads";
@@ -27,6 +31,46 @@ interface AgentNavigation {
   navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
 }
 
+const groupKeyOf = (t: ChildThread) => t.parentAgentId ?? OTHER_GROUP;
+
+function readCollapsed(): ReadonlySet<string> {
+  try {
+    const raw: unknown = JSON.parse(globalThis.localStorage?.getItem(COLLAPSED_KEY) ?? "[]");
+    return new Set(Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeCollapsed(set: ReadonlySet<string>): void {
+  try {
+    globalThis.localStorage?.setItem(COLLAPSED_KEY, JSON.stringify([...set]));
+  } catch {
+    // 保存できなくても画面上の開閉は動く
+  }
+}
+
+interface ThreadGroup {
+  key: string;
+  title: string;
+  threads: ChildThread[];
+}
+
+/** サーバーの並び(グループ単位でまとまっている)を出現順のままグループへ割る。 */
+function groupThreads(threads: readonly ChildThread[]): ThreadGroup[] {
+  const groups = new Map<string, ThreadGroup>();
+  for (const t of threads) {
+    const key = groupKeyOf(t);
+    let g = groups.get(key);
+    if (!g) {
+      g = { key, title: t.parentTitle || OTHER_LABEL, threads: [] };
+      groups.set(key, g);
+    }
+    g.threads.push(t);
+  }
+  return [...groups.values()];
+}
+
 export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
   const { currentScreen, openScreen } = props;
   const navigation = (props as PluginSidebarItemProps & AgentNavigation).navigation;
@@ -35,6 +79,8 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
   const [threads, setThreads] = useState<ChildThread[]>([]);
   const [failed, setFailed] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
+  const [orderIsManual, setOrderIsManual] = useState(false);
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(readCollapsed);
   const dragGateUntilRef = useRef(0);
 
   useEffect(() => {
@@ -46,6 +92,7 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
           // ドラッグ中に差し替えると行が飛ぶ。終了後(または期限切れ)まで待つ。
           if (Date.now() < dragGateUntilRef.current) return null;
           setThreads(r.threads);
+          setOrderIsManual(r.orderIsManual);
           setFailed(false);
           return null;
         })
@@ -62,11 +109,12 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
     dragGateUntilRef.current = Date.now() + DRAG_POLL_GATE_MS;
   }, []);
 
-  const onReorder = useCallback(
+  const persistOrder = useCallback(
     (keys: string[]) => {
       dragGateUntilRef.current = 0;
       // 先に画面へ反映し、保存は後追い。失敗したら次の取得でサーバーの順に戻る。
-      setThreads((prev) => applyOrder(prev, keys));
+      if (keys.length > 0) setThreads((prev) => applyOrder(prev, keys));
+      setOrderIsManual(keys.length > 0);
       setSaveFailed(false);
       void setOrder({ order: keys })
         .then((r) => {
@@ -78,6 +126,28 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
     [setOrder],
   );
 
+  // グループ内のドラッグ結果を全体の並びへ戻す(他グループの並びはそのまま)。
+  const onReorderGroup = useCallback(
+    (groupKey: string, keys: string[]) => {
+      const queue = [...keys];
+      const flat = threads.map((t) =>
+        groupKeyOf(t) === groupKey ? (queue.shift() ?? t.agentId) : t.agentId,
+      );
+      persistOrder(flat);
+    },
+    [persistOrder, threads],
+  );
+  const resetOrder = useCallback(() => persistOrder([]), [persistOrder]);
+  const toggleGroup = useCallback((key: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      writeCollapsed(next);
+      return next;
+    });
+  }, []);
+  const groups = useMemo(() => groupThreads(threads), [threads]);
+
   const focusId = (currentScreen?.params as { focusId?: string } | undefined)?.focusId;
   const onScreen = currentScreen?.screenId === CHILD_THREADS_SCREEN_ID;
 
@@ -85,7 +155,6 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
     () => openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: {} }),
     [openScreen],
   );
-  const keyOf = useCallback((t: ChildThread) => t.agentId, []);
   let headerLabel: string;
   if (failed) headerLabel = `子スレ ${threads.length}件(取得失敗)`;
   else if (saveFailed) headerLabel = `子スレ ${threads.length}件(並び順を保存できません)`;
@@ -114,17 +183,74 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
         active={onScreen && !focusId}
         onPress={openList}
       />
-      <SidebarReorderableList
-        testID="child-threads-list"
-        data={threads}
-        keyExtractor={keyOf}
-        renderItem={renderThread}
-        onDragBegin={onDragBegin}
-        onReorder={onReorder}
-      />
+      {groups.map((g) => (
+        <ThreadGroupSection
+          key={g.key}
+          group={g}
+          open={!collapsed.has(g.key)}
+          onToggle={toggleGroup}
+          onDragBegin={onDragBegin}
+          onReorderGroup={onReorderGroup}
+          renderThread={renderThread}
+        />
+      ))}
+      {orderIsManual ? (
+        <SidebarRow
+          id="child-threads-reset-order"
+          icon="RotateCcw"
+          label="並び順を自動に戻す"
+          onPress={resetOrder}
+        />
+      ) : null}
     </>
   );
 }
+
+function ThreadGroupSection({
+  group,
+  open,
+  onToggle,
+  onDragBegin,
+  onReorderGroup,
+  renderThread,
+}: {
+  group: ThreadGroup;
+  open: boolean;
+  onToggle: (key: string) => void;
+  onDragBegin: () => void;
+  onReorderGroup: (key: string, keys: string[]) => void;
+  renderThread: (t: ChildThread) => React.ReactElement;
+}) {
+  const press = useCallback(() => onToggle(group.key), [group.key, onToggle]);
+  const reorder = useCallback(
+    (keys: string[]) => onReorderGroup(group.key, keys),
+    [group.key, onReorderGroup],
+  );
+  const trailing = useMemo(() => <Text>{group.threads.length}</Text>, [group.threads.length]);
+  return (
+    <>
+      <SidebarRow
+        id={`child-group-${group.key || "other"}`}
+        icon={open ? "ChevronDown" : "ChevronRight"}
+        label={group.title}
+        onPress={press}
+        trailing={trailing}
+      />
+      {open ? (
+        <SidebarReorderableList
+          testID={`child-threads-list-${group.key || "other"}`}
+          data={group.threads}
+          keyExtractor={keyOfThread}
+          renderItem={renderThread}
+          onDragBegin={onDragBegin}
+          onReorder={reorder}
+        />
+      ) : null}
+    </>
+  );
+}
+
+const keyOfThread = (t: ChildThread) => t.agentId;
 
 /** 画面の並び(keys)を先に、keysに無い行(取得の隙間に入った新規)を既定順のまま後ろに。 */
 function applyOrder(threads: readonly ChildThread[], keys: readonly string[]): ChildThread[] {

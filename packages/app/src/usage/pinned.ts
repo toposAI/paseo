@@ -99,10 +99,18 @@ export function splitPinnedUsageRows(
 ): PinnedUsageRow[] {
   const sourceIdByReportId = new Map(reports.map((entry) => [entry.id, entry.sourceId]));
   return USAGE_ROWS.flatMap((row) => {
-    const rowSources = sources.filter((source) => {
-      const sourceId = sourceIdByReportId.get(source.key);
-      return sourceId !== undefined && row.matches(sourceId);
-    });
+    const rowSources = sources
+      .filter((source) => {
+        const sourceId = sourceIdByReportId.get(source.key);
+        return sourceId !== undefined && row.matches(sourceId);
+      })
+      // The sidebar only ever shows the 5h and weekly windows; monthly etc. stay in the modal.
+      .map((source) => ({
+        key: source.key,
+        icon: source.icon,
+        windows: source.windows.filter((w) => w.shortLabel === "5h" || w.shortLabel === "wk"),
+      }))
+      .filter((source) => source.windows.length > 0);
     return rowSources.length > 0 ? [{ key: row.key, title: row.title, sources: rowSources }] : [];
   });
 }
