@@ -17,12 +17,15 @@ import {
   confirmBoxDecideRpc,
   confirmBoxListRpc,
   confirmBoxPermitRpc,
+  cardChatListRpc,
+  cardChatSayRpc,
   priorityListRpc,
   priorityMoveRpc,
   prioritySayRpc,
 } from "./shared/contract.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
 import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/box.js";
+import { readCardChat, sayToCard } from "./server/cardchat.js";
 import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
 import { permitResponse, permitsToItems } from "./server/permits.js";
 import type { PermitAgentLike } from "./server/permits.js";
@@ -135,6 +138,22 @@ export default function contribute(server: PluginServerContext) {
   server.handle(prioritySayRpc, async (input) => {
     try {
       return sayToLedger(resolveConfirmBoxDir(), input.text);
+    } catch (error) {
+      return { ok: false, message: `送れません: ${(error as Error).message}` };
+    }
+  });
+
+  server.handle(cardChatListRpc, async (input) => {
+    try {
+      return { messages: readCardChat(resolveConfirmBoxDir(), input.key) };
+    } catch {
+      return { messages: [] };
+    }
+  });
+
+  server.handle(cardChatSayRpc, async (input) => {
+    try {
+      return sayToCard(resolveConfirmBoxDir(), input.key, input.text);
     } catch (error) {
       return { ok: false, message: `送れません: ${(error as Error).message}` };
     }
