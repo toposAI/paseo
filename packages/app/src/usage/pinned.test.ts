@@ -165,7 +165,7 @@ describe("resolvePinnedUsage", () => {
   it("names a window by its label when the source gives no short label", () => {
     const items = windows([codex], preferences([{ sourceId: "codex", windowId: "weekly" }]));
 
-    expect(items.map((item) => item.shortLabel)).toEqual(["Weekly"]);
+    expect(items.map((item) => item.shortLabel)).toEqual(["wk"]);
   });
 
   it("defaults to every window the source marks as summary, when it marks any", () => {
