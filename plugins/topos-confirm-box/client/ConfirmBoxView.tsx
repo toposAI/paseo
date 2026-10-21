@@ -80,6 +80,24 @@ export function ConfirmBoxView({
       link: { color: c.accent, fontSize: 13, textDecorationLine: "underline" as const },
       row: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: touch ? 8 : 6 },
       reporter: { color: c.foreground, fontSize: 13, fontWeight: "600" as const },
+      threadBtn: {
+        backgroundColor: c.surface2,
+        borderRadius: 6,
+        paddingVertical: touch ? 10 : 6,
+        paddingHorizontal: touch ? 14 : 10,
+        alignSelf: "flex-start" as const,
+        ...tap,
+      },
+      threadBtnOff: {
+        borderColor: c.border,
+        borderWidth: 1,
+        borderRadius: 6,
+        paddingVertical: touch ? 10 : 6,
+        paddingHorizontal: touch ? 14 : 10,
+        alignSelf: "flex-start" as const,
+        opacity: 0.6,
+        ...tap,
+      },
       footBtn: {
         paddingHorizontal: touch ? 8 : 0,
         ...(touch ? { minWidth: 44, alignItems: "center" as const } : {}),
@@ -118,11 +136,12 @@ export function ConfirmBoxView({
   const openBackground = useCallback(() => setDepth("background"), []);
   const openChat = useCallback(
     (item: ConfirmBoxItem) => {
-      setDepth("chat");
-      if (item.threadRef?.kind === "paseo_agent" && navigation) {
-        navigation.openAgent({ agentId: item.threadRef.id });
+      const agentId = threadAgentId(item);
+      if (agentId && navigation) {
+        setDepth("chat");
+        navigation.openAgent({ agentId });
       } else {
-        setNotice("この項目には開けるチャット(投函元スレ)がありません");
+        setNotice(threadDisabledReason(item, Boolean(navigation)) ?? "スレを開けません");
       }
     },
     [navigation],
@@ -223,6 +242,7 @@ export function ConfirmBoxView({
               onToggle={toggle}
               onBackground={openBackground}
               onChat={openChat}
+              canNavigate={Boolean(navigation)}
               onChoose={choose}
             />
           ))}
@@ -233,6 +253,19 @@ export function ConfirmBoxView({
 }
 
 type Styles = Record<string, object>;
+
+/** 元スレの agent ID。投函の thread_ref(paseo_agent)優先、無ければ承認待ちの agentId。 */
+function threadAgentId(item: ConfirmBoxItem): string | null {
+  if (item.threadRef?.kind === "paseo_agent") return item.threadRef.id;
+  return item.agentId;
+}
+
+/** 押せない理由。押せるなら null。 */
+function threadDisabledReason(item: ConfirmBoxItem, canNavigate: boolean): string | null {
+  if (!threadAgentId(item)) return "元スレを特定できません(投函に thread_ref がありません)";
+  if (!canNavigate) return "この画面からはスレを開けません(全画面の確認箱から開いてください)";
+  return null;
+}
 
 function formatCreated(ts: number): string {
   // 単位はソースにより秒/ミリ秒。年月日として読めない値(連番等)は出さない。
@@ -275,6 +308,7 @@ function ItemCard({
   onToggle,
   onBackground,
   onChat,
+  canNavigate,
   onChoose,
 }: {
   item: ConfirmBoxItem;
@@ -283,12 +317,14 @@ function ItemCard({
   onToggle: (id: string) => void;
   onBackground: () => void;
   onChat: (item: ConfirmBoxItem) => void;
+  canNavigate: boolean;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
 }) {
   const [bgOpen, setBgOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const toggle = useCallback(() => onToggle(item.id), [onToggle, item.id]);
   const thread = useCallback(() => onChat(item), [onChat, item]);
+  const threadReason = threadDisabledReason(item, canNavigate);
   const toggleBg = useCallback(() => {
     setBgOpen((v) => {
       if (!v) onBackground();
@@ -338,11 +374,15 @@ function ItemCard({
           <Text style={styles.link}>{chatOpen ? "▼ 💬" : "💬"}</Text>
         </Pressable>
       </View>
-      {item.threadRef ? (
-        <Pressable accessibilityRole="button" onPress={thread}>
-          <Text style={styles.muted}>投函元のスレを開く</Text>
-        </Pressable>
-      ) : null}
+      <Pressable
+        accessibilityRole="button"
+        disabled={threadReason !== null}
+        style={threadReason === null ? styles.threadBtn : styles.threadBtnOff}
+        onPress={thread}
+      >
+        <Text style={threadReason === null ? styles.link : styles.muted}>↩ 元のスレに戻る</Text>
+      </Pressable>
+      {threadReason ? <Text style={styles.muted}>{threadReason}</Text> : null}
     </View>
   );
 }
