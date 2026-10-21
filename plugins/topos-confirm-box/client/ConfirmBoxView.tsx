@@ -15,6 +15,7 @@ import {
   confirmBoxPermitRpc,
 } from "../shared/contract.js";
 import { notifyBoxChanged } from "./events.js";
+import { CardChat } from "./CardChat.js";
 import { PriorityView } from "./PriorityView.js";
 import type { ConfirmBoxDepth, ConfirmBoxItem, ConfirmBoxListOutput } from "../shared/contract.js";
 
@@ -202,7 +203,6 @@ export function ConfirmBoxView({
               item={item}
               styles={s}
               open={openId === item.id}
-              showBackground={depth === "background"}
               onToggle={toggle}
               onBackground={openBackground}
               onChat={openChat}
@@ -221,19 +221,21 @@ function BackgroundBlock({
   item,
   styles,
   show,
-  onOpen,
+  onToggle,
 }: {
   item: ConfirmBoxItem;
   styles: Styles;
   show: boolean;
-  onOpen: () => void;
+  onToggle: () => void;
 }) {
   if (!item.background) return null;
-  if (show) return <Text style={styles.text}>{item.background}</Text>;
   return (
-    <Pressable accessibilityRole="button" onPress={onOpen}>
-      <Text style={styles.link}>▶ 背景を読む</Text>
-    </Pressable>
+    <>
+      <Pressable accessibilityRole="button" onPress={onToggle}>
+        <Text style={styles.link}>{show ? "▼ 背景を非表示にする" : "▶ 背景を読む"}</Text>
+      </Pressable>
+      {show ? <Text style={styles.text}>{item.background}</Text> : null}
+    </>
   );
 }
 
@@ -264,7 +266,6 @@ function ItemCard({
   item,
   styles,
   open,
-  showBackground,
   onToggle,
   onBackground,
   onChat,
@@ -273,14 +274,22 @@ function ItemCard({
   item: ConfirmBoxItem;
   styles: Styles;
   open: boolean;
-  showBackground: boolean;
   onToggle: (id: string) => void;
   onBackground: () => void;
   onChat: (item: ConfirmBoxItem) => void;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
 }) {
+  const [bgOpen, setBgOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const toggle = useCallback(() => onToggle(item.id), [onToggle, item.id]);
-  const chat = useCallback(() => onChat(item), [onChat, item]);
+  const thread = useCallback(() => onChat(item), [onChat, item]);
+  const toggleBg = useCallback(() => {
+    setBgOpen((v) => {
+      if (!v) onBackground();
+      return !v;
+    });
+  }, [onBackground]);
+  const toggleChat = useCallback(() => setChatOpen((v) => !v), []);
   return (
     <View style={styles.card}>
       <Pressable accessibilityRole="button" onPress={toggle}>
@@ -300,20 +309,17 @@ function ItemCard({
           <OptionButton key={o.id} item={item} option={o} styles={styles} onChoose={onChoose} />
         ))}
       </View>
-      {open ? (
-        <>
-          <Text style={styles.text}>{item.summary}</Text>
-          <BackgroundBlock
-            item={item}
-            styles={styles}
-            show={showBackground}
-            onOpen={onBackground}
-          />
-        </>
-      ) : null}
+      {open ? <Text style={styles.text}>{item.summary}</Text> : null}
+      <BackgroundBlock item={item} styles={styles} show={bgOpen} onToggle={toggleBg} />
+      <Pressable accessibilityRole="button" onPress={toggleChat}>
+        <Text style={styles.link}>
+          {chatOpen ? "▼ このカードのチャット欄を閉じる" : "💬 このカードのチャット欄を開く"}
+        </Text>
+      </Pressable>
+      {chatOpen ? <CardChat itemKey={item.key ?? undefined} styles={styles} /> : null}
       {item.threadRef ? (
-        <Pressable accessibilityRole="button" onPress={chat}>
-          <Text style={styles.link}>💬 チャットで詳しく聞く</Text>
+        <Pressable accessibilityRole="button" onPress={thread}>
+          <Text style={styles.muted}>投函元のスレを開く</Text>
         </Pressable>
       ) : null}
     </View>

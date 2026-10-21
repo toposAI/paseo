@@ -217,6 +217,37 @@ export const prioritySayRpc = defineRpc({
   output: z.object({ ok: z.boolean(), message: z.string() }),
 });
 
+/** カード単位のチャット。質問を追記し、即時の受領返答を必ず1行返す。本回答は別プロセス(返信ワーカー)が replies に書く。 */
+export const CardChatReplySchema = z.object({
+  ts: z.number(),
+  re: z.number(),
+  by: z.string(),
+  text: z.string(),
+});
+export type CardChatReply = z.infer<typeof CardChatReplySchema>;
+
+export const cardChatListRpc = defineRpc({
+  name: "topos.confirmbox.cardchat.list",
+  input: z.object({ key: z.string() }),
+  output: z.object({
+    messages: z.array(
+      z.object({
+        ts: z.number(),
+        role: z.enum(["user", "reply"]),
+        by: z.string(),
+        text: z.string(),
+      }),
+    ),
+  }),
+});
+export type CardChatListOutput = z.infer<typeof cardChatListRpc.output>;
+
+export const cardChatSayRpc = defineRpc({
+  name: "topos.confirmbox.cardchat.say",
+  input: z.object({ key: z.string(), text: z.string() }),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
+
 // ---------------------------------------------------------------- 共有ヘルパ(純関数)
 
 /** 並び順。SSOT(Python `notify_box.sort_items()` / TS `compareConfirmBoxItems()`)の写し。
