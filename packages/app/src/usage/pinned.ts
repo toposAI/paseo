@@ -62,6 +62,44 @@ function groupBySource(reports: readonly UsageReportEntry[]): UsageReportEntry[]
 }
 
 /**
+ * One line of the sidebar summary. Every provider gets its own line so a slow or failing source
+ * never blanks the others: Claude first, then OpenCode Go.
+ */
+export interface PinnedUsageRow {
+  key: "claude" | "opencode-go";
+  title: string;
+  sources: PinnedUsageSource[];
+}
+
+/** Which line a source belongs to, by its id. Anything else stays in the Usage modal. */
+const USAGE_ROWS: readonly {
+  key: PinnedUsageRow["key"];
+  title: string;
+  matches: (id: string) => boolean;
+}[] = [
+  { key: "claude", title: "Claude", matches: (id) => id === "claude" },
+  { key: "opencode-go", title: "OpenCode Go", matches: (id) => id.startsWith("opencode") },
+];
+
+/**
+ * Splits the summary into provider lines. Each line keeps the order `resolvePinnedUsage` gave it;
+ * lines with nothing pinned are dropped rather than shown empty.
+ */
+export function splitPinnedUsageRows(
+  sources: readonly PinnedUsageSource[],
+  reports: readonly UsageReportEntry[],
+): PinnedUsageRow[] {
+  const sourceIdByReportId = new Map(reports.map((entry) => [entry.id, entry.sourceId]));
+  return USAGE_ROWS.flatMap((row) => {
+    const rowSources = sources.filter((source) => {
+      const sourceId = sourceIdByReportId.get(source.key);
+      return sourceId !== undefined && row.matches(sourceId);
+    });
+    return rowSources.length > 0 ? [{ key: row.key, title: row.title, sources: rowSources }] : [];
+  });
+}
+
+/**
  * The sidebar Usage item's summary: one group per account, grouped by source, each with its
  * windows in its report's order. Accounts with nothing to show are left out.
  */

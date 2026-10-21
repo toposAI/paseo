@@ -3,6 +3,7 @@ import type { UsagePreferences } from "./preferences";
 import {
   choosePinnedUsageLayout,
   resolvePinnedUsage,
+  splitPinnedUsageRows,
   type PinnedUsageSource,
   type PinnedUsageWindow,
 } from "./pinned";
@@ -255,6 +256,27 @@ describe("resolvePinnedUsage", () => {
       ["Claude (work) 5-hour 90% used", "90%"],
     ]);
   });
+});
+
+it("splits the sidebar summary into one line per provider, Claude first", () => {
+  const opencode = report({
+    sourceId: "opencode-go-key",
+    sourceLabel: "OpenCode Go",
+    windows: [{ id: "monthly", label: "Monthly", usedPct: 12, summary: true }],
+  });
+  const family = report({
+    sourceId: "opencode-go-family",
+    sourceLabel: "OpenCode Go (family)",
+    account: "family",
+    windows: [{ id: "monthly", label: "Monthly", usedPct: 40, summary: true }],
+  });
+  const reports = [opencode, claude, family];
+  const rows = splitPinnedUsageRows(resolvePinnedUsage(reports, preferences(null)), reports);
+
+  expect(rows.map((row) => [row.title, row.sources.length])).toEqual([
+    ["Claude", 1],
+    ["OpenCode Go", 2],
+  ]);
 });
 
 it("keeps unavailable and error reports out of the sidebar summary", () => {

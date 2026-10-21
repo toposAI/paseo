@@ -27,7 +27,9 @@ import {
   METER_GAP,
   MIN_METER_WIDTH,
   resolvePinnedUsage,
+  splitPinnedUsageRows,
   type PinnedUsageLayout,
+  type PinnedUsageRow,
   type PinnedUsageSource,
 } from "./pinned";
 import { UsageModal } from "./usage-modal";
@@ -39,23 +41,31 @@ function useUsageSummary(): readonly PinnedUsageSource[] {
   return useMemo(() => resolvePinnedUsage(reports, preferences), [preferences, reports]);
 }
 
+/** The summary split into one line per provider (Claude, then OpenCode Go). */
+function useUsageRows(): readonly PinnedUsageRow[] {
+  const { preferences } = useUsagePreferences();
+  const reports = useUsageHostReports(useUsageHostId());
+  const sources = useMemo(() => resolvePinnedUsage(reports, preferences), [preferences, reports]);
+  return useMemo(() => splitPinnedUsageRows(sources, reports), [sources, reports]);
+}
+
 /** Whether the sidebar Usage item has anything to show. */
 export function useHasUsageSummary(): boolean {
   return useUsageSummary().length > 0;
 }
 
 /**
- * The sidebar footer's usage entry: each summary window's source icon and percent, and nothing
- * while no summary window has data, since the footer's Usage icon already opens Usage.
- * Pressing it opens the Usage modal.
+ * The sidebar footer's usage entry: one line per provider (Claude, then OpenCode Go), each with
+ * its windows' percents, and nothing while no summary window has data, since the footer's Usage
+ * icon already opens Usage. Pressing it opens the Usage modal.
  */
 export function UsageSidebarItem() {
   const { t } = useTranslation();
   const label = t(builtinSidebarNavLabelKey("usage"));
   const openUsage = useOpenSidebarUsage();
-  const sources = useUsageSummary();
-  if (sources.length === 0) return null;
-  return <PinnedUsageTrigger label={label} sources={sources} onPress={openUsage} />;
+  const rows = useUsageRows();
+  if (rows.length === 0) return null;
+  return <PinnedUsageTrigger label={label} rows={rows} onPress={openUsage} />;
 }
 
 const OpenSidebarUsageContext = createContext<(() => void) | null>(null);
@@ -90,9 +100,11 @@ export function useOpenSidebarUsage(): () => void {
   return openUsage;
 }
 
-function pinnedUsageLabel(label: string, sources: readonly PinnedUsageSource[]): string {
-  const windows = sources.flatMap((source) => source.windows);
-  return `${label}: ${windows.map((window) => window.label).join(", ")}`;
+function pinnedUsageLabel(label: string, rows: readonly PinnedUsageRow[]): string {
+  return `${label}: ${rows
+    .flatMap((row) => row.sources.flatMap((source) => source.windows))
+    .map((window) => window.label)
+    .join(", ")}`;
 }
 
 function triggerStyle({ hovered }: PressableStateCallbackType & { hovered?: boolean }) {
@@ -104,19 +116,40 @@ function layoutWidth(event: LayoutChangeEvent): number {
 }
 
 /**
- * One line: each account's icon, then per window a meter and "31% 5h". Off-screen copies measure
- * the line with labels and with percents alone; the richest layout that fits is shown, and what
- * it leaves out takes no space at all.
+ * One line per provider: the provider's name, then each account's icon and per window a meter and
+ * "31% 5h". Rows measure and lay out independently, so one provider's data never waits on another's.
  */
 function PinnedUsageTrigger({
   label,
-  sources,
+  rows,
   onPress,
 }: {
   label: string;
-  sources: readonly PinnedUsageSource[];
+  rows: readonly PinnedUsageRow[];
   onPress: () => void;
 }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={pinnedUsageLabel(label, rows)}
+      style={triggerStyle}
+      testID="sidebar-usage"
+    >
+      <View style={styles.rows}>
+        {rows.map((row) => (
+          <PinnedUsageRowView key={row.key} row={row} />
+        ))}
+      </View>
+    </Pressable>
+  );
+}
+
+/**
+ * One provider's line, identified by its icon only. Off-screen copies measure it with labels and with percents alone; the
+ * richest layout that fits is shown, and what it leaves out takes no space at all.
+ */
+function PinnedUsageRowView({ row }: { row: PinnedUsageRow }) {
   const [available, setAvailable] = useState<number | null>(null);
   const [labelsWidth, setLabelsWidth] = useState<number | null>(null);
   const [percentsWidth, setPercentsWidth] = useState<number | null>(null);
@@ -133,18 +166,12 @@ function PinnedUsageTrigger({
     available,
     labelsWidth,
     percentsWidth,
-    windowCount: sources.reduce((count, source) => count + source.windows.length, 0),
+    windowCount: row.sources.reduce((count, source) => count + source.windows.length, 0),
   });
   return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={pinnedUsageLabel(label, sources)}
-      style={triggerStyle}
-      testID="sidebar-usage"
-    >
+    <View style={styles.row}>
       <View style={styles.line} onLayout={handleAvailableLayout}>
-        <PinnedUsageLine sources={sources} layout={layout} />
+        <PinnedUsageLine sources={row.sources} layout={layout} />
       </View>
       <View
         style={styles.measure}
@@ -154,13 +181,13 @@ function PinnedUsageTrigger({
         aria-hidden
       >
         <View style={styles.measured} onLayout={handleLabelsLayout}>
-          <PinnedUsageLine sources={sources} layout="labels" measuring />
+          <PinnedUsageLine sources={row.sources} layout="labels" measuring />
         </View>
         <View style={styles.measured} onLayout={handlePercentsLayout}>
-          <PinnedUsageLine sources={sources} layout="percents" measuring />
+          <PinnedUsageLine sources={row.sources} layout="percents" measuring />
         </View>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -191,12 +218,7 @@ function PinnedUsageLine({
           <Fragment key={window.key}>
             {layout === "meters" ? (
               <View style={[styles.meterSlot, leadStyle]}>
-                <UsageMeter
-                  percent={window.percent}
-                  tone={window.tone}
-                  quiet
-                  style={styles.meter}
-                />
+                <UsageMeter percent={window.percent} tone={window.tone} style={styles.meter} />
               </View>
             ) : null}
             <Text
@@ -219,8 +241,8 @@ function PinnedUsageLine({
 const styles = StyleSheet.create((theme) => ({
   trigger: {
     width: "100%",
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: "column",
+    alignItems: "stretch",
     overflow: "hidden",
     // Same row geometry and leading rail as Add project and the footer icons.
     minHeight: 28,
@@ -230,6 +252,15 @@ const styles = StyleSheet.create((theme) => ({
   },
   triggerHovered: {
     backgroundColor: theme.colors.surfaceSidebarHover,
+  },
+  rows: {
+    width: "100%",
+    gap: 1,
+  },
+  // One provider per line, kept short so the footer stays compact.
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   line: {
     flex: 1,
