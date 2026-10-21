@@ -21,13 +21,18 @@ const ICON: Record<ChildThreadStatus, string> = {
 export function ChildThreadsSidebar({ currentScreen, openScreen }: PluginSidebarItemProps) {
   const list = useRpc(childThreadsListRpc);
   const [threads, setThreads] = useState<ChildThread[]>([]);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let alive = true;
     const tick = () =>
       list({})
-        .then((r) => alive && setThreads(r.threads))
-        .catch(() => {});
+        .then((r) => {
+          if (!alive) return;
+          setThreads(r.threads);
+          setFailed(false);
+        })
+        .catch(() => alive && setFailed(true));
     void tick();
     const timer = setInterval(tick, POLL_MS);
     return () => {
@@ -36,19 +41,31 @@ export function ChildThreadsSidebar({ currentScreen, openScreen }: PluginSidebar
     };
   }, [list]);
 
+  const focusId = (currentScreen?.params as { focusId?: string } | undefined)?.focusId;
+  const onScreen = currentScreen?.screenId === CHILD_THREADS_SCREEN_ID;
+
   return (
     <>
+      {threads.length === 0 ? (
+        <SidebarRow
+          id="child-threads-empty"
+          icon="ListTodo"
+          label={failed ? "子スレ(取得失敗)" : "子スレ 0件"}
+          active={onScreen}
+          onPress={() => openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: {} })}
+        />
+      ) : null}
       {threads.map((t) => (
         <SidebarRow
           key={t.agentId}
           id={t.agentId}
           icon={ICON[t.status]}
           label={t.title}
-          active={currentScreen?.screenId === CHILD_THREADS_SCREEN_ID}
+          active={onScreen && focusId === t.agentId}
           onPress={() =>
             openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: { focusId: t.agentId } })
           }
-          trailing={<Text>{t.status}</Text>}
+          trailing={<Text>{failed ? `${t.status}(古い表示)` : t.status}</Text>}
         />
       ))}
     </>

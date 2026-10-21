@@ -24,7 +24,7 @@ export const ChildThreadSchema = z.object({
   /** 完了まとめの本文(箱の item の background)。箱から引けなければ null。 */
   summary: z.string().nullable(),
   /** 完了まとめの確認状態(箱の state)。確認済み=read/approved。 */
-  summaryState: z.enum(["new", "read", "approved"]).nullable(),
+  summaryState: z.string().nullable(),
   updatedAt: z.number(),
 });
 export type ChildThread = z.infer<typeof ChildThreadSchema>;
