@@ -477,6 +477,10 @@ function MobileSidebar({
     closeSidebar();
   }, [closeSidebar]);
 
+  const mobileHeaderGroupStyle = useMemo(
+    () => [styles.sidebarHeaderGroup, styles.sidebarHeaderGroupMobile],
+    [],
+  );
   const mobileSidebarInsetStyle = useMemo(
     () => ({
       paddingTop: insetsTop,
@@ -494,7 +498,7 @@ function MobileSidebar({
     >
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
-        <SidebarNavRows style={styles.sidebarHeaderGroup} onBeforeNavigate={closeSidebar} />
+        <SidebarNavRows style={mobileHeaderGroupStyle} onBeforeNavigate={closeSidebar} />
         <WindowChromeSafeArea
           placement="inline"
           pointerEvents="box-none"
@@ -789,6 +793,11 @@ const styles = StyleSheet.create((theme) => ({
     paddingBottom: theme.spacing[1.5],
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
+  },
+  // Compact layout has no drag-area wrapper; cap the nav+child-thread list so the pinned and
+  // workspace lists below it (and the footer) always keep room.
+  sidebarHeaderGroupMobile: {
+    maxHeight: "40%",
   },
   sidebarHeaderGroupBelowChrome: {
     paddingTop: 0,
