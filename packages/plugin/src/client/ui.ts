@@ -84,3 +84,32 @@ export interface SidebarRowProps {
 export declare const SidebarRow: ComponentType<SidebarRowProps>;
 /** A line between groups of rows. Render it from a sidebar item's `Component`. */
 export declare const SidebarSeparator: ComponentType;
+
+/** Web のドラッグ操作に使う props。行のラッパー要素へそのまま流す。 */
+export interface SidebarReorderHandleProps {
+  attributes?: Record<string, unknown>;
+  listeners?: Record<string, unknown>;
+  setActivatorNodeRef?: (node: unknown) => void;
+}
+export interface SidebarReorderItemInfo {
+  isDragging: boolean;
+  /** Web のみ。ネイティブでは undefined(長押しはホスト側が扱う)。 */
+  dragHandleProps?: SidebarReorderHandleProps;
+}
+export interface SidebarReorderableListProps<T> {
+  /** 表示する行(この配列の順で描画する)。 */
+  data: readonly T[];
+  /** 行の安定キー。並び替え結果はこのキーの配列で返る。 */
+  keyExtractor(item: T): string;
+  renderItem(item: T, info: SidebarReorderItemInfo): ReactNode;
+  /** ドラッグ終了時の新しい順序(上から)。 */
+  onReorder(keys: string[]): void;
+  /** ドラッグ開始(実行中に一覧を差し替えないためのフック)。 */
+  onDragBegin?: () => void;
+  testID?: string;
+}
+/**
+ * サイドバー内で使う並べ替え可能な行リスト。アプリ標準の `DraggableList` と同じ
+ * 操作感(Web=ドラッグ / ネイティブ=長押し)で、スクロールは親に任せる。
+ */
+export declare function SidebarReorderableList<T>(props: SidebarReorderableListProps<T>): ReactNode;

@@ -1,7 +1,17 @@
 import type { SidebarIcon, SidebarRowProps } from "@getpaseo/plugin/client/ui";
-import { useCallback, useEffect, useRef, type ComponentType } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  type ComponentType,
+  type ReactNode,
+  type Ref,
+} from "react";
 import { Pressable, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { DraggableList, type DraggableRenderItemInfo } from "@/components/draggable-list";
+import type { DraggableListDragHandleProps } from "@/components/draggable-list.types";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { SidebarSeparator as AppSidebarSeparator } from "@/components/sidebar/sidebar-separator";
 import { resolvePluginIcon } from "../icons";
@@ -101,6 +111,94 @@ export function SidebarSeparator() {
   return (
     <View style={frame.section === "footer" ? styles.footer : styles.header}>
       <AppSidebarSeparator />
+    </View>
+  );
+}
+
+export interface SidebarReorderableListProps<T> {
+  data: readonly T[];
+  keyExtractor(item: T): string;
+  renderItem(item: T, info: { isDragging: boolean }): ReactNode;
+  onReorder(keys: string[]): void;
+  onDragBegin?: () => void;
+  testID?: string;
+}
+
+/**
+ * プラグインのサイドバー行を並べ替え可能にする。アプリ標準の `DraggableList` をそのまま使うので、
+ * 固定済み/プロジェクト一覧のドラッグと同じ操作感(Web=6px動かすと開始 / ネイティブ=長押し)になる。
+ * スクロールはサイドバー本体に任せる(`scrollEnabled={false}`)。
+ */
+export function SidebarReorderableList<T>({
+  data,
+  keyExtractor,
+  renderItem,
+  onReorder,
+  onDragBegin,
+  testID,
+}: SidebarReorderableListProps<T>) {
+  const items = useMemo(() => [...data], [data]);
+  const renderRow = useCallback(
+    ({ item, isActive, drag, dragHandleProps }: DraggableRenderItemInfo<T>) => (
+      <ReorderableRow drag={drag} dragHandleProps={dragHandleProps}>
+        {renderItem(item, { isDragging: isActive })}
+      </ReorderableRow>
+    ),
+    [renderItem],
+  );
+  const getKey = useCallback((item: T) => keyExtractor(item), [keyExtractor]);
+  const handleDragEnd = useCallback(
+    (next: T[]) => onReorder(next.map((item) => keyExtractor(item))),
+    [keyExtractor, onReorder],
+  );
+  return (
+    <DraggableList
+      testID={testID}
+      data={items}
+      keyExtractor={getKey}
+      renderItem={renderRow}
+      onDragBegin={onDragBegin}
+      onDragEnd={handleDragEnd}
+      scrollEnabled={false}
+      useDragHandle
+    />
+  );
+}
+
+/**
+ * dnd-kit のリスナーを付けるラッパー。`attributes` の role/tabIndex は行の
+ * アクセシビリティ(ボタン)と衝突するので、アプリの行と同じく落とす。
+ */
+function ReorderableRow({
+  drag,
+  dragHandleProps,
+  children,
+}: {
+  drag: () => void;
+  dragHandleProps?: DraggableListDragHandleProps;
+  children: ReactNode;
+}) {
+  if (!dragHandleProps) {
+    // ネイティブ: 行の Pressable がタッチを取るので、外側の長押しでドラッグを開始する。
+    return (
+      <Pressable onLongPress={drag} delayLongPress={180}>
+        {children}
+      </Pressable>
+    );
+  }
+  const {
+    role: _dragRole,
+    tabIndex: _dragTabIndex,
+    "aria-roledescription": _dragRoleDescription,
+    ...dragAttributes
+  } = dragHandleProps.attributes ?? {};
+  return (
+    <View
+      {...dragAttributes}
+      {...(dragHandleProps.listeners ?? {})}
+      ref={dragHandleProps.setActivatorNodeRef as unknown as Ref<View>}
+    >
+      {children}
     </View>
   );
 }

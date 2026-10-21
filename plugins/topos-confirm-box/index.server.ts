@@ -25,8 +25,8 @@ import {
 } from "./shared/contract.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
 import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/box.js";
-import { childThreadsListRpc } from "./shared/child-threads.js";
-import { readChildThreads } from "./server/child-threads.js";
+import { childThreadsListRpc, childThreadsSetOrderRpc } from "./shared/child-threads.js";
+import { readChildThreads, writeChildThreadOrder } from "./server/child-threads.js";
 import { readCardChat, sayToCard } from "./server/cardchat.js";
 import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
 import { permitResponse, permitsToItems } from "./server/permits.js";
@@ -73,6 +73,16 @@ export default function contribute(server: PluginServerContext) {
     const dir = resolveConfirmBoxDir();
     const { items, dir: readDir } = readConfirmBox(dir);
     return { threads: readChildThreads(dir, items), dir: readDir, generatedAt: Date.now() };
+  });
+
+  server.handle(childThreadsSetOrderRpc, async (input) => {
+    try {
+      // 並び順は `child_threads_order.json` にだけ書く(既存の child_threads.json は触らない)。
+      const order = writeChildThreadOrder(resolveConfirmBoxDir(), input.order);
+      return { ok: true, order };
+    } catch (error) {
+      return { ok: false, order: [], message: `保存できません: ${(error as Error).message}` };
+    }
   });
 
   server.handle(confirmBoxCountRpc, async (_input, ctx) => {

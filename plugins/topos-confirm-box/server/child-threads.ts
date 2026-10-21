@@ -1,11 +1,20 @@
 /**
- * 子スレ一覧を読む(読み取り専用)。置き場は確認箱ディレクトリ直下の `child_threads.json`。
+ * 子スレ一覧を読む。置き場は確認箱ディレクトリ直下の `child_threads.json`。
  * 壊れた/無いファイルは空配列(読み手は止まらない)。アーカイブ済みは出さない。
  * 完了まとめ本文は箱の項目(`summary_item_id` と item id が一致)から引く。
+ *
+ * 並び順は `child_threads_order.json`(加算ファイル)があればそれを優先し、
+ * 無ければ既定順(`compareChildThreads`)。既存の `child_threads.json` は書き換えない。
  */
 import fs from "node:fs";
 import path from "node:path";
-import { CHILD_THREAD_STATUSES, compareChildThreads } from "../shared/child-threads.js";
+import {
+  CHILD_THREAD_ID_LIMIT,
+  CHILD_THREAD_ORDER_FILE,
+  CHILD_THREAD_ORDER_LIMIT,
+  CHILD_THREAD_STATUSES,
+  compareChildThreads,
+} from "../shared/child-threads.js";
 import type { ChildThread, ChildThreadStatus } from "../shared/child-threads.js";
 import type { ConfirmBoxItem } from "../shared/contract.js";
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -52,8 +61,88 @@ export function readChildThreads(
 ): ChildThread[] {
   try {
     const raw = JSON.parse(fs.readFileSync(path.join(dir, CHILD_THREADS_FILE), "utf8"));
-    return normalizeChildThreads(raw, boxItems);
+    return applyChildThreadOrder(normalizeChildThreads(raw, boxItems), readChildThreadOrder(dir));
   } catch {
     return [];
   }
+}
+
+/**
+ * 保存順を正規化する(文字列だけ・trim・空除外・重複除去・上限)。
+ * 入力はクライアント由来なので、そのままファイルへ書かない。
+ */
+export function normalizeChildThreadOrder(input: readonly unknown[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of input) {
+    if (typeof value !== "string") continue;
+    const agentId = value.trim().slice(0, CHILD_THREAD_ID_LIMIT);
+    if (!agentId || seen.has(agentId)) continue;
+    seen.add(agentId);
+    out.push(agentId);
+    if (out.length >= CHILD_THREAD_ORDER_LIMIT) break;
+  }
+  return out;
+}
+
+/** 保存済みの並び順。ファイルが無い/壊れている/形式違いは空(=既定順)。 */
+export function readChildThreadOrder(dir: string): string[] {
+  try {
+    const raw: unknown = JSON.parse(
+      fs.readFileSync(path.join(dir, CHILD_THREAD_ORDER_FILE), "utf8"),
+    );
+    // 素の配列でも `{ order: [...] }` でも受ける(手で書いた場合の取りこぼしを減らす)。
+    let order: unknown = raw;
+    if (!Array.isArray(raw) && raw && typeof raw === "object") {
+      order = (raw as { order?: unknown }).order;
+    }
+    return Array.isArray(order) ? normalizeChildThreadOrder(order) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 保存順を一覧へ適用する。保存に無いID(新規スレ)は既定順のまま後ろに置くので、
+ * 既存の並びを壊さず、次に誰かが並べ替えるまで位置が安定する。
+ */
+export function applyChildThreadOrder(
+  threads: readonly ChildThread[],
+  order: readonly string[],
+): ChildThread[] {
+  if (order.length === 0) return [...threads];
+  const rank = new Map<string, number>();
+  for (let i = 0; i < order.length; i++) {
+    const id = order[i];
+    if (!rank.has(id)) rank.set(id, i);
+  }
+  const placed: ChildThread[] = [];
+  const rest: ChildThread[] = [];
+  for (const thread of threads) {
+    if (rank.has(thread.agentId)) placed.push(thread);
+    else rest.push(thread);
+  }
+  placed.sort((a, b) => (rank.get(a.agentId) ?? 0) - (rank.get(b.agentId) ?? 0));
+  return [...placed, ...rest];
+}
+
+/** 並び順を保存する(原子的に置換。既存の `child_threads.json` には触らない)。 */
+export function writeChildThreadOrder(dir: string, input: readonly unknown[]): string[] {
+  const order = normalizeChildThreadOrder(input);
+  fs.mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, CHILD_THREAD_ORDER_FILE);
+  const tmp = path.join(dir, `.${CHILD_THREAD_ORDER_FILE}.${process.pid}.${Date.now()}.tmp`);
+  const body = JSON.stringify({ version: 1, updated_at: Date.now(), order }, null, 2);
+  try {
+    fs.writeFileSync(tmp, `${body}\n`, "utf8");
+    fs.renameSync(tmp, target);
+  } catch (error) {
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch {
+      // 後始末の失敗で元のエラーを隠さない
+    }
+    throw error;
+  }
+  return order;
 }

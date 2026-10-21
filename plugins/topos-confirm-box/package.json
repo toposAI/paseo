@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types server/*.test.ts"
+    "test": "node --import tsx --test server/*.test.ts"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.11.2",
