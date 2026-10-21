@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import { Linking, Text, View } from "react-native";
 import {
   getPaseoClient,
   useHosts,
@@ -13,10 +13,21 @@ import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { ChildThreadsSidebar, CHILD_THREADS_SCREEN_ID } from "./client/ChildThreadsSidebar";
 import { ChildThreadsView } from "./client/ChildThreadsView";
 import { ConfirmBoxView } from "./client/ConfirmBoxView";
+import { onBoxChanged } from "./client/events";
 import { confirmBoxCountRpc } from "./shared/contract";
 
 const COUNT_MS = 30_000;
 const SCREEN_ID = "main";
+// 110番メール整理の Compose UI(launchd com.toposai.mailtriage_compose_ui、Tailscale IP限定バインド)。
+const MAIL_UI_URL = "http://100.85.224.7:8731/";
+
+function openMailUi() {
+  void Linking.openURL(MAIL_UI_URL);
+}
+
+function MailLink() {
+  return <SidebarRow icon="Mail" label="メール" onPress={openMailUi} />;
+}
 
 function useOpenCount(): number | null {
   const count = useRpc(confirmBoxCountRpc);
@@ -29,16 +40,18 @@ function useOpenCount(): number | null {
         .catch(() => alive && setN(null));
     void tick();
     const timer = setInterval(tick, COUNT_MS);
+    const off = onBoxChanged(() => void tick());
     return () => {
       alive = false;
       clearInterval(timer);
+      off();
     };
   }, [count]);
   return n;
 }
 
-function Screen({ theme }: PluginScreenProps) {
-  return <ConfirmBoxView theme={theme} />;
+function Screen({ theme, navigation }: PluginScreenProps) {
+  return <ConfirmBoxView theme={theme} navigation={navigation} />;
 }
 
 function ChildThreadsScreen({ theme, params }: PluginScreenProps) {
@@ -46,6 +59,7 @@ function ChildThreadsScreen({ theme, params }: PluginScreenProps) {
   return <ChildThreadsView theme={theme} focusId={focusId} />;
 }
 
+const badgeText = { color: "#ffffff", fontSize: 10, fontWeight: "700" as const };
 const popoverStyle = { height: 480 };
 
 function Popover({ theme }: PluginButtonContentProps) {
@@ -65,6 +79,13 @@ export default function contribute(client: PluginClientContext) {
     const n = useOpenCount();
     const hosts = useHosts();
     const open = useCallback(() => openScreen({ screenId: SCREEN_ID }), [openScreen]);
+
+    // ワークスペースは後から増えるので、定期的に再列挙して未登録のものへボタンを足す。
+    const [tickN, setTickN] = useState(0);
+    useEffect(() => {
+      const timer = setInterval(() => setTickN((v) => v + 1), COUNT_MS);
+      return () => clearInterval(timer);
+    }, []);
 
     useEffect(() => {
       let alive = true;
@@ -97,9 +118,12 @@ export default function contribute(client: PluginClientContext) {
       return () => {
         alive = false;
       };
-    }, [hosts]);
+    }, [hosts, tickN]);
 
-    const trailing = useMemo(() => (n ? <Text>{n}</Text> : undefined), [n]);
+    const trailing = useMemo(
+      () => (n ? <Text style={badgeText}>{n > 99 ? "99+" : n}</Text> : undefined),
+      [n],
+    );
 
     return (
       <SidebarRow
@@ -119,7 +143,8 @@ export default function contribute(client: PluginClientContext) {
     Component: ChildThreadsSidebar,
   });
   client.addScreen({ id: SCREEN_ID, title: "確認箱", Component: Screen });
-  client.addSidebarHeaderItem({ id: "box", title: "確認箱", Component: Sidebar });
+  client.addSidebarFooterItem({ id: "box", title: "確認箱", Component: Sidebar });
+  client.addSidebarFooterItem({ id: "mail", title: "メール", Component: MailLink });
   return () => {
     for (const r of registered.values()) r.remove();
     registered.clear();

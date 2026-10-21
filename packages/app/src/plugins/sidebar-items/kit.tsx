@@ -1,7 +1,7 @@
 import type { SidebarIcon, SidebarRowProps } from "@getpaseo/plugin/client/ui";
-import { useCallback, useEffect, useRef } from "react";
-import { View } from "react-native";
-import { StyleSheet } from "react-native-unistyles";
+import { useCallback, useEffect, useRef, type ComponentType } from "react";
+import { Pressable, View } from "react-native";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { SidebarSeparator as AppSidebarSeparator } from "@/components/sidebar/sidebar-separator";
 import { resolvePluginIcon } from "../icons";
@@ -9,6 +9,31 @@ import { useSidebarItemFrame } from "./frame";
 
 function resolveIcon(icon: SidebarIcon) {
   return typeof icon === "string" ? resolvePluginIcon(icon) : icon;
+}
+
+type BarIconComponent = ComponentType<{ size: number; color: string }>;
+
+function BarIconInner({
+  Icon,
+  size,
+  color,
+}: {
+  Icon: BarIconComponent;
+  size: number;
+  color: string;
+}) {
+  return <Icon size={size} color={color} />;
+}
+const MutedBarIcon = withUnistyles(BarIconInner, (theme) => ({
+  size: theme.iconSize.md,
+  color: theme.colors.foregroundMuted,
+}));
+const ActiveBarIcon = withUnistyles(BarIconInner, (theme) => ({
+  size: theme.iconSize.md,
+  color: theme.colors.foreground,
+}));
+function BarIcon({ Icon, active }: { Icon: BarIconComponent; active: boolean }) {
+  return active ? <ActiveBarIcon Icon={Icon} /> : <MutedBarIcon Icon={Icon} />;
 }
 
 /**
@@ -34,6 +59,27 @@ export function SidebarRow({ id, icon, label, onPress, active, trailing }: Sideb
     anchorTo(rowRef.current);
     onPress();
   }, [anchorTo, onPress]);
+  if (frame.bar) {
+    const Icon = icon ? resolveIcon(icon) : null;
+    return (
+      <View ref={rowRef} collapsable={false} onStartShouldSetResponderCapture={anchorHere}>
+        <Pressable
+          style={styles.barButton}
+          testID={id ? `${frame.testID}-${id}` : frame.testID}
+          accessibilityRole="button"
+          accessibilityLabel={label ?? frame.title}
+          onPress={handlePress}
+        >
+          {Icon ? <BarIcon Icon={Icon} active={Boolean(active)} /> : null}
+          {trailing ? (
+            <View style={styles.barBadge} pointerEvents="none">
+              {trailing}
+            </View>
+          ) : null}
+        </Pressable>
+      </View>
+    );
+  }
   return (
     <View ref={rowRef} collapsable={false} onStartShouldSetResponderCapture={anchorHere}>
       <SidebarHeaderRow
@@ -60,6 +106,24 @@ export function SidebarSeparator() {
 }
 
 const styles = StyleSheet.create((theme) => ({
+  barButton: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  barBadge: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.colors.statusDanger,
+  },
   // Header rows fill the sidebar width; the gap between them is 2px.
   header: {
     marginVertical: theme.spacing[1],

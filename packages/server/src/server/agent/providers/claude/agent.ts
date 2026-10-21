@@ -3323,6 +3323,15 @@ class ClaudeAgentSession implements AgentSession {
       }
     }
 
+    // The fall-through below builds a query from the current config, so a restart
+    // requested while there was no query to restart is already satisfied. Clearing the
+    // flag here matters: a request that lands before the first query exists (the
+    // thinking option or mode the UI applies while a thread is being moved onto this
+    // provider) left it set, and the pump's own ensureQuery() then retired the query
+    // this call had just built — synchronously, on the way back to the caller, which
+    // is how `this.input.push(...)` in startTurn() met a null input.
+    this.queryRestartNeeded = false;
+
     // Preserve claudeSessionId across query recreation so buildOptions() passes
     // resume: sessionId and the new query continues the existing conversation.
     this.persistence = null;

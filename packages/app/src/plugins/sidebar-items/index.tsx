@@ -55,6 +55,8 @@ function renderNothing() {
 interface PluginSidebarItemEntryProps {
   group: PluginSidebarGroup;
   section: PluginSidebarSection;
+  /** Render in the footer's bottom icon bar instead of as a row. */
+  bar?: boolean;
   /** Anchors a popover opened by an item that renders no kit component. */
   fallbackAnchorRef: RefObject<View | null>;
   onBeforeNavigate?: () => void;
@@ -79,6 +81,7 @@ export function PluginSidebarItem({ group, ...props }: PluginSidebarItemEntryPro
 function PluginSidebarItemHost({
   group,
   section,
+  bar,
   fallbackAnchorRef,
   onBeforeNavigate,
   theme,
@@ -123,6 +126,7 @@ function PluginSidebarItemHost({
             plugin={plugin}
             item={item}
             section={section}
+            bar={bar}
             theme={theme}
             currentScreen={currentPluginScreen(plugin, pathname, routeParams)}
             environment={environment}
@@ -143,6 +147,7 @@ function SidebarItemContent({
   plugin,
   item,
   section,
+  bar,
   theme,
   currentScreen,
   environment,
@@ -154,6 +159,7 @@ function SidebarItemContent({
   plugin: PluginSidebarTarget["plugin"];
   item: PluginSidebarTarget["item"];
   section: PluginSidebarSection;
+  bar?: boolean;
   theme: PluginTheme;
   currentScreen: PluginScreenLocation | null;
   environment: PluginEnvironment;
@@ -205,6 +211,7 @@ function SidebarItemContent({
   const frame = useMemo<SidebarItemFrame>(
     () => ({
       section,
+      bar,
       title: item.title,
       testID:
         section === "header"
@@ -214,7 +221,7 @@ function SidebarItemContent({
       offerAnchor,
       releaseAnchor,
     }),
-    [anchorTo, item.id, item.title, offerAnchor, plugin.id, releaseAnchor, section],
+    [anchorTo, bar, item.id, item.title, offerAnchor, plugin.id, releaseAnchor, section],
   );
   const itemProps = useMemo<PluginSidebarItemProps>(
     () => ({ ...hostProps, currentScreen, openScreen, openPopover }),

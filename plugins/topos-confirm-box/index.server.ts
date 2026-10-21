@@ -17,11 +17,15 @@ import {
   confirmBoxDecideRpc,
   confirmBoxListRpc,
   confirmBoxPermitRpc,
+  priorityListRpc,
+  priorityMoveRpc,
+  prioritySayRpc,
 } from "./shared/contract.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
 import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/box.js";
 import { childThreadsListRpc } from "./shared/child-threads.js";
 import { readChildThreads } from "./server/child-threads.js";
+import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
 import { permitResponse, permitsToItems } from "./server/permits.js";
 import type { PermitAgentLike } from "./server/permits.js";
 
@@ -70,7 +74,8 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(confirmBoxCountRpc, async (_input, ctx) => {
     const { items, sources, generatedAt } = await collect(ctx);
-    const open = items.filter((i) => i.state !== "approved");
+    // 本当に未決 = 決定記録なし(approved でない)かつ選択肢がある項目(通知のみは数えない)
+    const open = items.filter((i) => i.state !== "approved" && i.options.length > 0);
     return {
       open: open.length,
       blocking: open.filter((i) => i.priority === "blocking").length,
@@ -118,6 +123,28 @@ export default function contribute(server: PluginServerContext) {
       return { ok: true, message: `応答しました(${response.behavior})` };
     } catch (error) {
       return { ok: false, message: `応答できません: ${(error as Error).message}` };
+    }
+  });
+
+  server.handle(priorityListRpc, async () => {
+    const dir = resolveConfirmBoxDir();
+    const { projects, updatedTs } = readLedger(dir);
+    return { projects, replies: readReplies(dir), updatedTs };
+  });
+
+  server.handle(priorityMoveRpc, async (input) => {
+    try {
+      return moveProject(resolveConfirmBoxDir(), input.id, input.toRank);
+    } catch (error) {
+      return { ok: false, message: `並べ替えできません: ${(error as Error).message}` };
+    }
+  });
+
+  server.handle(prioritySayRpc, async (input) => {
+    try {
+      return sayToLedger(resolveConfirmBoxDir(), input.text);
+    } catch (error) {
+      return { ok: false, message: `送れません: ${(error as Error).message}` };
     }
   });
 

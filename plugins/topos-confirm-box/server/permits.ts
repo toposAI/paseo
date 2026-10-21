@@ -99,6 +99,18 @@ export function permitResponse(
   return { behavior: actionId === "__deny" ? "deny" : "allow" };
 }
 
+/** 承認対象の中身(実行コマンド・対象パス等)を1行で。`input` の形はツール次第なので既知キーだけ拾う。 */
+export function inputGist(input: unknown): string {
+  if (typeof input === "string") return input.trim();
+  if (!input || typeof input !== "object") return "";
+  const rec = input as Record<string, unknown>;
+  for (const key of ["command", "cmd", "file_path", "path", "url", "pattern", "query"]) {
+    const v = rec[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return "";
+}
+
 function agentLabel(agent: PermitAgentLike): string {
   const id = s(agent.id);
   const title = s(agent.title).trim();
@@ -135,7 +147,9 @@ export function permitsToItems(
         s(perm.name).trim() ||
         "承認待ち"
       ).slice(0, SUBJECT_MAX);
-      const summary = (s(perm.description).trim() || s(perm.name).trim() || subject).slice(
+      const gist = inputGist(perm.input);
+      const head = s(perm.description).trim() || s(perm.name).trim() || subject;
+      const summary = (gist && !head.includes(gist) ? `${head}: ${gist}` : head).slice(
         0,
         SUMMARY_MAX,
       );

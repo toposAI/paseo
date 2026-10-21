@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { CircleGauge, FolderPlus, GitBranch, Server, Settings, X } from "lucide-react-native";
+import { FolderPlus, GitBranch, Settings, X } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
@@ -20,11 +20,9 @@ import {
   SIDEBAR_RESIZE_ACTIVATION_OFFSET,
   SIDEBAR_RESIZE_FAIL_OFFSET,
 } from "@/components/sidebar-resize-handle-layout";
-import { HostPicker } from "@/components/hosts/host-picker";
 import { SidebarDisplayPreferencesMenu } from "@/components/sidebar/display-preferences/menu";
 import { SidebarSeparator } from "@/components/sidebar/sidebar-separator";
 import { SidebarNavRows } from "@/components/sidebar/sidebar-nav-rows";
-import { SidebarHelpMenu } from "@/components/sidebar/sidebar-help-menu";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { buttonControlHeight } from "@/components/ui/control-geometry";
 import { Shortcut } from "@/components/ui/shortcut";
@@ -43,7 +41,6 @@ import { RetainedPanelActivity } from "@/components/retained-panel";
 import type { SidebarWorkspaceGroup } from "@/components/sidebar/sidebar-labels";
 import type { SidebarProjectIconTarget } from "@/utils/sidebar-project-row-model";
 import { type SidebarGroupMode, useSidebarViewStore } from "@/stores/sidebar-view-store";
-import { useHosts } from "@/runtime/host-runtime";
 import { PluginSidebarItem } from "@/plugins/sidebar-items";
 import { builtinSidebarNavLabelKey } from "@/sidebar-nav/model";
 import { useSidebarNavItems } from "@/sidebar-nav/use-sidebar-nav-items";
@@ -53,12 +50,7 @@ import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { buildSettingsAddHostRoute, buildSettingsRoute } from "@/utils/host-routes";
 import { openHostOverview } from "@/navigation/settings-navigation";
-import {
-  UsageSidebarItem,
-  UsageSidebarRoot,
-  useHasUsageSummary,
-  useOpenSidebarUsage,
-} from "@/usage";
+import { UsageSidebarItem, UsageSidebarRoot, useHasUsageSummary } from "@/usage";
 import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
@@ -271,10 +263,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   );
 });
 
-function sidebarHostOptionTestID(serverId: string): string {
-  return `sidebar-host-row-${serverId}`;
-}
-
 function FooterIconButton({
   buttonRef,
   onPress,
@@ -327,62 +315,6 @@ function FooterIconButton({
   );
 }
 
-function SidebarHostPicker({
-  theme,
-  label,
-  onAddHost,
-  onOpenHostSettings,
-}: {
-  theme: SidebarTheme;
-  label: string;
-  onAddHost: () => void;
-  onOpenHostSettings: (serverId: string) => void;
-}) {
-  const hosts = useHosts();
-  const triggerRef = useRef<View | null>(null);
-  const [isOpen, setIsOpen] = useState(false);
-
-  const handleSelect = useCallback(
-    (id: string) => {
-      onOpenHostSettings(id);
-    },
-    [onOpenHostSettings],
-  );
-
-  const handleOpen = useCallback(() => setIsOpen(true), []);
-
-  return (
-    <HostPicker
-      hosts={hosts}
-      value=""
-      onSelect={handleSelect}
-      open={isOpen}
-      onOpenChange={setIsOpen}
-      anchorRef={triggerRef}
-      includeAddHost
-      onAddHost={onAddHost}
-      showActiveConnection
-      onOpenHostSettings={onOpenHostSettings}
-      searchable
-      desktopPlacement="top-start"
-      desktopMinWidth={240}
-      addHostTestID="sidebar-host-add"
-      hostOptionTestID={sidebarHostOptionTestID}
-    >
-      <FooterIconButton
-        buttonRef={triggerRef}
-        onPress={handleOpen}
-        testID="sidebar-hosts-trigger"
-        label={label}
-        icon={Server}
-        // Server's two boxes fill more of the square than the other glyphs.
-        iconSizeAdjustment={-1}
-        theme={theme}
-      />
-    </HostPicker>
-  );
-}
-
 function IconTooltipContent({
   label,
   shortcutKeys,
@@ -398,13 +330,15 @@ function IconTooltipContent({
   );
 }
 
+// Plugin footer items that render as icons in the bottom bar (next to Add project and Settings)
+// instead of as rows above it.
+const BAR_PLUGIN_ID = "topos-confirm-box";
+
 function SidebarFooter({
   theme,
   handleOpenProject,
   handleSettings,
   labels,
-  handleAddHost,
-  handleOpenHostSettings,
   onBeforeNavigate,
 }: {
   theme: SidebarTheme;
@@ -423,6 +357,9 @@ function SidebarFooter({
 }) {
   const newAgentKeys = useShortcutKeys("new-agent");
   const settingsKeys = useShortcutKeys("toggle-settings");
+  const { items: footerItems } = useSidebarNavItems("footer");
+  const barRef = useRef<View | null>(null);
+  const barItems = footerItems.filter(isBarItem);
 
   // One line of icons: Add project, Usage, Hosts, then Help and Settings at the end.
   return (
@@ -438,15 +375,21 @@ function SidebarFooter({
             shortcutKeys={newAgentKeys}
             theme={theme}
           />
-          <SidebarUsageIcon label={labels.usage} theme={theme} />
-          <SidebarHostPicker
-            theme={theme}
-            label={labels.hosts}
-            onAddHost={handleAddHost}
-            onOpenHostSettings={handleOpenHostSettings}
-          />
           <View style={styles.footerSpacer} />
-          <SidebarHelpMenu />
+          <View ref={barRef} collapsable={false} style={styles.footerBarItems}>
+            {barItems.map((item) =>
+              item.kind === "plugin" ? (
+                <PluginSidebarItem
+                  key={item.key}
+                  group={item.group}
+                  section="footer"
+                  bar
+                  fallbackAnchorRef={barRef}
+                  onBeforeNavigate={onBeforeNavigate}
+                />
+              ) : null,
+            )}
+          </View>
           <FooterIconButton
             onPress={handleSettings}
             testID="sidebar-settings"
@@ -461,29 +404,20 @@ function SidebarFooter({
   );
 }
 
-function SidebarUsageIcon({ label, theme }: { label: string; theme: SidebarTheme }) {
-  const openUsage = useOpenSidebarUsage();
-  return (
-    <FooterIconButton
-      onPress={openUsage}
-      testID="sidebar-usage-icon"
-      label={label}
-      icon={CircleGauge}
-      theme={theme}
-    />
-  );
-}
-
 /**
  * The footer rows in the user's `sidebarFooterItems` order: the Usage item and plugin rows. The
  * Usage item is left out while it has no summary to show.
  */
+function isBarItem(item: { kind: string; visible: boolean; group?: { pluginId?: string } }) {
+  return item.kind === "plugin" && item.visible && item.group?.pluginId === BAR_PLUGIN_ID;
+}
+
 function SidebarFooterRows({ onBeforeNavigate }: { onBeforeNavigate?: () => void }) {
   const { items } = useSidebarNavItems("footer");
   const hasUsageSummary = useHasUsageSummary();
   const rowsRef = useRef<View | null>(null);
   const visibleItems = items.filter(
-    (item) => item.visible && (item.kind === "plugin" || hasUsageSummary),
+    (item) => item.visible && !isBarItem(item) && (item.kind === "plugin" || hasUsageSummary),
   );
   if (visibleItems.length === 0) return null;
   return (
@@ -950,6 +884,10 @@ const styles = StyleSheet.create((theme) => ({
   // Pushes Help and Settings to the end of the icon line.
   footerSpacer: {
     flex: 1,
+  },
+  footerBarItems: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   // Usage and plugin rows sit above the footer's icon line, spaced like the header nav rows.
   footerRows: {

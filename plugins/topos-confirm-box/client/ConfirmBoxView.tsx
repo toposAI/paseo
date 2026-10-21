@@ -14,11 +14,18 @@ import {
   confirmBoxListRpc,
   confirmBoxPermitRpc,
 } from "../shared/contract.js";
+import { notifyBoxChanged } from "./events.js";
+import { PriorityView } from "./PriorityView.js";
 import type { ConfirmBoxDepth, ConfirmBoxItem, ConfirmBoxListOutput } from "../shared/contract.js";
 
 const REFRESH_MS = 30_000;
 
-export function ConfirmBoxView({ theme }: Pick<PluginHostProps, "theme">) {
+export function ConfirmBoxView({
+  theme,
+  navigation,
+}: Pick<PluginHostProps, "theme"> & {
+  navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
+}) {
   const list = useRpc(confirmBoxListRpc);
   const decide = useRpc(confirmBoxDecideRpc);
   const permit = useRpc(confirmBoxPermitRpc);
@@ -27,6 +34,11 @@ export function ConfirmBoxView({ theme }: Pick<PluginHostProps, "theme">) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [depth, setDepth] = useState<ConfirmBoxDepth>("list");
   const [notice, setNotice] = useState<string>("");
+  const [tab, setTab] = useState<"items" | "priority">("items");
+  const [prio, setPrio] = useState<string>("all");
+  const [grp, setGrp] = useState<string>("all");
+  const [sortNew, setSortNew] = useState(false);
+  const [showDone, setShowDone] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -60,6 +72,7 @@ export function ConfirmBoxView({ theme }: Pick<PluginHostProps, "theme">) {
       muted: { color: c.foregroundMuted, fontSize: 12 },
       text: { color: c.foreground, fontSize: 13 },
       badge: { color: c.accent, fontSize: 11 },
+      link: { color: c.accent, fontSize: 13, textDecorationLine: "underline" as const },
       row: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6 },
       btn: {
         backgroundColor: c.surface2,
@@ -85,6 +98,17 @@ export function ConfirmBoxView({ theme }: Pick<PluginHostProps, "theme">) {
     setDepth("expanded");
   }, []);
   const openBackground = useCallback(() => setDepth("background"), []);
+  const openChat = useCallback(
+    (item: ConfirmBoxItem) => {
+      setDepth("chat");
+      if (item.threadRef?.kind === "paseo_agent" && navigation) {
+        navigation.openAgent({ agentId: item.threadRef.id });
+      } else {
+        setNotice("この項目には開けるチャット(投函元スレ)がありません");
+      }
+    },
+    [navigation],
+  );
 
   const choose = useCallback(
     async (item: ConfirmBoxItem, optionId: string) => {
@@ -110,34 +134,83 @@ export function ConfirmBoxView({ theme }: Pick<PluginHostProps, "theme">) {
         setNotice(e instanceof Error ? e.message : String(e));
       }
       void reload();
+      notifyBoxChanged();
     },
     [decide, permit, depth, reload],
   );
 
+  const groups = useMemo(() => {
+    const set = new Set<string>();
+    for (const i of data?.items ?? []) set.add(i.group ?? "(なし)");
+    return [...set].sort();
+  }, [data]);
+
+  const visible = useMemo(() => {
+    const rows = (data?.items ?? []).filter(
+      (i) =>
+        (showDone || i.state !== "approved") &&
+        (prio === "all" || i.priority === prio) &&
+        (grp === "all" || (i.group ?? "(なし)") === grp),
+    );
+    return sortNew ? [...rows].sort((a, b) => b.ts - a.ts) : rows;
+  }, [data, showDone, prio, grp, sortNew]);
+
+  const chip = (label: string, on: boolean, press: () => void) => (
+    <Pressable key={label} accessibilityRole="button" style={on ? s.btnRec : s.btn} onPress={press}>
+      <Text style={on ? s.btnRecText : s.btnText}>{label}</Text>
+    </Pressable>
+  );
+
   return (
     <ScrollView style={s.root} contentContainerStyle={s.body}>
-      {error ? <Text style={s.warn}>読み込めません: {error}</Text> : null}
-      {data?.sources
-        .filter((x) => !x.ok)
-        .map((x) => (
-          <Text key={x.id} style={s.warn}>
-            {x.label}: {x.detail}
-          </Text>
-        ))}
-      {notice ? <Text style={s.muted}>{notice}</Text> : null}
-      {data && data.items.length === 0 ? <Text style={s.muted}>判断待ちはありません</Text> : null}
-      {data?.items.map((item) => (
-        <ItemCard
-          key={item.id}
-          item={item}
-          styles={s}
-          open={openId === item.id}
-          showBackground={depth === "background"}
-          onToggle={toggle}
-          onBackground={openBackground}
-          onChoose={choose}
-        />
-      ))}
+      <View style={s.row}>
+        {chip("判断待ち", tab === "items", () => setTab("items"))}
+        {chip("優先順位", tab === "priority", () => setTab("priority"))}
+      </View>
+      {tab === "priority" ? (
+        <PriorityView styles={s} colors={c} />
+      ) : (
+        <>
+          <View style={s.row}>
+            {chip("全て", prio === "all", () => setPrio("all"))}
+            {(Object.keys(PRIORITY_LABEL) as (keyof typeof PRIORITY_LABEL)[]).map((k) =>
+              chip(PRIORITY_LABEL[k], prio === k, () => setPrio(k)),
+            )}
+          </View>
+          <View style={s.row}>
+            {chip("全グループ", grp === "all", () => setGrp("all"))}
+            {groups.map((g) => chip(g, grp === g, () => setGrp(g)))}
+          </View>
+          <View style={s.row}>
+            {chip(sortNew ? "新しい順" : "優先度順", true, () => setSortNew((v) => !v))}
+            {chip("決定済みも表示", showDone, () => setShowDone((v) => !v))}
+            <Text style={s.muted}>{visible.length}件</Text>
+          </View>
+          {error ? <Text style={s.warn}>読み込めません: {error}</Text> : null}
+          {data?.sources
+            .filter((x) => !x.ok)
+            .map((x) => (
+              <Text key={x.id} style={s.warn}>
+                {x.label}: {x.detail}
+              </Text>
+            ))}
+          {notice ? <Text style={s.muted}>{notice}</Text> : null}
+          {data && visible.length === 0 ? <Text style={s.muted}>判断待ちはありません</Text> : null}
+          {visible.map((item) => (
+            <ItemCard
+              key={item.id}
+              item={item}
+              styles={s}
+              open={openId === item.id}
+              showBackground={depth === "background"}
+              onToggle={toggle}
+              onBackground={openBackground}
+              onChat={openChat}
+              onChoose={choose}
+            />
+          ))}
+        </>
+      )}
     </ScrollView>
   );
 }
@@ -159,7 +232,7 @@ function BackgroundBlock({
   if (show) return <Text style={styles.text}>{item.background}</Text>;
   return (
     <Pressable accessibilityRole="button" onPress={onOpen}>
-      <Text style={styles.badge}>背景を開く</Text>
+      <Text style={styles.link}>▶ 背景を読む</Text>
     </Pressable>
   );
 }
@@ -194,6 +267,7 @@ function ItemCard({
   showBackground,
   onToggle,
   onBackground,
+  onChat,
   onChoose,
 }: {
   item: ConfirmBoxItem;
@@ -202,9 +276,11 @@ function ItemCard({
   showBackground: boolean;
   onToggle: (id: string) => void;
   onBackground: () => void;
+  onChat: (item: ConfirmBoxItem) => void;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
 }) {
   const toggle = useCallback(() => onToggle(item.id), [onToggle, item.id]);
+  const chat = useCallback(() => onChat(item), [onChat, item]);
   return (
     <View style={styles.card}>
       <Pressable accessibilityRole="button" onPress={toggle}>
@@ -219,6 +295,11 @@ function ItemCard({
           </Text>
         )}
       </Pressable>
+      <View style={styles.row}>
+        {item.options.map((o) => (
+          <OptionButton key={o.id} item={item} option={o} styles={styles} onChoose={onChoose} />
+        ))}
+      </View>
       {open ? (
         <>
           <Text style={styles.text}>{item.summary}</Text>
@@ -228,12 +309,12 @@ function ItemCard({
             show={showBackground}
             onOpen={onBackground}
           />
-          <View style={styles.row}>
-            {item.options.map((o) => (
-              <OptionButton key={o.id} item={item} option={o} styles={styles} onChoose={onChoose} />
-            ))}
-          </View>
         </>
+      ) : null}
+      {item.threadRef ? (
+        <Pressable accessibilityRole="button" onPress={chat}>
+          <Text style={styles.link}>💬 チャットで詳しく聞く</Text>
+        </Pressable>
       ) : null}
     </View>
   );
