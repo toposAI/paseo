@@ -1,10 +1,10 @@
 /**
  * 開発の優先順位(1〜10位)。▲▼で直接並べ替え(解釈を介さないので誤解釈が起きない)と、
- * PC=ドラッグ&ドロップ、iPhone=長押しして指を動かす、でも並べ替える(下の useDragReorder)。
+ * PC=ドラッグ&ドロップ、iPhone=長押し(または左端の握り⋮⋮)して指を動かす、でも並べ替える(下の useDragReorder)。
  * 自由記述(「Xを上げて」)の送信・返答表示。解釈と台帳更新は別プロセスが行い、
  * ここは台帳と返答を30秒ごと(送信直後は即時)に読み直すだけ。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, Text, TextInput, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
 import { priorityListRpc, priorityMoveRpc, prioritySayRpc } from "../shared/contract.js";
@@ -19,118 +19,202 @@ interface Colors {
   border: string;
 }
 
-const LONG_PRESS_MS = 450;
+const LONG_PRESS_MS = 350;
 const MOUSE_THRESHOLD_PX = 4;
-const TOUCH_CANCEL_PX = 8;
-
-interface DragState {
-  from: number;
-  over: number;
-}
+const HANDLE_THRESHOLD_PX = 3;
+const TOUCH_CANCEL_PX = 10;
+const ROW_GAP = 8;
+const SLIDE = "transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1)";
+const LIFT_SHADOW = "0 10px 24px rgba(0,0,0,0.28)";
 
 /**
- * 並べ替えのドラッグ。web 上の DOM を直接見る(react-native-web の View は div)。
- * マウス: 4px 動かしたらドラッグ開始。タッチ: 450ms 長押しで開始(それまでに8px動けばスクロール扱いで中止)。
- * ドラッグ中はスクロールを止め、離した位置の順位へ onDrop(from, over) を呼ぶ。
+ * 並べ替えのドラッグ(Todoist 風)。長押しで行が浮く → 指に追従 → 他の行が滑らかに場所を空ける → 離すと吸い付く。
+ * web 上の DOM を直接見て transform だけを動かす(react-native-web の View は div。指に追従する
+ * 描画に React の再描画を挟まないので滑らか)。
+ * - マウス: 4px 動かしたらドラッグ開始。
+ * - タッチ: 左端の握り(data-drag-handle・touch-action:none)は即ドラッグ、行本体は350ms長押しで開始
+ *   (それまでに10px動けばスクロール扱いで中止)。長押し中の iOS のコールアウト/選択は CSS と contextmenu で抑止。
+ * - ドラッグ中はスクロールさせない(touchmove を passive:false で止める)。
+ * 離したら吸い付くアニメーションの後に onDrop(from, to) を呼ぶ。transform の掃除は並び(orderKey)が
+ * 変わった直後の layout effect(描画前)で行うので、並べ替え後に一瞬ずれて見えることがない。
  */
 function useDragReorder(
   listRef: React.RefObject<View | null>,
-  count: number,
+  orderKey: string,
   onDrop: (from: number, to: number) => void,
 ) {
-  const [drag, setDrag] = useState<DragState | null>(null);
   const onDropRef = useRef(onDrop);
   onDropRef.current = onDrop;
+
+  const resetStyles = useCallback(() => {
+    const el = listRef.current as unknown as HTMLElement | null;
+    if (!el) return;
+    for (const r of Array.from(el.children) as HTMLElement[]) {
+      r.style.transform = "";
+      r.style.transition = "";
+      r.style.zIndex = "";
+      r.style.boxShadow = "";
+      r.style.willChange = "";
+    }
+  }, [listRef]);
+
+  // 並びが変わった(=楽観更新が描画された)直後、描画前に transform を外す
+  useLayoutEffect(() => {
+    if (Platform.OS === "web") resetStyles();
+  }, [orderKey, resetStyles]);
 
   useEffect(() => {
     if (Platform.OS !== "web") return undefined;
     const el = listRef.current as unknown as HTMLElement | null;
     if (!el) return undefined;
-    const rowIndexAt = (y: number): number => {
-      const rows = Array.from(el.children) as HTMLElement[];
-      const hit = rows.findIndex((r) => y < r.getBoundingClientRect().bottom);
-      return hit < 0 ? rows.length - 1 : hit;
-    };
-    const rowOf = (target: EventTarget | null): number => {
-      const rows = Array.from(el.children) as HTMLElement[];
-      return rows.findIndex((r) => r.contains(target as Node));
-    };
+    const rowEls = () => Array.from(el.children) as HTMLElement[];
 
     let from = -1;
-    let over = -1;
+    let target = -1;
     let active = false;
+    let settling = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
     let startX = 0;
     let startY = 0;
     let isTouch = false;
+    let fromHandle = false;
+    let rects: DOMRect[] = [];
 
-    const cleanup = () => {
-      if (timer) clearTimeout(timer);
-      timer = null;
+    const detach = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
+    };
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      detach();
       from = -1;
-      over = -1;
+      target = -1;
       active = false;
-      setDrag(null);
+    };
+    const slotOffset = (to: number): number => {
+      let sum = 0;
+      if (to > from) for (let k = from + 1; k <= to; k++) sum += rects[k].height + ROW_GAP;
+      else for (let k = to; k < from; k++) sum -= rects[k].height + ROW_GAP;
+      return sum;
+    };
+    const apply = (dy: number) => {
+      const rows = rowEls();
+      const h = rects[from].height + ROW_GAP;
+      rows.forEach((r, k) => {
+        if (k === from) {
+          r.style.transform = `translateY(${dy}px) scale(1.03)`;
+        } else if (k > from && k <= target) {
+          r.style.transform = `translateY(${-h}px)`;
+        } else if (k < from && k >= target) {
+          r.style.transform = `translateY(${h}px)`;
+        } else {
+          r.style.transform = "";
+        }
+      });
     };
     const begin = () => {
+      const rows = rowEls();
+      if (from < 0 || from >= rows.length) {
+        cleanup();
+        return;
+      }
+      rects = rows.map((r) => r.getBoundingClientRect());
       active = true;
-      over = from;
-      setDrag({ from, over });
+      target = from;
+      rows.forEach((r, k) => {
+        r.style.willChange = "transform";
+        r.style.transition = k === from ? "box-shadow 150ms" : SLIDE;
+      });
+      rows[from].style.zIndex = "20";
+      rows[from].style.boxShadow = LIFT_SHADOW;
+      apply(0);
+      if (typeof navigator.vibrate === "function") navigator.vibrate(12);
     };
     function onMove(e: PointerEvent) {
-      if (from < 0) return;
+      if (from < 0 || settling) return;
       const dx = e.clientX - startX;
       const dy = e.clientY - startY;
       if (!active) {
         const dist = Math.hypot(dx, dy);
-        if (isTouch) {
+        if (isTouch && !fromHandle) {
           if (dist > TOUCH_CANCEL_PX) cleanup();
-        } else if (dist > MOUSE_THRESHOLD_PX) {
+        } else if (dist > (isTouch ? HANDLE_THRESHOLD_PX : MOUSE_THRESHOLD_PX)) {
           begin();
         }
         return;
       }
       e.preventDefault();
-      const next = rowIndexAt(e.clientY);
-      if (next !== over) {
-        over = next;
-        setDrag({ from, over });
+      const minDy = rects[0].top - rects[from].top;
+      const maxDy = rects[rects.length - 1].bottom - rects[from].bottom;
+      const cdy = Math.max(minDy, Math.min(maxDy, dy));
+      const center = rects[from].top + rects[from].height / 2 + cdy;
+      let next = from;
+      if (cdy > 0) {
+        for (let k = from + 1; k < rects.length; k++) {
+          if (center > rects[k].top + rects[k].height / 2) next = k;
+        }
+      } else {
+        for (let k = from - 1; k >= 0; k--) {
+          if (center < rects[k].top + rects[k].height / 2) next = k;
+        }
       }
+      target = next;
+      apply(cdy);
     }
     function onUp() {
+      if (!active) {
+        cleanup();
+        return;
+      }
       const f = from;
-      const o = over;
-      const was = active;
-      cleanup();
-      if (was && f >= 0 && o >= 0 && f !== o) onDropRef.current(f, o);
+      const to = target;
+      detach();
+      settling = true;
+      const rows = rowEls();
+      // 吸い付く: 浮いた行を空いた場所へ戻してから(並びが変わる場合は)onDrop
+      rows[f].style.transition = `${SLIDE}, box-shadow 150ms`;
+      rows[f].style.transform = `translateY(${slotOffset(to)}px) scale(1)`;
+      rows[f].style.boxShadow = "none";
+      settleTimer = setTimeout(() => {
+        settleTimer = null;
+        settling = false;
+        cleanup();
+        if (f !== to) onDropRef.current(f, to);
+        else resetStyles();
+        // 念のため(並びが変わらなかった場合の取り残し防止)
+        setTimeout(resetStyles, 800);
+      }, 210);
     }
     function onCancel() {
+      const wasActive = active;
       cleanup();
+      if (wasActive) resetStyles();
     }
     const onDown = (e: PointerEvent) => {
-      if (e.button !== 0 || from >= 0) return;
-      const target = e.target as HTMLElement;
-      if (target.closest("button,[role=button]")) return;
-      const idx = rowOf(target);
-      if (idx < 0) return;
-      from = idx;
+      if (e.button !== 0 || from >= 0 || settling) return;
+      const target0 = e.target as HTMLElement;
+      if (target0.closest("button,[role=button]")) return;
+      const row = rowEls().findIndex((r) => r.contains(target0));
+      if (row < 0) return;
+      from = row;
       startX = e.clientX;
       startY = e.clientY;
       isTouch = e.pointerType === "touch" || e.pointerType === "pen";
-      if (isTouch) timer = setTimeout(begin, LONG_PRESS_MS);
+      fromHandle = target0.closest("[data-drag-handle]") !== null;
+      if (isTouch && !fromHandle) timer = setTimeout(begin, LONG_PRESS_MS);
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
       window.addEventListener("pointercancel", onCancel);
     };
-    // 長押し成立後はスクロールさせない(passive:false で止める)
+    // ドラッグ中(と長押し待ち中の右クリック/コールアウト)はスクロール・メニューを止める
     const onTouchMove = (e: TouchEvent) => {
-      if (active) e.preventDefault();
+      if (active && e.cancelable) e.preventDefault();
     };
     const onContext = (e: Event) => {
-      if (from >= 0 && isTouch) e.preventDefault();
+      if (from >= 0) e.preventDefault();
     };
     el.addEventListener("pointerdown", onDown);
     el.addEventListener("touchmove", onTouchMove, { passive: false });
@@ -139,16 +223,28 @@ function useDragReorder(
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("touchmove", onTouchMove);
       el.removeEventListener("contextmenu", onContext);
+      if (settleTimer) clearTimeout(settleTimer);
       cleanup();
+      resetStyles();
     };
-  }, [listRef, count]);
-
-  return drag;
+  }, [listRef, resetStyles]);
 }
 
-const dragStyle = (Platform.OS === "web" ? { cursor: "grab", userSelect: "none" } : {}) as object;
-const dragSource = { opacity: 0.4 };
-const dropTarget = { borderColor: "#3b82f6", borderWidth: 2 };
+const noSelect = (
+  Platform.OS === "web"
+    ? {
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none",
+        WebkitTapHighlightColor: "transparent",
+      }
+    : {}
+) as object;
+const dragStyle = (Platform.OS === "web" ? { cursor: "grab", ...noSelect } : noSelect) as object;
+const handleStyle = (
+  Platform.OS === "web" ? { touchAction: "none", cursor: "grab", paddingHorizontal: 6 } : {}
+) as object;
+const handleDataSet = { dragHandle: "1" };
 const rankRow = { flexDirection: "row" as const, alignItems: "center" as const, gap: 8 };
 const grow = { flex: 1 };
 
@@ -157,33 +253,23 @@ function RankRow({
   index,
   name,
   styles,
-  dragging,
-  target,
   onShift,
 }: {
   id: string;
   index: number;
   name: string;
   styles: Styles;
-  dragging: boolean;
-  target: boolean;
   onShift: (id: string, toRank: number) => Promise<void>;
 }) {
   const up = useCallback(() => void onShift(id, index), [onShift, id, index]);
   const down = useCallback(() => void onShift(id, index + 2), [onShift, id, index]);
-  const card = useMemo(
-    () => [
-      styles.card,
-      rankRow,
-      dragStyle,
-      dragging ? dragSource : null,
-      target ? dropTarget : null,
-    ],
-    [styles.card, dragging, target],
-  );
+  const card = useMemo(() => [styles.card, rankRow, dragStyle], [styles.card]);
   const label = useMemo(() => [styles.text, grow], [styles.text]);
   return (
     <View style={card}>
+      <View style={handleStyle} {...({ dataSet: handleDataSet } as object)}>
+        <Text style={styles.muted}>⋮⋮</Text>
+      </View>
       <Text style={styles.subject}>{index + 1}</Text>
       <Text style={label}>{name}</Text>
       <Pressable accessibilityRole="button" style={styles.btn} onPress={up}>
@@ -236,11 +322,21 @@ export function PriorityView({ styles, colors }: { styles: Styles; colors: Color
   const drop = useCallback(
     (from: number, to: number) => {
       const p = dataRef.current?.projects[from];
-      if (p) void shift(p.id, to + 1);
+      if (!p) return;
+      // 楽観更新: 離した位置へ即時に並べ替え、サーバーへの反映と再読込は後から
+      setData((d) => {
+        if (!d) return d;
+        const projects = d.projects.slice();
+        const [moved] = projects.splice(from, 1);
+        projects.splice(to, 0, moved);
+        return { ...d, projects };
+      });
+      void shift(p.id, to + 1);
     },
     [shift],
   );
-  const drag = useDragReorder(listRef, data?.projects.length ?? 0, drop);
+  const orderKey = (data?.projects ?? []).map((p) => p.id).join("|");
+  useDragReorder(listRef, orderKey, drop);
 
   const send = useCallback(async () => {
     const t = text.trim();
@@ -277,16 +373,7 @@ export function PriorityView({ styles, colors }: { styles: Styles; colors: Color
       {notice ? <Text style={styles.muted}>{notice}</Text> : null}
       <View ref={listRef} style={gap8}>
         {data?.projects.map((p, i) => (
-          <RankRow
-            key={p.id}
-            id={p.id}
-            index={i}
-            name={p.name}
-            styles={styles}
-            dragging={drag?.from === i}
-            target={drag !== null && drag.over === i && drag.from !== i}
-            onShift={shift}
-          />
+          <RankRow key={p.id} id={p.id} index={i} name={p.name} styles={styles} onShift={shift} />
         ))}
       </View>
       <TextInput
