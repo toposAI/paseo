@@ -34,6 +34,7 @@ export function CardChat({
   const [data, setData] = useState<CardChatListOutput | null>(null);
   const [text, setText] = useState("");
   const [notice, setNotice] = useState("");
+  const [sending, setSending] = useState(false);
 
   const reload = useCallback(async () => {
     if (!itemId) return;
@@ -52,28 +53,39 @@ export function CardChat({
 
   const send = useCallback(async () => {
     const t = text.trim();
-    if (!t || !itemId) return;
+    if (!t || !itemId || sending) return; // 二度押しで同じ質問を2件作らない
+    setSending(true);
     try {
       const r = await say({ id: itemId, key: itemKey ?? null, text: t });
       setNotice(r.ok ? "" : r.message);
       if (r.ok) setText("");
     } catch (e) {
       setNotice(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSending(false);
     }
     void reload();
-  }, [say, text, itemId, itemKey, reload]);
+  }, [say, text, itemId, itemKey, reload, sending]);
   const sendPress = useCallback(() => void send(), [send]);
   const inputStyle = useMemo(() => [input, styles.text], [styles.text]);
+  // 同じ周期に2問答えると ts と by が一致しうる(ワーカーは1周期の now を使う)。
+  // 並び順は元から固定なので、内容まで同じ行だけを出現順の番号で一意にする。
+  const rows = useMemo(() => {
+    const seen = new Map<string, number>();
+    return (data?.messages ?? []).map((message) => {
+      const base = `${message.ts}-${message.role}-${message.by}-${message.text}`;
+      const n = seen.get(base) ?? 0;
+      seen.set(base, n + 1);
+      return { key: `${base}#${n}`, message };
+    });
+  }, [data]);
 
   if (!itemId) return <Text style={styles.muted}>この項目はチャットできません(id なし)</Text>;
   return (
     <View style={box}>
-      {data?.messages.map((m) => (
-        <Text
-          key={`${m.ts}-${m.role}-${m.by}`}
-          style={m.role === "user" ? styles.text : styles.muted}
-        >
-          {speaker(m.role, m.by)}: {m.text}
+      {rows.map(({ key, message }) => (
+        <Text key={key} style={message.role === "user" ? styles.text : styles.muted}>
+          {speaker(message.role, message.by)}: {message.text}
         </Text>
       ))}
       {notice ? <Text style={styles.warn}>{notice}</Text> : null}
@@ -84,7 +96,12 @@ export function CardChat({
         multiline
         style={inputStyle}
       />
-      <Pressable accessibilityRole="button" style={styles.btnRec} onPress={sendPress}>
+      <Pressable
+        accessibilityRole="button"
+        disabled={sending}
+        style={styles.btnRec}
+        onPress={sendPress}
+      >
         <Text style={styles.btnRecText}>送る</Text>
       </Pressable>
     </View>

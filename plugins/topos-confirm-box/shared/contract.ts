@@ -219,19 +219,12 @@ export const prioritySayRpc = defineRpc({
   output: z.object({ ok: z.boolean(), message: z.string() }),
 });
 
-/** カード単位のチャット。質問を追記し、即時の受領返答を必ず1行返す。本回答は別プロセス(返信ワーカー)が replies に書く。 */
-export const CardChatReplySchema = z.object({
-  ts: z.number(),
-  re: z.number(),
-  by: z.string(),
-  text: z.string(),
-});
-export type CardChatReply = z.infer<typeof CardChatReplySchema>;
-
 /** どの項目への質問か。箱の項目は `key` を持たないことがあるので `id` を正とする
  * (2026-10-22: 返事を箱のイベント列 `t:"reply"` に出すようになり、id で突き合わせる)。 */
 const cardChatTarget = { id: z.string(), key: z.string().nullable().optional() };
 
+/** カード単位のチャット。質問を追記し、即時の受領返答を1行返す(プラグインUI経由の質問に限る)。
+ * 本回答は別プロセス(応答ワーカー)が箱の `t:"reply"` 行として書く。 */
 export const cardChatListRpc = defineRpc({
   name: "topos.confirmbox.cardchat.list",
   input: z.object(cardChatTarget),
