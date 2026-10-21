@@ -23,17 +23,78 @@ type Dictation139Event =
   | { type: "state"; state: Dictation139State; message?: string }
   | { type: "result"; text: string };
 
-export function subscribeDictation139(listener: (event: Dictation139Event) => void): () => void {
-  const handler = (event: Event) => listener((event as CustomEvent<Dictation139Event>).detail);
-  window.addEventListener("dictation139", handler);
-  return () => window.removeEventListener("dictation139", handler);
+/**
+ * `claim`は同じ1回のイベントに対して**最初の1呼び出しだけtrue**を返す。
+ * composerは複数(分割ペイン・開いたままのタブ)同時にマウントされ、各マイクボタンが
+ * 同じ`result`を購読する。全員が挿入すると、同じ文が購読数ぶん入力欄へ重複挿入される
+ * (2026-10-21の実害)。結果の挿入は`claim`を取れた1か所だけが行うこと。
+ */
+export type Dictation139Claim = () => boolean;
+
+/** 同じ文のresultがこの時間内に別イベントで再到達したら、ネイティブの二重送信とみなして捨てる。 */
+export const DICTATION_DUPLICATE_RESULT_WINDOW_MS = 1500;
+
+let subscriberCount = 0;
+let lastResult: { text: string; at: number } | null = null;
+
+/** 診断用: 現在`dictation139`を購読しているマイクボタンの数。 */
+export function getDictation139SubscriberCount(): number {
+  return subscriberCount;
 }
+
+export function subscribeDictation139(
+  listener: (event: Dictation139Event, claim: Dictation139Claim) => void,
+): () => void {
+  subscriberCount += 1;
+  const handler = (event: Event) => {
+    let claimed = claimedEvents.get(event);
+    if (!claimed) {
+      claimed = { done: false };
+      claimedEvents.set(event, claimed);
+      const detail = (event as CustomEvent<Dictation139Event>).detail;
+      if (detail?.type === "result") {
+        const now = Date.now();
+        if (
+          lastResult &&
+          lastResult.text === detail.text &&
+          now - lastResult.at < DICTATION_DUPLICATE_RESULT_WINDOW_MS
+        ) {
+          // 別イベントだが同一結果の再送(ネイティブ側の二重dispatch)。誰にも挿入させない。
+          claimed.done = true;
+          console.warn("[dictation139] duplicate result event dropped", {
+            subscribers: subscriberCount,
+            ageMs: now - lastResult.at,
+          });
+        }
+        lastResult = { text: detail.text, at: now };
+      }
+    }
+    const state = claimed;
+    listener((event as CustomEvent<Dictation139Event>).detail, () => {
+      if (state.done) return false;
+      state.done = true;
+      return true;
+    });
+  };
+  window.addEventListener("dictation139", handler);
+  return () => {
+    subscriberCount -= 1;
+    window.removeEventListener("dictation139", handler);
+  };
+}
+
+const claimedEvents = new WeakMap<Event, { done: boolean }>();
 
 /**
  * composerの入力欄(可視・編集可のもの)を1つ選ぶ。
  * `querySelector`で先頭一致を掴むと、高さ計測用の隠しtextareaを拾いうるため
  * 「見えていて編集可能」なものだけを対象にする。
  */
+/** 診断用: 見えていて編集可能な入力欄が今あるか。 */
+export function findVisibleComposerTextarea(): boolean {
+  return findComposerTextarea() !== null;
+}
+
 function findComposerTextarea(): HTMLTextAreaElement | null {
   const candidates = document.querySelectorAll<HTMLTextAreaElement>(
     '[data-testid="message-input-root"] textarea',
