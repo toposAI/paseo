@@ -5,8 +5,8 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { CHILD_THREAD_STATUSES, compareChildThreads } from "../shared/child-threads.ts";
-import type { ChildThread, ChildThreadStatus } from "../shared/child-threads.ts";
+import { CHILD_THREAD_STATUSES, compareChildThreads } from "../shared/child-threads.js";
+import type { ChildThread, ChildThreadStatus } from "../shared/child-threads.js";
 import type { ConfirmBoxItem } from "../shared/contract.js";
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 

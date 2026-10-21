@@ -780,6 +780,10 @@ const staticStyles = RNStyleSheet.create({
 
 const styles = StyleSheet.create((theme) => ({
   sidebarHeaderGroup: {
+    // The Topos child-thread list renders inside this group; without a bounded, scrollable
+    // height it grows past the viewport and pushes the footer off screen.
+    flexShrink: 1,
+    minHeight: 0,
     paddingTop: theme.spacing[2],
     gap: 2,
     paddingBottom: theme.spacing[1.5],
@@ -842,6 +846,9 @@ const styles = StyleSheet.create((theme) => ({
   },
   sidebarDragArea: {
     position: "relative",
+    flexShrink: 1,
+    minHeight: 0,
+    maxHeight: "60%",
   },
   desktopChromeRow: {
     position: "relative",
