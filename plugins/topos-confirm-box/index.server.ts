@@ -66,7 +66,8 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(confirmBoxCountRpc, async (_input, ctx) => {
     const { items, sources, generatedAt } = await collect(ctx);
-    const open = items.filter((i) => i.state !== "approved");
+    // 本当に未決 = 決定記録なし(approved でない)かつ選択肢がある項目(通知のみは数えない)
+    const open = items.filter((i) => i.state !== "approved" && i.options.length > 0);
     return {
       open: open.length,
       blocking: open.filter((i) => i.priority === "blocking").length,
