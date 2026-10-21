@@ -13,13 +13,24 @@ function dispatchResult(text: string) {
 }
 
 describe("subscribeDictation139", () => {
+  it("同じ文の別イベントが窓内に再到達しても誰もclaimできない(ネイティブ二重送信)", () => {
+    const claims: boolean[] = [];
+    const unsub = subscribeDictation139((_e, claim) => {
+      claims.push(claim());
+    });
+    dispatchResult("二重送信テスト");
+    dispatchResult("二重送信テスト");
+    dispatchResult("別の文");
+    unsub();
+    expect(claims).toEqual([true, false, true]);
+  });
+
   it("同じイベントのclaimは購読者が何人いても最初の1回だけtrueになる", () => {
     const claims: boolean[] = [];
-    const unsubs = [1, 2, 3, 4, 5].map(() =>
-      subscribeDictation139((_event, claim) => {
-        claims.push(claim());
-      }),
-    );
+    const listener = (_event: unknown, claim: () => boolean) => {
+      claims.push(claim());
+    };
+    const unsubs = [1, 2, 3, 4, 5].map(() => subscribeDictation139(listener));
     dispatchResult("確認箱");
     unsubs.forEach((u) => u());
     expect(claims).toEqual([true, false, false, false, false]);

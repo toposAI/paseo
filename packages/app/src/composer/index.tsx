@@ -50,6 +50,8 @@ import {
   subscribeDictation139,
   toggleDictation139Recording,
   type Dictation139State,
+  findVisibleComposerTextarea,
+  getDictation139SubscriberCount,
 } from "@/utils/dictation139-bridge";
 import { FOOTER_HEIGHT } from "@/constants/layout";
 import {
@@ -1224,6 +1226,11 @@ function ComposerDictationButton({
   useEffect(() => {
     const deliver = (text: string, claim: () => boolean) => {
       if (!claim()) return;
+      console.info("[dictation139] result claimed", {
+        subscribers: getDictation139SubscriberCount(),
+        active: isActiveComposerRef.current,
+        visibleTextarea: findVisibleComposerTextarea(),
+      });
       // composer本体のReact状態を通す経路を第一手段にし、使えなければDOM直操作へ落とす。
       // どちらも失敗したら黙って捨てずにエラー表示する。
       let inserted = false;
@@ -1256,6 +1263,9 @@ function ComposerDictationButton({
     });
     return () => {
       unsubscribe();
+      if (timers.size > 0) {
+        console.warn("[dictation139] composer unmounted with pending unclaimed result");
+      }
       for (const timer of timers) clearTimeout(timer);
     };
   }, [flashError]);

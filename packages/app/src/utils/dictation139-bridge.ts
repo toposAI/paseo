@@ -31,14 +31,43 @@ type Dictation139Event =
  */
 export type Dictation139Claim = () => boolean;
 
+/** 同じ文のresultがこの時間内に別イベントで再到達したら、ネイティブの二重送信とみなして捨てる。 */
+export const DICTATION_DUPLICATE_RESULT_WINDOW_MS = 1500;
+
+let subscriberCount = 0;
+let lastResult: { text: string; at: number } | null = null;
+
+/** 診断用: 現在`dictation139`を購読しているマイクボタンの数。 */
+export function getDictation139SubscriberCount(): number {
+  return subscriberCount;
+}
+
 export function subscribeDictation139(
   listener: (event: Dictation139Event, claim: Dictation139Claim) => void,
 ): () => void {
+  subscriberCount += 1;
   const handler = (event: Event) => {
     let claimed = claimedEvents.get(event);
     if (!claimed) {
       claimed = { done: false };
       claimedEvents.set(event, claimed);
+      const detail = (event as CustomEvent<Dictation139Event>).detail;
+      if (detail?.type === "result") {
+        const now = Date.now();
+        if (
+          lastResult &&
+          lastResult.text === detail.text &&
+          now - lastResult.at < DICTATION_DUPLICATE_RESULT_WINDOW_MS
+        ) {
+          // 別イベントだが同一結果の再送(ネイティブ側の二重dispatch)。誰にも挿入させない。
+          claimed.done = true;
+          console.warn("[dictation139] duplicate result event dropped", {
+            subscribers: subscriberCount,
+            ageMs: now - lastResult.at,
+          });
+        }
+        lastResult = { text: detail.text, at: now };
+      }
     }
     const state = claimed;
     listener((event as CustomEvent<Dictation139Event>).detail, () => {
@@ -48,7 +77,10 @@ export function subscribeDictation139(
     });
   };
   window.addEventListener("dictation139", handler);
-  return () => window.removeEventListener("dictation139", handler);
+  return () => {
+    subscriberCount -= 1;
+    window.removeEventListener("dictation139", handler);
+  };
 }
 
 const claimedEvents = new WeakMap<Event, { done: boolean }>();
@@ -58,6 +90,11 @@ const claimedEvents = new WeakMap<Event, { done: boolean }>();
  * `querySelector`で先頭一致を掴むと、高さ計測用の隠しtextareaを拾いうるため
  * 「見えていて編集可能」なものだけを対象にする。
  */
+/** 診断用: 見えていて編集可能な入力欄が今あるか。 */
+export function findVisibleComposerTextarea(): boolean {
+  return findComposerTextarea() !== null;
+}
+
 function findComposerTextarea(): HTMLTextAreaElement | null {
   const candidates = document.querySelectorAll<HTMLTextAreaElement>(
     '[data-testid="message-input-root"] textarea',
