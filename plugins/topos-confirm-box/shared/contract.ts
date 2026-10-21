@@ -173,6 +173,50 @@ export const confirmBoxPermitRpc = defineRpc({
 });
 export type ConfirmBoxPermitOutput = z.infer<typeof confirmBoxPermitRpc.output>;
 
+// ---------------------------------------------------------------- RPC: 開発の優先順位(台帳)
+
+/** 台帳の1行。順位は配列の添字(先頭=1位)で持ち、`rank` フィールドは持たない(二重管理で食い違うため)。 */
+export const PriorityProjectSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  note: z.string(),
+});
+export type PriorityProject = z.infer<typeof PriorityProjectSchema>;
+
+/** 自由記述に対する返答の1行。`by` は ack(即時の受領)/ worker(解釈した結果)/ fallback。 */
+export const PriorityReplySchema = z.object({
+  ts: z.number(),
+  re: z.number(),
+  by: z.string(),
+  text: z.string(),
+});
+export type PriorityReply = z.infer<typeof PriorityReplySchema>;
+
+export const priorityListRpc = defineRpc({
+  name: "topos.confirmbox.priority.list",
+  input: z.object({}),
+  output: z.object({
+    projects: z.array(PriorityProjectSchema),
+    replies: z.array(PriorityReplySchema),
+    updatedTs: z.number(),
+  }),
+});
+export type PriorityListOutput = z.infer<typeof priorityListRpc.output>;
+
+/** ▲▼ や並べ替えで順位を直接変える。解釈(LLM)を介さないので誤解釈が起きない。 */
+export const priorityMoveRpc = defineRpc({
+  name: "topos.confirmbox.priority.move",
+  input: z.object({ id: z.string(), toRank: z.number().int() }),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
+
+/** 自由記述(「Xを上げて」)。要求を追記し、即時の受領返答を必ず1行返す。解釈と台帳更新は別プロセス。 */
+export const prioritySayRpc = defineRpc({
+  name: "topos.confirmbox.priority.say",
+  input: z.object({ text: z.string() }),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
+
 // ---------------------------------------------------------------- 共有ヘルパ(純関数)
 
 /** 並び順。SSOT(Python `notify_box.sort_items()` / TS `compareConfirmBoxItems()`)の写し。

@@ -262,6 +262,22 @@ export function readConfirmBox(dir: string = resolveConfirmBoxDir()): ReadConfir
     }
   }
 
+  // 決定行(decision)が1つでもある key は、箱側の項目も決定済みとして外す
+  // (ingest 済みの項目は箱に入っているため、中間形式の除外だけでは未決一覧に残る)。
+  let decidedKeys = new Set<string>();
+  try {
+    if (fs.existsSync(pendingPath)) {
+      decidedKeys = parsePendingRecords(
+        parseJsonl(fs.readFileSync(pendingPath, "utf8")),
+      ).decidedKeys;
+    }
+  } catch {
+    // 読めない場合は上の pendingDetail に出ているのでここでは何もしない
+  }
+  for (const item of boxItems) {
+    if (item.key && decidedKeys.has(item.key)) item.state = "approved";
+  }
+
   sources.push({
     id: "box",
     label: KIND_LABEL.box,
