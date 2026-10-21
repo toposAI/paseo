@@ -80,7 +80,11 @@ export function ConfirmBoxView({
       link: { color: c.accent, fontSize: 13, textDecorationLine: "underline" as const },
       row: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: touch ? 8 : 6 },
       reporter: { color: c.foreground, fontSize: 13, fontWeight: "600" as const },
-      footBtn: { paddingHorizontal: touch ? 8 : 0, ...tap },
+      footBtn: {
+        paddingHorizontal: touch ? 8 : 0,
+        ...(touch ? { minWidth: 44, alignItems: "center" as const } : {}),
+        ...tap,
+      },
       footRow: {
         flexDirection: "row" as const,
         alignItems: "center" as const,
