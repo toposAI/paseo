@@ -17,6 +17,8 @@ import {
 import { notifyBoxChanged } from "./events.js";
 import { CardChat } from "./CardChat.js";
 import { PriorityView } from "./PriorityView.js";
+import { InboxIcon, ListIcon } from "./Icons.js";
+import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import type { ConfirmBoxDepth, ConfirmBoxItem, ConfirmBoxListOutput } from "../shared/contract.js";
 
 const REFRESH_MS = 30_000;
@@ -84,12 +86,18 @@ export function ConfirmBoxView({
       // サブ操作(背景・💬・元スレ)は小さめ。最下行は必ず1行に収める。
       footBtn: { paddingVertical: 4, paddingHorizontal: 4 },
       footBtnOff: { paddingVertical: 4, paddingHorizontal: 4, opacity: 0.45 },
+      created: {
+        color: c.foregroundMuted,
+        fontSize: 12,
+        marginLeft: "auto" as const,
+        flexShrink: 0,
+      },
       footText: { color: c.accent, fontSize: 12 },
       footRow: {
         flexDirection: "row" as const,
         flexWrap: "nowrap" as const,
         alignItems: "center" as const,
-        justifyContent: "space-between" as const,
+        justifyContent: "flex-start" as const,
         gap: 4,
       },
       filterLine: {
@@ -106,23 +114,19 @@ export function ConfirmBoxView({
       bottomBar: {
         flexGrow: 0,
         flexShrink: 0,
-        flexDirection: "row" as const,
         borderTopWidth: 1,
         borderTopColor: c.border,
         backgroundColor: c.surface1,
+        // iPhoneのホームバー分(web: env(safe-area-inset-bottom))
+        paddingBottom: "env(safe-area-inset-bottom)" as unknown as number,
       },
       tabBtn: {
         minWidth: 72,
-        paddingHorizontal: 14,
-        paddingVertical: 6,
+        minHeight: 56,
+        paddingHorizontal: 16,
         alignItems: "center" as const,
         justifyContent: "center" as const,
-        gap: 2,
-        minHeight: 48,
       },
-      tabIcon: { fontSize: 18 },
-      tabLabel: { color: c.foregroundMuted, fontSize: 11 },
-      tabLabelOn: { color: c.accent, fontSize: 11, fontWeight: "700" as const },
       btn: {
         backgroundColor: c.surface2,
         borderRadius: 6,
@@ -255,39 +259,62 @@ export function ConfirmBoxView({
           </>
         )}
       </ScrollView>
-      <ScrollView horizontal style={s.bottomBar} showsHorizontalScrollIndicator={false}>
-        {TABS.map((tb) => (
-          <TabButton key={tb.id} tab={tb} on={tab === tb.id} styles={s} onSelect={setTab} />
-        ))}
-      </ScrollView>
+      {tab === "priority" ? <ChatDock colors={c} agentId={PRIORITY_CHAT_AGENT_ID} /> : null}
+      <View style={s.bottomBar}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {TABS.map((tb) => (
+            <TabButton
+              key={tb.id}
+              tab={tb}
+              on={tab === tb.id}
+              styles={s}
+              accent={c.accent}
+              muted={c.foregroundMuted}
+              onSelect={setTab}
+            />
+          ))}
+        </ScrollView>
+      </View>
     </View>
   );
 }
 
-const TABS: { id: "items" | "priority"; icon: string; label: string }[] = [
-  { id: "items", icon: "📥", label: "判断待ち" },
-  { id: "priority", icon: "📋", label: "優先順位" },
+const TABS: { id: "items" | "priority"; label: string; Icon: typeof InboxIcon }[] = [
+  { id: "items", label: "判断待ち", Icon: InboxIcon },
+  { id: "priority", label: "優先順位", Icon: ListIcon },
 ];
 
 function TabButton({
   tab,
   on,
   styles,
+  accent,
+  muted,
   onSelect,
 }: {
   tab: (typeof TABS)[number];
   on: boolean;
   styles: Styles;
+  accent: string;
+  muted: string;
   onSelect: (id: "items" | "priority") => void;
 }) {
   const press = useCallback(() => onSelect(tab.id), [onSelect, tab.id]);
   return (
-    <Pressable accessibilityRole="tab" style={styles.tabBtn} onPress={press}>
-      <Text style={styles.tabIcon}>{tab.icon}</Text>
-      <Text style={on ? styles.tabLabelOn : styles.tabLabel}>{tab.label}</Text>
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityLabel={tab.label}
+      accessibilityState={on ? SELECTED : UNSELECTED}
+      style={styles.tabBtn}
+      onPress={press}
+    >
+      <tab.Icon color={on ? accent : muted} size={24} />
     </Pressable>
   );
 }
+
+const SELECTED = { selected: true };
+const UNSELECTED = { selected: false };
 
 type Styles = Record<string, object>;
 
@@ -394,9 +421,6 @@ function ItemCard({
       {bgOpen && item.background ? <Text style={styles.text}>{item.background}</Text> : null}
       {chatOpen ? <CardChat itemKey={item.key ?? undefined} styles={styles} /> : null}
       <View style={styles.footRow}>
-        <Text style={styles.muted} numberOfLines={1}>
-          {created}
-        </Text>
         {item.background ? (
           <Pressable accessibilityRole="button" style={styles.footBtn} onPress={toggleBg}>
             <Text style={styles.footText}>{bgOpen ? "▼背景" : "▶背景"}</Text>
@@ -418,6 +442,9 @@ function ItemCard({
         >
           <Text style={styles.footText}>↩ スレ</Text>
         </Pressable>
+        <Text style={styles.created} numberOfLines={1}>
+          {created}
+        </Text>
       </View>
       {threadReason && open ? <Text style={styles.muted}>{threadReason}</Text> : null}
     </View>
