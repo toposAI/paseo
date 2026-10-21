@@ -104,6 +104,8 @@ export function ConfirmBoxView({
         ...tap,
       },
       bottomBar: {
+        flexGrow: 0,
+        flexShrink: 0,
         flexDirection: "row" as const,
         borderTopWidth: 1,
         borderTopColor: c.border,
@@ -330,7 +332,7 @@ function OptionButton({
     <Pressable accessibilityRole="button" style={rec ? styles.btnRec : styles.btn} onPress={press}>
       <Text style={rec ? styles.btnRecText : styles.btnText}>
         {option.label}
-        {rec ? "(推奨)" : ""}
+        {rec && !option.label.includes("推奨") ? "(推奨)" : ""}
       </Text>
     </Pressable>
   );
