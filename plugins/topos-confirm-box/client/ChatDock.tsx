@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { getPaseoClient, useHosts } from "@getpaseo/plugin/client";
+import { BubbleIcon } from "./Icons.js";
 
 /** このページ専用の会話スレッドの agent ID。総司令から連絡があり次第ここへ設定する。 */
 export const PRIORITY_CHAT_AGENT_ID: string | null = null;
@@ -103,7 +104,7 @@ export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: str
       fab: {
         position: "absolute" as const,
         right: 16,
-        bottom: 16,
+        bottom: 76,
         width: 52,
         height: 52,
         borderRadius: 26,
@@ -111,12 +112,11 @@ export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: str
         alignItems: "center" as const,
         justifyContent: "center" as const,
       },
-      fabIcon: { fontSize: 24, color: colors.accentForeground },
       panel: {
         position: "absolute" as const,
         left: 12,
         right: 12,
-        bottom: 76,
+        bottom: 140,
         maxHeight: 420,
         backgroundColor: colors.surface1,
         borderColor: colors.border,
@@ -213,7 +213,7 @@ export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: str
         style={st.fab}
         onPress={toggle}
       >
-        <Text style={st.fabIcon}>💬</Text>
+        <BubbleIcon color={colors.accentForeground} size={26} />
       </Pressable>
     </>
   );

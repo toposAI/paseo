@@ -17,6 +17,7 @@ import {
 import { notifyBoxChanged } from "./events.js";
 import { CardChat } from "./CardChat.js";
 import { PriorityView } from "./PriorityView.js";
+import { InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import type { ConfirmBoxDepth, ConfirmBoxItem, ConfirmBoxListOutput } from "../shared/contract.js";
 
@@ -107,23 +108,19 @@ export function ConfirmBoxView({
       bottomBar: {
         flexGrow: 0,
         flexShrink: 0,
-        flexDirection: "row" as const,
         borderTopWidth: 1,
         borderTopColor: c.border,
         backgroundColor: c.surface1,
+        // iPhoneのホームバー分(web: env(safe-area-inset-bottom))
+        paddingBottom: "env(safe-area-inset-bottom)" as unknown as number,
       },
       tabBtn: {
         minWidth: 72,
-        paddingHorizontal: 14,
-        paddingVertical: 6,
+        minHeight: 56,
+        paddingHorizontal: 16,
         alignItems: "center" as const,
         justifyContent: "center" as const,
-        gap: 2,
-        minHeight: 48,
       },
-      tabIcon: { fontSize: 18 },
-      tabLabel: { color: c.foregroundMuted, fontSize: 11 },
-      tabLabelOn: { color: c.accent, fontSize: 11, fontWeight: "700" as const },
       btn: {
         backgroundColor: c.surface2,
         borderRadius: 6,
@@ -257,39 +254,61 @@ export function ConfirmBoxView({
         )}
       </ScrollView>
       {tab === "priority" ? <ChatDock colors={c} agentId={PRIORITY_CHAT_AGENT_ID} /> : null}
-      <ScrollView horizontal style={s.bottomBar} showsHorizontalScrollIndicator={false}>
-        {TABS.map((tb) => (
-          <TabButton key={tb.id} tab={tb} on={tab === tb.id} styles={s} onSelect={setTab} />
-        ))}
-      </ScrollView>
+      <View style={s.bottomBar}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {TABS.map((tb) => (
+            <TabButton
+              key={tb.id}
+              tab={tb}
+              on={tab === tb.id}
+              styles={s}
+              accent={c.accent}
+              muted={c.foregroundMuted}
+              onSelect={setTab}
+            />
+          ))}
+        </ScrollView>
+      </View>
     </View>
   );
 }
 
-const TABS: { id: "items" | "priority"; icon: string; label: string }[] = [
-  { id: "items", icon: "📥", label: "判断待ち" },
-  { id: "priority", icon: "📋", label: "優先順位" },
+const TABS: { id: "items" | "priority"; label: string; Icon: typeof InboxIcon }[] = [
+  { id: "items", label: "判断待ち", Icon: InboxIcon },
+  { id: "priority", label: "優先順位", Icon: ListIcon },
 ];
 
 function TabButton({
   tab,
   on,
   styles,
+  accent,
+  muted,
   onSelect,
 }: {
   tab: (typeof TABS)[number];
   on: boolean;
   styles: Styles;
+  accent: string;
+  muted: string;
   onSelect: (id: "items" | "priority") => void;
 }) {
   const press = useCallback(() => onSelect(tab.id), [onSelect, tab.id]);
   return (
-    <Pressable accessibilityRole="tab" style={styles.tabBtn} onPress={press}>
-      <Text style={styles.tabIcon}>{tab.icon}</Text>
-      <Text style={on ? styles.tabLabelOn : styles.tabLabel}>{tab.label}</Text>
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityLabel={tab.label}
+      accessibilityState={on ? SELECTED : UNSELECTED}
+      style={styles.tabBtn}
+      onPress={press}
+    >
+      <tab.Icon color={on ? accent : muted} size={24} />
     </Pressable>
   );
 }
+
+const SELECTED = { selected: true };
+const UNSELECTED = { selected: false };
 
 type Styles = Record<string, object>;
 
