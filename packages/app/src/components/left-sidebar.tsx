@@ -50,7 +50,7 @@ import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { buildSettingsAddHostRoute, buildSettingsRoute } from "@/utils/host-routes";
 import { openHostOverview } from "@/navigation/settings-navigation";
-import { UsageSidebarItem, UsageSidebarRoot, useHasUsageSummary } from "@/usage";
+import { UsageSidebarItem, UsageSidebarRoot } from "@/usage";
 import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
@@ -414,11 +414,8 @@ function isBarItem(item: { kind: string; visible: boolean; group?: { pluginId?: 
 
 function SidebarFooterRows({ onBeforeNavigate }: { onBeforeNavigate?: () => void }) {
   const { items } = useSidebarNavItems("footer");
-  const hasUsageSummary = useHasUsageSummary();
   const rowsRef = useRef<View | null>(null);
-  const visibleItems = items.filter(
-    (item) => item.visible && !isBarItem(item) && (item.kind === "plugin" || hasUsageSummary),
-  );
+  const visibleItems = items.filter((item) => item.visible && !isBarItem(item));
   if (visibleItems.length === 0) return null;
   return (
     <>

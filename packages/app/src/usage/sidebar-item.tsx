@@ -64,7 +64,20 @@ export function UsageSidebarItem() {
   const label = t(builtinSidebarNavLabelKey("usage"));
   const openUsage = useOpenSidebarUsage();
   const rows = useUsageRows();
-  if (rows.length === 0) return null;
+  // Never vanish silently: with no data the entry stays as a dash that still opens Usage.
+  if (rows.length === 0) {
+    return (
+      <Pressable
+        onPress={openUsage}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}: —`}
+        style={triggerStyle}
+        testID="sidebar-usage"
+      >
+        <Text style={styles.emptyText}>{`${label} —`}</Text>
+      </Pressable>
+    );
+  }
   return <PinnedUsageTrigger label={label} rows={rows} onPress={openUsage} />;
 }
 
@@ -252,6 +265,10 @@ const styles = StyleSheet.create((theme) => ({
   },
   triggerHovered: {
     backgroundColor: theme.colors.surfaceSidebarHover,
+  },
+  emptyText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
   },
   rows: {
     width: "100%",
