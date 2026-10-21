@@ -52,6 +52,7 @@ function Screen({ theme, navigation }: PluginScreenProps) {
   return <ConfirmBoxView theme={theme} navigation={navigation} />;
 }
 
+const badgeText = { color: "#ffffff", fontSize: 10, fontWeight: "700" as const };
 const popoverStyle = { height: 480 };
 
 function Popover({ theme }: PluginButtonContentProps) {
@@ -112,7 +113,10 @@ export default function contribute(client: PluginClientContext) {
       };
     }, [hosts, tickN]);
 
-    const trailing = useMemo(() => (n ? <Text>{n}</Text> : undefined), [n]);
+    const trailing = useMemo(
+      () => (n ? <Text style={badgeText}>{n > 99 ? "99+" : n}</Text> : undefined),
+      [n],
+    );
 
     return (
       <SidebarRow
