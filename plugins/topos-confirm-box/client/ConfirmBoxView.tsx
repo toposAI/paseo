@@ -14,6 +14,7 @@ import {
   confirmBoxListRpc,
   confirmBoxPermitRpc,
 } from "../shared/contract.js";
+import { notifyBoxChanged } from "./events.js";
 import type { ConfirmBoxDepth, ConfirmBoxItem, ConfirmBoxListOutput } from "../shared/contract.js";
 
 const REFRESH_MS = 30_000;
@@ -110,6 +111,7 @@ export function ConfirmBoxView({ theme }: Pick<PluginHostProps, "theme">) {
         setNotice(e instanceof Error ? e.message : String(e));
       }
       void reload();
+      notifyBoxChanged();
     },
     [decide, permit, depth, reload],
   );
