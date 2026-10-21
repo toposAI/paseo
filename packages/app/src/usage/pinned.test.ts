@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { UsagePreferences } from "./preferences";
 import {
   choosePinnedUsageLayout,
+  normalizeShortLabel,
   resolvePinnedUsage,
   splitPinnedUsageRows,
   type PinnedUsageSource,
@@ -292,4 +293,13 @@ it("keeps unavailable and error reports out of the sidebar summary", () => {
     report: { status: "error", error: "Store deleted" },
   };
   expect(resolvePinnedUsage([expired, failed], preferences(null))).toEqual([]);
+});
+
+describe("normalizeShortLabel", () => {
+  it("unifies provider spellings", () => {
+    expect(normalizeShortLabel("5 hour")).toBe("5h");
+    expect(normalizeShortLabel("Weekly")).toBe("wk");
+    expect(normalizeShortLabel("wk")).toBe("wk");
+    expect(normalizeShortLabel("mo")).toBe("mo");
+  });
 });

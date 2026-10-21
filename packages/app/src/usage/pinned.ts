@@ -25,6 +25,14 @@ export interface PinnedUsageSource {
 }
 
 /** How much of each window the one-line summary has room for. */
+/** Same short names on every provider row: "5 hour" / "Session" -> "5h", "Weekly" -> "wk". */
+export function normalizeShortLabel(label: string): string {
+  const trimmed = label.trim();
+  if (/^(5\s*h(ours?)?|session)$/i.test(trimmed)) return "5h";
+  if (/^(wk|week(ly)?)$/i.test(trimmed)) return "wk";
+  return trimmed;
+}
+
 export type PinnedUsageLayout = "meters" | "labels" | "percents";
 
 // A meter narrower than this is a sliver that reads as noise rather than a share.
@@ -123,7 +131,7 @@ export function resolvePinnedUsage(
         return {
           key: `${entry.id}/${window.id}`,
           label: `${describe(entry, window.label)} ${percentText} ${meaning}`,
-          shortLabel: window.shortLabel ?? window.label,
+          shortLabel: normalizeShortLabel(window.shortLabel ?? window.label),
           percent,
           percentText,
           tone: windowTone(window),
