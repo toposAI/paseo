@@ -75,6 +75,13 @@ export function ConfirmBoxView({
       badge: { color: c.accent, fontSize: 11 },
       link: { color: c.accent, fontSize: 13, textDecorationLine: "underline" as const },
       row: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6 },
+      reporter: { color: c.foreground, fontSize: 13, fontWeight: "600" as const },
+      footRow: {
+        flexDirection: "row" as const,
+        alignItems: "center" as const,
+        justifyContent: "space-between" as const,
+        gap: 8,
+      },
       btn: {
         backgroundColor: c.surface2,
         borderRadius: 6,
@@ -217,26 +224,15 @@ export function ConfirmBoxView({
 
 type Styles = Record<string, object>;
 
-function BackgroundBlock({
-  item,
-  styles,
-  show,
-  onToggle,
-}: {
-  item: ConfirmBoxItem;
-  styles: Styles;
-  show: boolean;
-  onToggle: () => void;
-}) {
-  if (!item.background) return null;
-  return (
-    <>
-      <Pressable accessibilityRole="button" onPress={onToggle}>
-        <Text style={styles.link}>{show ? "▼ 背景を非表示にする" : "▶ 背景を読む"}</Text>
-      </Pressable>
-      {show ? <Text style={styles.text}>{item.background}</Text> : null}
-    </>
-  );
+function formatCreated(ts: number): string {
+  // 単位はソースにより秒/ミリ秒。年月日として読めない値(連番等)は出さない。
+  let ms = 0;
+  if (ts > 1e12) ms = ts;
+  else if (ts > 1e9) ms = ts * 1000;
+  if (ms === 0) return "日時なし";
+  const d = new Date(ms);
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return `${p2(d.getMonth() + 1)}/${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 
 function OptionButton({
@@ -290,8 +286,10 @@ function ItemCard({
     });
   }, [onBackground]);
   const toggleChat = useCallback(() => setChatOpen((v) => !v), []);
+  const created = useMemo(() => formatCreated(item.ts), [item.ts]);
   return (
     <View style={styles.card}>
+      {item.reporter ? <Text style={styles.reporter}>報告者: {item.reporter}</Text> : null}
       <Pressable accessibilityRole="button" onPress={toggle}>
         <Text style={styles.badge}>
           {PRIORITY_LABEL[item.priority]} · {KIND_LABEL[item.kind]}
@@ -310,13 +308,25 @@ function ItemCard({
         ))}
       </View>
       {open ? <Text style={styles.text}>{item.summary}</Text> : null}
-      <BackgroundBlock item={item} styles={styles} show={bgOpen} onToggle={toggleBg} />
-      <Pressable accessibilityRole="button" onPress={toggleChat}>
-        <Text style={styles.link}>
-          {chatOpen ? "▼ このカードのチャット欄を閉じる" : "💬 このカードのチャット欄を開く"}
-        </Text>
-      </Pressable>
+      {bgOpen && item.background ? <Text style={styles.text}>{item.background}</Text> : null}
       {chatOpen ? <CardChat itemKey={item.key ?? undefined} styles={styles} /> : null}
+      <View style={styles.footRow}>
+        <Text style={styles.muted} numberOfLines={1}>
+          {created}
+        </Text>
+        {item.background ? (
+          <Pressable accessibilityRole="button" onPress={toggleBg}>
+            <Text style={styles.link}>{bgOpen ? "▼ 背景を閉じる" : "▶ 背景"}</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="このカードのチャット欄を開く"
+          onPress={toggleChat}
+        >
+          <Text style={styles.link}>{chatOpen ? "▼ 💬" : "💬"}</Text>
+        </Pressable>
+      </View>
       {item.threadRef ? (
         <Pressable accessibilityRole="button" onPress={thread}>
           <Text style={styles.muted}>投函元のスレを開く</Text>
