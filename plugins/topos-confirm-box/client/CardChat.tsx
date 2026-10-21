@@ -2,7 +2,7 @@
  * カード単位のチャット欄。質問を送ると即時に受領(ack)が返り、本回答は別プロセスが書いた返答を
  * 10秒ごと(送信直後は即時)に読み直して表示する。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
 import { cardChatListRpc, cardChatSayRpc } from "../shared/contract.js";
@@ -35,6 +35,9 @@ export function CardChat({
   const [text, setText] = useState("");
   const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
+  // state は再描画まで古い値のままなので、同じ描画フレーム内の二度押しは ref で止める
+  // (同じ質問が2件並ぶと、片方にしか返事が付かないように見える)。
+  const sendingRef = useRef(false);
 
   const reload = useCallback(async () => {
     if (!itemId) return;
@@ -53,7 +56,8 @@ export function CardChat({
 
   const send = useCallback(async () => {
     const t = text.trim();
-    if (!t || !itemId || sending) return; // 二度押しで同じ質問を2件作らない
+    if (!t || !itemId || sendingRef.current) return; // 二度押しで同じ質問を2件作らない
+    sendingRef.current = true;
     setSending(true);
     try {
       const r = await say({ id: itemId, key: itemKey ?? null, text: t });
@@ -62,10 +66,11 @@ export function CardChat({
     } catch (e) {
       setNotice(e instanceof Error ? e.message : String(e));
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
     void reload();
-  }, [say, text, itemId, itemKey, reload, sending]);
+  }, [say, text, itemId, itemKey, reload]);
   const sendPress = useCallback(() => void send(), [send]);
   const inputStyle = useMemo(() => [input, styles.text], [styles.text]);
   // 同じ周期に2問答えると ts と by が一致しうる(ワーカーは1周期の now を使う)。
