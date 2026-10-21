@@ -15,6 +15,7 @@ import {
   confirmBoxPermitRpc,
 } from "../shared/contract.js";
 import { notifyBoxChanged } from "./events.js";
+import { PriorityView } from "./PriorityView.js";
 import type { ConfirmBoxDepth, ConfirmBoxItem, ConfirmBoxListOutput } from "../shared/contract.js";
 
 const REFRESH_MS = 30_000;
@@ -28,6 +29,11 @@ export function ConfirmBoxView({ theme }: Pick<PluginHostProps, "theme">) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [depth, setDepth] = useState<ConfirmBoxDepth>("list");
   const [notice, setNotice] = useState<string>("");
+  const [tab, setTab] = useState<"items" | "priority">("items");
+  const [prio, setPrio] = useState<string>("all");
+  const [grp, setGrp] = useState<string>("all");
+  const [sortNew, setSortNew] = useState(false);
+  const [showDone, setShowDone] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -116,30 +122,77 @@ export function ConfirmBoxView({ theme }: Pick<PluginHostProps, "theme">) {
     [decide, permit, depth, reload],
   );
 
+  const groups = useMemo(() => {
+    const set = new Set<string>();
+    for (const i of data?.items ?? []) set.add(i.group ?? "(なし)");
+    return [...set].sort();
+  }, [data]);
+
+  const visible = useMemo(() => {
+    const rows = (data?.items ?? []).filter(
+      (i) =>
+        (showDone || i.state !== "approved") &&
+        (prio === "all" || i.priority === prio) &&
+        (grp === "all" || (i.group ?? "(なし)") === grp),
+    );
+    return sortNew ? [...rows].sort((a, b) => b.ts - a.ts) : rows;
+  }, [data, showDone, prio, grp, sortNew]);
+
+  const chip = (label: string, on: boolean, press: () => void) => (
+    <Pressable key={label} accessibilityRole="button" style={on ? s.btnRec : s.btn} onPress={press}>
+      <Text style={on ? s.btnRecText : s.btnText}>{label}</Text>
+    </Pressable>
+  );
+
   return (
     <ScrollView style={s.root} contentContainerStyle={s.body}>
-      {error ? <Text style={s.warn}>読み込めません: {error}</Text> : null}
-      {data?.sources
-        .filter((x) => !x.ok)
-        .map((x) => (
-          <Text key={x.id} style={s.warn}>
-            {x.label}: {x.detail}
-          </Text>
-        ))}
-      {notice ? <Text style={s.muted}>{notice}</Text> : null}
-      {data && data.items.length === 0 ? <Text style={s.muted}>判断待ちはありません</Text> : null}
-      {data?.items.map((item) => (
-        <ItemCard
-          key={item.id}
-          item={item}
-          styles={s}
-          open={openId === item.id}
-          showBackground={depth === "background"}
-          onToggle={toggle}
-          onBackground={openBackground}
-          onChoose={choose}
-        />
-      ))}
+      <View style={s.row}>
+        {chip("判断待ち", tab === "items", () => setTab("items"))}
+        {chip("優先順位", tab === "priority", () => setTab("priority"))}
+      </View>
+      {tab === "priority" ? (
+        <PriorityView styles={s} colors={c} />
+      ) : (
+        <>
+          <View style={s.row}>
+            {chip("全て", prio === "all", () => setPrio("all"))}
+            {(Object.keys(PRIORITY_LABEL) as (keyof typeof PRIORITY_LABEL)[]).map((k) =>
+              chip(PRIORITY_LABEL[k], prio === k, () => setPrio(k)),
+            )}
+          </View>
+          <View style={s.row}>
+            {chip("全グループ", grp === "all", () => setGrp("all"))}
+            {groups.map((g) => chip(g, grp === g, () => setGrp(g)))}
+          </View>
+          <View style={s.row}>
+            {chip(sortNew ? "新しい順" : "優先度順", true, () => setSortNew((v) => !v))}
+            {chip("決定済みも表示", showDone, () => setShowDone((v) => !v))}
+            <Text style={s.muted}>{visible.length}件</Text>
+          </View>
+          {error ? <Text style={s.warn}>読み込めません: {error}</Text> : null}
+          {data?.sources
+            .filter((x) => !x.ok)
+            .map((x) => (
+              <Text key={x.id} style={s.warn}>
+                {x.label}: {x.detail}
+              </Text>
+            ))}
+          {notice ? <Text style={s.muted}>{notice}</Text> : null}
+          {data && visible.length === 0 ? <Text style={s.muted}>判断待ちはありません</Text> : null}
+          {visible.map((item) => (
+            <ItemCard
+              key={item.id}
+              item={item}
+              styles={s}
+              open={openId === item.id}
+              showBackground={depth === "background"}
+              onToggle={toggle}
+              onBackground={openBackground}
+              onChoose={choose}
+            />
+          ))}
+        </>
+      )}
     </ScrollView>
   );
 }

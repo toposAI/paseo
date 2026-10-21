@@ -17,9 +17,13 @@ import {
   confirmBoxDecideRpc,
   confirmBoxListRpc,
   confirmBoxPermitRpc,
+  priorityListRpc,
+  priorityMoveRpc,
+  prioritySayRpc,
 } from "./shared/contract.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
 import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/box.js";
+import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
 import { permitResponse, permitsToItems } from "./server/permits.js";
 import type { PermitAgentLike } from "./server/permits.js";
 
@@ -110,6 +114,28 @@ export default function contribute(server: PluginServerContext) {
       return { ok: true, message: `応答しました(${response.behavior})` };
     } catch (error) {
       return { ok: false, message: `応答できません: ${(error as Error).message}` };
+    }
+  });
+
+  server.handle(priorityListRpc, async () => {
+    const dir = resolveConfirmBoxDir();
+    const { projects, updatedTs } = readLedger(dir);
+    return { projects, replies: readReplies(dir), updatedTs };
+  });
+
+  server.handle(priorityMoveRpc, async (input) => {
+    try {
+      return moveProject(resolveConfirmBoxDir(), input.id, input.toRank);
+    } catch (error) {
+      return { ok: false, message: `並べ替えできません: ${(error as Error).message}` };
+    }
+  });
+
+  server.handle(prioritySayRpc, async (input) => {
+    try {
+      return sayToLedger(resolveConfirmBoxDir(), input.text);
+    } catch (error) {
+      return { ok: false, message: `送れません: ${(error as Error).message}` };
     }
   });
 
