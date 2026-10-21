@@ -12,6 +12,9 @@ import { BubbleIcon } from "./Icons.js";
 import { notifyBoxChanged } from "./events.js";
 
 /** このページ専用の会話スレッドの agent ID。総司令から連絡があり次第ここへ設定する。 */
+/** カード💬の会話スレッド(確認箱チャット用)の agent ID。未確定の間は null(会話先未設定を表示)。 */
+export const CARD_CHAT_AGENT_ID: string | null = null;
+
 export const PRIORITY_CHAT_AGENT_ID: string | null = "887a6133-01de-498a-be7e-0262c61e0bc9";
 
 interface ChatLine {
@@ -20,7 +23,7 @@ interface ChatLine {
   text: string;
 }
 
-interface DockColors {
+export interface DockColors {
   surface0: string;
   surface1: string;
   surface2: string;
@@ -52,10 +55,29 @@ function appendLine(lines: ChatLine[], next: ChatLine): ChatLine[] {
   return [...lines, next];
 }
 
-export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: string | null }) {
+interface ChatPanelProps {
+  colors: DockColors;
+  agentId: string | null;
+  /** 送信文に付ける文脈(カードの論点など)。画面には出さず、エージェントへだけ渡す。 */
+  context?: string;
+  /** 開いた時に履歴を読む(カード会話は共有スレのため読まない)。 */
+  withHistory?: boolean;
+  /** true なら親の枠内に置く(false は右下に浮かせる)。 */
+  inline?: boolean;
+  /** 返答が届いたら順位等を再読込する。 */
+  notifyOnReply?: boolean;
+}
+
+export function ChatPanel({
+  colors,
+  agentId,
+  context,
+  withHistory = true,
+  inline = false,
+  notifyOnReply = true,
+}: ChatPanelProps) {
   const hosts = useHosts();
   const serverId = hosts.find((h) => h.status === "online")?.serverId ?? null;
-  const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [notice, setNotice] = useState("");
@@ -68,13 +90,15 @@ export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: str
   }, [agentId, serverId]);
 
   useEffect(() => {
-    if (!open || !agentId || !serverId) return undefined;
+    if (!agentId || !serverId) return undefined;
     const handle = getPaseoClient(serverId).agents.ref(agentId);
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     // 履歴(開き直しても会話が残る)。失敗しても会話自体は続けられる。
-    handle.timeline
-      .refetch({ limit: 30 })
+    const history = withHistory
+      ? handle.timeline.refetch({ limit: 30 })
+      : Promise.resolve({ entries: [] as { item: unknown }[] });
+    history
       .then((res) => {
         if (!alive) return null;
         const past: ChatLine[] = [];
@@ -97,16 +121,15 @@ export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: str
       if (line) setLines((cur) => appendLine(cur, line));
       // 台帳が更新されている可能性があるので、少し待って順位を再読込させる。
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => notifyBoxChanged(), 800);
+      if (notifyOnReply) timer = setTimeout(() => notifyBoxChanged(), 800);
     });
     return () => {
       alive = false;
       if (timer) clearTimeout(timer);
       sub();
     };
-  }, [open, agentId, serverId]);
+  }, [agentId, serverId, withHistory, notifyOnReply]);
 
-  const toggle = useCallback(() => setOpen((v) => !v), []);
   const send = useCallback(async () => {
     const t = text.trim();
     if (!t || !agentId || !serverId) return;
@@ -114,25 +137,24 @@ export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: str
     seq.current += 1;
     setLines((cur) => [...cur, { id: `u${seq.current}`, role: "user", text: t }]);
     try {
-      await getPaseoClient(serverId).agents.ref(agentId).send(t);
+      await getPaseoClient(serverId)
+        .agents.ref(agentId)
+        .send(context ? `${context}\n\n【ユーザーの発言】${t}` : t);
       setNotice("");
     } catch (e) {
       setNotice(`送れません: ${e instanceof Error ? e.message : String(e)}`);
     }
-  }, [text, agentId, serverId]);
+  }, [text, agentId, serverId, context]);
 
   const st = useMemo(
     () => ({
-      fab: {
-        position: "absolute" as const,
-        right: 16,
-        bottom: 76,
-        width: 52,
-        height: 52,
-        borderRadius: 26,
-        backgroundColor: colors.accent,
-        alignItems: "center" as const,
-        justifyContent: "center" as const,
+      panelInline: {
+        backgroundColor: colors.surface0,
+        borderColor: colors.border,
+        borderWidth: 1,
+        borderRadius: 10,
+        padding: 8,
+        gap: 8,
       },
       panel: {
         position: "absolute" as const,
@@ -194,45 +216,66 @@ export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: str
   );
 
   return (
-    <>
-      {open ? (
-        <View style={st.panel}>
-          <ScrollView style={st.list} contentContainerStyle={st.listBody}>
-            {lines.length === 0 ? (
-              <Text style={st.muted}>{reason ?? "メッセージを送ると返答が表示されます"}</Text>
-            ) : null}
-            {lines.map((l) => (
-              <View key={l.id} style={l.role === "user" ? st.mine : st.theirs}>
-                <Text style={l.role === "user" ? st.mineText : st.theirsText}>{l.text}</Text>
-              </View>
-            ))}
-          </ScrollView>
-          {notice ? <Text style={st.muted}>{notice}</Text> : null}
-          <View style={st.inputRow}>
-            <TextInput
-              style={st.input}
-              value={text}
-              onChangeText={setText}
-              multiline
-              editable={reason === null}
-              placeholder={reason ?? "メッセージを入力"}
-              placeholderTextColor={colors.foregroundMuted}
-            />
-            <Pressable
-              accessibilityRole="button"
-              style={st.sendBtn}
-              onPress={send}
-              disabled={reason !== null}
-            >
-              <Text style={st.sendText}>送信</Text>
-            </Pressable>
+    <View style={inline ? st.panelInline : st.panel}>
+      <ScrollView style={st.list} contentContainerStyle={st.listBody}>
+        {lines.length === 0 ? (
+          <Text style={st.muted}>{reason ?? "メッセージを送ると返答が表示されます"}</Text>
+        ) : null}
+        {lines.map((l) => (
+          <View key={l.id} style={l.role === "user" ? st.mine : st.theirs}>
+            <Text style={l.role === "user" ? st.mineText : st.theirsText}>{l.text}</Text>
           </View>
-        </View>
-      ) : null}
+        ))}
+      </ScrollView>
+      {notice ? <Text style={st.muted}>{notice}</Text> : null}
+      <View style={st.inputRow}>
+        <TextInput
+          style={st.input}
+          value={text}
+          onChangeText={setText}
+          multiline
+          editable={reason === null}
+          placeholder={reason ?? "メッセージを入力"}
+          placeholderTextColor={colors.foregroundMuted}
+        />
+        <Pressable
+          accessibilityRole="button"
+          style={st.sendBtn}
+          onPress={send}
+          disabled={reason !== null}
+        >
+          <Text style={st.sendText}>送信</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/** 優先順位ページ右下の吹き出しボタン+展開する会話。 */
+export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: string | null }) {
+  const [open, setOpen] = useState(false);
+  const toggle = useCallback(() => setOpen((v) => !v), []);
+  const fab = useMemo(
+    () => ({
+      position: "absolute" as const,
+      right: 16,
+      bottom: 76,
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      backgroundColor: colors.accent,
+      alignItems: "center" as const,
+      justifyContent: "center" as const,
+    }),
+    [colors],
+  );
+  return (
+    <>
+      {open ? <ChatPanel colors={colors} agentId={agentId} /> : null}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="会話を開く"
-        style={st.fab}
+        style={fab}
         onPress={toggle}
       >
         <BubbleIcon color={colors.accentForeground} size={26} />
