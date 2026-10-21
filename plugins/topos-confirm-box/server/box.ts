@@ -93,6 +93,7 @@ function applyItem(items: Map<string, ConfirmBoxItem>, e: Record<string, unknown
     source: str(e.source, "unknown"),
     threadRef: normalizeThreadRef(e.thread_ref),
     stoppedCount: normalizeStoppedCount(e.stopped_count),
+    ...reporterField(e.reporter),
     options,
     recommended: normalizeRecommended(e.recommended, options),
     state: "new",
@@ -139,6 +140,12 @@ export function listEventFiles(dir: string): string[] {
  * **`ts` を持たない**ので行番号を代理に使う(後ろの行ほど新しい)。
  * 並び順の最後の軸(ts降順)だけに効くので、値そのものは表示しない。
  */
+/** 報告者表示名。文字列で空でなければ `{reporter}`、それ以外は何も足さない。 */
+function reporterField(value: unknown): { reporter?: string } {
+  const name = str(value).trim().slice(0, 80);
+  return name ? { reporter: name } : {};
+}
+
 export function parsePendingRecords(records: readonly Record<string, unknown>[]): {
   items: ConfirmBoxItem[];
   decidedKeys: Set<string>;
@@ -175,6 +182,7 @@ export function parsePendingRecords(records: readonly Record<string, unknown>[])
       source: str(r.source, "unknown"),
       threadRef: normalizeThreadRef(r.thread_ref),
       stoppedCount: normalizeStoppedCount(r.stopped_count),
+      ...reporterField(r.reporter),
       options,
       recommended: normalizeRecommended(r.recommended, options),
       state: "new",
@@ -182,7 +190,7 @@ export function parsePendingRecords(records: readonly Record<string, unknown>[])
       key,
       agentId: null,
       workspaceId: null,
-      ts: index,
+      ts: typeof r.ts === "number" && Number.isFinite(r.ts) ? r.ts : index,
     });
   });
 

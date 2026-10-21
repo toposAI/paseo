@@ -74,6 +74,8 @@ export const ConfirmBoxItemSchema = z.object({
   source: z.string(),
   threadRef: ConfirmBoxThreadRefSchema.nullable(),
   stoppedCount: z.number().int(),
+  /** 新着バグ報告などの報告者表示名(投函側が `reporter` に入れた場合のみ)。 */
+  reporter: z.string().optional(),
   options: z.array(ConfirmBoxOptionSchema),
   recommended: z.string().nullable(),
   /** 箱の項目のみ意味を持つ(`new`/`read`/`approved`)。他は常に `new`。 */
