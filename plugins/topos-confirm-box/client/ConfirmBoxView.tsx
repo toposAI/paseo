@@ -86,12 +86,18 @@ export function ConfirmBoxView({
       // サブ操作(背景・💬・元スレ)は小さめ。最下行は必ず1行に収める。
       footBtn: { paddingVertical: 4, paddingHorizontal: 4 },
       footBtnOff: { paddingVertical: 4, paddingHorizontal: 4, opacity: 0.45 },
+      created: {
+        color: c.foregroundMuted,
+        fontSize: 12,
+        marginLeft: "auto" as const,
+        flexShrink: 0,
+      },
       footText: { color: c.accent, fontSize: 12 },
       footRow: {
         flexDirection: "row" as const,
         flexWrap: "nowrap" as const,
         alignItems: "center" as const,
-        justifyContent: "space-between" as const,
+        justifyContent: "flex-start" as const,
         gap: 4,
       },
       filterLine: {
@@ -415,9 +421,6 @@ function ItemCard({
       {bgOpen && item.background ? <Text style={styles.text}>{item.background}</Text> : null}
       {chatOpen ? <CardChat itemKey={item.key ?? undefined} styles={styles} /> : null}
       <View style={styles.footRow}>
-        <Text style={styles.muted} numberOfLines={1}>
-          {created}
-        </Text>
         {item.background ? (
           <Pressable accessibilityRole="button" style={styles.footBtn} onPress={toggleBg}>
             <Text style={styles.footText}>{bgOpen ? "▼背景" : "▶背景"}</Text>
@@ -439,6 +442,9 @@ function ItemCard({
         >
           <Text style={styles.footText}>↩ スレ</Text>
         </Pressable>
+        <Text style={styles.created} numberOfLines={1}>
+          {created}
+        </Text>
       </View>
       {threadReason && open ? <Text style={styles.muted}>{threadReason}</Text> : null}
     </View>
