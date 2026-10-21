@@ -17,8 +17,8 @@ import {
 import { notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
 import { InboxIcon, ListIcon } from "./Icons.js";
-import type { DockColors } from "./ChatDock.js";
-import { CARD_CHAT_AGENT_ID, ChatDock, ChatPanel, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
+import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
+import { CardChat } from "./CardChat.js";
 import type { ConfirmBoxDepth, ConfirmBoxItem, ConfirmBoxListOutput } from "../shared/contract.js";
 
 const REFRESH_MS = 30_000;
@@ -248,7 +248,6 @@ export function ConfirmBoxView({
                 key={item.id}
                 item={item}
                 styles={s}
-                colors={c}
                 open={openId === item.id}
                 onToggle={toggle}
                 onBackground={openBackground}
@@ -343,20 +342,6 @@ function formatCreated(ts: number): string {
   return `${p2(d.getMonth() + 1)}/${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 
-/** カードの論点をエージェントへ渡す文脈(画面には出さない)。 */
-function cardContext(item: ConfirmBoxItem): string {
-  const opts = item.options.map((o) => o.label).join(" / ");
-  return [
-    `【確認箱カードについての質問】key: ${item.key ?? item.id}`,
-    `件名: ${item.subject}`,
-    `要約: ${item.summary}`,
-    opts ? `選択肢: ${opts}` : "",
-    item.background ? `背景: ${item.background}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
 function OptionButton({
   item,
   option,
@@ -383,7 +368,6 @@ function OptionButton({
 function ItemCard({
   item,
   styles,
-  colors,
   open,
   onToggle,
   onBackground,
@@ -393,7 +377,6 @@ function ItemCard({
 }: {
   item: ConfirmBoxItem;
   styles: Styles;
-  colors: DockColors;
   open: boolean;
   onToggle: (id: string) => void;
   onBackground: () => void;
@@ -436,16 +419,7 @@ function ItemCard({
       </View>
       {open ? <Text style={styles.text}>{item.summary}</Text> : null}
       {bgOpen && item.background ? <Text style={styles.text}>{item.background}</Text> : null}
-      {chatOpen ? (
-        <ChatPanel
-          colors={colors}
-          agentId={CARD_CHAT_AGENT_ID}
-          context={cardContext(item)}
-          withHistory={false}
-          notifyOnReply={false}
-          inline
-        />
-      ) : null}
+      {chatOpen ? <CardChat itemId={item.id} itemKey={item.key} styles={styles} /> : null}
       <View style={styles.footRow}>
         {item.background ? (
           <Pressable accessibilityRole="button" style={styles.footBtn} onPress={toggleBg}>

@@ -1,19 +1,31 @@
 /**
- * カード単位のチャット。確認箱ディレクトリ配下の2ファイルで持つ(追記のみ):
+ * カード単位のチャット(確認箱の自由記述欄)。2026-10-22に箱のイベント列へ移行。
  *
- * - `card_chat_requests.jsonl` … 質問 `{ts,key,text}`(返信ワーカーが読む)
- * - `card_chat_replies.jsonl`  … 返答 `{ts,re,key,by,text}`(`re` = 質問の ts)。by=ack|worker|fallback
+ * 以前は `card_chat_requests.jsonl` / `card_chat_replies.jsonl` の2ファイルだったが、
+ * **書き手も読み手も居ない**(質問は書けるが返事を書くプロセスが無かった)ため、
+ * 箱の正本 `events-YYYYMM.jsonl` に一本化した。PaseoコアのPWAが既に書いている
+ * `{"t":"chat",…}` と同じ形なので、**どちらの画面から聞いても同じ返事が並ぶ**。
  *
- * UI側が書くのは質問と即時の受領(ack)だけ。本回答は別プロセスが replies に書き戻す。
+ * - 質問: `{t:"chat", id, key, ts, question, client_message_id}`
+ * - 返事: `{t:"reply", id, key, ts, re, by, text}`(`re` = 質問の client_message_id)
+ *   `by` = ack(受領) | origin_thread(元スレ) | worker(応答ワーカー) | fallback(詰み)
+ *
+ * UIが書くのは質問と**即時の受領(ack)**だけ。本回答は `confirm_box_reply_worker.py`
+ * (60秒ごと)が元スレへの転送かLLMで書き戻す=**誰も拾えなくても必ず1行返る**(fail-open)。
+ * 未知の `t` は既存の読み手が無視する契約なので、この2行を足しても箱は壊れない。
  */
 import fs from "node:fs";
 import path from "node:path";
 
-export const CARD_CHAT_REQUESTS_FILE = "card_chat_requests.jsonl";
-export const CARD_CHAT_REPLIES_FILE = "card_chat_replies.jsonl";
+const EVENTS_FILE = /^events-\d{6}\.jsonl$/;
+/** 旧形式(読み取りのみ・互換のため残す。新規の書き込みはしない)。 */
+export const LEGACY_REQUESTS_FILE = "card_chat_requests.jsonl";
+export const LEGACY_REPLIES_FILE = "card_chat_replies.jsonl";
+
 const TEXT_MAX = 600;
-const KEY_MAX = 200;
+const ID_MAX = 200;
 const MESSAGES_SHOWN = 40;
+export const ACK_TEXT = "受け取りました。担当スレに確認します(返事が出たらここに表示されます)";
 
 export interface CardChatMessage {
   ts: number;
@@ -22,9 +34,29 @@ export interface CardChatMessage {
   text: string;
 }
 
+/** どの項目への質問か。箱の項目は `key` を持たないことがあるので `id` は必須。 */
+export interface CardChatTarget {
+  id: string;
+  key?: string | null;
+}
+
 function appendLine(dir: string, file: string, obj: unknown): void {
   fs.mkdirSync(dir, { recursive: true });
-  fs.appendFileSync(path.join(dir, file), `${JSON.stringify(obj)}\n`, "utf-8");
+  fs.appendFileSync(path.join(dir, file), `${JSON.stringify(obj)}\n`, {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
+}
+
+function eventFiles(dir: string): string[] {
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((name) => EVENTS_FILE.test(name))
+      .sort();
+  } catch {
+    return [];
+  }
 }
 
 function readRows(dir: string, file: string): Record<string, unknown>[] {
@@ -46,45 +78,111 @@ function readRows(dir: string, file: string): Record<string, unknown>[] {
   return out;
 }
 
+function boxRows(dir: string): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = [];
+  for (const name of eventFiles(dir)) rows.push(...readRows(dir, name));
+  return rows;
+}
+
+function chatsFile(): string {
+  const now = new Date();
+  const ym = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return `events-${ym}.jsonl`;
+}
+
+function targetKeys(target: CardChatTarget): string[] {
+  return [target.id, target.key ?? ""].map((v) => v.trim()).filter((v) => v.length > 0);
+}
+
+function field(row: Record<string, unknown>, name: string): string {
+  const value = row[name];
+  return typeof value === "string" ? value : "";
+}
+
+/** その項目の行か(id か key の一致)。 */
+function cardMatcher(keys: string[]): (row: Record<string, unknown>) => boolean {
+  return (row) => {
+    const key = field(row, "key");
+    return keys.includes(field(row, "id")) || (key.length > 0 && keys.includes(key));
+  };
+}
+
 export function sayToCard(
   dir: string,
-  key: string,
+  target: CardChatTarget,
   text: string,
 ): { ok: boolean; message: string } {
-  const k = key.trim().slice(0, KEY_MAX);
+  const id = (target.id ?? "").trim().slice(0, ID_MAX);
+  const key = (target.key ?? "").trim().slice(0, ID_MAX) || null;
   const clean = text.replace(/\s+/g, " ").trim().slice(0, TEXT_MAX);
-  if (!k) return { ok: false, message: "この項目にはkeyが無くチャットできません" };
+  if (!id) return { ok: false, message: "この項目はチャットできません(id なし)" };
   if (!clean) return { ok: false, message: "空です" };
+
   const ts = Date.now();
-  appendLine(dir, CARD_CHAT_REQUESTS_FILE, { ts, key: k, text: clean });
-  appendLine(dir, CARD_CHAT_REPLIES_FILE, {
+  // 同じ項目に何度でも聞けるので、ms まで入れて一意にする(再起動をまたいでも衝突しない)。
+  const clientMessageId = `cbui-${id}-${ts}`.slice(0, ID_MAX * 2);
+  appendLine(dir, chatsFile(), {
+    t: "chat",
+    id,
+    key,
     ts,
-    re: ts,
-    key: k,
+    question: clean,
+    client_message_id: clientMessageId,
+    source: "plugin",
+  });
+  // fail-open: 本回答が来なくても「受け取った」は必ず1行返る(ユーザーに無反応を作らない)。
+  appendLine(dir, chatsFile(), {
+    t: "reply",
+    id,
+    key,
+    ts,
+    re: clientMessageId,
     by: "ack",
-    text: "受け取りました。このカードの論点について返事を作ります(出たらここに表示されます)",
+    text: ACK_TEXT,
   });
   return { ok: true, message: "送りました" };
 }
 
-export function readCardChat(dir: string, key: string): CardChatMessage[] {
-  const k = key.trim();
+/** 箱のイベント列から、その項目の質問と返事。返事は `re`(質問ID)でも照合する。 */
+function boxMessages(rows: Record<string, unknown>[], keys: string[]): CardChatMessage[] {
+  const mine = cardMatcher(keys);
+  const asked = new Set<string>();
   const out: CardChatMessage[] = [];
-  for (const r of readRows(dir, CARD_CHAT_REQUESTS_FILE)) {
-    if (r.key === k && typeof r.ts === "number" && typeof r.text === "string") {
+  for (const r of rows) {
+    if (r.t !== "chat" || !mine(r)) continue;
+    if (typeof r.ts !== "number" || typeof r.question !== "string") continue;
+    out.push({ ts: r.ts, role: "user", by: "user", text: r.question });
+    const cid = field(r, "client_message_id");
+    if (cid.length > 0) asked.add(cid);
+  }
+  for (const r of rows) {
+    if (r.t !== "reply" || typeof r.ts !== "number" || typeof r.text !== "string") continue;
+    if (!mine(r) && !asked.has(field(r, "re"))) continue;
+    out.push({ ts: r.ts, role: "reply", by: field(r, "by"), text: r.text });
+  }
+  return out;
+}
+
+/** 旧形式(2026-10-22以前に書かれた行があれば)も表示する。読み取りのみ。 */
+function legacyMessages(dir: string, keys: string[]): CardChatMessage[] {
+  const mine = cardMatcher(keys);
+  const out: CardChatMessage[] = [];
+  for (const r of readRows(dir, LEGACY_REQUESTS_FILE)) {
+    if (typeof r.ts === "number" && typeof r.text === "string" && mine(r)) {
       out.push({ ts: r.ts, role: "user", by: "user", text: r.text });
     }
   }
-  for (const r of readRows(dir, CARD_CHAT_REPLIES_FILE)) {
-    if (r.key === k && typeof r.ts === "number" && typeof r.text === "string") {
-      out.push({
-        ts: r.ts,
-        role: "reply",
-        by: typeof r.by === "string" ? r.by : "",
-        text: r.text,
-      });
+  for (const r of readRows(dir, LEGACY_REPLIES_FILE)) {
+    if (typeof r.ts === "number" && typeof r.text === "string" && mine(r)) {
+      out.push({ ts: r.ts, role: "reply", by: field(r, "by"), text: r.text });
     }
   }
+  return out;
+}
+
+export function readCardChat(dir: string, target: CardChatTarget): CardChatMessage[] {
+  const keys = targetKeys(target);
+  const out = [...boxMessages(boxRows(dir), keys), ...legacyMessages(dir, keys)];
   // 同じ ts なら質問が先、返答が後
   const roleOrder = (m: CardChatMessage) => (m.role === "user" ? 0 : 1);
   out.sort((a, b) => a.ts - b.ts || roleOrder(a) - roleOrder(b));

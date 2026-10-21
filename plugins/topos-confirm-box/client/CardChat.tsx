@@ -20,7 +20,15 @@ function speaker(role: string, by: string): string {
 const box = { gap: 6 };
 const input = { borderWidth: 1, borderRadius: 6, padding: 8, fontSize: 14, minHeight: 40 };
 
-export function CardChat({ itemKey, styles }: { itemKey?: string; styles: Styles }) {
+export function CardChat({
+  itemId,
+  itemKey,
+  styles,
+}: {
+  itemId: string;
+  itemKey?: string | null;
+  styles: Styles;
+}) {
   const list = useRpc(cardChatListRpc);
   const say = useRpc(cardChatSayRpc);
   const [data, setData] = useState<CardChatListOutput | null>(null);
@@ -28,13 +36,13 @@ export function CardChat({ itemKey, styles }: { itemKey?: string; styles: Styles
   const [notice, setNotice] = useState("");
 
   const reload = useCallback(async () => {
-    if (!itemKey) return;
+    if (!itemId) return;
     try {
-      setData(await list({ key: itemKey }));
+      setData(await list({ id: itemId, key: itemKey ?? null }));
     } catch (e) {
       setNotice(e instanceof Error ? e.message : String(e));
     }
-  }, [list, itemKey]);
+  }, [list, itemId, itemKey]);
 
   useEffect(() => {
     void reload();
@@ -44,20 +52,20 @@ export function CardChat({ itemKey, styles }: { itemKey?: string; styles: Styles
 
   const send = useCallback(async () => {
     const t = text.trim();
-    if (!t || !itemKey) return;
+    if (!t || !itemId) return;
     try {
-      const r = await say({ key: itemKey, text: t });
+      const r = await say({ id: itemId, key: itemKey ?? null, text: t });
       setNotice(r.ok ? "" : r.message);
       if (r.ok) setText("");
     } catch (e) {
       setNotice(e instanceof Error ? e.message : String(e));
     }
     void reload();
-  }, [say, text, itemKey, reload]);
+  }, [say, text, itemId, itemKey, reload]);
   const sendPress = useCallback(() => void send(), [send]);
   const inputStyle = useMemo(() => [input, styles.text], [styles.text]);
 
-  if (!itemKey) return <Text style={styles.muted}>この項目はチャットできません(key なし)</Text>;
+  if (!itemId) return <Text style={styles.muted}>この項目はチャットできません(id なし)</Text>;
   return (
     <View style={box}>
       {data?.messages.map((m) => (

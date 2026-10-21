@@ -228,9 +228,13 @@ export const CardChatReplySchema = z.object({
 });
 export type CardChatReply = z.infer<typeof CardChatReplySchema>;
 
+/** どの項目への質問か。箱の項目は `key` を持たないことがあるので `id` を正とする
+ * (2026-10-22: 返事を箱のイベント列 `t:"reply"` に出すようになり、id で突き合わせる)。 */
+const cardChatTarget = { id: z.string(), key: z.string().nullable().optional() };
+
 export const cardChatListRpc = defineRpc({
   name: "topos.confirmbox.cardchat.list",
-  input: z.object({ key: z.string() }),
+  input: z.object(cardChatTarget),
   output: z.object({
     messages: z.array(
       z.object({
@@ -246,7 +250,7 @@ export type CardChatListOutput = z.infer<typeof cardChatListRpc.output>;
 
 export const cardChatSayRpc = defineRpc({
   name: "topos.confirmbox.cardchat.say",
-  input: z.object({ key: z.string(), text: z.string() }),
+  input: z.object({ ...cardChatTarget, text: z.string() }),
   output: z.object({ ok: z.boolean(), message: z.string() }),
 });
 

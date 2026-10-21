@@ -153,7 +153,7 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(cardChatListRpc, async (input) => {
     try {
-      return { messages: readCardChat(resolveConfirmBoxDir(), input.key) };
+      return { messages: readCardChat(resolveConfirmBoxDir(), { id: input.id, key: input.key }) };
     } catch {
       return { messages: [] };
     }
@@ -161,7 +161,7 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(cardChatSayRpc, async (input) => {
     try {
-      return sayToCard(resolveConfirmBoxDir(), input.key, input.text);
+      return sayToCard(resolveConfirmBoxDir(), { id: input.id, key: input.key }, input.text);
     } catch (error) {
       return { ok: false, message: `送れません: ${(error as Error).message}` };
     }
