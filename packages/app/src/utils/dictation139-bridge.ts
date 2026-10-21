@@ -23,11 +23,35 @@ type Dictation139Event =
   | { type: "state"; state: Dictation139State; message?: string }
   | { type: "result"; text: string };
 
-export function subscribeDictation139(listener: (event: Dictation139Event) => void): () => void {
-  const handler = (event: Event) => listener((event as CustomEvent<Dictation139Event>).detail);
+/**
+ * `claim`は同じ1回のイベントに対して**最初の1呼び出しだけtrue**を返す。
+ * composerは複数(分割ペイン・開いたままのタブ)同時にマウントされ、各マイクボタンが
+ * 同じ`result`を購読する。全員が挿入すると、同じ文が購読数ぶん入力欄へ重複挿入される
+ * (2026-10-21の実害)。結果の挿入は`claim`を取れた1か所だけが行うこと。
+ */
+export type Dictation139Claim = () => boolean;
+
+export function subscribeDictation139(
+  listener: (event: Dictation139Event, claim: Dictation139Claim) => void,
+): () => void {
+  const handler = (event: Event) => {
+    let claimed = claimedEvents.get(event);
+    if (!claimed) {
+      claimed = { done: false };
+      claimedEvents.set(event, claimed);
+    }
+    const state = claimed;
+    listener((event as CustomEvent<Dictation139Event>).detail, () => {
+      if (state.done) return false;
+      state.done = true;
+      return true;
+    });
+  };
   window.addEventListener("dictation139", handler);
   return () => window.removeEventListener("dictation139", handler);
 }
+
+const claimedEvents = new WeakMap<Event, { done: boolean }>();
 
 /**
  * composerの入力欄(可視・編集可のもの)を1つ選ぶ。

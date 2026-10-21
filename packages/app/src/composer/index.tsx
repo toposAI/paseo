@@ -1170,6 +1170,9 @@ function ComposerRightControlsSlot({
 /** 失敗表示(トースト+マイクのエラー表示)を出し続ける時間。 */
 const DICTATION_ERROR_FLASH_MS = 6000;
 
+/** 非アクティブなcomposerが結果の引き受けを見送る猶予(アクティブなcomposerが先に取れるように)。 */
+const DICTATION_INACTIVE_COMPOSER_DELAY_MS = 150;
+
 function ComposerDictationButton({
   buttonIconSize,
   realtimeVoiceButtonStyle,
@@ -1210,29 +1213,52 @@ function ComposerDictationButton({
     [],
   );
 
-  useEffect(
-    () =>
-      subscribeDictation139((event) => {
-        if (event.type === "state") {
-          setState(event.state);
-          if (event.state === "error") {
-            flashError(event.message ?? "139番の音声入力を開始できませんでした");
-          }
-          return;
+  // 複数のcomposerが同時にマウントされうる(分割ペイン・開いたままのタブ)。全員が結果を
+  // 挿入すると同じ文が購読数ぶん重複するため、結果の挿入は`claim`を取った1か所だけが行う。
+  // 操作中(フォーカス中)のペインのcomposerを優先し、どこも名乗り出なければ短い猶予後に
+  // 残りのどれかが引き受ける(アクティブ判定が外れても文字を失わせない)。
+  const { isActiveComposer } = useComposerKeyboardScope();
+  const isActiveComposerRef = useRef(isActiveComposer);
+  isActiveComposerRef.current = isActiveComposer;
+
+  useEffect(() => {
+    const deliver = (text: string, claim: () => boolean) => {
+      if (!claim()) return;
+      // composer本体のReact状態を通す経路を第一手段にし、使えなければDOM直操作へ落とす。
+      // どちらも失敗したら黙って捨てずにエラー表示する。
+      let inserted = false;
+      try {
+        inserted = insertTextRef.current(text);
+      } catch {
+        inserted = false;
+      }
+      if (!inserted) inserted = insertIntoComposer(text);
+      if (!inserted) flashError("文字起こしを入力欄へ挿入できませんでした");
+    };
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const unsubscribe = subscribeDictation139((event, claim) => {
+      if (event.type === "state") {
+        setState(event.state);
+        if (event.state === "error") {
+          flashError(event.message ?? "139番の音声入力を開始できませんでした");
         }
-        // composer本体のReact状態を通す経路を第一手段にし、使えなければDOM直操作へ落とす。
-        // どちらも失敗したら黙って捨てずにエラー表示する。
-        let inserted = false;
-        try {
-          inserted = insertTextRef.current(event.text);
-        } catch {
-          inserted = false;
-        }
-        if (!inserted) inserted = insertIntoComposer(event.text);
-        if (!inserted) flashError("文字起こしを入力欄へ挿入できませんでした");
-      }),
-    [flashError],
-  );
+        return;
+      }
+      if (isActiveComposerRef.current) {
+        deliver(event.text, claim);
+        return;
+      }
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        deliver(event.text, claim);
+      }, DICTATION_INACTIVE_COMPOSER_DELAY_MS);
+      timers.add(timer);
+    });
+    return () => {
+      unsubscribe();
+      for (const timer of timers) clearTimeout(timer);
+    };
+  }, [flashError]);
 
   const isError = errorMessage !== null;
   const renderContent = useCallback(
