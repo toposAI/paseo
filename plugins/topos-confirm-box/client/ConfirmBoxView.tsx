@@ -17,6 +17,7 @@ import {
 import { notifyBoxChanged } from "./events.js";
 import { CardChat } from "./CardChat.js";
 import { PriorityView } from "./PriorityView.js";
+import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import type { ConfirmBoxDepth, ConfirmBoxItem, ConfirmBoxListOutput } from "../shared/contract.js";
 
 const REFRESH_MS = 30_000;
@@ -255,6 +256,7 @@ export function ConfirmBoxView({
           </>
         )}
       </ScrollView>
+      {tab === "priority" ? <ChatDock colors={c} agentId={PRIORITY_CHAT_AGENT_ID} /> : null}
       <ScrollView horizontal style={s.bottomBar} showsHorizontalScrollIndicator={false}>
         {TABS.map((tb) => (
           <TabButton key={tb.id} tab={tb} on={tab === tb.id} styles={s} onSelect={setTab} />
