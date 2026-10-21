@@ -5,6 +5,7 @@ import type {
   PluginScreenLocation,
   PluginSidebarItemProps,
 } from "@getpaseo/plugin/client";
+import { usePluginHostNavigation } from "../host-navigation";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { router, useGlobalSearchParams, usePathname } from "expo-router";
 import { useCallback, useMemo, useState, type ComponentType, type RefObject } from "react";
@@ -183,6 +184,7 @@ function SidebarItemContent({
     }),
     [compact, hostLabel, plugin.serverId, theme],
   );
+  const navigation = usePluginHostNavigation(plugin.serverId);
   const openScreen = useCallback(
     (input: PluginOpenScreenInput) => {
       const { screenId, params } = parsePluginOpenScreenInput(plugin, input);
@@ -224,8 +226,17 @@ function SidebarItemContent({
     [anchorTo, bar, item.id, item.title, offerAnchor, plugin.id, releaseAnchor, section],
   );
   const itemProps = useMemo<PluginSidebarItemProps>(
-    () => ({ ...hostProps, currentScreen, openScreen, openPopover }),
-    [currentScreen, hostProps, openPopover, openScreen],
+    // `navigation` is not in the published props type (changing it would force a daemon
+    // rebuild); sidebar items that open an agent read it off the props structurally.
+    () =>
+      ({
+        ...hostProps,
+        currentScreen,
+        openScreen,
+        openPopover,
+        navigation,
+      }) as PluginSidebarItemProps,
+    [currentScreen, hostProps, navigation, openPopover, openScreen],
   );
   const Item = item.Component;
   const Popover = popover;

@@ -18,7 +18,13 @@ const ICON: Record<ChildThreadStatus, string> = {
   完了: "CircleCheck",
 };
 
-export function ChildThreadsSidebar({ currentScreen, openScreen }: PluginSidebarItemProps) {
+interface AgentNavigation {
+  navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
+}
+
+export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
+  const { currentScreen, openScreen } = props;
+  const navigation = (props as PluginSidebarItemProps & AgentNavigation).navigation;
   const list = useRpc(childThreadsListRpc);
   const [threads, setThreads] = useState<ChildThread[]>([]);
   const [failed, setFailed] = useState(false);
@@ -69,6 +75,8 @@ export function ChildThreadsSidebar({ currentScreen, openScreen }: PluginSidebar
           failed={failed}
           active={onScreen && focusId === t.agentId}
           openScreen={openScreen}
+          openAgent={navigation?.openAgent}
+          serverId={props.host.id}
         />
       ))}
     </>
@@ -80,16 +88,21 @@ function ThreadRow({
   failed,
   active,
   openScreen,
+  openAgent,
+  serverId,
 }: {
   thread: ChildThread;
   failed: boolean;
   active: boolean;
   openScreen: PluginSidebarItemProps["openScreen"];
+  openAgent?: (input: { agentId: string; serverId?: string }) => void;
+  serverId: string;
 }) {
-  const onPress = useCallback(
-    () => openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: { focusId: t.agentId } }),
-    [openScreen, t.agentId],
-  );
+  // 押したらそのスレの会話(エージェント画面)を開く。navigationが無い古いホストだけ一覧画面へ退避。
+  const onPress = useCallback(() => {
+    if (openAgent) openAgent({ agentId: t.agentId, serverId });
+    else openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: { focusId: t.agentId } });
+  }, [openAgent, openScreen, serverId, t.agentId]);
   const trailing = useMemo(
     () => <Text>{failed ? `${t.status}(古い表示)` : t.status}</Text>,
     [failed, t.status],
