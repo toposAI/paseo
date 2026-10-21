@@ -74,6 +74,23 @@ export interface ConfirmBoxChatEntry {
   clientMessageId: string;
 }
 
+/**
+ * 箱のチャット欄に返ってきた返事1件(events の `{"t":"reply"}` を畳んだもの)。
+ *
+ * 元スレの返答はタイムラインから都度切り出す(`chat.ts`)が、**元スレを持たない項目**
+ * (保留中の判断・手動投函)でも返事は出る。それは `confirm_box_reply_worker.py` が
+ * 箱へ直接書く `reply` 行で、こちらはその行を畳む。2026-10-22追加。
+ */
+export interface ConfirmBoxReplyEntry {
+  itemId: string;
+  ts: number;
+  /** 対になる質問の `clientMessageId`。 */
+  re: string;
+  /** ack(受領) / origin_thread(元スレ) / worker(応答ワーカー) / fallback(詰み)。 */
+  by: string;
+  text: string;
+}
+
 export interface ConfirmBoxSummary {
   unread: number;
   urgentUnread: number;
@@ -100,6 +117,13 @@ export const OPTION_LABEL_MAX = 120;
 export const OPTIONS_MAX = 6;
 export const GROUP_MAX = 80;
 export const CHAT_QUESTION_MAX = 1000;
+export const CHAT_REPLY_MAX = 4000;
+/**
+ * 受領の1行。書くのは箱(この関数)とプラグイン(`plugins/topos-confirm-box/server/cardchat.ts`)、
+ * それに応答ワーカー。**同じ文言**にして、どの入口から聞いても同じ返事が見えるようにする
+ * (文言を変えるときは3箇所そろえる。2026-10-22)。
+ */
+export const CHAT_ACK_TEXT = "受け取りました。返事を作ります(出たらここに表示されます)";
 
 export const PRIORITIES: readonly ConfirmBoxPriority[] = ["blocking", "design", "normal", "info"];
 export const DEFAULT_PRIORITY: ConfirmBoxPriority = "normal";
@@ -215,6 +239,8 @@ export class ConfirmBoxStore {
   private readonly cursors = new Map<string, FileCursor>();
   /** item id → 箱から送った質問(古い順)。 */
   private readonly chats = new Map<string, ConfirmBoxChatEntry[]>();
+  /** 箱のチャット欄への返事(`t:"reply"` を畳んだもの)。項目ID → 古い順。 */
+  private readonly replies = new Map<string, ConfirmBoxReplyEntry[]>();
 
   constructor(
     readonly dir: string,
@@ -298,6 +324,8 @@ export class ConfirmBoxStore {
         return this.applyPush(e);
       case "chat":
         return this.applyChat(e);
+      case "reply":
+        return this.applyReply(e);
       default:
         return false;
     }
@@ -396,11 +424,58 @@ export class ConfirmBoxStore {
     return true;
   }
 
+  /**
+   * `{"t":"reply"}` を畳む。返事は**質問より後に書かれる**契約(プラグインは同一writeで
+   * chat→reply の順、ワーカーは後周期)なので、`re` から質問を辿って項目へ紐づける。
+   * 項目IDが無い/合わない行(`pending:<key>` 等)でも `re` が既知の質問を指すなら拾う=
+   * 返事を黙って落とさない。
+   *
+   * 同じ `(re, by)` は二重に数えない。ワーカーは ack と本回答を別の `by` で書くため、
+   * 両方残る。ファイル切り詰め後の読み直しで増殖しないための保険(applyChat と同じ)。
+   */
+  private applyReply(e: Record<string, unknown>): boolean {
+    const text = typeof e.text === "string" ? e.text.trim() : "";
+    const re = typeof e.re === "string" ? e.re : "";
+    if (!text || !re) return false;
+    const id = typeof e.id === "string" ? e.id : "";
+    const itemId = id && this.items.has(id) ? id : this.itemIdForClientMessage(re);
+    if (!itemId) return false;
+    const by = typeof e.by === "string" && e.by ? e.by.slice(0, 40) : "unknown";
+    const list = this.replies.get(itemId) ?? [];
+    if (list.some((r) => r.re === re && r.by === by)) return false;
+    list.push({
+      itemId,
+      ts: typeof e.ts === "number" ? e.ts : this.now(),
+      re,
+      by,
+      text: text.slice(0, CHAT_REPLY_MAX),
+    });
+    this.replies.set(itemId, list);
+    return true;
+  }
+
+  /** `clientMessageId` から、その質問を投げた項目を引く(返事の紐づけ用)。 */
+  private itemIdForClientMessage(clientMessageId: string): string {
+    for (const [itemId, list] of this.chats) {
+      if (list.some((c) => c.clientMessageId === clientMessageId)) return itemId;
+    }
+    return "";
+  }
+
   private append(event: Record<string, unknown>): void {
+    this.appendMany([event]);
+  }
+
+  /**
+   * 複数行を**1回のwrite**で書く。質問とその受領(ack)を別々に書くと、その隙に
+   * 応答ワーカーが読んで受領を二重に書くことがある(プラグイン側と同じ理由・2026-10-22)。
+   */
+  private appendMany(events: readonly Record<string, unknown>[]): void {
+    if (events.length === 0) return;
     fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    const line = `${JSON.stringify(event)}\n`;
+    const text = events.map((e) => `${JSON.stringify(e)}\n`).join("");
     // appendFileSync は O_APPEND で開き1回のwriteで書く(Python側と同じ方式)。
-    fs.appendFileSync(path.join(this.dir, eventsFileName(this.now())), line, {
+    fs.appendFileSync(path.join(this.dir, eventsFileName(this.now())), text, {
       encoding: "utf8",
       mode: 0o600,
     });
@@ -466,6 +541,10 @@ export class ConfirmBoxStore {
    * を追記する。`t:"chat"` は未知イベントなので、Python側 `load_items()` も
    * 既存の読み手も無視する(畳み込むのは Paseo 側の `applyChat` だけ)。
    *
+   * **受領の `reply` 行も同じwriteで書く**(2026-10-22)。応答ワーカーは60秒ごとなので、
+   * それだけだと「送ったのに何も起きない」時間ができる。プラグインUIと同じ契約
+   * (受領が同期的に必ず1行返る=fail-open)にそろえる。
+   *
    * 記録できなければ null を返す(送信側は「記録できなかった」として扱う)。
    */
   recordChatQuestion(itemId: string, question: string): string | null {
@@ -475,20 +554,38 @@ export class ConfirmBoxStore {
     if (!item || !text) return null;
     // 同じ項目に複数回聞けるので連番を付ける(対応付けの一意性はここで担保する)。
     const clientMessageId = `cbx-${itemId}-${(this.chats.get(itemId)?.length ?? 0) + 1}`;
-    this.appendAndApply({
-      t: "chat",
-      id: itemId,
-      key: item.key,
-      ts: this.now(),
-      question: text,
-      client_message_id: clientMessageId,
-    });
+    const ts = this.now();
+    this.appendMany([
+      {
+        t: "chat",
+        id: itemId,
+        key: item.key,
+        ts,
+        question: text,
+        client_message_id: clientMessageId,
+      },
+      {
+        t: "reply",
+        id: itemId,
+        key: item.key,
+        ts,
+        re: clientMessageId,
+        by: "ack",
+        text: CHAT_ACK_TEXT,
+      },
+    ]);
+    this.refresh();
     return clientMessageId;
   }
 
   /** 箱から送った質問(古い順)。 */
   chatEntries(itemId: string): ConfirmBoxChatEntry[] {
     return [...(this.chats.get(itemId) ?? [])];
+  }
+
+  /** 箱のチャット欄に返ってきた返事(古い順)。 */
+  replyEntries(itemId: string): ConfirmBoxReplyEntry[] {
+    return [...(this.replies.get(itemId) ?? [])];
   }
 
   getItem(id: string): ConfirmBoxItem | null {

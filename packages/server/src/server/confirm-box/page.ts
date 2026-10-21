@@ -81,6 +81,7 @@ export function renderConfirmBoxPage(options: { serverId?: string } = {}): strin
   .chatlog { margin: 8px 0; }
   .turn { border-left: 3px solid #8884; padding: 2px 0 2px 8px; margin: 8px 0; }
   .turn.user { border-left-color: #2e9d4f; }
+  .turn.ack { border-left-color: #8884; opacity: .8; }
   .turn .who { font-size: .72em; opacity: .7; }
   .turn pre { max-height: 20em; margin: 2px 0; }
   .hint { font-size: .78em; opacity: .7; margin: 4px 0; }
@@ -225,21 +226,50 @@ export function renderConfirmBoxPage(options: { serverId?: string } = {}): strin
     log.textContent = "";
     if (!d) { log.appendChild(el("div", "hint", "読み込み中…")); return; }
     var turns = d.turns || [];
+    var questions = d.questions || [];
+    var replies = d.replies || [];
+    var answered = false;
     if (turns.length) {
+      // 元スレのタイムラインが読めたときは、それが会話の正本(質問も含めて並ぶ)。
       turns.forEach(function (t) {
         var row = el("div", "turn " + t.role);
         row.appendChild(el("div", "who", t.role === "user" ? "あなた" : "元スレ"));
         row.appendChild(el("pre", "", t.text));
         log.appendChild(row);
+        if (t.role !== "user") answered = true;
       });
-    } else if ((d.questions || []).length) {
+    } else if (questions.length) {
+      // 元スレが読めない/無い項目でも、聞いたことは必ず見せる(記録は残っている)。
+      questions.forEach(function (q) {
+        var row = el("div", "turn user");
+        row.appendChild(el("div", "who", "あなた"));
+        row.appendChild(el("pre", "", q.question));
+        log.appendChild(row);
+      });
+    }
+    // 箱へ直接書かれた返事(受領・応答ワーカー・元スレ)。元スレが既に答えているなら、
+    // ワーカーの重複回答は出さない(転送した質問は元スレの返答とワーカーのLLM回答の
+    // 両方が残るため。2026-10-22)。受領だけは常に出す(無反応に見せない)。
+    replies.forEach(function (r) {
+      var text = String(r.text || "").trim();
+      if (!text) return;
+      if (r.by !== "ack" && answered) return;
+      if (r.by !== "ack") answered = true;
+      var row = el("div", "turn " + (r.by === "ack" ? "ack" : "assistant"));
+      row.appendChild(el("div", "who",
+        r.by === "ack" ? "受領" : (r.by === "origin_thread" ? "元スレ" : "返事")));
+      row.appendChild(el("pre", "", text));
+      log.appendChild(row);
+    });
+    if ((questions.length || turns.length) && !answered) {
       log.appendChild(el("div", "hint", d.transcriptError
         ? "返答を読めませんでした(" + d.transcriptError + ")。「元スレを開く」で確認してください。"
-        : "元スレが処理中です。返答が来るとここに出ます。"));
-      log.appendChild(el("div", "hint", "聞いたこと: " + d.questions.map(function (q) { return q.question; }).join(" / ")));
+        : "返事を作っています。出たらここに出ます。"));
     }
     var send = document.getElementById("chatsend-" + it.id);
-    if (send) send.disabled = !d.canSend || Boolean(chatBusy[it.id]);
+    // 送り先(元スレ)が無い項目でも質問は記録され、応答ワーカーが返す。
+    // よって**送信可否でボタンを殺さない**(2026-10-22。殺すと73%の項目で無反応に見える)。
+    if (send) send.disabled = Boolean(chatBusy[it.id]);
   }
 
   function sendChat(it) {
@@ -257,11 +287,17 @@ export function renderConfirmBoxPage(options: { serverId?: string } = {}): strin
       chatBusy[it.id] = false;
       setChatStatus(it, r.sent
         ? "送りました。返答はここに出ます。"
-        : "質問は記録しましたが、元スレへは送れませんでした(「元スレを開く」から聞いてください)。");
+        : "送りました。返事はここに出ます(元スレへの転送はしていません)。");
       return loadChat(it);
     }).catch(function (e) {
       chatBusy[it.id] = false;
-      setChatStatus(it, "送れませんでした: " + e.message);
+      // 記録は送信より先。HTTPエラー(3桁)なら質問は残っていて、応答ワーカーが返す。
+      // 通信断(数字でない)では記録できたか分からないので、そう書かない。
+      var recorded = /^[0-9]{3}$/.test(String(e.message));
+      setChatStatus(it, recorded
+        ? "元スレへは送れませんでした(質問は記録済み。返事はここに出ます): " + e.message
+        : "送れませんでした: " + e.message);
+      if (recorded) return loadChat(it);
       renderChat(it);
     });
   }
@@ -279,13 +315,14 @@ export function renderConfirmBoxPage(options: { serverId?: string } = {}): strin
     ta.addEventListener("input", function () { saveDraft(it.id, ta.value); });
     var send = el("button", "primary", "送る");
     send.id = "chatsend-" + it.id;
-    send.disabled = !canSendThread;
+    // 元スレが無い項目でも質問は記録され、応答ワーカーが返す(2026-10-22)。
+    send.disabled = false;
     send.onclick = function () { sendChat(it); };
     box.appendChild(ta);
     box.appendChild(send);
     box.appendChild(el("div", "hint", canSendThread
       ? "元スレへ送られ、返答がここに出ます。元スレが作業中でも中断はしません(合流します)。"
-      : "この項目の元スレはPaseoのスレッドではないため、ここからは送れません。質問文は記録に残します。"));
+      : "この項目には元スレの送り先がありませんが、書いた内容への返事はここに出ます。"));
     var log = el("div", "chatlog");
     log.id = "chatlog-" + it.id;
     box.appendChild(log);

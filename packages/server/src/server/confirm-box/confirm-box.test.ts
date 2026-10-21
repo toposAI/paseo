@@ -14,7 +14,7 @@ import {
 import { decidePush } from "./push-policy.js";
 import { registerConfirmBoxRoutes } from "./routes.js";
 import { ConfirmBoxService } from "./service.js";
-import { ConfirmBoxStore } from "./store.js";
+import { ConfirmBoxStore, CHAT_ACK_TEXT } from "./store.js";
 
 function createLogger(): pino.Logger {
   const logger = {
@@ -278,9 +278,12 @@ describe("ConfirmBoxStore", () => {
     // 空の質問・存在しない項目では記録しない
     expect(store.recordChatQuestion("a", "   ")).toBeNull();
     expect(store.recordChatQuestion("nope", "x")).toBeNull();
-    const line = JSON.parse(readFileSync(eventsFile(dir), "utf8").trim().split("\n").pop()!);
+    const lines = readFileSync(eventsFile(dir), "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
     // イベントの形はPython側と共有する契約なので client_message_id だけ snake_case
-    expect(line).toMatchObject({
+    expect(lines[lines.length - 2]).toMatchObject({
       t: "chat",
       id: "a",
       key: "p22-1",
@@ -288,13 +291,29 @@ describe("ConfirmBoxStore", () => {
       question: "J1とJ2の違いは?",
       client_message_id: "cbx-a-1",
     });
+    // 受領は**同じwriteの直後**に付く(fail-open。UIが即座に1行返す=無反応に見せない)
+    expect(lines[lines.length - 1]).toMatchObject({
+      t: "reply",
+      id: "a",
+      key: "p22-1",
+      ts: NOW,
+      re: "cbx-a-1",
+      by: "ack",
+      text: CHAT_ACK_TEXT,
+    });
     expect(store.chatEntries("a")).toEqual([
       { itemId: "a", ts: NOW, question: "J1とJ2の違いは?", clientMessageId: "cbx-a-1" },
+    ]);
+    expect(store.replyEntries("a")).toEqual([
+      { itemId: "a", ts: NOW, re: "cbx-a-1", by: "ack", text: CHAT_ACK_TEXT },
     ]);
     // 別インスタンス(デーモン再起動)でも同じ状態に畳み込まれる
     const fresh = new ConfirmBoxStore(dir, () => NOW);
     fresh.refresh();
     expect(fresh.chatEntries("a")).toHaveLength(1);
+    expect(fresh.replyEntries("a")).toEqual([
+      { itemId: "a", ts: NOW, re: "cbx-a-1", by: "ack", text: CHAT_ACK_TEXT },
+    ]);
     // 同じ項目に複数回聞ける(連番で対応付けを一意にする)
     expect(fresh.recordChatQuestion("a", "もう一つ")).toBe("cbx-a-2");
     expect(fresh.chatEntries("a").map((c) => c.question)).toEqual(["J1とJ2の違いは?", "もう一つ"]);
@@ -311,6 +330,39 @@ describe("ConfirmBoxStore", () => {
     store.refresh();
     expect(store.chatEntries("a")).toHaveLength(1);
     expect(store.chatEntries("zzz")).toEqual([]);
+  });
+
+  test("reply行: 返事を畳み込み、同じ(re,by)は二重に数えない", () => {
+    const replyLine = (o: Record<string, unknown>) =>
+      `${JSON.stringify({ t: "reply", ts: NOW, ...o })}\n`;
+    appendFileSync(eventsFile(dir), pyItemFull("a"));
+    appendFileSync(
+      eventsFile(dir),
+      `${JSON.stringify({ t: "chat", id: "a", ts: NOW, question: "q", client_message_id: "cbx-a-1" })}\n`,
+    );
+    appendFileSync(
+      eventsFile(dir),
+      // 受領は同じ (re, by) で2回来ても1本。ワーカーの本回答は by が違うので別行として残る。
+      replyLine({ id: "a", re: "cbx-a-1", by: "ack", text: "受け取りました" }) +
+        replyLine({ id: "a", re: "cbx-a-1", by: "ack", text: "受け取りました" }) +
+        replyLine({ re: "cbx-a-1", by: "worker", text: "J1は…" }) +
+        // 項目IDも対応する質問も無い返事は捨てる(どの項目にも見せない)
+        replyLine({ re: "cbx-unknown-9", by: "worker", text: "迷子" }) +
+        // 本文が空/`re` が無い行は捨てる
+        replyLine({ id: "a", re: "cbx-a-1", by: "fallback", text: "  " }) +
+        replyLine({ id: "a", by: "worker", text: "re なし" }),
+    );
+    const store = new ConfirmBoxStore(dir, () => NOW);
+    store.refresh();
+    // id を書かない行でも `re` から質問→項目へ辿れる(プラグインの保留中項目など)
+    expect(store.replyEntries("a")).toEqual([
+      { itemId: "a", ts: NOW, re: "cbx-a-1", by: "ack", text: "受け取りました" },
+      { itemId: "a", ts: NOW, re: "cbx-a-1", by: "worker", text: "J1は…" },
+    ]);
+    expect(store.replyEntries("zzz")).toEqual([]);
+    // 再読み込みで増えない(デーモン再起動・ファイル切り詰めの保険)
+    store.refresh();
+    expect(store.replyEntries("a")).toHaveLength(2);
   });
 
   test("heartbeat.json を原子的に書く", () => {
@@ -540,6 +592,11 @@ describe("confirm-box routes", () => {
     expect(html).toContain("送る");
     expect(html).toContain("元スレを開く");
     expect(html).toContain("srv_test123"); // 元スレの直リンク /h/<serverId>/agent/<id>
+    // 元スレの無い項目でも送れる(質問は記録され、応答ワーカーが返す。2026-10-22)
+    expect(html).toContain(
+      "この項目には元スレの送り先がありませんが、書いた内容への返事はここに出ます。",
+    );
+    expect(html).toContain("replies = d.replies || []");
 
     expect(await (await fetch(`${base}/summary`)).json()).toEqual({
       unread: 2,
@@ -635,12 +692,15 @@ describe("confirm-box routes", () => {
     ];
     const got = (await (await fetch(`${base}/items/c/chat`)).json()) as {
       questions: Array<{ question: string }>;
+      replies: Array<{ re: string; by: string; text: string }>;
       turns: Array<{ role: string; text: string }>;
       canSend: boolean;
       transcriptError: string | null;
     };
     expect(got.canSend).toBe(true);
     expect(got.questions.map((q) => q.question)).toEqual(["J1とJ2の違いは?"]);
+    // 受領は箱が同じwriteで書く(応答ワーカーの周期を待たずにUIが1行返す)
+    expect(got.replies).toMatchObject([{ re: "cbx-c-1", by: "ack", text: CHAT_ACK_TEXT }]);
     // 箱の質問より前のやり取りは出さない(箱は「聞いて返ってきた所」だけ見せる)
     expect(got.turns).toEqual([
       { role: "user", text: "J1とJ2の違いは?" },
@@ -689,11 +749,14 @@ describe("confirm-box routes", () => {
     const got = (await (await fetch(`${base}/items/n/chat`)).json()) as {
       canSend: boolean;
       questions: unknown[];
+      replies: Array<{ by: string; text: string }>;
       turns: unknown[];
     };
     expect(got.canSend).toBe(false);
     // 送れなくても質問文は学習ログの主原料なので残す
     expect(got.questions).toHaveLength(1);
     expect(got.turns).toEqual([]);
+    // 元スレが無くても受領は返る(=画面が無反応にならない)。本回答は応答ワーカーが書く。
+    expect(got.replies).toMatchObject([{ re: "cbx-n-1", by: "ack", text: CHAT_ACK_TEXT }]);
   });
 });

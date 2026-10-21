@@ -128,6 +128,14 @@ export function registerConfirmBoxRoutes(options: {
       ts: c.ts,
       clientMessageId: c.clientMessageId,
     }));
+    // 箱へ直接書かれた返事(受領・応答ワーカー・元スレ)。元スレを持たない項目でも
+    // ここに必ず1行は入る(fail-open)ので、UIはタイムライン抜きでも会話を描ける。
+    const replies = store.replyEntries(item.id).map((r) => ({
+      ts: r.ts,
+      re: r.re,
+      by: r.by,
+      text: r.text,
+    }));
     const ref = item.threadRef;
     const gateway = isSendableThread(ref) ? options.getThreadGateway?.() : undefined;
     let turns: ConfirmBoxChatTurn[] = [];
@@ -146,6 +154,7 @@ export function registerConfirmBoxRoutes(options: {
     }
     res.json({
       questions,
+      replies,
       turns,
       canSend: isSendableThread(ref) && Boolean(gateway),
       transcriptError,
