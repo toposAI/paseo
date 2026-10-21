@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, Text, TextInput, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
+import { onBoxChanged } from "./events.js";
 import { priorityListRpc, priorityMoveRpc, prioritySayRpc } from "../shared/contract.js";
 import type { PriorityListOutput } from "../shared/contract.js";
 
@@ -303,7 +304,11 @@ export function PriorityView({ styles, colors }: { styles: Styles; colors: Color
   useEffect(() => {
     void reload();
     const timer = setInterval(() => void reload(), REFRESH_MS);
-    return () => clearInterval(timer);
+    const off = onBoxChanged(() => void reload());
+    return () => {
+      clearInterval(timer);
+      off();
+    };
   }, [reload]);
 
   const shift = useCallback(
