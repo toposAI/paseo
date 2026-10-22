@@ -48,6 +48,17 @@ test("本文は上限で切る(巨大な報告で一覧が壊れない)", () => 
   assert.equal(r?.text.length, FEEDBACK_TEXT_MAX);
 });
 
+test("返信は家族版の {text,at,by} 形でも本文を取り出す(文字列形も受ける)", () => {
+  const nested = normalizeReport(
+    report({ reply: { text: "もう一度お試しください", at: "2026-10-22T01:17:27Z", by: "owner" } }),
+    "家族",
+    labels,
+  );
+  assert.equal(nested?.reply, "もう一度お試しください");
+  assert.equal(normalizeReport(report({ reply: "plain" }), "家族", labels)?.reply, "plain");
+  assert.equal(normalizeReport(report({ reply: { at: "x" } }), "家族", labels)?.reply, null);
+});
+
 test("日時が読めない報告は ts=0 で並びの最後に落ちる", () => {
   const r = normalizeReport(report({ created_at: "not-a-date" }), "家族", labels);
   assert.equal(r?.ts, 0);
