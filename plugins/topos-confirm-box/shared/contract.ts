@@ -148,7 +148,7 @@ export const confirmBoxCountRpc = defineRpc({
   name: "topos.confirmbox.count",
   input: z.object({}),
   output: z.object({
-    /** 要対応(承認済みを除く)。 */
+    /** 判断タブと同じ件数(判断タブに出る項目のうち承認済みを除く)。通知・バグ報告・完了報告は数えない。 */
     open: z.number().int(),
     /** うち priority=blocking。 */
     blocking: z.number().int(),
@@ -338,10 +338,30 @@ export function isJudgmentItem(item: ConfirmBoxItem): boolean {
   return item.options.length > 0;
 }
 
+/**
+ * 判断タブに並べる行。`ConfirmBoxView` の `visible` は必ずこれを通す(画面側で絞り込みを書き直さない。
+ * 2026-10-22、判断タブが種別で絞っておらず通知が二重表示されたため、絞り込みをここで1本にした)。
+ */
+export function judgmentTabRows(
+  items: readonly ConfirmBoxItem[],
+  opts: { showDone: boolean; prio: ConfirmBoxPriority | null; newestFirst: boolean },
+): ConfirmBoxItem[] {
+  const rows = items.filter(
+    (i) =>
+      isJudgmentItem(i) &&
+      (opts.showDone || i.state !== "approved") &&
+      (opts.prio === null || i.priority === opts.prio),
+  );
+  return opts.newestFirst ? [...rows].sort((a, b) => b.ts - a.ts) : rows;
+}
+
 /** 画面に出す「要対応」件数。判断タブと同じ定義で、承認済みは数えない。 */
 export function countOpen(items: readonly ConfirmBoxItem[]): number {
   return items.filter((i) => isJudgmentItem(i) && i.state !== "approved").length;
 }
+
+/** 子スレの完了まとめを投函する側の source(書き手は `child_thread_registry.py` の `SOURCE`)。 */
+export const CHILD_THREAD_REPORT_SOURCE = "child_thread_report";
 
 /**
  * 通知タブに流す項目。判断タブの補集合(判断でないもの)から、専用タブを持つ出所を除く。
@@ -350,7 +370,7 @@ export function countOpen(items: readonly ConfirmBoxItem[]): number {
  */
 export const NOTIFICATION_EXCLUDED_SOURCES: readonly string[] = [
   "topos_feedback",
-  "child_thread_report",
+  CHILD_THREAD_REPORT_SOURCE,
 ];
 
 export function isNotificationItem(item: ConfirmBoxItem): boolean {

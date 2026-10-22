@@ -1,9 +1,13 @@
 /**
  * 箱の既読/確認を追記する。契約は Paseo 本体ストア `packages/server/src/server/confirm-box/store.ts`
- * の `ack()` / `ackAll()` と同じ:
+ * の `ack()` と同じ:
  *
  * - `{"t":"ack","id","ts","action":"read"|"approve"}`
- * - `{"t":"ackall","ts":<before>,"action":"read","before":<before>}`
+ *
+ * `ackall` は**使わない**。「通知」タブの「すべて既読」も1件ずつ `ack` を書く。`ackall` は
+ * 箱の全項目(判断待ち=選択肢ありも含む)を既読にしてしまい、(1) 判断していない項目が
+ * `depth_stats` の「決まった」に混ざる、(2) 見えていない項目まで既読になるため。
+ * Python 側 `child_thread_registry._directly_acked_ids` が ackall を除外しているのと同じ理由。
  *
  * 追記先は同じ箱ディレクトリの `events-YYYYMM.jsonl`(ローカル時刻の月)。O_APPEND の**単一 write** で
  * 書くので、デーモン本体や Python 側と同時に書いても行が混ざらない(既存の `appendDecision` と同じ流儀)。
@@ -41,9 +45,4 @@ export function appendAck(
   const itemId = id.trim();
   if (!itemId) throw new Error("id が空です");
   appendLine(dir, { t: "ack", id: itemId, ts: now, action });
-}
-
-/** `before` 以前の未読をまとめて既読にする。返り値は書いたかどうか。 */
-export function appendAckAll(dir: string, now: number = Date.now()): void {
-  appendLine(dir, { t: "ackall", ts: now, action: "read", before: now });
 }

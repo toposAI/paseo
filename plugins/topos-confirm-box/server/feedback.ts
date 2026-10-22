@@ -34,7 +34,8 @@ export const REPORTER_LABELS_FILE = path.join(
 );
 export const USERS_YAML = "/Users/user/topos-family/config/topos-users.yaml";
 
-const ID_RE = /^fb-\d{8}-\d{6}-[0-9a-f]{4,12}$/;
+// 家族版 `feedback.py` の `_ID_RE` と同じ(6桁の16進)。緩めない=読む前に形で弾く。
+const ID_RE = /^fb-\d{8}-\d{6}-[0-9a-f]{6}$/;
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 

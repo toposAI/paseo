@@ -168,10 +168,13 @@ function ReportCard({
   );
 }
 
-/** 家族版 `feedback.py` の status。未知の値はそのまま出す(勝手に言い換えない)。 */
+/**
+ * 家族版 `feedback.py` の `STATUS_LABELS` と同じ文言(SSOT は家族版。ずらさない)。
+ * 未知の値はそのまま出す(勝手に言い換えない)。
+ */
 const STATUS_LABEL: Record<string, string> = {
-  new: "未対応",
-  will_do: "対応予定",
+  new: "新着",
+  will_do: "対応する",
   hold: "保留",
   rejected: "却下",
   done: "対応済み",

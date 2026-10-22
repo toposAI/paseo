@@ -24,7 +24,7 @@ export const FeedbackReportSchema = z.object({
   title: z.string(),
   /** 本文。長すぎるものは読み手側で切る(画面が壊れないように)。 */
   text: z.string(),
-  /** `new` / `doing` / `done` など家族版のパイプラインが進める値。未知も文字列のまま出す。 */
+  /** 家族版の `STATUSES`(new / will_do / hold / rejected / done)。未知も文字列のまま出す。 */
   status: z.string(),
   urgent: z.boolean(),
   /** 受付日時(ISO8601・文字列のまま。表示側で整形する)。 */

@@ -6,12 +6,14 @@
  * (判断タブは出所 `kind` で絞らず全項目を並べていた)。
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   countOpen,
   countUnreadNotifications,
   isJudgmentItem,
   isNotificationItem,
+  judgmentTabRows,
 } from "../shared/contract.js";
 import type { ConfirmBoxItem } from "../shared/contract.js";
 
@@ -124,4 +126,50 @@ test("通知タブのバッジは未読の通知だけ数える", () => {
     item({ id: "box:mail-read", source: "mailtriage_deepseek_safety_net_watchdog", state: "read" }),
   ];
   assert.equal(countUnreadNotifications(rows), 1);
+});
+
+test("判断タブの行(画面と共通の絞り込み)に通知・バグ報告・完了報告は入らない", () => {
+  const decision = item({
+    id: "box:decision",
+    options: [
+      { id: "a", label: "やる" },
+      { id: "b", label: "やらない" },
+    ],
+  });
+  const rows = judgmentTabRows(
+    [
+      MAIL,
+      decision,
+      item({ id: "permit:a:p", kind: "permit" }),
+      item({ id: "box:topos_feedback", source: "topos_feedback" }),
+      item({ id: "box:child_thread_report", source: "child_thread_report" }),
+    ],
+    { showDone: true, prio: null, newestFirst: false },
+  );
+  assert.deepEqual(
+    rows.map((r) => r.id),
+    ["box:decision", "permit:a:p"],
+  );
+});
+
+test("判断タブの行は「決定済みも表示」と優先度の絞り込みにだけ従う(通知は絞り込みを外しても出ない)", () => {
+  const rows = [
+    MAIL,
+    item({ id: "box:done", options: [{ id: "a", label: "A" }], state: "approved" }),
+    item({ id: "box:blocking", priority: "blocking", options: [{ id: "a", label: "A" }] }),
+  ];
+  const ids = (o: Parameters<typeof judgmentTabRows>[1]) =>
+    judgmentTabRows(rows, o).map((r) => r.id);
+  assert.deepEqual(ids({ showDone: false, prio: null, newestFirst: true }), ["box:blocking"]);
+  assert.deepEqual(ids({ showDone: true, prio: null, newestFirst: false }), [
+    "box:done",
+    "box:blocking",
+  ]);
+  assert.deepEqual(ids({ showDone: true, prio: "normal", newestFirst: false }), ["box:done"]);
+});
+
+test("画面側は自前の絞り込みを書かず、共通の judgmentTabRows を使う", () => {
+  const view = readFileSync(new URL("../client/ConfirmBoxView.tsx", import.meta.url), "utf8");
+  assert.match(view, /judgmentTabRows\(/);
+  assert.doesNotMatch(view, /isJudgmentItem\(/);
 });

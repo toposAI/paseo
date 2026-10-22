@@ -15,7 +15,7 @@ import {
   confirmBoxDecideRpc,
   confirmBoxListRpc,
   confirmBoxPermitRpc,
-  isJudgmentItem,
+  judgmentTabRows,
 } from "../shared/contract.js";
 import { onBoxChanged, notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
@@ -27,7 +27,12 @@ import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import { CardChat } from "./CardChat.js";
 import { QuestionAnswer } from "./QuestionAnswer.js";
 import type { QuestionAnswerColors } from "./QuestionAnswer.js";
-import type { ConfirmBoxDepth, ConfirmBoxItem, ConfirmBoxListOutput } from "../shared/contract.js";
+import type {
+  ConfirmBoxDepth,
+  ConfirmBoxItem,
+  ConfirmBoxListOutput,
+  ConfirmBoxPriority,
+} from "../shared/contract.js";
 
 const REFRESH_MS = 30_000;
 
@@ -251,15 +256,15 @@ export function ConfirmBoxView({
   );
 
   // 判断タブは判断だけ(選択肢のある項目・Paseo承認待ち)。通知・バグ報告・完了報告は専用タブにだけ出す。
-  const visible = useMemo(() => {
-    const rows = (data?.items ?? []).filter(
-      (i) =>
-        isJudgmentItem(i) &&
-        (showDone || i.state !== "approved") &&
-        (prio === "all" || i.priority === prio),
-    );
-    return sortNew ? [...rows].sort((a, b) => b.ts - a.ts) : rows;
-  }, [data, showDone, prio, sortNew]);
+  const visible = useMemo(
+    () =>
+      judgmentTabRows(data?.items ?? [], {
+        showDone,
+        prio: prio === "all" ? null : (prio as ConfirmBoxPriority),
+        newestFirst: sortNew,
+      }),
+    [data, showDone, prio, sortNew],
+  );
 
   const chip = (label: string, on: boolean, press: () => void) => (
     <Pressable key={label} accessibilityRole="button" style={on ? s.btnRec : s.btn} onPress={press}>
