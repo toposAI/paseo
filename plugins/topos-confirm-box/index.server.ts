@@ -34,13 +34,19 @@ import { feedbackReportsListRpc, countNewReports } from "./shared/feedback.js";
 import { readFeedbackReports } from "./server/feedback.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
 import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/box.js";
-import { childThreadsListRpc, childThreadsSetOrderRpc } from "./shared/child-threads.js";
+import {
+  childThreadsArchiveRpc,
+  childThreadsListRpc,
+  childThreadsSetOrderRpc,
+} from "./shared/child-threads.js";
 import {
   readChildThreadOrder,
   readChildThreads,
   writeChildThreadOrder,
 } from "./server/child-threads.js";
-import { readCardChat, sayToCard } from "./server/cardchat.js";
+import { cardExists, readCardChat, sayToCard } from "./server/cardchat.js";
+import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
+import type { WorkspaceArchiveDecision } from "./server/workspace-membership.js";
 import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
 import {
   answerlessAllowBlocked,
@@ -97,6 +103,81 @@ export default function contribute(server: PluginServerContext) {
       generatedAt: Date.now(),
       orderIsManual: readChildThreadOrder(dir).length > 0,
     };
+  });
+
+  /**
+   * 行のアーカイブ(agent + そのスレの workspace)。完了→確認箱→アーカイブの自動経路
+   * (`child_thread_registry.archive_confirmed`)と同じ2つを閉じる。一覧(登録簿)は書き換えない
+   * — サイドバーは Paseo 側のアーカイブと登録簿の同期(`child_thread_registry.sync`)で消える。
+   * 実行中のスレは止めないよう断る(会話を途中で殺さない)。
+   */
+  server.handle(childThreadsArchiveRpc, async (input, ctx) => {
+    const ref = ctx.paseo.agents.ref(input.agentId);
+    try {
+      await ref.refresh();
+    } catch (error) {
+      return { ok: false, message: `スレの状態を取得できません: ${(error as Error).message}` };
+    }
+    const agent = ref.current();
+    if (!agent)
+      return { ok: false, message: "スレが見つかりません(既にアーカイブ済みかもしれません)" };
+    if (agent.status === "running") {
+      return {
+        ok: false,
+        message: "実行中のスレはアーカイブできません(止まってから操作してください)",
+      };
+    }
+    // ワークスペースを閉じる前に、そのワークスペースを共有している他のスレを数える
+    // (アーカイブ前に取る: 自分自身をアーカイブ済みとして除外させるため)。
+    // `scope:"active"` は一度に200件しか返さないためフルディレクトリ(全件)で数える。
+    const workspaceId = typeof agent.workspaceId === "string" ? agent.workspaceId : "";
+    let decision: WorkspaceArchiveDecision | null = null;
+    if (workspaceId) {
+      try {
+        const listed = await ctx.paseo.agents.list({
+          includeBackground: true,
+          page: { limit: WORKSPACE_SCAN_LIMIT },
+        });
+        // `entry.agent.workspaceId` で数える(`entry.project.projectKey` は
+        // projectId であって workspaceId ではないため、同じプロジェクトの別
+        // workspace と混ざる)。
+        const members = listed.entries
+          .filter((entry) => entry.agent.workspaceId === workspaceId)
+          .map((entry) => ({
+            id: entry.agent.id,
+            status: entry.agent.status,
+            archived: entry.agent.archivedAt != null,
+          }));
+        decision = decideWorkspaceArchive(input.agentId, members, listed.pageInfo.hasMore);
+      } catch (error) {
+        // 数えられないなら閉じない(共有ワークスペースを巻き込む方の事故の方が重い)。
+        decision = {
+          safe: false,
+          message: `スレをアーカイブしました。ワークスペースの共有状態を確認できないため閉じませんでした: ${(error as Error).message}`,
+        };
+      }
+    }
+    try {
+      await ref.archive();
+    } catch (error) {
+      return { ok: false, message: `スレをアーカイブできません: ${(error as Error).message}` };
+    }
+    if (!workspaceId) {
+      return { ok: true, message: "スレをアーカイブしました(ワークスペースは不明のため未処理)" };
+    }
+    if (decision && !decision.safe) {
+      return { ok: true, message: decision.message };
+    }
+    try {
+      await ctx.paseo.workspaces.archive(ctx.paseo.workspaces.ref(workspaceId));
+      return { ok: true, message: "スレとワークスペースをアーカイブしました" };
+    } catch (error) {
+      // スレは閉じた。ワークスペースは残ったので、そのことを言う(黙って成功にしない)。
+      return {
+        ok: true,
+        message: `スレはアーカイブしましたが、ワークスペースを閉じられません: ${(error as Error).message}`,
+      };
+    }
   });
 
   server.handle(childThreadsSetOrderRpc, async (input) => {
@@ -282,9 +363,13 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(cardChatListRpc, async (input) => {
     try {
-      return { messages: readCardChat(resolveConfirmBoxDir(), { id: input.id, key: input.key }) };
+      const dir = resolveConfirmBoxDir();
+      return {
+        found: cardExists(dir, { id: input.id, key: input.key }),
+        messages: readCardChat(dir, { id: input.id, key: input.key }),
+      };
     } catch {
-      return { messages: [] };
+      return { found: false, messages: [] };
     }
   });
 
