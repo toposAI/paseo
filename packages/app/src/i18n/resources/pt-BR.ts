@@ -366,6 +366,10 @@ export const ptBR: TranslationResources = {
       openFile: "Abrir arquivo",
       copied: "Copiado",
     },
+    harnessContext: {
+      show: "Mostrar contexto do harness",
+      hide: "Ocultar contexto do harness",
+    },
     attachments: {
       dismissImage: "Dispensar imagem",
       closeImage: "Fechar imagem",

@@ -359,6 +359,10 @@ export const en = {
       openFile: "Open file",
       copied: "Copied",
     },
+    harnessContext: {
+      show: "Show harness context",
+      hide: "Hide harness context",
+    },
     attachments: {
       dismissImage: "Dismiss image",
       closeImage: "Close image",

@@ -107,6 +107,8 @@ import { useForkAgent } from "@/hooks/use-fork-agent";
 import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
 import { recordRenderProfileReasons } from "@/utils/render-profiler";
+import { isHarnessContextOnlyMessage } from "@/utils/harness-context-message";
+import { HarnessContextMessage } from "@/components/harness-context-message";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { useStreamHistoryWindow } from "./use-stream-history-window";
 import { PluginTimelineItemView, useInstalledTimelineTransform } from "@/plugins/timeline";
@@ -713,6 +715,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     const renderUserMessageItem = useCallback(
       (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "user_message" }>) => {
+        if (isHarnessContextOnlyMessage(item.text)) {
+          return <HarnessContextMessage text={item.text} timestamp={item.timestamp.getTime()} />;
+        }
         return (
           <UserMessage
             serverId={resolvedServerId}

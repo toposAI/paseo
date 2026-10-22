@@ -366,6 +366,10 @@ export const ru: TranslationResources = {
       openFile: "Открыть файл",
       copied: "Скопировано",
     },
+    harnessContext: {
+      show: "Показать контекст харнеса",
+      hide: "Скрыть контекст харнеса",
+    },
     attachments: {
       dismissImage: "Закрыть изображение",
       closeImage: "Закрыть изображение",

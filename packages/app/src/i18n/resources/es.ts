@@ -368,6 +368,10 @@ export const es: TranslationResources = {
       openFile: "Abrir archivo",
       copied: "Copiado",
     },
+    harnessContext: {
+      show: "Mostrar contexto del harness",
+      hide: "Ocultar contexto del harness",
+    },
     attachments: {
       dismissImage: "Descartar imagen",
       closeImage: "Cerrar imagen",

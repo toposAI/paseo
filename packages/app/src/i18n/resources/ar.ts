@@ -361,6 +361,10 @@ export const ar: TranslationResources = {
       openFile: "افتح الملف",
       copied: "منقول",
     },
+    harnessContext: {
+      show: "إظهار سياق الـharness",
+      hide: "إخفاء سياق الـharness",
+    },
     attachments: {
       dismissImage: "تجاهل الصورة",
       closeImage: "إغلاق الصورة",

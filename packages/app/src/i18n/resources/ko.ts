@@ -364,6 +364,10 @@ export const ko: TranslationResources = {
       openFile: "파일 열기",
       copied: "복사됨",
     },
+    harnessContext: {
+      show: "하네스 내부 알림 표시",
+      hide: "하네스 내부 알림 숨기기",
+    },
     attachments: {
       dismissImage: "이미지 닫기",
       closeImage: "이미지 닫기",

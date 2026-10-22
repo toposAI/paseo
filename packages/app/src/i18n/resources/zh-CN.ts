@@ -361,6 +361,10 @@ export const zhCN: TranslationResources = {
       openFile: "打开文件",
       copied: "已复制",
     },
+    harnessContext: {
+      show: "显示 harness 上下文",
+      hide: "隐藏 harness 上下文",
+    },
     attachments: {
       dismissImage: "关闭图片",
       closeImage: "关闭图片",

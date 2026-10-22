@@ -368,6 +368,10 @@ export const ja: TranslationResources = {
       openFile: "ファイルを開く",
       copied: "コピーしました",
     },
+    harnessContext: {
+      show: "ハーネスの内部通知を表示",
+      hide: "ハーネスの内部通知を隠す",
+    },
     attachments: {
       dismissImage: "画像を閉じる",
       closeImage: "画像を閉じる",
