@@ -14,6 +14,7 @@ import {
   isJudgmentItem,
   isNotificationItem,
   judgmentTabRows,
+  notificationTabRows,
 } from "../shared/contract.js";
 import type { ConfirmBoxItem } from "../shared/contract.js";
 
@@ -166,6 +167,27 @@ test("判断タブの行は「決定済みも表示」と優先度の絞り込�
     "box:blocking",
   ]);
   assert.deepEqual(ids({ showDone: true, prio: "normal", newestFirst: false }), ["box:done"]);
+});
+
+test("通知タブは緊急を先に、同順位は新しい順(判断タブから外した緊急通知を埋もれさせない)", () => {
+  const rows = notificationTabRows(
+    [
+      item({ id: "box:new-normal", urgency: "normal", ts: 30 }),
+      item({ id: "box:urgent-old", urgency: "urgent", ts: 10 }),
+      item({ id: "box:old-normal", urgency: "normal", ts: 5 }),
+      item({ id: "box:urgent-new", urgency: "urgent", ts: 20 }),
+      item({ id: "box:decision", options: [{ id: "a", label: "A" }], ts: 99 }),
+    ],
+    true,
+  );
+  assert.deepEqual(
+    rows.map((r) => r.id),
+    ["box:urgent-new", "box:urgent-old", "box:new-normal", "box:old-normal"],
+  );
+  assert.deepEqual(
+    notificationTabRows(rows, false).map((r) => r.id),
+    ["box:urgent-new", "box:urgent-old", "box:new-normal", "box:old-normal"],
+  );
 });
 
 test("画面側は自前の絞り込みを書かず、共通の judgmentTabRows を使う", () => {

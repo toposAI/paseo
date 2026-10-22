@@ -381,3 +381,23 @@ export function isNotificationItem(item: ConfirmBoxItem): boolean {
 export function countUnreadNotifications(items: readonly ConfirmBoxItem[]): number {
   return items.filter((i) => isNotificationItem(i) && i.state === "new").length;
 }
+
+/**
+ * 通知タブに並べる行。**緊急(urgency=urgent)を先**に、その後は新しい順。
+ *
+ * 判断タブから通知を外した結果、デーモン停止などの緊急通知はこのタブにしか出なくなった。
+ * 時刻順だけだと新しい雑多な通知の下に埋もれるので、緊急だけ先頭へ寄せる
+ * (`priority` は並び順の軸だが、通知は `blocking` を持たないことが多く当てにならない)。
+ */
+export function notificationTabRows(
+  items: readonly ConfirmBoxItem[],
+  showRead: boolean,
+): ConfirmBoxItem[] {
+  return items
+    .filter((i) => isNotificationItem(i) && (showRead || i.state === "new"))
+    .sort((a, b) => {
+      const au = a.urgency === "urgent" ? 0 : 1;
+      const bu = b.urgency === "urgent" ? 0 : 1;
+      return au !== bu ? au - bu : b.ts - a.ts;
+    });
+}

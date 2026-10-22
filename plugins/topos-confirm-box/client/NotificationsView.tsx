@@ -14,7 +14,7 @@ import {
   confirmBoxAckAllRpc,
   confirmBoxAckRpc,
   confirmBoxListRpc,
-  isNotificationItem,
+  notificationTabRows,
 } from "../shared/contract.js";
 import type { ConfirmBoxItem, ConfirmBoxListOutput } from "../shared/contract.js";
 import { notifyBoxChanged } from "./events.js";
@@ -115,10 +115,7 @@ export function NotificationsView({ theme }: Pick<PluginHostProps, "theme">) {
     [c],
   );
 
-  const items = useMemo(
-    () => (data?.items ?? []).filter(isNotificationItem).sort((a, b) => b.ts - a.ts),
-    [data],
-  );
+  const items = useMemo(() => notificationTabRows(data?.items ?? [], true), [data]);
   const unread = items.filter((i) => i.state === "new").length;
   const visible = showRead ? items : items.filter((i) => i.state === "new");
   const header = describe(error, data !== null, items.length, unread);
