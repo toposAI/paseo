@@ -22,6 +22,7 @@ import {
   cardChatListRpc,
   cardChatSayRpc,
   countUnreadNotifications,
+  isJudgmentItem,
   priorityListRpc,
   priorityMoveRpc,
   prioritySayRpc,
@@ -108,8 +109,8 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(confirmBoxCountRpc, async (_input, ctx) => {
     const { items, sources, generatedAt } = await collect(ctx);
-    // 本当に未決 = 決定記録なし(approved でない)かつ選択肢がある項目(通知のみは数えない)
-    const open = items.filter((i) => i.state !== "approved" && i.options.length > 0);
+    // 判断タブと同じ定義(SSOT は `isJudgmentItem`)。通知だけの項目は数えない。
+    const open = items.filter((i) => isJudgmentItem(i) && i.state !== "approved");
     const dir = resolveConfirmBoxDir();
     // バッジは失敗しても0で返す(件数が取れないだけで確認箱そのものは開けるようにする)
     let bugs = 0;

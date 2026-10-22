@@ -15,6 +15,7 @@ import {
   confirmBoxDecideRpc,
   confirmBoxListRpc,
   confirmBoxPermitRpc,
+  isJudgmentItem,
 } from "../shared/contract.js";
 import { onBoxChanged, notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
@@ -249,9 +250,13 @@ export function ConfirmBoxView({
     [permit, reload],
   );
 
+  // 判断タブは判断だけ(選択肢のある項目・Paseo承認待ち)。通知・バグ報告・完了報告は専用タブにだけ出す。
   const visible = useMemo(() => {
     const rows = (data?.items ?? []).filter(
-      (i) => (showDone || i.state !== "approved") && (prio === "all" || i.priority === prio),
+      (i) =>
+        isJudgmentItem(i) &&
+        (showDone || i.state !== "approved") &&
+        (prio === "all" || i.priority === prio),
     );
     return sortNew ? [...rows].sort((a, b) => b.ts - a.ts) : rows;
   }, [data, showDone, prio, sortNew]);

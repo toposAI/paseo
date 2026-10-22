@@ -325,14 +325,28 @@ export function compareConfirmBoxItems(a: ConfirmBoxItem, b: ConfirmBoxItem): nu
   return b.ts - a.ts;
 }
 
-/** 画面に出す「要対応」件数。承認済みは数えない。 */
+/**
+ * 判断タブに流す項目。**ユーザーが選ぶ/答える必要があるものだけ**。
+ *
+ * - `permit`(Paseo の承認待ち)は常に判断(回答なしの指定でも許可/拒否を選ぶ)。
+ * - 箱・中間形式は **選択肢が1つ以上** あるもの。選択肢の無い項目は、バックグラウンドの
+ *   ウォッチドッグ通知・台帳の既決メモ(`info`)・バグ報告など、決めることが無いお知らせで、
+ *   通知タブ/専用タブに出す。ここで種別は問わない(通知タブの除外表と片方だけに出す)。
+ */
+export function isJudgmentItem(item: ConfirmBoxItem): boolean {
+  if (item.kind === "permit") return true;
+  return item.options.length > 0;
+}
+
+/** 画面に出す「要対応」件数。判断タブと同じ定義で、承認済みは数えない。 */
 export function countOpen(items: readonly ConfirmBoxItem[]): number {
-  return items.filter((i) => i.state !== "approved").length;
+  return items.filter((i) => isJudgmentItem(i) && i.state !== "approved").length;
 }
 
 /**
- * 通知タブに流す項目。判定は「選択肢を持たない」= ユーザーが決めることが無いお知らせ。
- * 家族報告の新着通知と子スレの完了まとめは専用タブがあるので除く(同じ内容を2箇所に出さない)。
+ * 通知タブに流す項目。判断タブの補集合(判断でないもの)から、専用タブを持つ出所を除く。
+ * 家族報告はバグ報告タブ、子スレの完了まとめは子スレ完了報告タブが受け持つ
+ * (同じ内容を2箇所に出さない)。
  */
 export const NOTIFICATION_EXCLUDED_SOURCES: readonly string[] = [
   "topos_feedback",
@@ -340,7 +354,7 @@ export const NOTIFICATION_EXCLUDED_SOURCES: readonly string[] = [
 ];
 
 export function isNotificationItem(item: ConfirmBoxItem): boolean {
-  return item.options.length === 0 && !NOTIFICATION_EXCLUDED_SOURCES.includes(item.source);
+  return !isJudgmentItem(item) && !NOTIFICATION_EXCLUDED_SOURCES.includes(item.source);
 }
 
 /** 通知タブのバッジ。未読(state=new)だけ数える。 */
