@@ -213,6 +213,14 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
           renderThread={renderThread}
         />
       ))}
+      {!failed && threads.length === 0 ? (
+        <SidebarRow
+          id="child-threads-empty"
+          icon="ListTodo"
+          label="子スレはありません"
+          onPress={openList}
+        />
+      ) : null}
       {orderIsManual ? (
         <SidebarRow
           id="child-threads-reset-order"
@@ -267,6 +275,7 @@ function ThreadGroupSection({
           accessibilityRole="button"
           accessibilityLabel={open ? `${group.title}をたたむ` : `${group.title}を開く`}
           hitSlop={8}
+          style={styles.toggleHit}
         >
           <Text style={styles.chevron}>{open ? "▾" : "▸"}</Text>
         </Pressable>
@@ -357,5 +366,12 @@ const styles = StyleSheet.create({
   },
   chevron: {
     fontSize: 11,
+  },
+  // タッチ端末でも開閉を狙えるよう当たり判定を広げる(見出し本体は司令塔を開く)。
+  toggleHit: {
+    minWidth: 32,
+    minHeight: 32,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
