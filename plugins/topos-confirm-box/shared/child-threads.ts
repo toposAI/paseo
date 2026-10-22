@@ -35,6 +35,8 @@ export const ChildThreadSchema = z.object({
   parentAgentId: z.string().nullable().default(null),
   /** 親の題名(グループ見出し用)。 */
   parentTitle: z.string().nullable().default(null),
+  /** ピン止め(そのグループの先頭に固定)。 */
+  pinned: z.boolean().default(false),
 });
 export type ChildThread = z.infer<typeof ChildThreadSchema>;
 
@@ -48,6 +50,10 @@ export const childThreadsListRpc = defineRpc({
     generatedAt: z.number(),
     /** 手動の並び順が保存されているか(「自動に戻す」を出す判断用)。 */
     orderIsManual: z.boolean().default(false),
+    /** ピン止めの保存(サーバー側)に失敗したか。行内でピン止めするため、失敗は一覧で知らせる。 */
+    pinSaveFailed: z.boolean().default(false),
+    /** ピン止め(この箱ディレクトリの設定ファイルに保存)の読み出し失敗。画面には出さずログ用。 */
+    pinReadError: z.string().nullish(),
   }),
 });
 export type ChildThreadsListOutput = z.infer<typeof childThreadsListRpc.output>;
@@ -80,11 +86,44 @@ export const childThreadsSetOrderRpc = defineRpc({
 });
 export type ChildThreadsSetOrderOutput = z.infer<typeof childThreadsSetOrderRpc.output>;
 
+/** 行のアーカイブ(スレ + そのスレのワークスペース)。 */
+export const childThreadsArchiveRpc = defineRpc({
+  name: "topos.childthreads.archive",
+  input: z.object({ agentId: z.string().min(1).max(CHILD_THREAD_ID_LIMIT) }),
+  output: z.object({
+    ok: z.boolean(),
+    /** 実行できなかった理由(画面に出す。無言で閉じない)。 */
+    message: z.string().optional(),
+  }),
+});
+export type ChildThreadsArchiveOutput = z.infer<typeof childThreadsArchiveRpc.output>;
+
+/** ピン止めの切り替え。 */
+export const childThreadsPinRpc = defineRpc({
+  name: "topos.childthreads.pin",
+  input: z.object({
+    agentId: z.string().min(1).max(CHILD_THREAD_ID_LIMIT),
+    pinned: z.boolean(),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    pins: z.array(z.string()),
+    message: z.string().optional(),
+  }),
+});
+export type ChildThreadsPinOutput = z.infer<typeof childThreadsPinRpc.output>;
+
 export const STATUS_RANK: Record<ChildThreadStatus, number> = {
   ユーザー判断待ち: 0,
   実装中: 1,
   完了: 2,
 };
+
+/**
+ * サイドバー行に固定(ピン止め)するスレの id。並び替えの保存と同じ理由で
+ * `child_threads.json` には触らず、同じ箱ディレクトリの別ファイルに置く。
+ */
+export const CHILD_THREAD_PINS_FILE = "child_threads_pins.json";
 
 /** 表示順: ユーザー判断待ち → 実装中 → 完了、同じ状態の中は更新の新しい順。 */
 export function compareChildThreads(a: ChildThread, b: ChildThread): number {

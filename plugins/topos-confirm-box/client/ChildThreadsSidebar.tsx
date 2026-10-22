@@ -4,14 +4,25 @@
  *
  * 並び順はドラッグで変更でき、`child_threads_order.json` に保存される
  * (既存の `child_threads.json` は触らない)。保存が無ければサーバーの既定順。
+ *
+ * 行末の状態ラベルは**必ずテーマ色を自分で与える**(与えないとホスト既定の黒になり、
+ * ダークテーマで背景に溶ける)。ピン止め(`child_threads_pins.json`)とアーカイブ
+ * (スレ + ワークスペース)は行内のボタン。アーカイブは誤爆しないよう2度押しで実行する。
  */
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useRpc, type PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { SidebarReorderableList, SidebarRow } from "@getpaseo/plugin/client/ui";
-import { childThreadsListRpc, childThreadsSetOrderRpc } from "../shared/child-threads.js";
-import type { ChildThread, ChildThreadStatus } from "../shared/child-threads.js";
+import {
+  childThreadsArchiveRpc,
+  childThreadsListRpc,
+  childThreadsPinRpc,
+  childThreadsSetOrderRpc,
+} from "../shared/child-threads.js";
+import type { ChildThread } from "../shared/child-threads.js";
+import { displayStatus, type StatusKind } from "../shared/thread-status-label.js";
+import { StatusBadge } from "./sidebar-badge.js";
 
 const POLL_MS = 30_000;
 const COLLAPSED_KEY = "topos-child-groups-collapsed";
@@ -21,10 +32,11 @@ const OTHER_LABEL = "その他";
 const DRAG_POLL_GATE_MS = 60_000;
 export const CHILD_THREADS_SCREEN_ID = "child-threads";
 
-const ICON: Record<ChildThreadStatus, string> = {
-  ユーザー判断待ち: "CircleHelp",
-  実装中: "Loader",
-  完了: "CircleCheck",
+const ICON: Record<StatusKind, string> = {
+  waiting: "CircleHelp",
+  running: "Loader",
+  done: "CircleCheck",
+  closed: "Archive",
 };
 
 interface AgentNavigation {
@@ -72,16 +84,25 @@ function groupThreads(threads: readonly ChildThread[]): ThreadGroup[] {
 }
 
 export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
-  const { currentScreen, openScreen } = props;
+  const { currentScreen, openScreen, theme } = props;
   const navigation = (props as PluginSidebarItemProps & AgentNavigation).navigation;
   const list = useRpc(childThreadsListRpc);
   const setOrder = useRpc(childThreadsSetOrderRpc);
+  const archive = useRpc(childThreadsArchiveRpc);
+  const pin = useRpc(childThreadsPinRpc);
   const [threads, setThreads] = useState<ChildThread[]>([]);
   const [failed, setFailed] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [orderIsManual, setOrderIsManual] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(readCollapsed);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
   const dragGateUntilRef = useRef(0);
+  const colors = theme.colors;
+  const noticeStyle = useMemo(
+    () => [styles.noticeText, { color: colors.foregroundMuted }],
+    [colors],
+  );
 
   useEffect(() => {
     let alive = true;
@@ -94,6 +115,7 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
           setThreads(r.threads);
           setOrderIsManual(r.orderIsManual);
           setFailed(false);
+          if (r.pinReadError) console.warn(`[child-threads] ${r.pinReadError}`);
           return null;
         })
         .catch(() => alive && setFailed(true));
@@ -105,9 +127,12 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
     };
   }, [list]);
 
-  const onDragBegin = useCallback(() => {
-    dragGateUntilRef.current = Date.now() + DRAG_POLL_GATE_MS;
+  // アーカイブ/ピンの操作直後も取得結果で一覧を差し替えない(操作の行が飛んだり戻ったりしない)。
+  const gatePoll = useCallback((ms: number) => {
+    dragGateUntilRef.current = Date.now() + ms;
   }, []);
+
+  const onDragBegin = useCallback(() => gatePoll(DRAG_POLL_GATE_MS), [gatePoll]);
 
   const persistOrder = useCallback(
     (keys: string[]) => {
@@ -178,6 +203,63 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
   else if (saveFailed) headerLabel = `子スレ ${threads.length}件(並び順を保存できません)`;
   else headerLabel = `子スレ ${threads.length}件`;
 
+  const dropThread = useCallback((agentId: string) => {
+    setThreads((prev) => prev.filter((x) => x.agentId !== agentId));
+  }, []);
+
+  // アーカイブは取り消しにくいので、同じ行をもう一度押したときだけ実行する(押した直後は「もう一度押す」に変わる)。
+  const onArchive = useCallback(
+    (t: ChildThread) => {
+      if (pendingId !== t.agentId) {
+        setPendingId(t.agentId);
+        setNotice(`「もう一度」でアーカイブ: ${t.title}`);
+        return;
+      }
+      setPendingId(null);
+      setNotice("アーカイブしています…");
+      gatePoll(30_000);
+      void archive({ agentId: t.agentId })
+        .then((r) => {
+          setNotice(r.message ?? (r.ok ? "アーカイブしました" : "アーカイブできませんでした"));
+          if (r.ok) dropThread(t.agentId);
+          return null;
+        })
+        .catch((error: unknown) => setNotice(`アーカイブできません: ${(error as Error).message}`));
+    },
+    [archive, dropThread, gatePoll, pendingId],
+  );
+
+  // ピン止めは一覧に `pinned` が返るので、保存後は次の取得(またはここでの楽観更新)で並びに反映される。
+  const onTogglePin = useCallback(
+    (t: ChildThread) => {
+      const pinned = !t.pinned;
+      gatePoll(5_000);
+      setThreads((prev) =>
+        pinFirstPerGroup(prev.map((x) => (x.agentId === t.agentId ? { ...x, pinned } : x))),
+      );
+      setNotice(pinned ? "ピン止めしました" : "ピン止めを外しました");
+      const revert = () =>
+        setThreads((prev) =>
+          pinFirstPerGroup(
+            prev.map((x) => (x.agentId === t.agentId ? { ...x, pinned: !pinned } : x)),
+          ),
+        );
+      void pin({ agentId: t.agentId, pinned })
+        .then((r) => {
+          if (!r.ok) {
+            revert();
+            setNotice(r.message ?? "ピン止めを保存できません");
+          }
+          return null;
+        })
+        .catch((error: unknown) => {
+          revert();
+          setNotice(`ピン止めを保存できません: ${(error as Error).message}`);
+        });
+    },
+    [gatePoll, pin],
+  );
+
   const renderThread = useCallback(
     (t: ChildThread) => (
       <ThreadRow
@@ -187,9 +269,24 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
         openScreen={openScreen}
         openAgent={navigation?.openAgent}
         serverId={props.host.id}
+        colors={colors}
+        confirmingArchive={pendingId === t.agentId}
+        onArchive={onArchive}
+        onTogglePin={onTogglePin}
       />
     ),
-    [failed, focusId, navigation?.openAgent, onScreen, openScreen, props.host.id],
+    [
+      colors,
+      failed,
+      focusId,
+      navigation?.openAgent,
+      onArchive,
+      onScreen,
+      onTogglePin,
+      openScreen,
+      pendingId,
+      props.host.id,
+    ],
   );
 
   return (
@@ -211,8 +308,14 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
           onDragBegin={onDragBegin}
           onReorderGroup={onReorderGroup}
           renderThread={renderThread}
+          colors={colors}
         />
       ))}
+      {notice ? (
+        <View style={styles.notice}>
+          <Text style={noticeStyle}>{notice}</Text>
+        </View>
+      ) : null}
       {!failed && threads.length === 0 ? (
         <SidebarRow
           id="child-threads-empty"
@@ -241,9 +344,11 @@ function ThreadGroupSection({
   onDragBegin,
   onReorderGroup,
   renderThread,
+  colors,
 }: {
   group: ThreadGroup;
   open: boolean;
+  colors: PluginSidebarItemProps["theme"]["colors"];
   onToggle: (key: string) => void;
   /** Opens the group's coordinator agent; absent on older hosts. */
   onOpenCoordinator?: (key: string) => void;
@@ -265,10 +370,12 @@ function ThreadGroupSection({
     onOpenCoordinator(group.key);
   }, [group.key, onOpenCoordinator, onToggle]);
   const toggle = useCallback(() => onToggle(group.key), [group.key, onToggle]);
+  const metaStyle = useMemo(() => [styles.metaText, { color: colors.foregroundMuted }], [colors]);
+  const chevronStyle = useMemo(() => [styles.chevron, { color: colors.foregroundMuted }], [colors]);
   const trailing = useMemo(
     () => (
       <View style={styles.trailing}>
-        <Text>{group.threads.length}</Text>
+        <Text style={metaStyle}>{group.threads.length}</Text>
         <Pressable
           onPress={toggle}
           testID={`child-group-toggle-${group.key || "other"}`}
@@ -277,11 +384,11 @@ function ThreadGroupSection({
           hitSlop={8}
           style={styles.toggleHit}
         >
-          <Text style={styles.chevron}>{open ? "▾" : "▸"}</Text>
+          <Text style={chevronStyle}>{open ? "▾" : "▸"}</Text>
         </Pressable>
       </View>
     ),
-    [group.key, group.threads.length, group.title, open, toggle],
+    [chevronStyle, group.key, group.threads.length, group.title, metaStyle, open, toggle],
   );
   return (
     <>
@@ -308,7 +415,10 @@ function ThreadGroupSection({
 
 const keyOfThread = (t: ChildThread) => t.agentId;
 
-/** 画面の並び(keys)を先に、keysに無い行(取得の隙間に入った新規)を既定順のまま後ろに。 */
+/**
+ * 画面の並び(keys)を先に、keysに無い行(取得の隙間に入った新規)を既定順のまま後ろに。
+ * ピン止めした行はそのグループの先頭に寄せる(保存順のまま。グループ内の相対順は崩さない)。
+ */
 function applyOrder(threads: readonly ChildThread[], keys: readonly string[]): ChildThread[] {
   const byId = new Map(threads.map((t) => [t.agentId, t]));
   const out: ChildThread[] = [];
@@ -319,8 +429,27 @@ function applyOrder(threads: readonly ChildThread[], keys: readonly string[]): C
     byId.delete(key);
   }
   for (const thread of threads) if (byId.has(thread.agentId)) out.push(thread);
+  return pinFirstPerGroup(out);
+}
+
+function pinFirstPerGroup(threads: readonly ChildThread[]): ChildThread[] {
+  // グループの並び(出現順)は変えず、グループ内だけピン止めを先頭へ(サーバーの並びと同じ規則)。
+  const groups = new Map<string, ChildThread[]>();
+  for (const t of threads) {
+    const key = groupKeyOf(t);
+    const g = groups.get(key);
+    if (g) g.push(t);
+    else groups.set(key, [t]);
+  }
+  const out: ChildThread[] = [];
+  for (const g of groups.values()) {
+    for (const t of g) if (t.pinned) out.push(t);
+    for (const t of g) if (!t.pinned) out.push(t);
+  }
   return out;
 }
+
+type SidebarColors = PluginSidebarItemProps["theme"]["colors"];
 
 function ThreadRow({
   thread: t,
@@ -329,6 +458,10 @@ function ThreadRow({
   openScreen,
   openAgent,
   serverId,
+  colors,
+  confirmingArchive,
+  onArchive,
+  onTogglePin,
 }: {
   thread: ChildThread;
   failed: boolean;
@@ -336,20 +469,77 @@ function ThreadRow({
   openScreen: PluginSidebarItemProps["openScreen"];
   openAgent?: (input: { agentId: string; serverId?: string }) => void;
   serverId: string;
+  colors: SidebarColors;
+  confirmingArchive: boolean;
+  onArchive: (t: ChildThread) => void;
+  onTogglePin: (t: ChildThread) => void;
 }) {
   // 押したらそのスレの会話(エージェント画面)を開く。navigationが無い古いホストだけ一覧画面へ退避。
   const onPress = useCallback(() => {
     if (openAgent) openAgent({ agentId: t.agentId, serverId });
     else openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: { focusId: t.agentId } });
   }, [openAgent, openScreen, serverId, t.agentId]);
+  const status = displayStatus(t.status, t.machineState, failed);
+  const testID = `child-thread-status-${t.agentId}`;
+  const pressArchive = useCallback(() => onArchive(t), [onArchive, t]);
+  const pressPin = useCallback(() => onTogglePin(t), [onTogglePin, t]);
+  const pinLabel = t.pinned ? `${t.title}のピン止めを外す` : `${t.title}をピン止め`;
+  const archiveLabel = confirmingArchive
+    ? `${t.title}をアーカイブする(もう一度押す)`
+    : `${t.title}をアーカイブ`;
+  const { agentId } = t;
+  const archiveStyle = useMemo(
+    () => [styles.iconHit, confirmingArchive && styles.iconHitConfirm],
+    [confirmingArchive],
+  );
+  const pinColor = t.pinned ? colors.foreground : colors.foregroundMuted;
+  const archiveColor = confirmingArchive ? "#b91c1c" : colors.foregroundMuted;
+  // 行末: ピン止め → アーカイブ(確認待ち) → 状態ラベル。幅は状態ラベル分で固定され、題名がここへ重ならない。
   const trailing = useMemo(
-    () => <Text>{failed ? `${t.status}(古い表示)` : t.status}</Text>,
-    [failed, t.status],
+    () => (
+      <View style={styles.trailing}>
+        <Pressable
+          onPress={pressPin}
+          testID={`child-thread-pin-${agentId}`}
+          accessibilityRole="button"
+          accessibilityLabel={pinLabel}
+          hitSlop={6}
+          style={styles.iconHit}
+        >
+          <PinGlyph filled={t.pinned} color={pinColor} />
+        </Pressable>
+        <Pressable
+          onPress={pressArchive}
+          testID={`child-thread-archive-${agentId}`}
+          accessibilityRole="button"
+          accessibilityLabel={archiveLabel}
+          hitSlop={6}
+          style={archiveStyle}
+        >
+          <ArchiveGlyph color={archiveColor} />
+        </Pressable>
+        <StatusBadge text={status.text} kind={status.kind} testID={testID} />
+      </View>
+    ),
+    [
+      agentId,
+      archiveColor,
+      archiveLabel,
+      archiveStyle,
+      pinColor,
+      pinLabel,
+      pressArchive,
+      pressPin,
+      status.kind,
+      status.text,
+      t.pinned,
+      testID,
+    ],
   );
   return (
     <SidebarRow
       id={t.agentId}
-      icon={ICON[t.status]}
+      icon={ICON[status.kind]}
       label={t.title}
       active={active}
       onPress={onPress}
@@ -358,11 +548,81 @@ function ThreadRow({
   );
 }
 
+/** ピン止めのアイコン(プラグインAPIにアイコン一覧が無いため View で描く)。 */
+function PinGlyph({ filled, color }: { filled: boolean; color: string }) {
+  const headStyle = useMemo(
+    () => [styles.pinHead, { borderColor: color, backgroundColor: filled ? color : "transparent" }],
+    [color, filled],
+  );
+  const stemStyle = useMemo(() => [styles.pinStem, { backgroundColor: color }], [color]);
+  return (
+    <View style={styles.pinGlyph}>
+      <View style={headStyle} />
+      <View style={stemStyle} />
+    </View>
+  );
+}
+
+/** アーカイブのアイコン(箱)。 */
+function ArchiveGlyph({ color }: { color: string }) {
+  const boxStyle = useMemo(() => [styles.archiveBox, { borderColor: color }], [color]);
+  const lidStyle = useMemo(() => [styles.archiveLid, { backgroundColor: color }], [color]);
+  return (
+    <View style={boxStyle}>
+      <View style={lidStyle} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   trailing: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: 2,
+  },
+  metaText: {
+    fontSize: 12,
+  },
+  iconHit: {
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 6,
+  },
+  iconHitConfirm: {
+    backgroundColor: "#fee2e2",
+  },
+  pinGlyph: {
+    alignItems: "center",
+  },
+  pinHead: {
+    width: 9,
+    height: 7,
+    borderWidth: 1.5,
+    borderRadius: 2,
+  },
+  pinStem: {
+    width: 1.5,
+    height: 4,
+  },
+  archiveBox: {
+    width: 12,
+    height: 9,
+    borderWidth: 1.5,
+    borderRadius: 1.5,
+    justifyContent: "flex-start",
+  },
+  archiveLid: {
+    height: 1.5,
+    marginTop: 2,
+  },
+  notice: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  noticeText: {
+    fontSize: 12,
   },
   chevron: {
     fontSize: 11,

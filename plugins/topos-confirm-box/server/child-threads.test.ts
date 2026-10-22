@@ -8,8 +8,10 @@ import {
   normalizeChildThreadOrder,
   normalizeChildThreads,
   readChildThreadOrder,
+  readChildThreadPins,
   readChildThreads,
   writeChildThreadOrder,
+  writeChildThreadPin,
 } from "./child-threads.js";
 
 const row = (o: Record<string, unknown>) => ({
@@ -199,4 +201,32 @@ test("events ファイルが無ければ誰も確認済みにならない", () =
   );
   const [t] = readChildThreads(dir, [{ id: "bx", background: "s", state: "new" as const }]);
   assert.equal(t.summaryAcked, false);
+});
+
+test("ピン止めは同じグループの先頭に寄せ、グループの相対順は保つ", () => {
+  const raw = {
+    threads: [
+      row({ agent_id: "a1", parent_agent_id: "p1", updated_at: 30 }),
+      row({ agent_id: "a2", parent_agent_id: "p1", updated_at: 20 }),
+      row({ agent_id: "a3", parent_agent_id: "p1", updated_at: 10 }),
+      row({ agent_id: "b1", parent_agent_id: "p2", updated_at: 5 }),
+    ],
+  };
+  const ids = normalizeChildThreads(raw, [], new Set(), new Set(["a3", "b1"])).map(
+    (t) => t.agentId,
+  );
+  assert.deepEqual(ids, ["a3", "a1", "a2", "b1"]);
+});
+
+test("ピン止めの往復(切り替え・外す。壊れた/無いファイルは空)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pins-"));
+  assert.deepEqual(readChildThreadPins(dir), []);
+  assert.deepEqual(writeChildThreadPin(dir, "a1", true), ["a1"]);
+  assert.deepEqual(writeChildThreadPin(dir, "a2", true), ["a1", "a2"]);
+  // 何度押しても重複しない
+  assert.deepEqual(writeChildThreadPin(dir, "a1", true), ["a1", "a2"]);
+  assert.deepEqual(writeChildThreadPin(dir, "a1", false), ["a2"]);
+  assert.deepEqual(readChildThreadPins(dir), ["a2"]);
+  fs.writeFileSync(path.join(dir, "child_threads_pins.json"), "{broken");
+  assert.deepEqual(readChildThreadPins(dir), []);
 });

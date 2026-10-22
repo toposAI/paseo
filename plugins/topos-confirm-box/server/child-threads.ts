@@ -12,6 +12,7 @@ import {
   CHILD_THREAD_ID_LIMIT,
   CHILD_THREAD_ORDER_FILE,
   CHILD_THREAD_ORDER_LIMIT,
+  CHILD_THREAD_PINS_FILE,
   CHILD_THREAD_STATUSES,
   sortChildThreadsGrouped,
 } from "../shared/child-threads.js";
@@ -27,6 +28,8 @@ export function normalizeChildThreads(
   boxItems: readonly Pick<ConfirmBoxItem, "id" | "background" | "state">[] = [],
   /** 個別 ack 済みの item id(`t:"ack"` の行だけ。ackall は含めない)。 */
   ackedIds: ReadonlySet<string> = new Set(),
+  /** ピン止め済みの agent id(未指定は全部ピン無し)。 */
+  pinnedIds: ReadonlySet<string> = new Set(),
 ): ChildThread[] {
   const list = raw && typeof raw === "object" ? (raw as { threads?: unknown }).threads : undefined;
   if (!Array.isArray(list)) return [];
@@ -57,12 +60,68 @@ export function normalizeChildThreads(
           updatedAt: typeof o.updated_at === "number" ? o.updated_at : 0,
           parentAgentId: str(o.parent_agent_id).slice(0, 200) || null,
           parentTitle: str(o.parent_title).slice(0, 120) || null,
+          pinned: pinnedIds.has(agentId),
         },
       ];
     });
   // 子を持つ行(司令塔)はグループ見出しになるので行としては出さない(固定済みと二重に出ない)。
   const parents = new Set(out.map((t) => t.parentAgentId).filter((id) => id !== null));
-  return sortChildThreadsGrouped(out.filter((t) => !parents.has(t.agentId)));
+  const rows = sortChildThreadsGrouped(out.filter((t) => !parents.has(t.agentId)));
+  // ピン止めはそのグループの先頭へ(グループ内の相対順は保つ)。クライアントの挿入処理と同義。
+  const grouped = new Map<string, ChildThread[]>();
+  for (const t of rows) {
+    const key = t.parentAgentId ?? "";
+    const g = grouped.get(key);
+    if (g) g.push(t);
+    else grouped.set(key, [t]);
+  }
+  const ordered: ChildThread[] = [];
+  for (const g of grouped.values()) {
+    for (const t of g) if (t.pinned) ordered.push(t);
+    for (const t of g) if (!t.pinned) ordered.push(t);
+  }
+  return ordered;
+}
+
+/** ピン止めの保存(壊れた/無いファイルは空)。 */
+export function readChildThreadPins(dir: string): string[] {
+  try {
+    const raw: unknown = JSON.parse(
+      fs.readFileSync(path.join(dir, CHILD_THREAD_PINS_FILE), "utf8"),
+    );
+    const pins = Array.isArray(raw) ? raw : (raw as { pins?: unknown } | null)?.pins;
+    return Array.isArray(pins) ? normalizeChildThreadOrder(pins) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** ピン止めを1件だけ切り替えた後の一覧を返す(保存は原子的に置換)。 */
+export function writeChildThreadPin(dir: string, agentId: string, pinned: boolean): string[] {
+  const id = normalizeChildThreadOrder([agentId])[0];
+  if (!id) throw new Error("agentId が空です");
+  const current = readChildThreadPins(dir);
+  // 既にあるピンの位置は動かさない(押し直しても並びが跳ねない)
+  let next: string[];
+  if (!pinned) next = current.filter((x) => x !== id);
+  else if (current.includes(id)) next = current;
+  else next = [...current, id];
+  fs.mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, CHILD_THREAD_PINS_FILE);
+  const tmp = path.join(dir, `.${CHILD_THREAD_PINS_FILE}.${process.pid}.${Date.now()}.tmp`);
+  const body = JSON.stringify({ version: 1, updated_at: Date.now(), pins: next }, null, 2);
+  try {
+    fs.writeFileSync(tmp, `${body}\n`, "utf8");
+    fs.renameSync(tmp, target);
+  } catch (error) {
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch {
+      // 後始末の失敗で元のエラーを隠さない
+    }
+    throw error;
+  }
+  return next;
 }
 
 /**
@@ -96,15 +155,28 @@ export function readChildThreads(
   dir: string,
   boxItems: readonly Pick<ConfirmBoxItem, "id" | "background" | "state">[] = [],
   ackedIds: ReadonlySet<string> = readDirectlyAckedIds(dir),
+  pinnedIds: ReadonlySet<string> = new Set(readChildThreadPins(dir)),
 ): ChildThread[] {
   try {
     const raw = JSON.parse(fs.readFileSync(path.join(dir, CHILD_THREADS_FILE), "utf8"));
     return applyChildThreadOrder(
-      normalizeChildThreads(raw, boxItems, ackedIds),
+      normalizeChildThreads(raw, boxItems, ackedIds, pinnedIds),
       readChildThreadOrder(dir),
     );
   } catch {
     return [];
+  }
+}
+
+/** ピン止めの保存が読めなかったときの理由(存在しないだけなら null)。一覧を止めずに記録だけ返す。 */
+export function childThreadPinsReadError(dir: string): string | null {
+  const file = path.join(dir, CHILD_THREAD_PINS_FILE);
+  if (!fs.existsSync(file)) return null;
+  try {
+    JSON.parse(fs.readFileSync(file, "utf8"));
+    return null;
+  } catch (error) {
+    return `ピン止めを読めません: ${(error as Error).message}`;
   }
 }
 
