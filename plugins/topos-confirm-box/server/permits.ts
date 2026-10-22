@@ -13,6 +13,8 @@
  * (渡ってくる実体は `AgentSnapshotPayload` / `AgentPermissionRequestPayload`)。
  */
 import type { ConfirmBoxItem, ConfirmBoxOption } from "../shared/contract.js";
+import { parseQuestions, questionsToText, sanitizeAnswers } from "../shared/questions.js";
+import type { QuestionItem } from "../shared/questions.js";
 
 export interface PermitActionLike {
   id?: unknown;
@@ -111,6 +113,67 @@ export function inputGist(input: unknown): string {
   return "";
 }
 
+/** 承認待ちが質問(AskUserQuestion / opencode の question)なら、その中身を返す。 */
+export function permitQuestions(perm: PermitRequestLike): QuestionItem[] | null {
+  const kind = s(perm.kind).trim();
+  // kind を持つプロバイダは "question" の時だけ質問として扱う
+  // (別ツールの input にたまたま questions があっても拾わない)。
+  if (kind && kind !== "question") return null;
+  return parseQuestions(perm.input);
+}
+
+/** 質問への回答を `updatedInput.answers` に載せた応答。上流の質問を実物で引き直して組み立てる。 */
+export function questionResponse(
+  perm: PermitRequestLike,
+  answers: Record<string, string>,
+):
+  | { ok: true; response: { behavior: "allow"; updatedInput: Record<string, unknown> } }
+  | { ok: false; message: string } {
+  const questions = permitQuestions(perm);
+  if (!questions) return { ok: false, message: "この承認待ちは質問ではありません" };
+  const sanitized = sanitizeAnswers(questions, answers);
+  if (!sanitized.ok) return { ok: false, message: sanitized.message };
+  const input =
+    perm.input && typeof perm.input === "object" && !Array.isArray(perm.input)
+      ? (perm.input as Record<string, unknown>)
+      : {};
+  return {
+    ok: true,
+    response: { behavior: "allow", updatedInput: { ...input, answers: sanitized.answers } },
+  };
+}
+
+/** プロバイダが付ける「質問」というだけの題名(opencode は title:"Question")。 */
+const GENERIC_QUESTION_TITLES = new Set(["question", "askuserquestion", "質問"]);
+
+function permitSubject(perm: PermitRequestLike, questions: QuestionItem[] | null): string {
+  const title = s(perm.title).trim();
+  const first = questions?.[0]?.question ?? "";
+  if (first && (!title || GENERIC_QUESTION_TITLES.has(title.toLowerCase()))) {
+    return first.slice(0, SUBJECT_MAX);
+  }
+  return (title || s(perm.description).trim() || s(perm.name).trim() || first || "承認待ち").slice(
+    0,
+    SUBJECT_MAX,
+  );
+}
+
+function questionSummary(questions: QuestionItem[]): string {
+  if (questions.length > 1) {
+    const headers = questions.map((q) => q.header || q.question).join(" / ");
+    return `${questions.length}問: ${headers}`.slice(0, SUMMARY_MAX);
+  }
+  const labels = questions[0].options.map((option) => option.label);
+  return labels.length > 0 ? labels.join(" / ").slice(0, SUMMARY_MAX) : "自由記述で回答";
+}
+
+/** 背景欄。質問は生JSONではなく、質問文と選択肢がそのまま読める形にする。 */
+function permitBackground(perm: PermitRequestLike, questions: QuestionItem[] | null): string {
+  if (questions) return questionsToText(questions).slice(0, BACKGROUND_MAX);
+  if (perm.input === undefined) return "";
+  return safeJson(perm.input).slice(0, BACKGROUND_MAX);
+}
+
 function agentLabel(agent: PermitAgentLike): string {
   const id = s(agent.id);
   const title = s(agent.title).trim();
@@ -141,20 +204,16 @@ export function permitsToItems(
       const requestId = s(perm.id);
       if (!requestId) continue;
       const { options, recommended } = permitOptions(perm);
-      const subject = (
-        s(perm.title).trim() ||
-        s(perm.description).trim() ||
-        s(perm.name).trim() ||
-        "承認待ち"
-      ).slice(0, SUBJECT_MAX);
+      // 質問は選択肢ボタン(許可/拒否)では答えられない。中身を画面へ渡し、
+      // 背景も生JSONではなく読める形にする(質問文と選択肢がそのまま読める)。
+      const questions = permitQuestions(perm);
+      const subject = permitSubject(perm, questions);
       const gist = inputGist(perm.input);
       const head = s(perm.description).trim() || s(perm.name).trim() || subject;
-      const summary = (gist && !head.includes(gist) ? `${head}: ${gist}` : head).slice(
-        0,
-        SUMMARY_MAX,
-      );
-      const background =
-        perm.input === undefined ? "" : safeJson(perm.input).slice(0, BACKGROUND_MAX);
+      const summary = questions
+        ? questionSummary(questions)
+        : (gist && !head.includes(gist) ? `${head}: ${gist}` : head).slice(0, SUMMARY_MAX);
+      const background = permitBackground(perm, questions);
       items.push({
         id: `permit:${agentId}:${requestId}`,
         kind: "permit",
@@ -175,6 +234,7 @@ export function permitsToItems(
         key: null,
         agentId,
         workspaceId: s(agent.workspaceId) || null,
+        ...(questions ? { questions } : {}),
         ts: tsOf(agent, now),
       });
     }

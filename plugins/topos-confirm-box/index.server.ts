@@ -33,7 +33,7 @@ import {
 } from "./server/child-threads.js";
 import { readCardChat, sayToCard } from "./server/cardchat.js";
 import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
-import { permitResponse, permitsToItems } from "./server/permits.js";
+import { permitResponse, permitsToItems, questionResponse } from "./server/permits.js";
 import type { PermitAgentLike } from "./server/permits.js";
 
 export default function contribute(server: PluginServerContext) {
@@ -138,6 +138,17 @@ export default function contribute(server: PluginServerContext) {
       if (!perm) {
         return { ok: false, message: "この承認待ちは既に解消されています" };
       }
+      // 質問への回答。**実物の質問**と突き合わせて `updatedInput.answers` を組み立てる
+      // (クライアントの言い分をそのまま上流へ流さない)。
+      if (input.answers) {
+        const built = questionResponse(perm, input.answers);
+        if (!built.ok) return { ok: false, message: built.message };
+        await ctx.paseo.agents
+          .ref(input.agentId)
+          .respondToPermission({ requestId: input.requestId, response: built.response });
+        return { ok: true, message: "回答を送りました" };
+      }
+
       const response = permitResponse(perm, input.actionId);
       await ctx.paseo.agents
         .ref(input.agentId)

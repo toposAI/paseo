@@ -19,6 +19,8 @@ import { PriorityView } from "./PriorityView.js";
 import { InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import { CardChat } from "./CardChat.js";
+import { QuestionAnswer } from "./QuestionAnswer.js";
+import type { QuestionAnswerColors } from "./QuestionAnswer.js";
 import type { ConfirmBoxDepth, ConfirmBoxItem, ConfirmBoxListOutput } from "../shared/contract.js";
 
 const REFRESH_MS = 30_000;
@@ -169,8 +171,11 @@ export function ConfirmBoxView({
     async (item: ConfirmBoxItem, optionId: string) => {
       try {
         if (item.kind === "permit" && item.agentId) {
-          const requestId = item.id.split(":").slice(2).join(":");
-          const r = await permit({ agentId: item.agentId, requestId, actionId: optionId });
+          const r = await permit({
+            agentId: item.agentId,
+            requestId: permitRequestId(item),
+            actionId: optionId,
+          });
           setNotice(r.message);
         } else if (item.key) {
           const r = await decide({
@@ -192,6 +197,30 @@ export function ConfirmBoxView({
       notifyBoxChanged();
     },
     [decide, permit, depth, reload],
+  );
+
+  /** 質問への回答。押された選択肢/自由記述を `answers` として送る。 */
+  const answer = useCallback(
+    async (item: ConfirmBoxItem, answers: Record<string, string>) => {
+      if (item.kind !== "permit" || !item.agentId) {
+        setNotice("この項目は回答を送れません");
+        return;
+      }
+      try {
+        const r = await permit({
+          agentId: item.agentId,
+          requestId: permitRequestId(item),
+          actionId: null,
+          answers,
+        });
+        setNotice(r.message);
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : String(e));
+      }
+      void reload();
+      notifyBoxChanged();
+    },
+    [permit, reload],
   );
 
   const visible = useMemo(() => {
@@ -248,12 +277,14 @@ export function ConfirmBoxView({
                 key={item.id}
                 item={item}
                 styles={s}
+                colors={c}
                 open={openId === item.id}
                 onToggle={toggle}
                 onBackground={openBackground}
                 onChat={openChat}
                 canNavigate={Boolean(navigation)}
                 onChoose={choose}
+                onAnswer={answer}
               />
             ))}
           </>
@@ -315,8 +346,15 @@ function TabButton({
 
 const SELECTED = { selected: true };
 const UNSELECTED = { selected: false };
+/** 質問が無い項目で毎回新しい配列を作らないため(react-perf の lint 対策)。 */
+const NO_QUESTIONS: NonNullable<ConfirmBoxItem["questions"]> = [];
 
 type Styles = Record<string, object>;
+
+/** 項目ID `permit:<agentId>:<requestId>` から requestId を取り出す。 */
+function permitRequestId(item: ConfirmBoxItem): string {
+  return item.id.split(":").slice(2).join(":");
+}
 
 /** 元スレの agent ID。投函の thread_ref(paseo_agent)優先、無ければ承認待ちの agentId。 */
 function threadAgentId(item: ConfirmBoxItem): string | null {
@@ -368,21 +406,25 @@ function OptionButton({
 function ItemCard({
   item,
   styles,
+  colors,
   open,
   onToggle,
   onBackground,
   onChat,
   canNavigate,
   onChoose,
+  onAnswer,
 }: {
   item: ConfirmBoxItem;
   styles: Styles;
+  colors: QuestionAnswerColors;
   open: boolean;
   onToggle: (id: string) => void;
   onBackground: () => void;
   onChat: (item: ConfirmBoxItem) => void;
   canNavigate: boolean;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
+  onAnswer: (item: ConfirmBoxItem, answers: Record<string, string>) => Promise<void>;
 }) {
   const [bgOpen, setBgOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -396,7 +438,13 @@ function ItemCard({
     });
   }, [onBackground]);
   const toggleChat = useCallback(() => setChatOpen((v) => !v), []);
+  const deny = useCallback(() => void onChoose(item, "__deny"), [item, onChoose]);
+  const answer = useCallback(
+    (answers: Record<string, string>) => void onAnswer(item, answers),
+    [item, onAnswer],
+  );
   const created = useMemo(() => formatCreated(item.ts), [item.ts]);
+  const questions = item.questions ?? NO_QUESTIONS;
   return (
     <View style={styles.card}>
       {item.reporter ? <Text style={styles.reporter}>報告者: {item.reporter}</Text> : null}
@@ -406,18 +454,28 @@ function ItemCard({
           {item.state === "approved" ? " · 決定済み" : ""}
         </Text>
         <Text style={styles.subject}>{item.subject}</Text>
-        {open ? null : (
+        {open || questions.length > 0 ? null : (
           <Text style={styles.muted} numberOfLines={2}>
             {item.summary}
           </Text>
         )}
       </Pressable>
-      <View style={styles.row}>
-        {item.options.map((o) => (
-          <OptionButton key={o.id} item={item} option={o} styles={styles} onChoose={onChoose} />
-        ))}
-      </View>
-      {open ? <Text style={styles.text}>{item.summary}</Text> : null}
+      {questions.length > 0 ? (
+        <QuestionAnswer
+          questions={questions}
+          colors={colors}
+          disabled={false}
+          onAnswer={answer}
+          onDeny={deny}
+        />
+      ) : (
+        <View style={styles.row}>
+          {item.options.map((o) => (
+            <OptionButton key={o.id} item={item} option={o} styles={styles} onChoose={onChoose} />
+          ))}
+        </View>
+      )}
+      {open && questions.length === 0 ? <Text style={styles.text}>{item.summary}</Text> : null}
       {bgOpen && item.background ? <Text style={styles.text}>{item.background}</Text> : null}
       {chatOpen ? <CardChat itemId={item.id} itemKey={item.key} styles={styles} /> : null}
       <View style={styles.footRow}>

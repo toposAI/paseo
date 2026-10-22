@@ -61,6 +61,27 @@ export type ConfirmBoxOption = z.infer<typeof ConfirmBoxOptionSchema>;
 export const ConfirmBoxThreadRefSchema = z.object({ kind: z.string(), id: z.string() });
 export type ConfirmBoxThreadRef = z.infer<typeof ConfirmBoxThreadRefSchema>;
 
+/**
+ * 承認待ちが「質問」(Claude の AskUserQuestion / opencode の question)の時の選択肢。
+ * `options` ボタン(許可/拒否)では答えられないので、質問そのものを画面へ渡す。
+ * 読み替えは `shared/questions.ts`(`parseQuestions`)が行う。
+ */
+export const ConfirmBoxQuestionOptionSchema = z.object({
+  label: z.string(),
+  description: z.string().nullable(),
+});
+export type ConfirmBoxQuestionOption = z.infer<typeof ConfirmBoxQuestionOptionSchema>;
+
+export const ConfirmBoxQuestionSchema = z.object({
+  header: z.string(),
+  question: z.string(),
+  multiSelect: z.boolean(),
+  allowOther: z.boolean(),
+  allowEmpty: z.boolean(),
+  options: z.array(ConfirmBoxQuestionOptionSchema),
+});
+export type ConfirmBoxQuestion = z.infer<typeof ConfirmBoxQuestionSchema>;
+
 export const ConfirmBoxItemSchema = z.object({
   /** 安定ID。箱は item id、中間形式は `pending:<key>`、permit は `permit:<agentId>:<permId>`。 */
   id: z.string(),
@@ -87,6 +108,8 @@ export const ConfirmBoxItemSchema = z.object({
   /** permit のみ: 承認待ちの主体。 */
   agentId: z.string().nullable(),
   workspaceId: z.string().nullable(),
+  /** permit かつ質問の時だけ入る(選択肢ボタンの代わりに質問フォームを描く)。 */
+  questions: z.array(ConfirmBoxQuestionSchema).optional(),
   ts: z.number(),
 });
 export type ConfirmBoxItem = z.infer<typeof ConfirmBoxItemSchema>;
@@ -170,6 +193,13 @@ export const confirmBoxPermitRpc = defineRpc({
      * `__allow` / `__deny`(`server/permits.ts` の `permitOptions()`)。
      */
     actionId: z.string().nullable(),
+    /**
+     * 質問(`kind:"question"`)への回答。キーは質問の header(空なら質問文)。
+     * 値は選択肢のラベル(複数選択はカンマ区切り)か「その他」の自由記述。
+     * サーバーが実物の質問と突き合わせて `updatedInput.answers` を組み立てる
+     * (`shared/questions.ts` の `sanitizeAnswers`)。`actionId` より優先する。
+     */
+    answers: z.record(z.string(), z.string()).optional(),
   }),
   output: z.object({ ok: z.boolean(), message: z.string() }),
 });
