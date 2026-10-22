@@ -40,6 +40,8 @@ import {
   readChildThreads,
   writeChildThreadOrder,
 } from "./server/child-threads.js";
+import { notesSidebarRpc } from "./shared/notes.js";
+import { readSidebarNotes } from "./server/notes.js";
 import { readCardChat, sayToCard } from "./server/cardchat.js";
 import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
 import {
@@ -285,6 +287,31 @@ export default function contribute(server: PluginServerContext) {
       return { messages: readCardChat(resolveConfirmBoxDir(), { id: input.id, key: input.key }) };
     } catch {
       return { messages: [] };
+    }
+  });
+
+  server.handle(notesSidebarRpc, async () => {
+    const generatedAt = Date.now();
+    try {
+      // 存在するスレだけをタップ先にする(走査のたびに1回だけ読む)。
+      let knownAgentIds: Set<string> | undefined;
+      try {
+        knownAgentIds = new Set(readChildThreads(resolveConfirmBoxDir()).map((t) => t.agentId));
+      } catch {
+        knownAgentIds = undefined;
+      }
+      const r = readSidebarNotes({ knownAgentIds });
+      return { ...r, generatedAt };
+    } catch (error) {
+      // 走査先の設定誤り(バックアップ指定など)は握りつぶさず、空の一覧と理由を返す。
+      return {
+        notes: [],
+        roots: [],
+        generatedAt,
+        truncated: false,
+        scanned: 0,
+        error: `ノートを読めません: ${(error as Error).message}`.slice(0, 200),
+      };
     }
   });
 
