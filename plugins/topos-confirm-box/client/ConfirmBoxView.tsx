@@ -56,6 +56,8 @@ export function ConfirmBoxView({
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortNew, setSortNew] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  // 判断印(`judgment: true`)の無い旧形式(選択肢つき)は既定では出さない。押した時だけ並べる。
+  const [legacyOff, setLegacyOff] = useState(true);
 
   const reload = useCallback(async () => {
     try {
@@ -255,15 +257,17 @@ export function ConfirmBoxView({
     [permit, reload],
   );
 
-  // 判断タブは判断だけ(選択肢のある項目・Paseo承認待ち)。通知・バグ報告・完了報告は専用タブにだけ出す。
+  // 判断タブは判断印のある項目と Paseo 承認待ちだけ。通知・バグ報告・完了報告は専用タブにだけ出す。
+  // 印の無い旧形式(選択肢つき)は「印なし(旧形式)」を押した時だけ加える。
   const visible = useMemo(
     () =>
       judgmentTabRows(data?.items ?? [], {
         showDone,
         prio: prio === "all" ? null : (prio as ConfirmBoxPriority),
         newestFirst: sortNew,
+        legacy: !legacyOff,
       }),
-    [data, showDone, prio, sortNew],
+    [data, showDone, prio, sortNew, legacyOff],
   );
 
   const chip = (label: string, on: boolean, press: () => void) => (
@@ -273,7 +277,7 @@ export function ConfirmBoxView({
   );
 
   const toggleFilter = useCallback(() => setFilterOpen((v) => !v), []);
-  const filterSummary = `${prio === "all" ? "全て" : PRIORITY_LABEL[prio as keyof typeof PRIORITY_LABEL]} · ${sortNew ? "新しい順" : "優先度順"}${showDone ? " · 決定済み含む" : ""} · ${visible.length}件`;
+  const filterSummary = `${prio === "all" ? "全て" : PRIORITY_LABEL[prio as keyof typeof PRIORITY_LABEL]} · ${sortNew ? "新しい順" : "優先度順"}${showDone ? " · 決定済み含む" : ""}${legacyOff ? "" : " · 旧形式含む"} · ${visible.length}件`;
 
   // タブごとの中身。入れ子の三項を JSX へ書かないよう if 連鎖で組み立てる。
   let content: ReactNode;
@@ -300,6 +304,7 @@ export function ConfirmBoxView({
             )}
             {chip(sortNew ? "新しい順" : "優先度順", true, () => setSortNew((v) => !v))}
             {chip("決定済みも表示", showDone, () => setShowDone((v) => !v))}
+            {chip("印なし(旧形式)", !legacyOff, () => setLegacyOff((v) => !v))}
           </View>
         ) : null}
         {error ? <Text style={s.warn}>読み込めません: {error}</Text> : null}

@@ -255,6 +255,8 @@ export function permitsToItems(
         recommended,
         state: "new",
         urgency: "normal",
+        // 承認待ちは `kind: "permit"` で判断と判定される(`isJudgmentItem`)。判断印は要らない。
+        judgment: false,
         key: null,
         agentId,
         workspaceId: s(agent.workspaceId) || null,
