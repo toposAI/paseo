@@ -138,10 +138,17 @@ export function ConfirmBoxView({
         alignItems: "center" as const,
         justifyContent: "center" as const,
       },
+      // アイコンと**同じ大きさ**の箱。バッジはこの箱の右上角を基準に absolute で置く(はみ出しは許容)。
+      tabIcon: {
+        width: 24,
+        height: 24,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
+      },
       badgeDot: {
         position: "absolute" as const,
-        top: 6,
-        right: 10,
+        top: -7,
+        right: -9,
         minWidth: 18,
         height: 18,
         borderRadius: 9,
@@ -416,14 +423,18 @@ function TabButton({
       style={styles.tabBtn}
       onPress={press}
     >
-      <tab.Icon color={on ? accent : muted} size={24} />
-      {count > 0 ? (
-        <View style={styles.badgeDot}>
-          <Text style={styles.badgeText} numberOfLines={1}>
-            {count > 99 ? "99+" : count}
-          </Text>
-        </View>
-      ) : null}
+      {/* バッジの基準は**アイコン**。タブ幅いっぱいのボタンに absolute で置くと、幅が伸びた分だけ右へずれる
+          (iPad幅で顕著)。アイコンと同じ箱に重ね、右上へのはみ出し分は箱側の余白で確保する。 */}
+      <View style={styles.tabIcon}>
+        <tab.Icon color={on ? accent : muted} size={24} />
+        {count > 0 ? (
+          <View style={styles.badgeDot}>
+            <Text style={styles.badgeText} numberOfLines={1}>
+              {count > 99 ? "99+" : count}
+            </Text>
+          </View>
+        ) : null}
+      </View>
     </Pressable>
   );
 }
