@@ -89,6 +89,17 @@ function parseTs(createdAt: string): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+/**
+ * 返信の本文。家族版 `feedback.set_reply` は `reply` を `{text, at, by}` の**オブジェクト**で書く
+ * (文字列で書く版もありうるので両方受ける)。形が違えば null(本文に `[object Object]` を出さない)。
+ */
+function replyText(value: unknown): string | null {
+  const text =
+    typeof value === "object" && value !== null ? (value as { text?: unknown }).text : value;
+  const s = str(text).trim();
+  return s ? s.slice(0, FEEDBACK_REPLY_MAX) : null;
+}
+
 /** 1件の報告 JSON を契約の形へ寄せる。`id` が形式外なら null(壊れたファイルは出さない)。 */
 export function normalizeReport(
   raw: unknown,
@@ -116,7 +127,7 @@ export function normalizeReport(
     reporter: labels.get(reporterId) ?? reporterId,
     screen: str(o.screen),
     appVersion: str(o.app_version),
-    reply: str(o.reply).trim() ? str(o.reply).slice(0, FEEDBACK_REPLY_MAX) : null,
+    reply: replyText(o.reply),
     replySeen: o.reply_seen === true,
     hasScreenshot: str(o.screenshot).trim().length > 0,
     origin,
