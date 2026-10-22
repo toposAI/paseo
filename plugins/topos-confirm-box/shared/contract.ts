@@ -131,6 +131,12 @@ export const confirmBoxCountRpc = defineRpc({
     permits: z.number().int(),
     /** 読めなかった出所の数(0 以外なら画面で知らせる)。 */
     failedSources: z.number().int(),
+    /** 通知タブの未読(選択肢を持たないお知らせのうち state=new)。 */
+    notifications: z.number().int().default(0),
+    /** バグ報告タブの未対応(status=new)。 */
+    bugs: z.number().int().default(0),
+    /** 子スレ完了報告タブの未確認(完了かつまとめが未読)。 */
+    childDone: z.number().int().default(0),
     generatedAt: z.number(),
   }),
 });
@@ -153,6 +159,32 @@ export const confirmBoxDecideRpc = defineRpc({
   output: z.object({ ok: z.boolean(), message: z.string() }),
 });
 export type ConfirmBoxDecideOutput = z.infer<typeof confirmBoxDecideRpc.output>;
+
+// ---------------------------------------------------------------- RPC: 既読/確認(通知・完了まとめ)
+
+/**
+ * 箱の項目を既読/承認にする。**ユーザーが画面で押した時だけ**呼ばれる
+ * (自動既読はしない)。書くのは箱の `ack` イベント1行だけで、項目そのものは書き換えない。
+ *
+ * 完了まとめの確認は `approve`。`child_thread_registry.py` の定期 tick が
+ * 「個別に ack された完了まとめ」をアーカイブする(アーカイブの実行経路は既存のまま1本)。
+ */
+export const confirmBoxAckRpc = defineRpc({
+  name: "topos.confirmbox.ack",
+  input: z.object({
+    id: z.string(),
+    action: z.enum(["read", "approve"]).default("read"),
+  }),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
+export type ConfirmBoxAckOutput = z.infer<typeof confirmBoxAckRpc.output>;
+
+/** 通知をまとめて既読にする(`ackall`。`before` 以前の未読が対象=本体ストアと同じ意味)。 */
+export const confirmBoxAckAllRpc = defineRpc({
+  name: "topos.confirmbox.ackall",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
 
 // ---------------------------------------------------------------- RPC: Paseo 承認待ちへの応答
 
@@ -264,4 +296,22 @@ export function compareConfirmBoxItems(a: ConfirmBoxItem, b: ConfirmBoxItem): nu
 /** 画面に出す「要対応」件数。承認済みは数えない。 */
 export function countOpen(items: readonly ConfirmBoxItem[]): number {
   return items.filter((i) => i.state !== "approved").length;
+}
+
+/**
+ * 通知タブに流す項目。判定は「選択肢を持たない」= ユーザーが決めることが無いお知らせ。
+ * 家族報告の新着通知と子スレの完了まとめは専用タブがあるので除く(同じ内容を2箇所に出さない)。
+ */
+export const NOTIFICATION_EXCLUDED_SOURCES: readonly string[] = [
+  "topos_feedback",
+  "child_thread_report",
+];
+
+export function isNotificationItem(item: ConfirmBoxItem): boolean {
+  return item.options.length === 0 && !NOTIFICATION_EXCLUDED_SOURCES.includes(item.source);
+}
+
+/** 通知タブのバッジ。未読(state=new)だけ数える。 */
+export function countUnreadNotifications(items: readonly ConfirmBoxItem[]): number {
+  return items.filter((i) => isNotificationItem(i) && i.state === "new").length;
 }

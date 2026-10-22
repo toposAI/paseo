@@ -13,16 +13,22 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   KIND_LABEL,
   compareConfirmBoxItems,
+  confirmBoxAckAllRpc,
+  confirmBoxAckRpc,
   confirmBoxCountRpc,
   confirmBoxDecideRpc,
   confirmBoxListRpc,
   confirmBoxPermitRpc,
   cardChatListRpc,
   cardChatSayRpc,
+  countUnreadNotifications,
   priorityListRpc,
   priorityMoveRpc,
   prioritySayRpc,
 } from "./shared/contract.js";
+import { appendAck, appendAckAll } from "./server/ack.js";
+import { feedbackReportsListRpc, countNewReports } from "./shared/feedback.js";
+import { readFeedbackReports } from "./server/feedback.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
 import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/box.js";
 import { childThreadsListRpc, childThreadsSetOrderRpc } from "./shared/child-threads.js";
@@ -98,13 +104,58 @@ export default function contribute(server: PluginServerContext) {
     const { items, sources, generatedAt } = await collect(ctx);
     // 本当に未決 = 決定記録なし(approved でない)かつ選択肢がある項目(通知のみは数えない)
     const open = items.filter((i) => i.state !== "approved" && i.options.length > 0);
+    const dir = resolveConfirmBoxDir();
+    // バッジは失敗しても0で返す(件数が取れないだけで確認箱そのものは開けるようにする)
+    let bugs = 0;
+    try {
+      bugs = countNewReports(readFeedbackReports().reports);
+    } catch {
+      bugs = 0;
+    }
+    let childDone = 0;
+    try {
+      childDone = readChildThreads(dir, items).filter(
+        (t) => t.status === "完了" && t.summaryState !== "read" && t.summaryState !== "approved",
+      ).length;
+    } catch {
+      childDone = 0;
+    }
     return {
       open: open.length,
       blocking: open.filter((i) => i.priority === "blocking").length,
       permits: open.filter((i) => i.kind === "permit").length,
       failedSources: sources.filter((src) => !src.ok).length,
+      notifications: countUnreadNotifications(items),
+      bugs,
+      childDone,
       generatedAt,
     };
+  });
+
+  server.handle(confirmBoxAckRpc, async (input) => {
+    try {
+      appendAck(resolveConfirmBoxDir(), input.id, input.action);
+      return {
+        ok: true,
+        message: input.action === "approve" ? "確認しました" : "既読にしました",
+      };
+    } catch (error) {
+      return { ok: false, message: `記録できません: ${(error as Error).message}` };
+    }
+  });
+
+  server.handle(confirmBoxAckAllRpc, async () => {
+    try {
+      appendAckAll(resolveConfirmBoxDir());
+      return { ok: true, message: "すべて既読にしました" };
+    } catch (error) {
+      return { ok: false, message: `記録できません: ${(error as Error).message}` };
+    }
+  });
+
+  server.handle(feedbackReportsListRpc, async () => {
+    const { reports, sources } = readFeedbackReports();
+    return { reports, sources, generatedAt: Date.now() };
   });
 
   server.handle(confirmBoxDecideRpc, async (input) => {

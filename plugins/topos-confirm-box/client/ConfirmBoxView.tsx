@@ -5,18 +5,23 @@
  * 決定の記録は押した時だけ(自動では何も決めない)。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import {
   KIND_LABEL,
   PRIORITY_LABEL,
+  confirmBoxCountRpc,
   confirmBoxDecideRpc,
   confirmBoxListRpc,
   confirmBoxPermitRpc,
 } from "../shared/contract.js";
-import { notifyBoxChanged } from "./events.js";
+import { onBoxChanged, notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
-import { InboxIcon, ListIcon } from "./Icons.js";
+import { BugReportsView } from "./BugReportsView.js";
+import { ChildDoneView } from "./ChildDoneView.js";
+import { NotificationsView } from "./NotificationsView.js";
+import { BellIcon, BugIcon, CheckCircleIcon, InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import { CardChat } from "./CardChat.js";
 import type { ConfirmBoxDepth, ConfirmBoxItem, ConfirmBoxListOutput } from "../shared/contract.js";
@@ -37,7 +42,8 @@ export function ConfirmBoxView({
   const [openId, setOpenId] = useState<string | null>(null);
   const [depth, setDepth] = useState<ConfirmBoxDepth>("list");
   const [notice, setNotice] = useState<string>("");
-  const [tab, setTab] = useState<"items" | "priority">("items");
+  const [tab, setTab] = useState<TabId>("items");
+  const counts = useBadgeCounts();
   const [prio, setPrio] = useState<string>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortNew, setSortNew] = useState(false);
@@ -120,13 +126,29 @@ export function ConfirmBoxView({
         // iPhoneのホームバー分(web: env(safe-area-inset-bottom))
         paddingBottom: "env(safe-area-inset-bottom)" as unknown as number,
       },
+      tabStrip: { flexGrow: 1 },
+      // 5枚を等分する。iPhone幅390pxなら1枚78px、最小56pxを割る幅では横スクロールへ落ちる。
       tabBtn: {
-        minWidth: 72,
+        flex: 1,
+        minWidth: 56,
         minHeight: 56,
-        paddingHorizontal: 16,
+        paddingHorizontal: 4,
         alignItems: "center" as const,
         justifyContent: "center" as const,
       },
+      badgeDot: {
+        position: "absolute" as const,
+        top: 6,
+        right: 10,
+        minWidth: 18,
+        height: 18,
+        borderRadius: 9,
+        paddingHorizontal: 4,
+        backgroundColor: c.accent,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
+      },
+      badgeText: { color: c.accentForeground, fontSize: 10, fontWeight: "700" as const },
       btn: {
         backgroundColor: c.surface2,
         borderRadius: 6,
@@ -210,58 +232,73 @@ export function ConfirmBoxView({
   const toggleFilter = useCallback(() => setFilterOpen((v) => !v), []);
   const filterSummary = `${prio === "all" ? "全て" : PRIORITY_LABEL[prio as keyof typeof PRIORITY_LABEL]} · ${sortNew ? "新しい順" : "優先度順"}${showDone ? " · 決定済み含む" : ""} · ${visible.length}件`;
 
+  // タブごとの中身。入れ子の三項を JSX へ書かないよう if 連鎖で組み立てる。
+  let content: ReactNode;
+  if (tab === "priority") {
+    content = <PriorityView styles={s} colors={c} />;
+  } else if (tab === "bugs") {
+    content = <BugReportsView theme={theme} />;
+  } else if (tab === "childdone") {
+    content = <ChildDoneView theme={theme} navigation={navigation} />;
+  } else if (tab === "notify") {
+    content = <NotificationsView theme={theme} />;
+  } else {
+    content = (
+      <>
+        <Pressable accessibilityRole="button" style={s.filterLine} onPress={toggleFilter}>
+          <Text style={s.text}>{filterSummary}</Text>
+          <Text style={s.muted}>{filterOpen ? "▲" : "▼"}</Text>
+        </Pressable>
+        {filterOpen ? (
+          <View style={s.row}>
+            {chip("全て", prio === "all", () => setPrio("all"))}
+            {(Object.keys(PRIORITY_LABEL) as (keyof typeof PRIORITY_LABEL)[]).map((k) =>
+              chip(PRIORITY_LABEL[k], prio === k, () => setPrio(k)),
+            )}
+            {chip(sortNew ? "新しい順" : "優先度順", true, () => setSortNew((v) => !v))}
+            {chip("決定済みも表示", showDone, () => setShowDone((v) => !v))}
+          </View>
+        ) : null}
+        {error ? <Text style={s.warn}>読み込めません: {error}</Text> : null}
+        {data?.sources
+          .filter((x) => !x.ok)
+          .map((x) => (
+            <Text key={x.id} style={s.warn}>
+              {x.label}: {x.detail}
+            </Text>
+          ))}
+        {notice ? <Text style={s.muted}>{notice}</Text> : null}
+        {data && visible.length === 0 ? <Text style={s.muted}>判断待ちはありません</Text> : null}
+        {visible.map((item) => (
+          <ItemCard
+            key={item.id}
+            item={item}
+            styles={s}
+            open={openId === item.id}
+            onToggle={toggle}
+            onBackground={openBackground}
+            onChat={openChat}
+            canNavigate={Boolean(navigation)}
+            onChoose={choose}
+          />
+        ))}
+      </>
+    );
+  }
+
   return (
     <View style={s.root}>
       <ScrollView style={s.flex} contentContainerStyle={s.body}>
-        {tab === "priority" ? (
-          <PriorityView styles={s} colors={c} />
-        ) : (
-          <>
-            <Pressable accessibilityRole="button" style={s.filterLine} onPress={toggleFilter}>
-              <Text style={s.text}>{filterSummary}</Text>
-              <Text style={s.muted}>{filterOpen ? "▲" : "▼"}</Text>
-            </Pressable>
-            {filterOpen ? (
-              <View style={s.row}>
-                {chip("全て", prio === "all", () => setPrio("all"))}
-                {(Object.keys(PRIORITY_LABEL) as (keyof typeof PRIORITY_LABEL)[]).map((k) =>
-                  chip(PRIORITY_LABEL[k], prio === k, () => setPrio(k)),
-                )}
-                {chip(sortNew ? "新しい順" : "優先度順", true, () => setSortNew((v) => !v))}
-                {chip("決定済みも表示", showDone, () => setShowDone((v) => !v))}
-              </View>
-            ) : null}
-            {error ? <Text style={s.warn}>読み込めません: {error}</Text> : null}
-            {data?.sources
-              .filter((x) => !x.ok)
-              .map((x) => (
-                <Text key={x.id} style={s.warn}>
-                  {x.label}: {x.detail}
-                </Text>
-              ))}
-            {notice ? <Text style={s.muted}>{notice}</Text> : null}
-            {data && visible.length === 0 ? (
-              <Text style={s.muted}>判断待ちはありません</Text>
-            ) : null}
-            {visible.map((item) => (
-              <ItemCard
-                key={item.id}
-                item={item}
-                styles={s}
-                open={openId === item.id}
-                onToggle={toggle}
-                onBackground={openBackground}
-                onChat={openChat}
-                canNavigate={Boolean(navigation)}
-                onChoose={choose}
-              />
-            ))}
-          </>
-        )}
+        {content}
       </ScrollView>
       {tab === "priority" ? <ChatDock colors={c} agentId={PRIORITY_CHAT_AGENT_ID} /> : null}
       <View style={s.bottomBar}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        {/* `flexGrow:1` で5枚を等分。狭い幅では等分を保ったまま横スクロールへ落ちる。 */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.tabStrip}
+        >
           {TABS.map((tb) => (
             <TabButton
               key={tb.id}
@@ -270,6 +307,7 @@ export function ConfirmBoxView({
               styles={s}
               accent={c.accent}
               muted={c.foregroundMuted}
+              count={counts[tb.id] ?? 0}
               onSelect={setTab}
             />
           ))}
@@ -279,10 +317,49 @@ export function ConfirmBoxView({
   );
 }
 
-const TABS: { id: "items" | "priority"; label: string; Icon: typeof InboxIcon }[] = [
+type TabId = "items" | "bugs" | "childdone" | "notify" | "priority";
+
+const TABS: { id: TabId; label: string; Icon: typeof InboxIcon }[] = [
   { id: "items", label: "判断待ち", Icon: InboxIcon },
+  { id: "bugs", label: "Toposバグ報告", Icon: BugIcon },
+  { id: "childdone", label: "子スレ完了報告", Icon: CheckCircleIcon },
+  { id: "notify", label: "通知", Icon: BellIcon },
   { id: "priority", label: "優先順位", Icon: ListIcon },
 ];
+
+/** バッジ用の件数。30秒毎 + 決定/既読の直後(`notifyBoxChanged`)に取り直す。 */
+function useBadgeCounts(): Partial<Record<TabId, number>> {
+  const count = useRpc(confirmBoxCountRpc);
+  const [n, setN] = useState<Partial<Record<TabId, number>>>({});
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await count({});
+        if (alive) {
+          setN({
+            items: r.open,
+            bugs: r.bugs,
+            childdone: r.childDone,
+            notify: r.notifications,
+          });
+        }
+      } catch {
+        // 件数が取れない時はバッジを出さない(一覧そのものは各タブが別途読む)
+        if (alive) setN({});
+      }
+    };
+    void tick();
+    const timer = setInterval(tick, REFRESH_MS);
+    const off = onBoxChanged(() => void tick());
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      off();
+    };
+  }, [count]);
+  return n;
+}
 
 function TabButton({
   tab,
@@ -290,6 +367,7 @@ function TabButton({
   styles,
   accent,
   muted,
+  count,
   onSelect,
 }: {
   tab: (typeof TABS)[number];
@@ -297,18 +375,27 @@ function TabButton({
   styles: Styles;
   accent: string;
   muted: string;
-  onSelect: (id: "items" | "priority") => void;
+  count: number;
+  onSelect: (id: TabId) => void;
 }) {
   const press = useCallback(() => onSelect(tab.id), [onSelect, tab.id]);
+  const label = count > 0 ? `${tab.label}(${count})` : tab.label;
   return (
     <Pressable
       accessibilityRole="tab"
-      accessibilityLabel={tab.label}
+      accessibilityLabel={label}
       accessibilityState={on ? SELECTED : UNSELECTED}
       style={styles.tabBtn}
       onPress={press}
     >
       <tab.Icon color={on ? accent : muted} size={24} />
+      {count > 0 ? (
+        <View style={styles.badgeDot}>
+          <Text style={styles.badgeText} numberOfLines={1}>
+            {count > 99 ? "99+" : count}
+          </Text>
+        </View>
+      ) : null}
     </Pressable>
   );
 }

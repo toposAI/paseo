@@ -60,6 +60,161 @@ export function ListIcon({ color, size = 24 }: IconProps) {
   );
 }
 
+/**
+ * 虫(バグ報告)。**家族版/試用版 Topos のバグ報告ボタンと同じ形**(`m.html` の
+ * `#hdr-bug-btn` のインラインSVGを、この画面の他のアイコンと同じ View 描画へ写したもの)。
+ * 元のSVG(`viewBox 0 0 24 24`・stroke 1.7・塗りなし):
+ *   M9 7a3 3 0 016 0 / rect x7 y7 w10 h12 rx5 / M12 11v8M7 12H4M17 12h3M7 16H5M17 16h2M8 8L6 6M16 8l2-2
+ * 線幅と比率は元のまま(size/24 倍)。
+ */
+export function BugIcon({ color, size = 24 }: IconProps) {
+  const u = size / 24;
+  const st = useMemo(() => {
+    const line = (left: number, top: number, width: number, height: number) => ({
+      position: "absolute" as const,
+      left: left * u,
+      top: top * u,
+      width: width * u,
+      height: height * u,
+      backgroundColor: color,
+      borderRadius: (Math.min(width, height) * u) / 2,
+    });
+    return {
+      wrap: { width: size, height: size },
+      // 胴体(角丸の矩形)
+      body: {
+        position: "absolute" as const,
+        left: 7 * u,
+        top: 7 * u,
+        width: 10 * u,
+        height: 12 * u,
+        borderWidth: 1.7 * u,
+        borderColor: color,
+        borderRadius: 5 * u,
+      },
+      // 頭の上の弧(M9 7a3 3 0 016 0)= 上半分の半円
+      head: {
+        position: "absolute" as const,
+        left: 9 * u,
+        top: 4 * u,
+        width: 6 * u,
+        height: 3 * u,
+        borderWidth: 1.7 * u,
+        borderBottomWidth: 0,
+        borderColor: color,
+        borderTopLeftRadius: 3 * u,
+        borderTopRightRadius: 3 * u,
+      },
+      spine: line(11.15, 11, 1.7, 8),
+      legL1: line(4, 11.15, 3, 1.7),
+      legL2: line(5, 15.15, 2, 1.7),
+      legR1: line(17, 11.15, 3, 1.7),
+      legR2: line(17, 15.15, 2, 1.7),
+      // 触角(斜め)は回転させた細い棒で描く
+      antL: { ...line(6.4, 6.4, 3, 1.4), transform: [{ rotate: "-45deg" }] },
+      antR: { ...line(14.6, 6.4, 3, 1.4), transform: [{ rotate: "45deg" }] },
+    };
+  }, [color, size, u]);
+  return (
+    <View style={st.wrap}>
+      <View style={st.head} />
+      <View style={st.body} />
+      <View style={st.spine} />
+      <View style={st.legL1} />
+      <View style={st.legL2} />
+      <View style={st.legR1} />
+      <View style={st.legR2} />
+      <View style={st.antL} />
+      <View style={st.antR} />
+    </View>
+  );
+}
+
+/** 丸いチェック(子スレ完了報告)。 */
+export function CheckCircleIcon({ color, size = 24 }: IconProps) {
+  const u = size / 24;
+  const st = useMemo(
+    () => ({
+      ring: {
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        borderWidth: 1.8 * u,
+        borderColor: color,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
+      },
+      tickWrap: { width: 10 * u, height: 8 * u, marginTop: -1 * u },
+      tickShort: {
+        position: "absolute" as const,
+        left: 0.6 * u,
+        top: 4 * u,
+        width: 4.6 * u,
+        height: 1.9 * u,
+        backgroundColor: color,
+        borderRadius: u,
+        transform: [{ rotate: "45deg" }],
+      },
+      tickLong: {
+        position: "absolute" as const,
+        left: 3.2 * u,
+        top: 3 * u,
+        width: 7.2 * u,
+        height: 1.9 * u,
+        backgroundColor: color,
+        borderRadius: u,
+        transform: [{ rotate: "-45deg" }],
+      },
+    }),
+    [color, size, u],
+  );
+  return (
+    <View style={st.ring}>
+      <View style={st.tickWrap}>
+        <View style={st.tickShort} />
+        <View style={st.tickLong} />
+      </View>
+    </View>
+  );
+}
+
+/** ベル(通知)。 */
+export function BellIcon({ color, size = 24 }: IconProps) {
+  const u = size / 24;
+  const st = useMemo(
+    () => ({
+      wrap: { width: size, height: size, alignItems: "center" as const },
+      dome: {
+        marginTop: 3 * u,
+        width: 15 * u,
+        height: 13 * u,
+        borderWidth: 1.8 * u,
+        borderColor: color,
+        borderTopLeftRadius: 7.5 * u,
+        borderTopRightRadius: 7.5 * u,
+        borderBottomWidth: 0,
+      },
+      brim: { width: 19 * u, height: 1.8 * u, backgroundColor: color, borderRadius: u },
+      clapper: {
+        marginTop: 1.6 * u,
+        width: 3.6 * u,
+        height: 2.2 * u,
+        backgroundColor: color,
+        borderBottomLeftRadius: 2 * u,
+        borderBottomRightRadius: 2 * u,
+      },
+    }),
+    [color, size, u],
+  );
+  return (
+    <View style={st.wrap}>
+      <View style={st.dome} />
+      <View style={st.brim} />
+      <View style={st.clapper} />
+    </View>
+  );
+}
+
 /** 吹き出し(塗り単色+左下のしっぽ)。 */
 export function BubbleIcon({ color, size = 24 }: IconProps) {
   const st = useMemo(
