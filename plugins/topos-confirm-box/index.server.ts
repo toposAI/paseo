@@ -4,7 +4,7 @@
  * やること:
  * - `topos.confirmbox.list`   … Topos の箱 + 中間形式 + Paseo の承認待ちを1つにして返す
  * - `topos.confirmbox.decide` … ユーザーの選択を `pending_user_decisions.jsonl` へ追記
- * - `topos.confirmbox.permit` … Paseo の承認待ちに答える(許可/拒否)
+ * - `topos.confirmbox.permit` … Paseo の承認待ちに答える(許可/拒否・質問への回答)
  *
  * **読み取りはファイル直読み**。既存のサーバー側確認箱(`/api/confirm-box/*`)は通さない
  * (HTTPのポートと認証が要るうえ、同じディレクトリを別経路で読む意味が無い)。
@@ -33,7 +33,13 @@ import {
 } from "./server/child-threads.js";
 import { readCardChat, sayToCard } from "./server/cardchat.js";
 import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
-import { permitResponse, permitsToItems, questionResponse } from "./server/permits.js";
+import {
+  answerlessAllowBlocked,
+  permitQuestions,
+  permitResponse,
+  permitsToItems,
+  questionResponse,
+} from "./server/permits.js";
 import type { PermitAgentLike } from "./server/permits.js";
 
 export default function contribute(server: PluginServerContext) {
@@ -150,12 +156,26 @@ export default function contribute(server: PluginServerContext) {
       }
 
       const response = permitResponse(perm, input.actionId);
+      if (answerlessAllowBlocked(perm, response)) {
+        // 画面にフォームが出ていない場合(質問が読めなかった等)は、その旨を言う。
+        return {
+          ok: false,
+          message: permitQuestions(perm)
+            ? "この承認待ちは質問です。選択肢を選んで回答するか、拒否してください"
+            : "この質問は読み取れませんでした。スレで答えるか、拒否してください",
+        };
+      }
       await ctx.paseo.agents
         .ref(input.agentId)
         .respondToPermission({ requestId: input.requestId, response });
       return { ok: true, message: `応答しました(${response.behavior})` };
     } catch (error) {
-      return { ok: false, message: `応答できません: ${(error as Error).message}` };
+      // 上流の失敗は理由が読み取りにくい(例: opencode v2 の複数選択は配列を要求する)。
+      // 黙って失敗したように見せず、次に取れる手を示す。
+      return {
+        ok: false,
+        message: `応答できませんでした(${(error as Error).message})。項目が残る場合はスレで答えてください`,
+      };
     }
   });
 

@@ -9,7 +9,14 @@
  */
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
-import { allAnswered, answerKeys, buildAnswers, showsTextInput } from "../shared/questions.js";
+import {
+  allAnswered,
+  answerKeys,
+  anyTruncated,
+  buildAnswers,
+  showsTextInput,
+  uniqueOptionKeys,
+} from "../shared/questions.js";
 import type { QuestionItem, QuestionOption } from "../shared/questions.js";
 
 export interface QuestionAnswerColors {
@@ -222,6 +229,13 @@ export function QuestionAnswer({
   );
   // キーは header(空/重複は質問文)。React のリストキーとしても一意になる。
   const keys = useMemo(() => answerKeys(questions), [questions]);
+  const optionKeys = useMemo(
+    () => questions.map((question) => uniqueOptionKeys(question.options)),
+    [questions],
+  );
+  // 切り詰めた質問・選択肢は上流の実物と一致しない(選んでも別の選択肢になる)。
+  // フォームを出さず、スレで答えてもらう。
+  const truncated = useMemo(() => anyTruncated(questions), [questions]);
   const styles = useMemo(() => buildStyles(colors), [colors]);
 
   const submit = useCallback(() => {
@@ -236,6 +250,27 @@ export function QuestionAnswer({
 
   const canSubmit = ready && !disabled;
 
+  if (truncated) {
+    return (
+      <View style={styles.stack}>
+        <Text style={styles.header}>質問が長すぎます</Text>
+        <Text style={styles.hint}>
+          選択肢を完全には表示できないため、この画面からは答えられません。元のスレで答えてください。
+        </Text>
+        <View style={styles.actionRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="質問に答えずに拒否"
+            style={styles.action}
+            onPress={onDeny}
+          >
+            <Text style={styles.actionText}>拒否</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.stack}>
       {questions.map((question, questionIndex) => {
@@ -246,7 +281,7 @@ export function QuestionAnswer({
             <Text style={styles.question}>{question.question}</Text>
             {question.options.map((option, optionIndex) => (
               <OptionRow
-                key={option.label}
+                key={optionKeys[questionIndex][optionIndex]}
                 option={option}
                 selected={picked.includes(optionIndex)}
                 multiSelect={question.multiSelect}

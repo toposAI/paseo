@@ -6,10 +6,16 @@
  * React / Node のAPIは使わない。
  *
  * 回答の載せ方はプロバイダ共通ではないが、Paseo の
- * `AgentPermissionResponse.updatedInput.answers` が受け口になっている:
- * - opencode: `respondToPermission` が `answers[header]` を読んで `question.reply` に渡す
+ * `AgentPermissionResponse.updatedInput.answers` が受け口になっている(すべて
+ * `answers[キー]` を読む。キーは質問の header が共通解):
  * - claude:   `normalizeClaudeAskUserQuestionUpdatedInput` が header→質問文へ正規化する
+ * - opencode v1: `answers[header]` を読んで `question.reply` に渡す(値はカンマで分割)
+ * - opencode v2: `answers[header]` を読むが、**複数選択は配列を要求する**(文字列だと例外)
+ * - codex / omp / pi(rpiv): header 引き。複数選択は「ラベル, ラベル」の連結を前提にする
  * したがってキーは **header**(空/重複なら質問文)を使う。
+ *
+ * 既知の残差: opencode v2 の複数選択だけは、プラグインから v1/v2 を区別できないため
+ * 文字列で送ると上流で例外になる(画面にはエラーが出る。無言の成功にはならない)。
  */
 
 export interface QuestionOption {
@@ -24,6 +30,12 @@ export interface QuestionItem {
   allowOther: boolean;
   allowEmpty: boolean;
   options: QuestionOption[];
+  /**
+   * 上限を超えて切り詰めた/捨てた質問・選択肢があるか。
+   * **切り詰めた文字列は回答値としては使えない**(上流の選択肢と一致しなくなる)ので、
+   * 画面はフォームを出さず「スレで答えてください」に倒す。
+   */
+  truncated: boolean;
 }
 
 export type QuestionSelections = Record<number, readonly number[]>;
@@ -41,24 +53,45 @@ function str(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function clampText(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max)}…` : value;
+/**
+ * 上限を超えたら切る。**切ったかどうかも返す**(切った文字列は回答値に使えないため、
+ * 呼び出し側は `truncated` を立てて画面からフォームを引っ込める)。
+ * 末尾に `…` を付けない: 付けると上流の選択肢ラベルと一致しなくなる。
+ */
+function clampText(value: string, max: number): { text: string; cut: boolean } {
+  return value.length > max
+    ? { text: value.slice(0, max), cut: true }
+    : { text: value, cut: false };
+}
+
+interface ParsedOption {
+  option: QuestionOption;
+  cut: boolean;
 }
 
 /** 選択肢1件。`{label, description}` と文字列の両方を受ける。読めなければ null。 */
-function parseOption(raw: unknown): QuestionOption | null {
+function parseOption(raw: unknown): ParsedOption | null {
   if (typeof raw === "string") {
     const label = raw.trim();
-    return label ? { label: clampText(label, MAX_LABEL), description: null } : null;
+    if (!label) return null;
+    const clamped = clampText(label, MAX_LABEL);
+    return { option: { label: clamped.text, description: null }, cut: clamped.cut };
   }
   if (!raw || typeof raw !== "object") return null;
   const rec = raw as Record<string, unknown>;
   const label = str(rec.label).trim();
   if (!label) return null;
-  const description = str(rec.description).trim();
+  const clampedLabel = clampText(label, MAX_LABEL);
+  const trimmedDescription = str(rec.description).trim();
+  const clampedDescription = trimmedDescription
+    ? clampText(trimmedDescription, MAX_DESCRIPTION)
+    : { text: "", cut: false };
   return {
-    label: clampText(label, MAX_LABEL),
-    description: description ? clampText(description, MAX_DESCRIPTION) : null,
+    option: {
+      label: clampedLabel.text,
+      description: clampedDescription.text || null,
+    },
+    cut: clampedLabel.cut,
   };
 }
 
@@ -69,16 +102,28 @@ function parseQuestion(raw: unknown): QuestionItem | null {
   const question = str(q.question).trim();
   if (!question) return null;
 
+  const rawOptions = Array.isArray(q.options) ? q.options : [];
   const options: QuestionOption[] = [];
-  for (const entry of Array.isArray(q.options) ? q.options : []) {
-    const option = parseOption(entry);
-    if (option) options.push(option);
+  let cut = rawOptions.length > MAX_OPTIONS;
+  for (const entry of rawOptions) {
+    const parsed = parseOption(entry);
+    if (!parsed) {
+      // 読めない選択肢を黙って落とすと「選べない選択肢」になる。切り詰め扱いにする。
+      cut = true;
+      continue;
+    }
+    if (parsed.cut) cut = true;
+    options.push(parsed.option);
     if (options.length >= MAX_OPTIONS) break;
   }
 
+  const clampedQuestion = clampText(question, MAX_QUESTION);
+  const clampedHeader = clampText(str(q.header).trim(), MAX_LABEL);
+
   return {
-    header: clampText(str(q.header).trim(), MAX_LABEL),
-    question: clampText(question, MAX_QUESTION),
+    header: clampedHeader.text,
+    question: clampedQuestion.text,
+    truncated: cut || clampedQuestion.cut || clampedHeader.cut,
     multiSelect: q.multiSelect === true || q.multiple === true,
     // 選択肢が無い質問は自由記述しかない。Claude は allowOther を付けてくる。
     allowOther: q.allowOther === true || q.isOther === true || options.length === 0,
@@ -97,12 +142,27 @@ export function parseQuestions(input: unknown): QuestionItem[] | null {
   if (!Array.isArray(raw)) return null;
 
   const out: QuestionItem[] = [];
+  let dropped = raw.length > MAX_QUESTIONS;
   for (const entry of raw) {
     const question = parseQuestion(entry);
-    if (question) out.push(question);
+    if (!question) {
+      // 読めない質問を落とすと「未回答のまま許可」になりうる。全部フォーム不可へ倒す。
+      dropped = true;
+      continue;
+    }
+    out.push(question);
     if (out.length >= MAX_QUESTIONS) break;
   }
-  return out.length > 0 ? out : null;
+  if (out.length === 0) return null;
+  // 1問でも落としたら、残りにも答えさせない(部分回答を上流へ流さない)。
+  return dropped ? out.map((question) => ({ ...question, truncated: true })) : out;
+}
+
+/** 切り詰め/欠落があり、この画面からは答えられない質問を含むか。 */
+export function anyTruncated(questions: readonly QuestionItem[]): boolean {
+  // `=== true` ではなく `!== false` で見る: 古いサーバー(この欄を知らない版)から
+  // 来た項目は undefined になる。その時は「答えられない」側へ倒す。
+  return questions.some((question) => question.truncated !== false);
 }
 
 /** `answers` のキー。header が空/重複なら質問文で代用する。 */
@@ -117,11 +177,35 @@ export function answerKeys(questions: readonly QuestionItem[]): string[] {
   });
 }
 
+/**
+ * 選択肢の表示キー。同じラベルの選択肢が2つあると React のキーが衝突し、
+ * 片方を選ぶともう片方も選ばれたように見える。連番を足して一意にする
+ * (回答値に使うのは `label` のままで、キーは表示の都合)。
+ */
+export function uniqueOptionKeys(options: readonly QuestionOption[]): string[] {
+  const used = new Set<string>();
+  return options.map((option) => {
+    let key = option.label;
+    let n = 1;
+    // 付けた連番が既存のラベルと衝突しないまで進める(例: ["A","A","A #2"])。
+    while (used.has(key)) {
+      n += 1;
+      key = `${option.label} #${n}`;
+    }
+    used.add(key);
+    return key;
+  });
+}
+
 /** 自由記述欄を出すか(選択肢が無い、または「その他」可)。 */
 export function showsTextInput(question: QuestionItem): boolean {
   return question.options.length === 0 || question.allowOther;
 }
 
+/**
+ * 画面の選択状態から見た「答えられるか」。
+ * ワイヤ上の値に対する判定は `isAnsweredValue` と対で保守する(規則をずらさない)。
+ */
 export function isAnswered(
   question: QuestionItem,
   selected: readonly number[],
@@ -129,11 +213,20 @@ export function isAnswered(
 ): boolean {
   if (selected.length > 0) return true;
   if (showsTextInput(question) && otherText.trim().length > 0) return true;
-  // 選択肢が無い質問を空で通すのは、作った側が allowEmpty を明示した時だけ。
-  return question.allowEmpty && question.options.length === 0;
+  // 空で通すのは、作った側が allowEmpty を明示した時だけ
+  // (選択肢の有無は問わない。選択肢つきで allowEmpty の質問も実在する)。
+  return question.allowEmpty;
 }
 
-/** 選んだ選択肢と自由記述から `answers` を組み立てる(コアPWAの質問カードと同じ規則)。 */
+/** サーバー側の判定。`isAnswered` と同じ規則を、送られてきた値に対して適用する。 */
+export function isAnsweredValue(
+  question: QuestionItem,
+  value: string | undefined,
+): value is string {
+  return value !== undefined && (value.length > 0 || question.allowEmpty);
+}
+
+/** 選んだ選択肢と自由記述から `answers` を組み立てる。 */
 export function buildAnswers(
   questions: readonly QuestionItem[],
   selections: QuestionSelections,
@@ -153,11 +246,13 @@ export function buildAnswers(
       answers[keys[i]] = q.multiSelect ? [...labels, other].join(", ") : other;
       return;
     }
-    if (q.allowEmpty && q.options.length === 0) {
-      answers[keys[i]] = "";
+    if (labels.length > 0) {
+      answers[keys[i]] = labels.join(", ");
       return;
     }
-    if (labels.length > 0) answers[keys[i]] = labels.join(", ");
+    // 何も選ばずに空で通すのは、作った側が allowEmpty を明示した時だけ
+    // (選択肢があるのに未選択なら、ここでは空を入れない=送信側の isAnswered で止まる)。
+    if (q.allowEmpty) answers[keys[i]] = "";
   });
   return answers;
 }
@@ -177,7 +272,7 @@ export function allAnswered(
  * サーバー側の受け口。**クライアントの言い分をそのまま上流へ流さない**:
  * - キーは実物の質問に一致するものだけ(知らないキーは捨てずにエラー)
  * - 全質問に回答が揃っていること(欠けたまま allow すると、上流では無回答の許可になる)
- * - 長さを切る
+ * - 長すぎる回答は**切らずに拒否する**(切った文字列は上流の選択肢と一致しない)
  */
 export function sanitizeAnswers(
   questions: readonly QuestionItem[],
@@ -200,13 +295,22 @@ export function sanitizeAnswers(
     if (typeof rawValue !== "string") {
       return { ok: false, message: "回答は文字列で送ってください" };
     }
-    picked.set(index, rawValue.trim().slice(0, MAX_ANSWER));
+    const value = rawValue.trim();
+    // **切らない**。切った文字列は上流の選択肢と一致せず、別の回答として解釈される
+    // (選択肢の切り詰めを画面側で禁じているのと同じ理由)。
+    if (value.length > MAX_ANSWER) {
+      return {
+        ok: false,
+        message: `回答が長すぎます(${MAX_ANSWER}字まで)。スレで答えてください`,
+      };
+    }
+    picked.set(index, value);
   }
 
   const out: Record<string, string> = {};
   for (let i = 0; i < questions.length; i++) {
     const value = picked.get(i);
-    if (value === undefined) {
+    if (!isAnsweredValue(questions[i], value)) {
       return {
         ok: false,
         message: `未回答の質問があります: ${questions[i].question.slice(0, 60)}`,

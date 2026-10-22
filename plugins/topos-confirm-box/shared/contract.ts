@@ -79,6 +79,8 @@ export const ConfirmBoxQuestionSchema = z.object({
   allowOther: z.boolean(),
   allowEmpty: z.boolean(),
   options: z.array(ConfirmBoxQuestionOptionSchema),
+  /** 上限で切り詰めた/落とした質問・選択肢がある。true ならフォームを出さない。 */
+  truncated: z.boolean().default(true),
 });
 export type ConfirmBoxQuestion = z.infer<typeof ConfirmBoxQuestionSchema>;
 

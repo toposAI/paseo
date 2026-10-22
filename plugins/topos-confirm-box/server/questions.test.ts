@@ -13,12 +13,19 @@ import { describe, it } from "node:test";
 import {
   allAnswered,
   answerKeys,
+  anyTruncated,
   buildAnswers,
   parseQuestions,
   questionsToText,
   sanitizeAnswers,
+  uniqueOptionKeys,
 } from "../shared/questions.ts";
-import { permitQuestions, permitsToItems, questionResponse } from "./permits.ts";
+import {
+  answerlessAllowBlocked,
+  permitQuestions,
+  permitsToItems,
+  questionResponse,
+} from "./permits.ts";
 
 const claudeInput = {
   questions: [
@@ -71,6 +78,84 @@ describe("parseQuestions", () => {
     assert.equal(parseQuestions({ command: "ls" }), null);
     assert.equal(parseQuestions(null), null);
     assert.equal(parseQuestions({ questions: [] }), null);
+  });
+});
+
+describe("切り詰め(truncated)", () => {
+  it("通常の質問は truncated=false", () => {
+    const questions = parseQuestions(claudeInput);
+    assert.ok(questions);
+    assert.equal(anyTruncated(questions), false);
+  });
+
+  it("長すぎるラベルは切り詰め、回答に使えないので truncated を立てる", () => {
+    const longLabel = "あ".repeat(500);
+    const questions = parseQuestions({
+      questions: [{ question: "Q?", header: "H", options: [{ label: longLabel }] }],
+    });
+    assert.ok(questions);
+    // `…` は付けない(上流のラベルと一致しなくなる)。
+    assert.equal(questions[0].options[0].label.length, 200);
+    assert.doesNotMatch(questions[0].options[0].label, /…$/);
+    assert.equal(questions[0].truncated, true);
+    assert.equal(anyTruncated(questions), true);
+  });
+
+  it("選択肢の数が上限を超えたら truncated", () => {
+    const questions = parseQuestions({
+      questions: [
+        {
+          question: "Q?",
+          header: "H",
+          options: Array.from({ length: 20 }, (_, i) => ({ label: `o${i}` })),
+        },
+      ],
+    });
+    assert.ok(questions);
+    assert.equal(questions[0].truncated, true);
+  });
+
+  it("読めない質問を1つでも落としたら、残りも truncated にして部分回答を防ぐ", () => {
+    const questions = parseQuestions({
+      questions: [
+        { header: "H", options: [] },
+        { question: "Q?", header: "H2", options: [] },
+      ],
+    });
+    assert.ok(questions);
+    assert.equal(questions.length, 1);
+    assert.equal(anyTruncated(questions), true);
+  });
+});
+
+describe("uniqueOptionKeys", () => {
+  it("同じラベルでもキーが衝突しない", () => {
+    const keys = uniqueOptionKeys([
+      { label: "A", description: null },
+      { label: "A", description: null },
+    ]);
+    assert.deepEqual(keys, ["A", "A #2"]);
+  });
+
+  it("連番の候補が既存ラベルと衝突しても一意にする", () => {
+    const keys = uniqueOptionKeys([
+      { label: "A", description: null },
+      { label: "A", description: null },
+      { label: "A #2", description: null },
+    ]);
+    assert.equal(new Set(keys).size, 3);
+  });
+});
+
+describe("古いサーバー由来の項目(truncated が無い)", () => {
+  it("undefined は「答えられない」側に倒す", () => {
+    const questions = parseQuestions(claudeInput);
+    assert.ok(questions);
+    // 欄を知らない版が返した項目を模す。
+    const stale = questions.map((question) =>
+      Object.assign({}, question, { truncated: undefined as never }),
+    );
+    assert.equal(anyTruncated(stale), true);
   });
 });
 
@@ -153,6 +238,14 @@ describe("sanitizeAnswers", () => {
     // @ts-expect-error 実行時の防御(クライアントは何でも送れる)
     assert.equal(sanitizeAnswers(questions, { 方式: 1 }).ok, false);
   });
+
+  it("長すぎる回答は切らずに拒否する(切ると別の回答になる)", () => {
+    const tooLong = sanitizeAnswers(questions, { 方式: "あ".repeat(501) });
+    assert.equal(tooLong.ok, false);
+    if (!tooLong.ok) assert.match(tooLong.message, /スレで答えて/);
+    // 上限ちょうどは通る。
+    assert.equal(sanitizeAnswers(questions, { 方式: "あ".repeat(500) }).ok, true);
+  });
 });
 
 describe("questionsToText", () => {
@@ -225,6 +318,78 @@ describe("questionResponse", () => {
 
   it("permitQuestions は kind が question の時だけ拾う", () => {
     assert.equal(permitQuestions({ kind: "tool", input: claudeInput }), null);
+    // kind が無い(または空)承認待ちは質問として扱わない。input に questions が
+    // あっても、別ツールの入力をフォームにしてはいけない。
+    assert.equal(permitQuestions({ input: claudeInput }), null);
+    assert.equal(permitQuestions({ kind: "", input: claudeInput }), null);
     assert.ok(permitQuestions({ kind: "question", input: claudeInput }));
+  });
+
+  it("切り詰めが起きた質問は回答を受け付けない(上流の実物と一致しない)", () => {
+    const longPerm = {
+      kind: "question",
+      input: {
+        questions: [
+          {
+            question: "Q?",
+            header: "H",
+            options: Array.from({ length: 20 }, (_, i) => ({ label: `o${i}` })),
+          },
+        ],
+      },
+    };
+    const built = questionResponse(longPerm, { H: "o0" });
+    assert.equal(built.ok, false);
+    if (!built.ok) assert.match(built.message, /スレで答えて/);
+  });
+});
+
+describe("answerlessAllowBlocked", () => {
+  it("kind=question なら回答なしの許可を止める(質問が0件に読めても止める)", () => {
+    // input.questions が読めない(配列でない)ので permitQuestions は null を返すが、
+    // kind が question である以上、回答なしの許可は通してはいけない。
+    const unreadable = { kind: "question", input: { questions: "壊れた" } };
+    assert.equal(permitQuestions(unreadable), null);
+    assert.equal(answerlessAllowBlocked(unreadable, { behavior: "allow" }), true);
+    assert.equal(answerlessAllowBlocked(unreadable, { behavior: "deny" }), false);
+  });
+
+  it("質問でない承認待ちの許可は止めない", () => {
+    assert.equal(
+      answerlessAllowBlocked({ kind: "tool", input: claudeInput }, { behavior: "allow" }),
+      false,
+    );
+    assert.equal(answerlessAllowBlocked({ input: claudeInput }, { behavior: "allow" }), false);
+  });
+});
+
+describe("allowEmpty", () => {
+  const empty = parseQuestions({
+    questions: [
+      { question: "メモは?", header: "メモ", allowEmpty: true, options: [{ label: "a" }] },
+      { question: "必須は?", header: "必須", options: [{ label: "b" }] },
+    ],
+  });
+  if (!empty) throw new Error("fixture");
+
+  it("allowEmpty の質問だけ空のまま送れる", () => {
+    assert.equal(allAnswered(empty, {}, { 0: "" }), false);
+    assert.equal(allAnswered(empty, { 0: [] }, { 0: "" }), false);
+    const onlyEmpty = parseQuestions({
+      questions: [
+        { question: "メモは?", header: "メモ", allowEmpty: true, options: [{ label: "a" }] },
+      ],
+    });
+    assert.ok(onlyEmpty);
+    assert.equal(allAnswered(onlyEmpty, {}, {}), true);
+    assert.deepEqual(buildAnswers(onlyEmpty, {}, {}), { メモ: "" });
+    // 選んだなら空ではなく選択肢が載る(allowEmpty は「空でもよい」の意味)。
+    assert.deepEqual(buildAnswers(onlyEmpty, { 0: [0] }, {}), { メモ: "a" });
+  });
+
+  it("allowEmpty でない質問は空文字を受け付けない", () => {
+    // メモは allowEmpty なので空で通る。必須は空だと弾く。
+    assert.equal(sanitizeAnswers(empty, { メモ: "", 必須: "b" }).ok, true);
+    assert.equal(sanitizeAnswers(empty, { メモ: "", 必須: "" }).ok, false);
   });
 });

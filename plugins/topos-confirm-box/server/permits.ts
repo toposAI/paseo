@@ -13,7 +13,12 @@
  * (渡ってくる実体は `AgentSnapshotPayload` / `AgentPermissionRequestPayload`)。
  */
 import type { ConfirmBoxItem, ConfirmBoxOption } from "../shared/contract.js";
-import { parseQuestions, questionsToText, sanitizeAnswers } from "../shared/questions.js";
+import {
+  anyTruncated,
+  parseQuestions,
+  questionsToText,
+  sanitizeAnswers,
+} from "../shared/questions.js";
 import type { QuestionItem } from "../shared/questions.js";
 
 export interface PermitActionLike {
@@ -115,11 +120,22 @@ export function inputGist(input: unknown): string {
 
 /** 承認待ちが質問(AskUserQuestion / opencode の question)なら、その中身を返す。 */
 export function permitQuestions(perm: PermitRequestLike): QuestionItem[] | null {
-  const kind = s(perm.kind).trim();
-  // kind を持つプロバイダは "question" の時だけ質問として扱う
-  // (別ツールの input にたまたま questions があっても拾わない)。
-  if (kind && kind !== "question") return null;
+  // kind が "question" の時だけ質問として扱う。kind が無い/別の値なら、input に
+  // たまたま questions があっても拾わない(別ツールの入力をフォームにしない)。
+  if (s(perm.kind).trim() !== "question") return null;
   return parseQuestions(perm.input);
+}
+
+/**
+ * 質問の承認待ちに「回答なしの許可」を返してはいけない(上流では無回答のまま許可になる)。
+ * 判定は **kind で直接**行う: `permitQuestions` は質問が0件に読めると null を返すため、
+ * それに頼ると素通りする。拒否は明示的な意思なので通す。
+ */
+export function answerlessAllowBlocked(
+  perm: PermitRequestLike,
+  response: { behavior: "allow" | "deny" },
+): boolean {
+  return response.behavior !== "deny" && s(perm.kind).trim() === "question";
 }
 
 /** 質問への回答を `updatedInput.answers` に載せた応答。上流の質問を実物で引き直して組み立てる。 */
@@ -131,6 +147,14 @@ export function questionResponse(
   | { ok: false; message: string } {
   const questions = permitQuestions(perm);
   if (!questions) return { ok: false, message: "この承認待ちは質問ではありません" };
+  // 切り詰めた質問/選択肢は上流の実物と一致しない。回答値として送ると別の選択肢を
+  // 選んだことになるので、この経路では受け付けない(スレで答えてもらう)。
+  if (anyTruncated(questions)) {
+    return {
+      ok: false,
+      message: "この質問は長すぎて確認箱からは答えられません。スレで答えてください",
+    };
+  }
   const sanitized = sanitizeAnswers(questions, answers);
   if (!sanitized.ok) return { ok: false, message: sanitized.message };
   const input =
