@@ -110,9 +110,10 @@ export function BugIcon({ color, size = 24 }: IconProps) {
       legL2: line(5, 15.15, 2, 1.7),
       legR1: line(17, 11.15, 3, 1.7),
       legR2: line(17, 15.15, 2, 1.7),
-      // 触角(斜め)は回転させた細い棒で描く
-      antL: { ...line(6.4, 6.4, 3, 1.4), transform: [{ rotate: "-45deg" }] },
-      antR: { ...line(14.6, 6.4, 3, 1.4), transform: [{ rotate: "45deg" }] },
+      // 触角は元の path `M8 8L6 6`(左)・`M16 8l2-2`(右)と同じ向き=外へ開く。
+      // 回転は時計回りが正なので、左は +45°・右は -45°(逆にすると内側へ寄る)。
+      antL: { ...line(6.4, 6.4, 3, 1.4), transform: [{ rotate: "45deg" }] },
+      antR: { ...line(14.6, 6.4, 3, 1.4), transform: [{ rotate: "-45deg" }] },
     };
   }, [color, size, u]);
   return (

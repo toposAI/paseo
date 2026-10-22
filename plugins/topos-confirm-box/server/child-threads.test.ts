@@ -160,3 +160,43 @@ test("親(子司令塔)ごとにまとめ、司令塔自身の行は出さず、
   );
   assert.equal(list[0].parentTitle, "C");
 });
+
+test("確認済みは個別 ack のときだけ(すべて既読=ackall では真にならない)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-"));
+  fs.writeFileSync(
+    path.join(dir, "child_threads.json"),
+    JSON.stringify({
+      threads: [
+        row({ agent_id: "a1", status: "完了", summary_item_id: "bx-a1" }),
+        row({ agent_id: "a2", status: "完了", summary_item_id: "bx-a2" }),
+      ],
+    }),
+  );
+  const items = [
+    { id: "bx-a1", background: "s1", state: "approved" as const },
+    { id: "bx-a2", background: "s2", state: "read" as const },
+  ];
+  // a1 は個別 ack、a2 は ackall だけ。ackall は今の書き手では書かないが、古い行が残っていても数えない。
+  fs.writeFileSync(
+    path.join(dir, "events-202610.jsonl"),
+    [
+      JSON.stringify({ t: "ack", id: "bx-a1", ts: 1, action: "approve" }),
+      JSON.stringify({ t: "ackall", ts: 2, action: "read", before: 2 }),
+    ].join("\n"),
+  );
+  const byId = new Map(readChildThreads(dir, items).map((t) => [t.agentId, t]));
+  assert.equal(byId.get("a1")?.summaryAcked, true);
+  assert.equal(byId.get("a2")?.summaryAcked, false);
+  // 表示用の state は箱の値のまま(既読という事実は消さない)
+  assert.equal(byId.get("a2")?.summaryState, "read");
+});
+
+test("events ファイルが無ければ誰も確認済みにならない", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-"));
+  fs.writeFileSync(
+    path.join(dir, "child_threads.json"),
+    JSON.stringify({ threads: [row({ agent_id: "a1", status: "完了", summary_item_id: "bx" })] }),
+  );
+  const [t] = readChildThreads(dir, [{ id: "bx", background: "s", state: "new" as const }]);
+  assert.equal(t.summaryAcked, false);
+});

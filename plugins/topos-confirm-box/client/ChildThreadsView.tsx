@@ -10,6 +10,26 @@ import type { ChildThreadsListOutput } from "../shared/child-threads.js";
 
 const REFRESH_MS = 30_000;
 
+/** 見出し文。読み込み中/エラー/件数の3状態をここで畳む(JSX に入れ子の三項を書かない)。 */
+function describe(error: string | null, data: ChildThreadsListOutput | null): string {
+  if (error) return `取得できません: ${error}`;
+  if (!data) return "読み込み中…";
+  return `子スレ ${data.threads.length} 件`;
+}
+
+/**
+ * 完了まとめの確認状態。**個別 ack** で判定する(アーカイブ条件と同じ定義)。
+ * 状態が取れない/未完了なら何も出さない。
+ */
+function summaryNote(thread: {
+  status: string;
+  summaryItemId: string | null;
+  summaryAcked: boolean;
+}): string {
+  if (thread.status !== "完了" || !thread.summaryItemId) return "";
+  return thread.summaryAcked ? " ・ まとめ確認済み" : " ・ まとめ未確認";
+}
+
 export function ChildThreadsView({
   theme,
   focusId,
@@ -55,13 +75,7 @@ export function ChildThreadsView({
 
   return (
     <ScrollView style={s.root} contentContainerStyle={s.body}>
-      <Text style={s.muted}>
-        {error
-          ? `取得できません: ${error}`
-          : data
-            ? `子スレ ${data.threads.length} 件`
-            : "読み込み中…"}
-      </Text>
+      <Text style={s.muted}>{describe(error, data)}</Text>
       {(data?.threads ?? [])
         .slice()
         .sort((a, b) => Number(b.agentId === focusId) - Number(a.agentId === focusId))
@@ -71,11 +85,7 @@ export function ChildThreadsView({
             <Text style={s.muted}>
               {t.status}
               {t.machineState ? `(${t.machineState})` : ""}
-              {t.status === "完了" && t.summaryState
-                ? t.summaryState === "new"
-                  ? " ・ まとめ未確認"
-                  : " ・ まとめ確認済み"
-                : ""}
+              {summaryNote(t)}
             </Text>
             {t.request ? <Text style={s.text}>{t.request}</Text> : null}
             {t.status === "完了" ? (

@@ -11,6 +11,7 @@
  */
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
+  CHILD_THREAD_REPORT_SOURCE,
   KIND_LABEL,
   compareConfirmBoxItems,
   confirmBoxAckAllRpc,
@@ -22,11 +23,12 @@ import {
   cardChatListRpc,
   cardChatSayRpc,
   countUnreadNotifications,
+  isNotificationItem,
   priorityListRpc,
   priorityMoveRpc,
   prioritySayRpc,
 } from "./shared/contract.js";
-import { appendAck, appendAckAll } from "./server/ack.js";
+import { appendAck } from "./server/ack.js";
 import { feedbackReportsListRpc, countNewReports } from "./shared/feedback.js";
 import { readFeedbackReports } from "./server/feedback.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
@@ -120,8 +122,9 @@ export default function contribute(server: PluginServerContext) {
     }
     let childDone = 0;
     try {
+      // 画面の「未確認」と同じ定義(個別 ack が無い)。一覧とバッジの数が食い違わないようにする。
       childDone = readChildThreads(dir, items).filter(
-        (t) => t.status === "完了" && t.summaryState !== "read" && t.summaryState !== "approved",
+        (t) => t.status === "完了" && !t.summaryAcked,
       ).length;
     } catch {
       childDone = 0;
@@ -138,9 +141,28 @@ export default function contribute(server: PluginServerContext) {
     };
   });
 
-  server.handle(confirmBoxAckRpc, async (input) => {
+  // 押された項目を**箱に実在するものと突き合わせて**から書く(クライアントの言い分で任意の id を閉じない)。
+  // 種類と操作も閉じた列挙で縛る: 通知は既読のみ、子スレの完了まとめは承認のみ、それ以外はこの画面から閉じない
+  // (判断待ちの項目をここから既読にすると、誰も選んでいないのに「決まった」扱いになってしまう)。
+  function ackReject(item: ConfirmBoxItem | undefined, action: "read" | "approve"): string | null {
+    if (!item) return "この項目は確認箱に見つかりません(消えた可能性があります)";
+    if (item.source === CHILD_THREAD_REPORT_SOURCE) {
+      return action === "approve" ? null : "完了報告は「確認」でのみ閉じられます";
+    }
+    if (isNotificationItem(item))
+      return action === "read" ? null : "通知は既読でしか閉じられません";
+    return "判断が必要な項目は一覧から選んで答えてください(この画面では閉じられません)";
+  }
+
+  server.handle(confirmBoxAckRpc, async (input, ctx) => {
     try {
-      appendAck(resolveConfirmBoxDir(), input.id, input.action);
+      const dir = resolveConfirmBoxDir();
+      const reject = ackReject(
+        (await collect(ctx)).items.find((i) => i.id === input.id),
+        input.action,
+      );
+      if (reject) return { ok: false, message: reject };
+      appendAck(dir, input.id, input.action);
       return {
         ok: true,
         message: input.action === "approve" ? "確認しました" : "既読にしました",
@@ -150,10 +172,15 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
+  // 「通知」タブの「すべて既読」。`ackall` は判断待ち(選択肢あり)まで既読にしてしまうので使わず、
+  // いま通知タブに出ている未読だけを1件ずつ ack する(見えていないものを既読にしない)。
   server.handle(confirmBoxAckAllRpc, async () => {
     try {
-      appendAckAll(resolveConfirmBoxDir());
-      return { ok: true, message: "すべて既読にしました" };
+      const dir = resolveConfirmBoxDir();
+      const { items } = readConfirmBox(dir);
+      const unread = items.filter((i) => isNotificationItem(i) && i.state === "new");
+      for (const item of unread) appendAck(dir, item.id, "read");
+      return { ok: true, message: `通知 ${unread.length}件を既読にしました` };
     } catch (error) {
       return { ok: false, message: `記録できません: ${(error as Error).message}` };
     }

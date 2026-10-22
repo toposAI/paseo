@@ -60,20 +60,20 @@ test("複数ディレクトリを読み、新しい順に返す。読めない�
   fs.mkdirSync(path.join(a, "reports"), { recursive: true });
   fs.mkdirSync(path.join(b, "reports"), { recursive: true });
   fs.writeFileSync(
-    path.join(a, "reports", "fb-20261020-000000-aaaa.json"),
-    JSON.stringify(report({ id: "fb-20261020-000000-aaaa", created_at: "2026-10-20T00:00:00Z" })),
+    path.join(a, "reports", "fb-20261020-000000-aaaaaa.json"),
+    JSON.stringify(report({ id: "fb-20261020-000000-aaaaaa", created_at: "2026-10-20T00:00:00Z" })),
   );
   fs.writeFileSync(
-    path.join(b, "reports", "fb-20261021-000000-bbbb.json"),
-    JSON.stringify(report({ id: "fb-20261021-000000-bbbb", created_at: "2026-10-21T00:00:00Z" })),
+    path.join(b, "reports", "fb-20261021-000000-bbbbbb.json"),
+    JSON.stringify(report({ id: "fb-20261021-000000-bbbbbb", created_at: "2026-10-21T00:00:00Z" })),
   );
   // 壊れた1件は飛ばす
-  fs.writeFileSync(path.join(b, "reports", "fb-20261022-000000-cccc.json"), "{not json");
+  fs.writeFileSync(path.join(b, "reports", "fb-20261022-000000-cccccc.json"), "{not json");
 
   const { reports, sources } = readFeedbackReports([a, b, path.join(root, "missing")], labels);
   assert.deepEqual(
     reports.map((r) => r.id),
-    ["fb-20261021-000000-bbbb", "fb-20261020-000000-aaaa"],
+    ["fb-20261021-000000-bbbbbb", "fb-20261020-000000-aaaaaa"],
   );
   assert.equal(reports[0].origin, "trial");
   assert.equal(sources.filter((s) => s.ok).length, 2);

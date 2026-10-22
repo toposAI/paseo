@@ -23,8 +23,13 @@ export const ChildThreadSchema = z.object({
   summaryItemId: z.string().nullable(),
   /** 完了まとめの本文(箱の item の background)。箱から引けなければ null。 */
   summary: z.string().nullable(),
-  /** 完了まとめの確認状態(箱の state)。確認済み=read/approved。 */
+  /** 完了まとめの確認状態(箱の state)。表示用(既読=read を含む)。 */
   summaryState: z.string().nullable(),
+  /**
+   * 完了まとめを**個別に** ack 済みか(`t:"ack"` イベントがあるか)。`ackall`(すべて既読)では真にならない。
+   * アーカイブ条件(`child_thread_registry._directly_acked_ids`)と同じ定義。確認済みの判定はこちらを使う。
+   */
+  summaryAcked: z.boolean().default(false),
   updatedAt: z.number(),
   /** 親(子司令塔)のagent id。親が無い/不明は null(「その他」グループ)。 */
   parentAgentId: z.string().nullable().default(null),

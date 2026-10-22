@@ -17,6 +17,7 @@ import {
 } from "../shared/child-threads.js";
 import type { ChildThread, ChildThreadStatus } from "../shared/child-threads.js";
 import type { ConfirmBoxItem } from "../shared/contract.js";
+import { parseJsonl } from "./normalize.js";
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
 export const CHILD_THREADS_FILE = "child_threads.json";
@@ -24,48 +25,84 @@ export const CHILD_THREADS_FILE = "child_threads.json";
 export function normalizeChildThreads(
   raw: unknown,
   boxItems: readonly Pick<ConfirmBoxItem, "id" | "background" | "state">[] = [],
+  /** 個別 ack 済みの item id(`t:"ack"` の行だけ。ackall は含めない)。 */
+  ackedIds: ReadonlySet<string> = new Set(),
 ): ChildThread[] {
   const list = raw && typeof raw === "object" ? (raw as { threads?: unknown }).threads : undefined;
   if (!Array.isArray(list)) return [];
   const byId = new Map(boxItems.map((i) => [i.id, i]));
-  const out: ChildThread[] = [];
-  for (const r of list) {
-    if (!r || typeof r !== "object") continue;
-    const o = r as Record<string, unknown>;
-    if (o.archived === true) continue;
-    const agentId = str(o.agent_id).slice(0, 200);
-    if (!agentId) continue;
-    const status = (CHILD_THREAD_STATUSES as readonly string[]).includes(o.status as string)
-      ? (o.status as ChildThreadStatus)
-      : "実装中";
-    const summaryItemId = str(o.summary_item_id).slice(0, 64) || null;
-    const item = summaryItemId ? byId.get(summaryItemId) : undefined;
-    out.push({
-      agentId,
-      title: str(o.title).slice(0, 120) || agentId.slice(0, 8),
-      status,
-      machineState: str(o.machine_state).slice(0, 40) || null,
-      request: str(o.request).slice(0, 300),
-      summaryItemId,
-      summary: item ? item.background : null,
-      summaryState: item ? item.state : null,
-      updatedAt: typeof o.updated_at === "number" ? o.updated_at : 0,
-      parentAgentId: str(o.parent_agent_id).slice(0, 200) || null,
-      parentTitle: str(o.parent_title).slice(0, 120) || null,
+  const out = list
+    .filter(
+      (r): r is Record<string, unknown> => !!r && typeof r === "object" && r.archived !== true,
+    )
+    .flatMap((o) => {
+      const agentId = str(o.agent_id).slice(0, 200);
+      if (!agentId) return [];
+      const status = (CHILD_THREAD_STATUSES as readonly string[]).includes(o.status as string)
+        ? (o.status as ChildThreadStatus)
+        : "実装中";
+      const summaryItemId = str(o.summary_item_id).slice(0, 64) || null;
+      const item = summaryItemId ? byId.get(summaryItemId) : undefined;
+      return [
+        {
+          agentId,
+          title: str(o.title).slice(0, 120) || agentId.slice(0, 8),
+          status,
+          machineState: str(o.machine_state).slice(0, 40) || null,
+          request: str(o.request).slice(0, 300),
+          summaryItemId,
+          summary: item ? item.background : null,
+          summaryState: item ? item.state : null,
+          summaryAcked: summaryItemId !== null && ackedIds.has(summaryItemId),
+          updatedAt: typeof o.updated_at === "number" ? o.updated_at : 0,
+          parentAgentId: str(o.parent_agent_id).slice(0, 200) || null,
+          parentTitle: str(o.parent_title).slice(0, 120) || null,
+        },
+      ];
     });
-  }
   // 子を持つ行(司令塔)はグループ見出しになるので行としては出さない(固定済みと二重に出ない)。
   const parents = new Set(out.map((t) => t.parentAgentId).filter((id) => id !== null));
   return sortChildThreadsGrouped(out.filter((t) => !parents.has(t.agentId)));
 }
 
+/**
+ * 箱の `events-*.jsonl` から**個別** ack(`t:"ack"`)された item id だけを集める。
+ * `ackall` は入れない(Python 側 `child_thread_registry._directly_acked_ids` と同じ判定)。
+ * ファイルが読めなければ空集合(一覧は止まらない)。
+ */
+export function readDirectlyAckedIds(dir: string): Set<string> {
+  const ids = new Set<string>();
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir).filter((n) => /^events-\d{6}\.jsonl$/.test(n));
+  } catch {
+    return ids;
+  }
+  for (const name of names) {
+    let text = "";
+    try {
+      text = fs.readFileSync(path.join(dir, name), "utf8");
+    } catch {
+      continue;
+    }
+    for (const e of parseJsonl(text)) {
+      if (e.t === "ack" && typeof e.id === "string" && e.id) ids.add(e.id);
+    }
+  }
+  return ids;
+}
+
 export function readChildThreads(
   dir: string,
   boxItems: readonly Pick<ConfirmBoxItem, "id" | "background" | "state">[] = [],
+  ackedIds: ReadonlySet<string> = readDirectlyAckedIds(dir),
 ): ChildThread[] {
   try {
     const raw = JSON.parse(fs.readFileSync(path.join(dir, CHILD_THREADS_FILE), "utf8"));
-    return applyChildThreadOrder(normalizeChildThreads(raw, boxItems), readChildThreadOrder(dir));
+    return applyChildThreadOrder(
+      normalizeChildThreads(raw, boxItems, ackedIds),
+      readChildThreadOrder(dir),
+    );
   } catch {
     return [];
   }

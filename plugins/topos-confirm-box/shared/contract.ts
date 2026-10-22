@@ -334,9 +334,12 @@ export function countOpen(items: readonly ConfirmBoxItem[]): number {
  * 通知タブに流す項目。判定は「選択肢を持たない」= ユーザーが決めることが無いお知らせ。
  * 家族報告の新着通知と子スレの完了まとめは専用タブがあるので除く(同じ内容を2箇所に出さない)。
  */
+/** 子スレの完了まとめを投函する側の source(書き手は `child_thread_registry.py` の `SOURCE`)。 */
+export const CHILD_THREAD_REPORT_SOURCE = "child_thread_report";
+
 export const NOTIFICATION_EXCLUDED_SOURCES: readonly string[] = [
   "topos_feedback",
-  "child_thread_report",
+  CHILD_THREAD_REPORT_SOURCE,
 ];
 
 export function isNotificationItem(item: ConfirmBoxItem): boolean {

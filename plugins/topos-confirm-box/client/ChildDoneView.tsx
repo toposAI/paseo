@@ -136,7 +136,8 @@ export function ChildDoneView({
   );
 
   const done = useMemo(() => (data?.threads ?? []).filter((t) => t.status === "完了"), [data]);
-  const isAcked = (t: ChildThread) => t.summaryState === "read" || t.summaryState === "approved";
+  // 「確認済み」は**個別の ack** で判定する(アーカイブ条件と同じ)。「すべて既読」ではアーカイブされないため。
+  const isAcked = (t: ChildThread) => t.summaryAcked;
   const visible = showAcked ? done : done.filter((t) => !isAcked(t));
   const unconfirmed = done.filter((t) => !isAcked(t)).length;
   const header = describe(error, data !== null, done.length, unconfirmed);
@@ -244,10 +245,17 @@ function DoneCard({
         ) : null}
       </View>
       {!acked && !thread.summaryItemId ? (
-        <Text style={styles.meta}>完了まとめが確認箱に無いため確認できません</Text>
+        <Text style={styles.meta}>
+          完了まとめが確認箱に無いため、ここからは確認できません。「スレを開く」から手でアーカイブしてください。
+        </Text>
       ) : null}
       {!acked && thread.summaryItemId ? (
-        <Text style={styles.meta}>確認すると数分以内にアーカイブされます</Text>
+        <Text style={styles.meta}>
+          確認すると数分以内にアーカイブされます(アーカイブは既存の定期処理が行います)。
+        </Text>
+      ) : null}
+      {acked ? (
+        <Text style={styles.meta}>アーカイブ待ちです(数分以内に一覧から消えます)</Text>
       ) : null}
     </View>
   );

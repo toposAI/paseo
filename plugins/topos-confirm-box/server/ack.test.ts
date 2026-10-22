@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { appendAck, appendAckAll, eventsFileName } from "./ack.js";
+import { appendAck, eventsFileName } from "./ack.js";
 import { readConfirmBox } from "./box.js";
 
 function tmpDir(): string {
@@ -32,16 +32,15 @@ test("ack(approve) は承認として畳まれる", () => {
   assert.equal(items.find((i) => i.id === "a2")?.state, "approved");
 });
 
-test("ackall は before 以前の未読だけを既読にする(後から来た項目は未読のまま)", () => {
+test("ack は他の項目に波及しない(「すべて既読」も1件ずつの ack で書く)", () => {
   const dir = tmpDir();
   putItem(dir, "old", { ts: 1_700_000_000_000 });
-  appendAckAll(dir, 1_700_000_001_000);
-  // 同じファイルへ新しい項目を追記(= ackall より後)
   fs.appendFileSync(
     path.join(dir, eventsFileName(Date.now())),
     `${JSON.stringify({ t: "item", id: "new", ts: 1_700_000_002_000, subject: "s" })}\n`,
     "utf8",
   );
+  appendAck(dir, "old", "read", 1_700_000_001_000);
   const { items } = readConfirmBox(dir);
   assert.equal(items.find((i) => i.id === "old")?.state, "read");
   assert.equal(items.find((i) => i.id === "new")?.state, "new");
