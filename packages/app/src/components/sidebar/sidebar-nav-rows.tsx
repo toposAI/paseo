@@ -30,6 +30,8 @@ interface SidebarNavRowProps {
 interface SidebarNavRowsProps extends SidebarNavRowProps {
   /** Style for the group wrapper, which the sidebar owns. */
   style?: StyleProp<ViewStyle>;
+  /** When set, only these builtin rows render. Plugin items are unaffected. */
+  only?: readonly BuiltinSidebarNavId[];
 }
 
 /**
@@ -37,9 +39,15 @@ interface SidebarNavRowsProps extends SidebarNavRowProps {
  * `sidebarNavItems` preference. Renders nothing — not even the bordered group
  * wrapper — when every item is hidden.
  */
-export function SidebarNavRows({ style, onBeforeNavigate }: SidebarNavRowsProps) {
+export function SidebarNavRows({ style, onBeforeNavigate, only }: SidebarNavRowsProps) {
   const { items } = useSidebarNavItems("header");
-  const visibleItems = useMemo(() => items.filter((item) => item.visible), [items]);
+  const visibleItems = useMemo(
+    () =>
+      items.filter(
+        (item) => item.visible && (item.kind !== "builtin" || !only || only.includes(item.id)),
+      ),
+    [items, only],
+  );
   const groupRef = useRef<View | null>(null);
 
   if (visibleItems.length === 0) return null;

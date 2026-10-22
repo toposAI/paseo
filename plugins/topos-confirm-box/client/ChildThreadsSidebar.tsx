@@ -7,7 +7,7 @@
  */
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Text } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useRpc, type PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { SidebarReorderableList, SidebarRow } from "@getpaseo/plugin/client/ui";
 import { childThreadsListRpc, childThreadsSetOrderRpc } from "../shared/child-threads.js";
@@ -148,6 +148,24 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
   }, []);
   const groups = useMemo(() => groupThreads(threads), [threads]);
 
+  // グループ見出し(親=司令塔)は司令塔スレを開く。「その他」だけは従来どおり開閉。
+  const openAgent = navigation?.openAgent;
+  const openGroup = useCallback(
+    (key: string) => {
+      if (!key) {
+        toggleGroup(key);
+        return;
+      }
+      if (openAgent) {
+        openAgent({ agentId: key, serverId: props.host.id });
+        return;
+      }
+      // navigationの無い古いホストは一覧画面へ退避。
+      openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: { focusId: key } });
+    },
+    [openAgent, openScreen, props.host.id, toggleGroup],
+  );
+
   const focusId = (currentScreen?.params as { focusId?: string } | undefined)?.focusId;
   const onScreen = currentScreen?.screenId === CHILD_THREADS_SCREEN_ID;
 
@@ -189,6 +207,7 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
           group={g}
           open={!collapsed.has(g.key)}
           onToggle={toggleGroup}
+          onOpenCoordinator={openGroup}
           onDragBegin={onDragBegin}
           onReorderGroup={onReorderGroup}
           renderThread={renderThread}
@@ -210,6 +229,7 @@ function ThreadGroupSection({
   group,
   open,
   onToggle,
+  onOpenCoordinator,
   onDragBegin,
   onReorderGroup,
   renderThread,
@@ -217,23 +237,50 @@ function ThreadGroupSection({
   group: ThreadGroup;
   open: boolean;
   onToggle: (key: string) => void;
+  /** Opens the group's coordinator agent; absent on older hosts. */
+  onOpenCoordinator?: (key: string) => void;
   onDragBegin: () => void;
   onReorderGroup: (key: string, keys: string[]) => void;
   renderThread: (t: ChildThread) => React.ReactElement;
 }) {
-  const press = useCallback(() => onToggle(group.key), [group.key, onToggle]);
   const reorder = useCallback(
     (keys: string[]) => onReorderGroup(group.key, keys),
     [group.key, onReorderGroup],
   );
-  const trailing = useMemo(() => <Text>{group.threads.length}</Text>, [group.threads.length]);
+  // 純正の固定済み一覧を外したので、司令塔(親)行そのものが司令塔スレへの入口になる。
+  // 開閉は行末のケアットだけが担う(行の押下と開閉を分ける)。
+  const openCoordinator = useCallback(() => {
+    if (!onOpenCoordinator) {
+      onToggle(group.key);
+      return;
+    }
+    onOpenCoordinator(group.key);
+  }, [group.key, onOpenCoordinator, onToggle]);
+  const toggle = useCallback(() => onToggle(group.key), [group.key, onToggle]);
+  const trailing = useMemo(
+    () => (
+      <View style={styles.trailing}>
+        <Text>{group.threads.length}</Text>
+        <Pressable
+          onPress={toggle}
+          testID={`child-group-toggle-${group.key || "other"}`}
+          accessibilityRole="button"
+          accessibilityLabel={open ? `${group.title}をたたむ` : `${group.title}を開く`}
+          hitSlop={8}
+        >
+          <Text style={styles.chevron}>{open ? "▾" : "▸"}</Text>
+        </Pressable>
+      </View>
+    ),
+    [group.key, group.threads.length, group.title, open, toggle],
+  );
   return (
     <>
       <SidebarRow
         id={`child-group-${group.key || "other"}`}
-        icon={open ? "ChevronDown" : "ChevronRight"}
+        icon="ListTodo"
         label={group.title}
-        onPress={press}
+        onPress={openCoordinator}
         trailing={trailing}
       />
       {open ? (
@@ -301,3 +348,14 @@ function ThreadRow({
     />
   );
 }
+
+const styles = StyleSheet.create({
+  trailing: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  chevron: {
+    fontSize: 11,
+  },
+});
