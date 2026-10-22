@@ -105,6 +105,12 @@ export const ConfirmBoxItemSchema = z.object({
   state: ConfirmBoxStateSchema,
   /** 緊急(push対象)。並び順には使わない。 */
   urgency: z.enum(["urgent", "normal"]),
+  /**
+   * 判断印(許可リスト方式)。投函側が `kind="judgment"` で投函した項目にだけ `"judgment": true` が付く
+   * (箱の行・中間形式の行のどちらも同じフィールド名)。**選択肢の有無では判断と判定しない**。
+   * 出所の軸の `kind`(`"box"`/`"pending"`/`"permit"`)とは別物なので名前を分けている。
+   */
+  judgment: z.boolean().default(false),
   /** 中間形式の `key`(決定を書き戻すときの突き合わせ)。無ければ null。 */
   key: z.string().nullable(),
   /** permit のみ: 承認待ちの主体。 */
@@ -148,7 +154,8 @@ export const confirmBoxCountRpc = defineRpc({
   name: "topos.confirmbox.count",
   input: z.object({}),
   output: z.object({
-    /** 判断タブと同じ件数(判断タブに出る項目のうち承認済みを除く)。通知・バグ報告・完了報告は数えない。 */
+    /** 判断タブと同じ件数(判断印 `judgment: true` か permit の項目のうち承認済みを除く)。
+     * 印の無い旧形式は数えない。通知・バグ報告・完了報告は数えない。 */
     open: z.number().int(),
     /** うち priority=blocking。 */
     blocking: z.number().int(),
@@ -326,29 +333,46 @@ export function compareConfirmBoxItems(a: ConfirmBoxItem, b: ConfirmBoxItem): nu
 }
 
 /**
- * 判断タブに流す項目。**ユーザーが選ぶ/答える必要があるものだけ**。
+ * 判断タブに流す項目。**許可リスト方式**: 明示の判断印 `judgment: true` を持つ項目だけ。
  *
- * - `permit`(Paseo の承認待ち)は常に判断(回答なしの指定でも許可/拒否を選ぶ)。
- * - 箱・中間形式は **選択肢が1つ以上** あるもの。選択肢の無い項目は、バックグラウンドの
- *   ウォッチドッグ通知・台帳の既決メモ(`info`)・バグ報告など、決めることが無いお知らせで、
- *   通知タブ/専用タブに出す。ここで種別は問わない(通知タブの除外表と片方だけに出す)。
+ * - `permit`(Paseo の承認待ち)は、プラグインが Paseo 実物から作る別枠なので常に判断
+ *   (回答なしの指定でも許可/拒否を選ぶ)。
+ * - 箱・中間形式は `judgment === true` のものだけ。**選択肢の有無は見ない**。
+ *   印の無い項目は、選択肢が付いていても判断タブには出ない(通知タブ/専用タブ側)。
+ *   印を付けるのは投函側(`notify_box.deposit(judgment=True)` が `"judgment": true` を書く)。
+ * - 印の無い旧形式の選択肢つき項目は `judgmentTabRows(..., { legacy: true })` でのみ見られる。
  */
 export function isJudgmentItem(item: ConfirmBoxItem): boolean {
   if (item.kind === "permit") return true;
-  return item.options.length > 0;
+  return item.judgment === true;
+}
+
+/**
+ * 印の無い旧形式の判断項目(判断印の導入前に投函された「選択肢つき」の行)。
+ * 判断としては扱わない(許可リスト方式)が、`legacy` を指定した時だけ判断タブで見られる。
+ */
+export function isLegacyOptionItem(item: ConfirmBoxItem): boolean {
+  return item.kind !== "permit" && item.judgment !== true && item.options.length > 0;
 }
 
 /**
  * 判断タブに並べる行。`ConfirmBoxView` の `visible` は必ずこれを通す(画面側で絞り込みを書き直さない。
  * 2026-10-22、判断タブが種別で絞っておらず通知が二重表示されたため、絞り込みをここで1本にした)。
+ * 既定では判断印のある項目だけ。`legacy: true` の時だけ旧形式(`isLegacyOptionItem`)も加える。
  */
 export function judgmentTabRows(
   items: readonly ConfirmBoxItem[],
-  opts: { showDone: boolean; prio: ConfirmBoxPriority | null; newestFirst: boolean },
+  opts: {
+    showDone: boolean;
+    prio: ConfirmBoxPriority | null;
+    newestFirst: boolean;
+    /** 印の無い旧形式(選択肢あり・`judgment` なし・permit でない)も並べる。既定は false。 */
+    legacy?: boolean;
+  },
 ): ConfirmBoxItem[] {
   const rows = items.filter(
     (i) =>
-      isJudgmentItem(i) &&
+      (isJudgmentItem(i) || (opts.legacy === true && isLegacyOptionItem(i))) &&
       (opts.showDone || i.state !== "approved") &&
       (opts.prio === null || i.priority === opts.prio),
   );
@@ -367,6 +391,10 @@ export const CHILD_THREAD_REPORT_SOURCE = "child_thread_report";
  * 通知タブに流す項目。判断タブの補集合(判断でないもの)から、専用タブを持つ出所を除く。
  * 家族報告はバグ報告タブ、子スレの完了まとめは子スレ完了報告タブが受け持つ
  * (同じ内容を2箇所に出さない)。
+ *
+ * **印の無い旧形式の選択肢つき項目(`isLegacyOptionItem`)は通知タブに出さない**。
+ * 出せば選択肢つきのお知らせが「判断」に見えるため(元の混入と同じ誤読)。
+ * 旧形式は判断タブの「印なし(旧形式)」フィルタでのみ見られる。
  */
 export const NOTIFICATION_EXCLUDED_SOURCES: readonly string[] = [
   "topos_feedback",
@@ -374,7 +402,8 @@ export const NOTIFICATION_EXCLUDED_SOURCES: readonly string[] = [
 ];
 
 export function isNotificationItem(item: ConfirmBoxItem): boolean {
-  return !isJudgmentItem(item) && !NOTIFICATION_EXCLUDED_SOURCES.includes(item.source);
+  if (isJudgmentItem(item) || isLegacyOptionItem(item)) return false;
+  return !NOTIFICATION_EXCLUDED_SOURCES.includes(item.source);
 }
 
 /** 通知タブのバッジ。未読(state=new)だけ数える。 */

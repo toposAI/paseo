@@ -1,9 +1,10 @@
 /**
- * 判断タブの振り分けの回帰テスト。メール通知などの「決めることが無いお知らせ」が
- * 判断タブに混ざらないこと・各項目がちょうど1つのタブにだけ出ることを固定する。
+ * 判断タブの振り分けの回帰テスト。**許可リスト方式**(明示の判断印 `judgment: true` を持つ項目だけが判断)
+ * を固定する。
  *
  * きっかけ: 2026-10-22、判断タブにウォッチドッグのメール通知が通知タブと二重に並んでいた
- * (判断タブは出所 `kind` で絞らず全項目を並べていた)。
+ * (判断タブは出所 `kind` で絞らず全項目を並べていた)。その後「選択肢がある＝判断」をやめ、
+ * 投函側が付ける判断印だけで判定する方式へ変えた(選択肢があっても印の無いものは判断ではない)。
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -12,11 +13,18 @@ import {
   countOpen,
   countUnreadNotifications,
   isJudgmentItem,
+  isLegacyOptionItem,
   isNotificationItem,
   judgmentTabRows,
   notificationTabRows,
 } from "../shared/contract.js";
 import type { ConfirmBoxItem } from "../shared/contract.js";
+import { foldBoxEvents, mergeBoxAndPending, parsePendingRecords } from "./box.js";
+
+const OPTIONS = [
+  { id: "a", label: "やる" },
+  { id: "b", label: "やらない" },
+];
 
 function item(over: Partial<ConfirmBoxItem> = {}): ConfirmBoxItem {
   return {
@@ -35,6 +43,7 @@ function item(over: Partial<ConfirmBoxItem> = {}): ConfirmBoxItem {
     recommended: null,
     state: "new",
     urgency: "normal",
+    judgment: false,
     key: null,
     agentId: null,
     workspaceId: null,
@@ -49,46 +58,74 @@ const MAIL = item({
   subject: "[mailtriage_deepseek_safety_net_watchdog] 110番 無人経路で止まったジョブ",
 });
 
-test("メール通知(選択肢なし)は判断タブに入らず、通知タブだけに入る", () => {
+/** 判断印つきの箱の項目(投函側が `kind="judgment"` で投函したもの)。 */
+const JUDGMENT = item({ id: "box:judgment", source: "総司令", options: OPTIONS, judgment: true });
+
+/** 印の無い旧形式(判断印の導入前に投函された選択肢つきの項目)。 */
+const LEGACY_OPTION = item({ id: "box:legacy", source: "総司令", options: OPTIONS });
+
+const PERMIT = item({ id: "permit:a:p", kind: "permit", agentId: "a" });
+
+test("メール通知(選択肢なし・印なし)は判断タブに入らず、通知タブだけに入る", () => {
   assert.equal(isJudgmentItem(MAIL), false);
   assert.equal(isNotificationItem(MAIL), true);
 });
 
-test("選択肢のある箱の項目は判断タブだけに入る(通知タブに入らない)", () => {
-  const decision = item({
-    id: "box:decision",
-    source: "総司令",
-    options: [
-      { id: "a", label: "やる" },
-      { id: "b", label: "やらない" },
-    ],
-  });
-  assert.equal(isJudgmentItem(decision), true);
-  assert.equal(isNotificationItem(decision), false);
+test("(a) 選択肢があっても判断印が無ければ判断タブに出ない", () => {
+  assert.equal(isJudgmentItem(LEGACY_OPTION), false);
+  assert.equal(isLegacyOptionItem(LEGACY_OPTION), true);
+  assert.deepEqual(
+    judgmentTabRows([LEGACY_OPTION], { showDone: true, prio: null, newestFirst: false }),
+    [],
+  );
 });
 
-test("中間形式(pending)も選択肢の有無で同じ規則", () => {
-  const pendingDecision = item({
-    id: "pending:x",
-    kind: "pending",
-    key: "x",
-    options: [{ id: "a", label: "A" }],
-  });
-  const pendingInfo = item({
-    id: "pending:info-x",
-    kind: "pending",
-    key: "info-x",
-    priority: "info",
-  });
-  assert.equal(isJudgmentItem(pendingDecision), true);
-  assert.equal(isJudgmentItem(pendingInfo), false);
-  assert.equal(isNotificationItem(pendingInfo), true);
+test("(b) 選択肢が無くても判断印があれば判断タブに出る", () => {
+  const bare = item({ id: "box:bare", judgment: true });
+  assert.equal(isJudgmentItem(bare), true);
+  assert.equal(isNotificationItem(bare), false);
+  assert.deepEqual(
+    judgmentTabRows([bare], { showDone: true, prio: null, newestFirst: false }).map((r) => r.id),
+    ["box:bare"],
+  );
 });
 
-test("permit(承認待ち)は選択肢が無くても判断", () => {
-  const permit = item({ id: "permit:a:p", kind: "permit", agentId: "a" });
-  assert.equal(isJudgmentItem(permit), true);
-  assert.equal(isNotificationItem(permit), false);
+test("(c) permit(承認待ち)は判断印が無くても判断", () => {
+  assert.equal(PERMIT.judgment, false);
+  assert.equal(isJudgmentItem(PERMIT), true);
+  assert.equal(isNotificationItem(PERMIT), false);
+});
+
+test("(d) legacy=true で印なしの選択肢つきだけが加わる(並び順は変えない)", () => {
+  const rows = [JUDGMENT, LEGACY_OPTION, MAIL, PERMIT];
+  const ids = (legacy: boolean) =>
+    judgmentTabRows(rows, { showDone: true, prio: null, newestFirst: false, legacy }).map(
+      (r) => r.id,
+    );
+  assert.deepEqual(ids(false), ["box:judgment", "permit:a:p"]);
+  assert.deepEqual(ids(true), ["box:judgment", "box:legacy", "permit:a:p"]);
+});
+
+test("(e) 印ありも印なしの選択肢つきも通知タブに出ない(選択肢つきのお知らせを判断に見せない)", () => {
+  assert.equal(isNotificationItem(JUDGMENT), false);
+  // 印なしの選択肢つき = 旧形式。判断タブの「印なし(旧形式)」フィルタでだけ見られる。
+  assert.equal(isNotificationItem(LEGACY_OPTION), false);
+  assert.deepEqual(
+    notificationTabRows([JUDGMENT, LEGACY_OPTION, MAIL], true).map((r) => r.id),
+    ["box:mail"],
+  );
+});
+
+test("(f) countOpen も同じ定義(判断印か permit だけを数え、旧形式は数えない)", () => {
+  const rows = [
+    MAIL,
+    JUDGMENT,
+    LEGACY_OPTION,
+    item({ id: "box:done", judgment: true, options: OPTIONS, state: "approved" }),
+    PERMIT,
+    item({ id: "box:notify-read", source: "x", state: "read" }),
+  ];
+  assert.equal(countOpen(rows), 2);
 });
 
 test("バグ報告・子スレ完了まとめは専用タブのみ(判断タブにも通知タブにも出さない)", () => {
@@ -99,49 +136,30 @@ test("バグ報告・子スレ完了まとめは専用タブのみ(判断タブ�
   }
 });
 
-test("各項目は判断タブか通知タブのどちらか片方にだけ出る(二重表示しない)", () => {
-  const rows = [
-    MAIL,
-    item({ id: "box:decision", options: [{ id: "a", label: "A" }] }),
-    item({ id: "permit:a:p", kind: "permit" }),
-  ];
-  for (const row of rows) {
-    assert.notEqual(isJudgmentItem(row), isNotificationItem(row));
+test("通知タブに出るものは判断タブ(旧形式フィルタ含む)にも出ない=二重表示しない", () => {
+  const rows = [MAIL, JUDGMENT, LEGACY_OPTION, PERMIT];
+  const both = { showDone: true, prio: null, newestFirst: false, legacy: true };
+  const judgmentIds = new Set(judgmentTabRows(rows, both).map((r) => r.id));
+  for (const row of rows.filter(isNotificationItem)) {
+    assert.equal(judgmentIds.has(row.id), false);
   }
-});
-
-test("要対応件数(判断タブのバッジ)は通知を数えず、承認済みも数えない", () => {
-  const rows = [
-    MAIL,
-    item({ id: "box:decision", options: [{ id: "a", label: "A" }] }),
-    item({ id: "box:done", options: [{ id: "a", label: "A" }], state: "approved" }),
-    item({ id: "permit:a:p", kind: "permit" }),
-    item({ id: "box:notify-read", source: "x", state: "read" }),
-  ];
-  assert.equal(countOpen(rows), 2);
 });
 
 test("通知タブのバッジは未読の通知だけ数える", () => {
   const rows = [
     MAIL,
+    JUDGMENT,
     item({ id: "box:mail-read", source: "mailtriage_deepseek_safety_net_watchdog", state: "read" }),
   ];
   assert.equal(countUnreadNotifications(rows), 1);
 });
 
 test("判断タブの行(画面と共通の絞り込み)に通知・バグ報告・完了報告は入らない", () => {
-  const decision = item({
-    id: "box:decision",
-    options: [
-      { id: "a", label: "やる" },
-      { id: "b", label: "やらない" },
-    ],
-  });
   const rows = judgmentTabRows(
     [
       MAIL,
-      decision,
-      item({ id: "permit:a:p", kind: "permit" }),
+      JUDGMENT,
+      PERMIT,
       item({ id: "box:topos_feedback", source: "topos_feedback" }),
       item({ id: "box:child_thread_report", source: "child_thread_report" }),
     ],
@@ -149,15 +167,15 @@ test("判断タブの行(画面と共通の絞り込み)に通知・バグ報告
   );
   assert.deepEqual(
     rows.map((r) => r.id),
-    ["box:decision", "permit:a:p"],
+    ["box:judgment", "permit:a:p"],
   );
 });
 
 test("判断タブの行は「決定済みも表示」と優先度の絞り込みにだけ従う(通知は絞り込みを外しても出ない)", () => {
   const rows = [
     MAIL,
-    item({ id: "box:done", options: [{ id: "a", label: "A" }], state: "approved" }),
-    item({ id: "box:blocking", priority: "blocking", options: [{ id: "a", label: "A" }] }),
+    item({ id: "box:done", judgment: true, options: OPTIONS, state: "approved" }),
+    item({ id: "box:blocking", priority: "blocking", judgment: true, options: OPTIONS }),
   ];
   const ids = (o: Parameters<typeof judgmentTabRows>[1]) =>
     judgmentTabRows(rows, o).map((r) => r.id);
@@ -176,7 +194,7 @@ test("通知タブは緊急を先に、同順位は新しい順(判断タブか�
       item({ id: "box:urgent-old", urgency: "urgent", ts: 10 }),
       item({ id: "box:old-normal", urgency: "normal", ts: 5 }),
       item({ id: "box:urgent-new", urgency: "urgent", ts: 20 }),
-      item({ id: "box:decision", options: [{ id: "a", label: "A" }], ts: 99 }),
+      item({ id: "box:decision", judgment: true, options: OPTIONS, ts: 99 }),
     ],
     true,
   );
@@ -188,6 +206,58 @@ test("通知タブは緊急を先に、同順位は新しい順(判断タブか�
     notificationTabRows(rows, false).map((r) => r.id),
     ["box:urgent-new", "box:urgent-old", "box:new-normal", "box:old-normal"],
   );
+});
+
+test("箱の行・中間形式の行の判断印が ConfirmBoxItem へ引き継がれる", () => {
+  const box = [
+    ...foldBoxEvents([
+      { t: "item", id: "box:j", ts: 1, judgment: true, options: OPTIONS },
+      { t: "item", id: "box:n", ts: 2 },
+    ]).values(),
+  ];
+  assert.equal(box.find((i) => i.id === "box:j")?.judgment, true);
+  assert.equal(box.find((i) => i.id === "box:n")?.judgment, false);
+
+  const parsed = parsePendingRecords([
+    { key: "j", judgment: true, options: OPTIONS },
+    { key: "n", options: OPTIONS },
+  ]);
+  assert.equal(parsed.items.find((i) => i.key === "j")?.judgment, true);
+  assert.equal(parsed.items.find((i) => i.key === "n")?.judgment, false);
+});
+
+test("追記の判断印(judgment イベント)は箱の項目に効き、item 行の内容は変えない", () => {
+  const records = [
+    { t: "item", id: "box:x", ts: 1, subject: "旧判断", options: OPTIONS, key: "k1" },
+    { t: "judgment", id: "box:x", ts: 2, by: "backfill" },
+  ];
+  const box = [...foldBoxEvents(records).values()];
+  assert.equal(box[0].judgment, true);
+  assert.equal(box[0].subject, "旧判断");
+});
+
+test("key つきの判断印は、後から箱へ流れ込んだ同じ key の項目にも効く", () => {
+  // 付与が先・item が後(中間形式の行への付与 → 後日の ingest)でも印が失われない
+  const box = [
+    ...foldBoxEvents([
+      { t: "judgment", key: "k2", ts: 1 },
+      { t: "item", id: "box:y", ts: 2, options: OPTIONS, key: "k2" },
+    ]).values(),
+  ];
+  assert.equal(box[0].judgment, true);
+});
+
+test("pending の判断印は箱に同じ key が無い行にだけ効く(箱側の状態を上書きしない)", () => {
+  const box = [item({ id: "box:has", key: "k3" })];
+  const parsed = parsePendingRecords([
+    { key: "k3", subject: "箱にある方", options: OPTIONS },
+    { key: "k4", subject: "箱に無い方", options: OPTIONS },
+    { t: "judgment", id: "pending:k3" },
+    { t: "judgment", key: "k4" },
+  ]);
+  const merged = mergeBoxAndPending(box, parsed.items, parsed.overrides);
+  assert.equal(merged.find((i) => i.key === "k3")?.judgment, false);
+  assert.equal(merged.find((i) => i.key === "k4")?.judgment, true);
 });
 
 test("画面側は自前の絞り込みを書かず、共通の judgmentTabRows を使う", () => {

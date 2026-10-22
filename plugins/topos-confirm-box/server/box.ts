@@ -56,6 +56,9 @@ export function foldBoxEvents(
   records: readonly Record<string, unknown>[],
 ): Map<string, ConfirmBoxItem> {
   const items = new Map<string, ConfirmBoxItem>();
+  // `key` だけで付いた判断印(中間形式の行へ付けたもの)。同じ key の item が**後から**
+  // 箱へ流れてきても印が失われないよう、畳んだ後に1回だけ当てる。
+  const keyMarks = new Set<string>();
   for (const e of records) {
     switch (e.t) {
       case "item":
@@ -67,10 +70,22 @@ export function foldBoxEvents(
       case "ackall":
         applyAckAll(items, e);
         break;
+      case "judgment":
+        applyJudgment(items, e);
+        if (e.judgment !== false) {
+          const key = normalizeKey(e.key);
+          if (key) keyMarks.add(key);
+        }
+        break;
       // "push" は表示に関係しない、"chat" は項目ではなく質問なので、この版では畳まない。
       // 未知の `t` も同じく無視する(契約)。
       default:
         break;
+    }
+  }
+  if (keyMarks.size > 0) {
+    for (const item of items.values()) {
+      if (item.key && keyMarks.has(item.key)) item.judgment = true;
     }
   }
   return items;
@@ -98,6 +113,7 @@ function applyItem(items: Map<string, ConfirmBoxItem>, e: Record<string, unknown
     recommended: normalizeRecommended(e.recommended, options),
     state: "new",
     urgency: e.urgency === "urgent" ? "urgent" : "normal",
+    judgment: e.judgment === true,
     key: normalizeKey(e.key),
     agentId: null,
     workspaceId: null,
@@ -110,6 +126,15 @@ function applyAck(items: Map<string, ConfirmBoxItem>, e: Record<string, unknown>
   if (!item) return;
   if (e.action === "approve") item.state = "approved";
   else if (item.state === "new") item.state = "read";
+}
+
+/** 後から付ける判断印(`{"t":"judgment","id":…}`)。**追記専用**で item 行は書き換えない。
+ * バックフィルの対象には箱の item のほか、まだ箱へ流していない中間形式(`pending:<key>`)も
+ * あるため、そちらの id も受け付ける(`mergeBoxAndPending` の命名に合わせる)。 */
+function applyJudgment(items: Map<string, ConfirmBoxItem>, e: Record<string, unknown>): void {
+  if (typeof e.id !== "string") return;
+  const item = items.get(e.id) ?? items.get(`pending:${e.id}`);
+  if (item) item.judgment = true;
 }
 
 function applyAckAll(items: Map<string, ConfirmBoxItem>, e: Record<string, unknown>): void {
@@ -146,13 +171,21 @@ function reporterField(value: unknown): { reporter?: string } {
   return name ? { reporter: name } : {};
 }
 
-export function parsePendingRecords(records: readonly Record<string, unknown>[]): {
+export interface PendingParseResult {
   items: ConfirmBoxItem[];
   decidedKeys: Set<string>;
+  /** key → 判断印。`t:"judgment"` の行(バックフィルの追記)を key で畳んだもの。
+   * **箱に同じ key が無い行にだけ**効かせる(`mergeBoxAndPending` を参照)。 */
+  overrides: Map<string, boolean>;
   problems: number;
-} {
+}
+
+export function parsePendingRecords(
+  records: readonly Record<string, unknown>[],
+): PendingParseResult {
   const items: ConfirmBoxItem[] = [];
   const decidedKeys = new Set<string>();
+  const overrides = new Map<string, boolean>();
   let problems = 0;
 
   records.forEach((r, index) => {
@@ -161,6 +194,10 @@ export function parsePendingRecords(records: readonly Record<string, unknown>[])
       if (t === "decision") {
         const key = normalizeKey(r.key);
         if (key) decidedKeys.add(key);
+      } else if (t === "judgment") {
+        // 後から付ける判断印(追記専用)。ファイル順で後に来た行が勝つ(付与は最後に来る想定)
+        const key = normalizeKey(r.key);
+        if (key) overrides.set(key, r.judgment !== false);
       }
       return; // chat / 未知の t は無視
     }
@@ -187,6 +224,7 @@ export function parsePendingRecords(records: readonly Record<string, unknown>[])
       recommended: normalizeRecommended(r.recommended, options),
       state: "new",
       urgency: "normal",
+      judgment: r.judgment === true,
       key,
       agentId: null,
       workspaceId: null,
@@ -194,7 +232,7 @@ export function parsePendingRecords(records: readonly Record<string, unknown>[])
     });
   });
 
-  return { items, decidedKeys, problems };
+  return { items, decidedKeys, overrides, problems };
 }
 
 // ---------------------------------------------------------------- 統合
@@ -206,13 +244,17 @@ export function parsePendingRecords(records: readonly Record<string, unknown>[])
 export function mergeBoxAndPending(
   boxItems: readonly ConfirmBoxItem[],
   pendingItems: readonly ConfirmBoxItem[],
+  pendingOverrides: ReadonlyMap<string, boolean> = new Map(),
 ): ConfirmBoxItem[] {
   const boxKeys = new Set<string>();
   for (const item of boxItems) if (item.key) boxKeys.add(item.key);
   const merged = [...boxItems];
   for (const item of pendingItems) {
     if (item.key && boxKeys.has(item.key)) continue;
-    merged.push(item);
+    // 箱側に同じ key が無い中間形式の行に付いた判断印(pending_overrides)。
+    // 同一項目・同一トランザクションの行を1つに畳む(ファイル順で後に来た行が勝つ)。
+    const mark = item.key ? pendingOverrides.get(item.key) : undefined;
+    merged.push(mark === undefined ? item : { ...item, judgment: mark === true });
   }
   return merged.sort(compareConfirmBoxItems);
 }
@@ -250,6 +292,7 @@ export function readConfirmBox(dir: string = resolveConfirmBoxDir()): ReadConfir
 
   // --- 中間形式
   let pendingItems: ConfirmBoxItem[] = [];
+  let pendingOverrides = new Map<string, boolean>();
   let pendingDetail = "";
   let pendingOk = true;
   const pendingPath = path.join(dir, PENDING_FILE);
@@ -258,6 +301,7 @@ export function readConfirmBox(dir: string = resolveConfirmBoxDir()): ReadConfir
   } else {
     try {
       const parsed = parsePendingRecords(parseJsonl(fs.readFileSync(pendingPath, "utf8")));
+      pendingOverrides = parsed.overrides;
       // 決定済みの key を外す(投函側が箱へ流す前でも、決めたものが残らないように)
       pendingItems = parsed.items.filter((i) => !(i.key && parsed.decidedKeys.has(i.key)));
       pendingDetail =
@@ -301,7 +345,7 @@ export function readConfirmBox(dir: string = resolveConfirmBoxDir()): ReadConfir
     count: pendingItems.length,
   });
 
-  return { items: mergeBoxAndPending(boxItems, pendingItems), sources, dir };
+  return { items: mergeBoxAndPending(boxItems, pendingItems, pendingOverrides), sources, dir };
 }
 
 // ---------------------------------------------------------------- 決定の書き戻し
