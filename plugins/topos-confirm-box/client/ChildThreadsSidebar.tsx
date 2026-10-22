@@ -89,13 +89,14 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
   const navigation = (props as PluginSidebarItemProps & AgentNavigation).navigation;
   const list = useRpc(childThreadsListRpc);
   const setOrder = useRpc(childThreadsSetOrderRpc);
-  const { notes, error: notesError, implByThread } = useSidebarNotes();
+  // ドラッグ中は取得結果で一覧を差し替えない(ノート側の取得でも同じゲートを使う)。
+  const dragGateUntilRef = useRef(0);
+  const { notes, error: notesError, implByThread } = useSidebarNotes(dragGateUntilRef);
   const [threads, setThreads] = useState<ChildThread[]>([]);
   const [failed, setFailed] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [orderIsManual, setOrderIsManual] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(readCollapsed);
-  const dragGateUntilRef = useRef(0);
 
   useEffect(() => {
     let alive = true;
@@ -204,10 +205,13 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
     colors.surface2,
   ]);
 
+  // 件数は画面に出ている行数(上段から外したものは数えない)。ノートを取れないときは、
+  // 上段がスレ側の古い status で崩れていることが分かるよう見出しに出す。
   let headerLabel: string;
-  if (failed) headerLabel = `子スレ ${threads.length}件(取得失敗)`;
-  else if (saveFailed) headerLabel = `子スレ ${threads.length}件(並び順を保存できません)`;
-  else headerLabel = `子スレ ${threads.length}件`;
+  if (failed) headerLabel = `子スレ ${rows.length}件(取得失敗)`;
+  else if (saveFailed) headerLabel = `子スレ ${rows.length}件(並び順を保存できません)`;
+  else if (notesError) headerLabel = `子スレ ${rows.length}件(ノート未取得)`;
+  else headerLabel = `子スレ ${rows.length}件`;
 
   const renderThread = useCallback(
     (row: SidebarRowView<ChildThread>) => (

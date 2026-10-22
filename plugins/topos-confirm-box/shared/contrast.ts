@@ -13,8 +13,11 @@ export function parseHex(color: string): [number, number, number] | null {
   if (!m) return null;
   let hex = m[1];
   if (hex.length === 3) hex = hex.replace(/./g, (c) => c + c);
-  else if (hex.length === 8) hex = hex.slice(0, 6);
-  else if (hex.length !== 6) return null;
+  else if (hex.length === 8) {
+    // 半透明は背景と合成しないと比を出せない。不透明(ff)だけを受け付け、それ以外は判定不能として null。
+    if (hex.slice(6).toLowerCase() !== "ff") return null;
+    hex = hex.slice(0, 6);
+  } else if (hex.length !== 6) return null;
   return [
     Number.parseInt(hex.slice(0, 2), 16),
     Number.parseInt(hex.slice(2, 4), 16),
@@ -46,17 +49,40 @@ export function contrastRatio(a: string, b: string): number | null {
 /**
  * `preferred` が **すべての** 背景に対して `min` 以上ならそれを、駄目なら `fallback` を返す。
  * 背景が1つも無い/色が読めないときは `fallback`(安全側)。
+ * 色が `#hex` でない等で判定できない場合も `false` を返すので、呼び出し側で
+ * 「判定不能のまま薄い色が通った」と見えるようにできる(判定自体はここでは変えない)。
  */
+export function meetsContrast(color: string, backgrounds: readonly string[], min = 4.5): boolean {
+  if (backgrounds.length === 0) return false;
+  return backgrounds.every((bg) => {
+    const ratio = contrastRatio(color, bg);
+    return ratio !== null && ratio >= min;
+  });
+}
+
 export function pickReadableText(
   preferred: string,
   fallback: string,
   backgrounds: readonly string[],
   min = 4.5,
 ): string {
-  if (backgrounds.length === 0) return fallback;
-  const ok = backgrounds.every((bg) => {
-    const ratio = contrastRatio(preferred, bg);
-    return ratio !== null && ratio >= min;
-  });
-  return ok ? preferred : fallback;
+  if (meetsContrast(preferred, backgrounds, min)) return preferred;
+  // `fallback` も満たさないテーマがある。その場合は「より読める方」を返す
+  // (無条件に fallback へ落とすと、落とした先がさらに薄いケースで悪化する)。
+  const fallbackOk = meetsContrast(fallback, backgrounds, min);
+  if (fallbackOk || backgrounds.length === 0) return fallback;
+  return worstRatio(fallback, backgrounds) >= worstRatio(preferred, backgrounds)
+    ? fallback
+    : preferred;
+}
+
+/** 全背景に対する最小コントラスト比(判定不能は -1)。 */
+function worstRatio(color: string, backgrounds: readonly string[]): number {
+  let worst = Number.POSITIVE_INFINITY;
+  for (const bg of backgrounds) {
+    const ratio = contrastRatio(color, bg);
+    if (ratio === null) return -1;
+    worst = Math.min(worst, ratio);
+  }
+  return worst;
 }

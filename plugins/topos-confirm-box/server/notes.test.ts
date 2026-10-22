@@ -97,7 +97,7 @@ test("タイトルが無ければファイル名から作る", () => {
   assert.equal(frontmatterToNote(fm ?? {}, "二段サイドバー")?.title, "二段サイドバー");
 });
 
-test("走査: type×statusで上段/下段に分け、対象外は出さない", () => {
+test("走査: typeで実装/構想を返し、statusでは絞らない(振り分けはクライアントの正)", () => {
   const dir = tmpDir();
   write(dir, "a-impl.md", note("type: implementation-note\nstatus: 実装中\ntitle: 実装A"));
   write(dir, "b-impl.md", note("type: implementation-note\nstatus: 完了\ntitle: 完了した実装"));
@@ -107,17 +107,22 @@ test("走査: type×statusで上段/下段に分け、対象外は出さない",
   write(dir, "f-nofm.md", "# frontmatter無し\n");
   write(dir, ".hidden/g.md", note("type: concept-note\nstatus: 構想\ntitle: 隠し"));
   const r = readSidebarNotes({ roots: [dir] });
+  // `完了` の実装ノートも返す。ここで落とすと、クライアントの「完了は畳む」判定に届かず
+  // スレ側の古い status(実装中)で上段に戻る(出口レビュー指摘1)。
+  // 並びは更新時刻順(同時刻ならパス順)なので、集合として比べる
   assert.deepEqual(
-    r.notes.map((n) => n.title),
-    ["実装A", "構想C"],
+    r.notes.map((n) => `${n.title}:${n.status}`).sort(),
+    ["実装A:実装中", "完了した実装:完了", "構想C:構想", "判断待ちの構想:確認待ち"].sort(),
   );
   for (const n of r.notes) assert.equal(path.isAbsolute(n.path), true);
   assert.equal(r.truncated, false);
 });
 
-test("走査: 読めないディレクトリは飛ばす", () => {
-  const r = readSidebarNotes({ roots: [path.join(tmpDir(), "missing")] });
-  assert.deepEqual(r.notes, []);
+test("走査: 走査先が無ければ黙って0件にせずthrowする(設定ミスを空表示と区別)", () => {
+  assert.throws(
+    () => readSidebarNotes({ roots: [path.join(tmpDir(), "missing")] }),
+    /走査先がありません/,
+  );
 });
 
 test("走査上限に当たったらtruncatedを立てる", () => {

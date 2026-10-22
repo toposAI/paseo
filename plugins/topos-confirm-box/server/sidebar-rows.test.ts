@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import type { SidebarNote } from "../shared/notes.js";
+import { readSidebarNotes } from "./notes.js";
 import { buildUpperRows, lowerTierNotes } from "../shared/sidebar-rows.js";
+import type { RowThread } from "../shared/sidebar-rows.js";
 
 const thread = (
   agentId: string,
@@ -73,6 +78,51 @@ test("上段: 並びは入力順を保つ(ドラッグ並びを壊さない)", (
     ["3", "1", "2"],
   );
 });
+
+const DONE_ID = "11111111-1111-4111-8111-111111111111";
+const BUSY_ID = "22222222-2222-4222-8222-222222222222";
+const BARE_ID = "33333333-3333-4333-8333-333333333333";
+
+test("通し: 実走査→implByThread→buildUpperRowsで、完了ノートのスレは上段から消える", () => {
+  // 出口レビュー指摘1の再発防止。サーバー側で done を落とすと、クライアントでは
+  // 「ノート無しの実装中スレ」として戻ってしまうため、走査から描画行まで通して確かめる。
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "topos-two-tier-"));
+  fs.writeFileSync(
+    path.join(dir, "done.md"),
+    `---\ntype: implementation-note\nstatus: 完了\ntitle: 終わった\nthread: ${DONE_ID}\n---\n`,
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(dir, "busy.md"),
+    `---\ntype: implementation-note\nstatus: 判断待ち\ntitle: 未決あり\nthread: ${BUSY_ID}\n---\n`,
+    "utf8",
+  );
+  const { notes, implByThread } = scanAndIndex(dir);
+  assert.equal(notes.length, 2);
+  const rows = buildUpperRows<RowThread>(
+    [thread(DONE_ID, "実装中"), thread(BUSY_ID, "実装中"), thread(BARE_ID, "実装中")],
+    implByThread,
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.thread.agentId, r.statusLabel]),
+    [
+      [BUSY_ID, "判断待ち"],
+      [BARE_ID, "実装中"],
+    ],
+  );
+});
+
+function scanAndIndex(dir: string): {
+  notes: SidebarNote[];
+  implByThread: ReadonlyMap<string, SidebarNote>;
+} {
+  const { notes } = readSidebarNotes({ roots: [dir] });
+  const implByThread = new Map<string, SidebarNote>();
+  for (const n of notes) {
+    if (n.kind === "implementation" && n.threadId) implByThread.set(n.threadId, n);
+  }
+  return { notes, implByThread };
+}
 
 test("下段: 構想/壁打ち中の構想ノートだけ", () => {
   const notes = [

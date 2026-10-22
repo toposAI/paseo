@@ -2,15 +2,18 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   contrastRatio,
+  meetsContrast,
   parseHex,
   pickReadableText,
   relativeLuminance,
 } from "../shared/contrast.js";
 
-test("parseHexは#rgb/#rrggbb/#rrggbbaaを読む", () => {
+test("parseHexは#rgb/#rrggbbと不透明な#rrggbbaaを読み、半透明は判定不能にする", () => {
   assert.deepEqual(parseHex("#fff"), [255, 255, 255]);
   assert.deepEqual(parseHex("000000"), [0, 0, 0]);
-  assert.deepEqual(parseHex("#336699cc"), [0x33, 0x66, 0x99]);
+  assert.deepEqual(parseHex("#336699ff"), [0x33, 0x66, 0x99]);
+  // 半透明は背景と合成しないと比を出せないので、通さない(薄い色を合格と誤判定しない)
+  assert.equal(parseHex("#336699cc"), null);
   assert.equal(parseHex("red"), null);
   assert.equal(parseHex("#12345"), null);
 });
@@ -41,4 +44,16 @@ test("pickReadableText: 背景のどれか1つが不足なら落とす", () => {
 
 test("pickReadableText: 背景が無い/色が読めないときは安全側(foreground)", () => {
   assert.equal(pickReadableText("#555555", "#111111", []), "#111111");
+});
+
+test("pickReadableText: 落とした先も満たさないテーマでは、より読める方(比が高い方)を返す", () => {
+  // 明るいグレー地でどちらも4.5未満。#888 の方が #999 より読める(引数の順に依らない)
+  assert.equal(pickReadableText("#999999", "#888888", ["#f0f0f0"]), "#888888");
+  assert.equal(pickReadableText("#888888", "#999999", ["#f0f0f0"]), "#888888");
+});
+
+test("meetsContrast: 判定不能(非hex・半透明)は満たさない扱い", () => {
+  assert.equal(meetsContrast("#555555", ["#ffffff"]), true);
+  assert.equal(meetsContrast("var(--fg)", ["#ffffff"]), false);
+  assert.equal(meetsContrast("#55555580", ["#ffffff"]), false);
 });

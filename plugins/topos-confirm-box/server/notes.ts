@@ -7,14 +7,16 @@
  * - frontmatter は先頭の `---` ブロックだけを読む(本文は読まない。走査を速く保つ)。
  * - `type:` が `implementation` なら実装ノート(上段)、`concept` なら構想ノート(下段)。
  *   それ以外(標準ノート等)は読み飛ばす。
- * - 上段 = status が 実装中/判断待ち/確認待ち。判定は**語彙だけ**で、`完了` はここでは出さない
- *   (「ユーザーが完了を確認するまで確認待ち」= ノート側が `確認待ち` と書く決まり)。
- * - 下段 = status が 構想/壁打ち中。
+ * - **振り分けの規則はここでは持たない**(2026-10-23 出口レビュー指摘1)。サーバーは
+ *   `type:` で implementation / concept を返すだけで、上段・下段のどちらに出すかは
+ *   クライアントの `shared/sidebar-rows.ts` が唯一の正として決める。以前はサーバー側でも
+ *   status で絞っていたため、`完了` の実装ノートが一覧から消え、クライアントの
+ *   「完了は畳む」判定に届かず、スレ側の古い status(実装中)で上段に戻る不具合があった。
  */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { LOWER_TIER_STATUSES, UPPER_TIER_STATUSES, normalizeNoteStatus } from "../shared/notes.js";
+import { normalizeNoteStatus } from "../shared/notes.js";
 import type { NoteKind, NoteStatus, SidebarNote } from "../shared/notes.js";
 
 /** 走査するファイル数の上限(壊れた/巨大な Vault でサイドバーを止めない)。 */
@@ -40,11 +42,20 @@ export function resolveNoteRoots(env: NodeJS.ProcessEnv = process.env): string[]
   const vault =
     firstNonEmpty(env.TOPOS_CONFIRM_BOX_VAULT_DIR, env.OBSIDIAN_VAULT_DIR) || DEFAULT_VAULT;
   const expanded = expandHome(vault);
-  if (/(^|[\\/])Obsidian-Git([\\/]|$)/.test(expanded)) {
+  if (isBackupPath(expanded)) {
     throw new Error(`バックアップは読みません(書込禁止の一方向同期先): ${expanded}`);
   }
   const projects = firstNonEmpty(env.TOPOS_CONFIRM_BOX_NOTE_DIR);
-  return [projects ? expandHome(projects) : path.join(expanded, "05_Projects")];
+  const root = projects ? expandHome(projects) : path.join(expanded, "05_Projects");
+  // 明示設定(`TOPOS_CONFIRM_BOX_NOTE_DIR`)は上の分岐で検査を素通りするため、最終的なルートにも掛ける。
+  if (isBackupPath(root)) {
+    throw new Error(`バックアップは読みません(書込禁止の一方向同期先): ${root}`);
+  }
+  return [root];
+}
+
+function isBackupPath(p: string): boolean {
+  return /(^|[\\/])Obsidian-Git([\\/]|$)/.test(p);
 }
 
 function firstNonEmpty(...values: (string | undefined)[]): string {
@@ -66,6 +77,8 @@ export interface NoteFrontmatter {
   title: string;
   conclusion: string;
   threadId: string | null;
+  /** ノートに書かれたスレID候補(先頭が優先。一覧と照合前の生の並び)。 */
+  threadCandidates: string[];
   conceptLinks: string[];
 }
 
@@ -162,14 +175,32 @@ export function frontmatterToNote(
   }
 
   const links = fm.concept_notes;
+  const threadCandidates = threadIdCandidates(threadId, fm.threads);
   return {
     kind,
     status,
     title,
     conclusion: collapse(conclusion).slice(0, CONCLUSION_MAX),
-    threadId: /^[A-Za-z0-9-]{8,200}$/.test(threadId) ? threadId.slice(0, THREAD_ID_MAX) : null,
+    threadId: threadCandidates[0] ?? null,
+    threadCandidates,
     conceptLinks: (Array.isArray(links) ? links : []).slice(0, 20),
   };
+}
+
+/**
+ * スレID候補を並べる。単一キー(`thread` 等)を先頭に、インライン形式 `threads: [a, b]` の全件を続ける
+ * (インラインで先頭1件に潰すと、一覧と照合して選び直せなくなる)。8〜200字の英数・ハイフンだけ。
+ */
+function threadIdCandidates(single: string, inline: string | string[] | undefined): string[] {
+  const ok = (s: string) => /^[A-Za-z0-9-]{8,200}$/.test(s);
+  const all = (Array.isArray(inline) ? inline : []).filter(ok);
+  if (ok(single)) all.unshift(single);
+  const ordered = [...new Set(all)];
+  // 優先: UUID 形(実在するスレのID) → それ以外(短縮形など)を元の順で。
+  const uuid = ordered.filter((s) => /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(s));
+  return [...uuid, ...ordered.filter((s) => !uuid.includes(s))].map((s) =>
+    s.slice(0, THREAD_ID_MAX),
+  );
 }
 
 /**
@@ -233,7 +264,8 @@ export function readNoteHead(file: string): string | null {
 // ---------------------------------------------------------------- 走査
 
 /**
- * サイドバー二段の材料を集める。上段(status で判定)→ 下段 の順にまとめて返す。
+ * サイドバー二段の材料を集める。実装ノート → 構想ノートの順に、**status では絞らずに**返す。
+ * 上段/下段への振り分けは `shared/sidebar-rows.ts`(クライアント)が決める。
  * 1本のノートが壊れていても、他のノートは出す。
  */
 export function readSidebarNotes(
@@ -263,11 +295,20 @@ export function readSidebarNotes(
     const note = scanFile(file, now, { knownAgentIds: opts.knownAgentIds });
     if (!note || seen.has(note.path)) return false;
     seen.add(note.path);
-    if (note.kind === "implementation" && UPPER_TIER_STATUSES.includes(note.status))
-      upper.push(note);
-    else if (note.kind === "concept" && LOWER_TIER_STATUSES.includes(note.status)) lower.push(note);
+    if (note.kind === "implementation") upper.push(note);
+    else lower.push(note);
     return false;
   };
+
+  // 走査先が無いのを「ノートが0件」と見分けられないと、画面は正常な空表示になる。
+  // 設定ミスは握りつぶさず throw し、呼び出し側(index.server.ts)の catch 経路で error にする。
+  for (const root of roots) {
+    try {
+      fs.statSync(root);
+    } catch {
+      throw new Error(`走査先がありません: ${root}`);
+    }
+  }
 
   outer: for (const root of roots) {
     const stack = [root];
@@ -304,19 +345,18 @@ function isNoteFile(e: fs.Dirent): boolean {
  * ノートに書かれたスレID候補から、**実際に存在するスレ**を1つ選ぶ(タップで壁打ちする先)。
  *
  * - 既存スレの一覧(`child_threads.json` の agent id)があるときは、それに含まれる候補だけ。
- *   一致が複数なら先頭(=ノートに先に書かれたもの)。
- * - 一覧が無い(起動直後など)ときは、UUID 形の先頭を使う(短縮形 `c389e3e` は解決できない)。
+ *   一致が複数なら先頭(=ノートに先に書かれたもの)。**一致が無ければ null**
+ *   (アーカイブ済みなど存在しないスレを開きに行かない。以前は一覧に無くても UUID 形を返していた)。
+ * - 一覧が無い/空(起動直後)ときだけ、UUID 形の先頭を使う(短縮形 `c389e3e` は解決できない)。
  * - どれも使えなければ null(行は開けず、未解決と分かる表示になる)。
  */
 export function resolveThreadId(
   candidates: readonly string[],
   knownAgentIds?: ReadonlySet<string>,
 ): string | null {
-  if (knownAgentIds && knownAgentIds.size > 0) {
-    const hit = candidates.find((id) => knownAgentIds.has(id));
-    if (hit) return hit;
-  }
-  return candidates.find((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id)) ?? null;
+  const uuid = candidates.find((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id)) ?? null;
+  if (!knownAgentIds || knownAgentIds.size === 0) return uuid;
+  return candidates.find((id) => knownAgentIds.has(id)) ?? null;
 }
 
 interface ScanFileContext {
@@ -335,21 +375,18 @@ function scanFile(file: string, now: number, opts?: ScanFileContext): SidebarNot
     .replace(/-/g, " ");
   const parsed = frontmatterToNote(fm, fallback);
   if (!parsed) return null;
-  const meta = {
-    ...parsed,
-    threadIds: parsed.threadId ? [parsed.threadId] : threadIdFromBlockList(head),
-  };
+  // インラインの候補 → ブロック形式 `threads:` の候補、の順に並べる(先頭が優先)。
+  const threadIds = [...parsed.threadCandidates, ...threadIdFromBlockList(head)];
   let updatedAt = now;
   try {
     updatedAt = fs.statSync(file).mtimeMs;
   } catch {
     // 読めた時点の時刻でよい
   }
-  const { threadIds, ...rest } = meta;
   return {
     path: file,
     updatedAt,
-    ...rest,
+    ...parsed,
     threadId: resolveThreadId(threadIds, opts?.knownAgentIds),
     threadCandidates: threadIds,
   };

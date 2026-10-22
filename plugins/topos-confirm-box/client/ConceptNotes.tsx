@@ -18,6 +18,11 @@ import { lowerTierNotes } from "../shared/sidebar-rows.js";
 
 const POLL_MS = 60_000;
 const LOWER_COLLAPSED_KEY = "topos-concept-notes-collapsed";
+/**
+ * 下段の行右端に確保する幅。ピン止め・アーカイブ(6f957aa9 が同じ行に実装)の置き場。
+ * 状態文字がずれないよう、上段と同じ幅を空けておく。
+ */
+const CONCEPT_ACTIONS_WIDTH = 44;
 const CONCEPT_ICON: Record<NoteStatus, string> = {
   構想: "Lightbulb",
   壁打ち中: "MessageCircle",
@@ -35,8 +40,11 @@ export interface SidebarNotesState {
   implByThread: ReadonlyMap<string, SidebarNote>;
 }
 
-/** ノート一覧を取得する(サイドバー項目ごとに1回)。 */
-export function useSidebarNotes(): SidebarNotesState {
+/**
+ * ノート一覧を取得する(サイドバー項目ごとに1回)。
+ * `gate` を渡すと、その時刻までは取得結果を反映しない(ドラッグ中に行が飛ばないように)。
+ */
+export function useSidebarNotes(gate?: { current: number }): SidebarNotesState {
   const list = useRpc(notesSidebarRpc);
   const [notes, setNotes] = useState<SidebarNote[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +55,10 @@ export function useSidebarNotes(): SidebarNotesState {
       list({})
         .then((r) => {
           if (!alive) return null;
-          setNotes(r.notes);
+          if (gate && Date.now() < gate.current) return null;
+          // 内容が同じなら配列を差し替えない(60秒ごとに上段・下段を丸ごと再描画しない。
+          // ドラッグ中に行が飛ぶのも、この再描画が原因になりうる)。
+          setNotes((prev) => (sameNotes(prev, r.notes) ? prev : r.notes));
           setError(r.error ?? (r.truncated ? "ノートの走査が途中で打ち切られました" : null));
           return null;
         })
@@ -58,10 +69,11 @@ export function useSidebarNotes(): SidebarNotesState {
       alive = false;
       clearInterval(timer);
     };
-  }, [list]);
+  }, [list, gate]);
 
-  // 実装ノートをスレIDで引く。ノートは1スレに1枚(検収単位と1対1)なので、解決済みIDだけを張る
-  // (候補を全部張ると同じノートが複数行に重なる)。同じスレに複数枚あれば新しい順の先頭。
+  // 実装ノートをスレIDで引く。ノートは1スレに1枚(検収単位と1対1)なので、解決済みの threadId だけを張る
+  // (候補を全部張ると同じノートが複数行に重なる。1ノート=1スレの決まりは確定済み)。
+  // 同じスレに複数枚あれば新しい順の先頭。解決できない候補しか無いノートは、そのスレの行に重ねない。
   const implByThread = useMemo(() => {
     const map = new Map<string, SidebarNote>();
     for (const n of notes) {
@@ -72,6 +84,24 @@ export function useSidebarNotes(): SidebarNotesState {
     return map;
   }, [notes]);
   return { notes, error, implByThread };
+}
+
+/** 2つのノート一覧が表示上同じか(パス・種類・status・題名・結論・スレ・更新時刻)。 */
+function sameNotes(a: readonly SidebarNote[], b: readonly SidebarNote[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  return a.every((x, i) => {
+    const y = b[i];
+    return (
+      x.path === y.path &&
+      x.kind === y.kind &&
+      x.status === y.status &&
+      x.title === y.title &&
+      x.conclusion === y.conclusion &&
+      x.threadId === y.threadId &&
+      x.updatedAt === y.updatedAt
+    );
+  });
 }
 
 function readCollapsed(): boolean {
@@ -105,8 +135,10 @@ function conceptLabel(n: SidebarNote): string {
   return n.conclusion ? `${n.title} — ${oneLine(n.conclusion)}` : n.title;
 }
 
+/** スレIDが書かれているのに解決できない(短縮形・アーカイブ済み)かを、未作成と区別して出す。 */
 function conceptStatus(n: SidebarNote): string {
-  return n.threadId ? n.status : `${n.status}(スレ未作成)`;
+  if (n.threadId) return n.status;
+  return n.threadCandidates.length > 0 ? `${n.status}(スレ未解決)` : `${n.status}(スレ未作成)`;
 }
 
 export function ConceptNotesSection({
@@ -248,8 +280,14 @@ function ConceptRow({
   const textStyle = useMemo(() => ({ color }), [color]);
   const status = conceptStatus(n);
   const trailing = useMemo(
-    () => (busy ? <ActivityIndicator size="small" /> : <Text style={textStyle}>{status}</Text>),
-    [busy, textStyle, status],
+    () => (
+      <View style={styles.trailing}>
+        {/* ピン止め・アーカイブの置き場(6f957aa9)。今は空けておく。 */}
+        <View style={styles.actionsSlot} testID={`concept-row-actions-${n.path}`} />
+        {busy ? <ActivityIndicator size="small" /> : <Text style={textStyle}>{status}</Text>}
+      </View>
+    ),
+    [busy, textStyle, status, n.path],
   );
   return (
     <SidebarRow
@@ -266,4 +304,5 @@ const styles = StyleSheet.create({
   trailing: { flexDirection: "row", alignItems: "center", gap: 4 },
   chevron: { fontSize: 11 },
   toggleHit: { minWidth: 32, minHeight: 32, alignItems: "center", justifyContent: "center" },
+  actionsSlot: { width: CONCEPT_ACTIONS_WIDTH },
 });
