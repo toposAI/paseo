@@ -191,6 +191,18 @@ test("確認済みは個別 ack のときだけ(すべて既読=ackall では真
   assert.equal(byId.get("a2")?.summaryState, "read");
 });
 
+test("確認待ちの文言は箱の決定印(承認済み扱い)では減らない — 個別 ack だけが確認", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-"));
+  fs.writeFileSync(
+    path.join(dir, "child_threads.json"),
+    JSON.stringify({ threads: [row({ agent_id: "a1", status: "完了", summary_item_id: "bx" })] }),
+  );
+  // 別機能(自由記述の決定行)で key が決定済みになった項目は箱側で approved になるが、
+  // 「子スレ完了」タブの確認待ちはそれを確認と見なさない(ユーザーが明示的に畳んだ時だけ)。
+  const [t] = readChildThreads(dir, [{ id: "bx", background: "s", state: "approved" as const }]);
+  assert.equal(t.summaryAcked, false);
+});
+
 test("events ファイルが無ければ誰も確認済みにならない", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-"));
   fs.writeFileSync(

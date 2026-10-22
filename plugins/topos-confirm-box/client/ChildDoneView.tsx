@@ -1,10 +1,12 @@
 /**
- * 「子スレ完了報告」タブ。**既存の** `child_threads.json` / `childThreadsListRpc` をそのまま使い、
- * `status === "完了"` の子スレと完了まとめ本文を並べる(新しい一覧を作らない)。
+ * 「子スレ完了」タブ。**既存の** `child_threads.json` / `childThreadsListRpc` をそのまま使い、
+ * `status === "完了"`(=レジストリの確認待ち)の子スレと完了まとめ本文を並べる(新しい一覧を作らない)。
  *
- * 「確認してアーカイブ」は完了まとめの箱項目を `ack(approve)` するだけ。実際のアーカイブは
- * 既存の `child_thread_registry.py tick`(4分毎)が ack 済みの完了スレを `paseo agent archive` する。
- * ここから削除経路を増やさない。
+ * 「完了にする」は完了まとめの箱項目を `ack(approve)` するだけ。ユーザーが子スレに直接「完了」と伝えた
+ * 場合も同じ確認として扱われる(2026-10-23 ユーザー決定)。実際のアーカイブは既存の
+ * `child_thread_registry.py tick`(4分毎)が ack 済みの完了スレを `paseo agent archive` する。
+ * workspace は**子スレ専用の Paseo worktree の時だけ**畳む(司令塔の共有チェックアウトは他スレが
+ * 隠れるため残す)。ここから削除経路を増やさない。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -29,14 +31,14 @@ function describe(
 ): string {
   if (error) return `取得できません: ${error}`;
   if (!loaded) return "読み込み中…";
-  return `完了 ${done}件(未確認 ${unconfirmed}件)`;
+  return `子スレ完了 ${done}件(確認待ち ${unconfirmed}件)`;
 }
 
 /** 確認ボタンの文言。 */
 function confirmLabel(acked: boolean, busy: boolean): string {
   if (acked) return "確認済み";
   if (busy) return "確認中…";
-  return "確認してアーカイブ";
+  return "完了にする";
 }
 
 export function ChildDoneView({
@@ -177,7 +179,12 @@ export function ChildDoneView({
       {notice ? <Text style={s.meta}>{notice}</Text> : null}
       {data && visible.length === 0 && !error ? (
         <Text style={s.meta}>
-          {done.length === 0 ? "完了した子スレはありません" : "未確認の完了報告はありません"}
+          {done.length === 0 ? "完了した子スレはありません" : "確認待ちの完了報告はありません"}
+        </Text>
+      ) : null}
+      {unconfirmed > 0 ? (
+        <Text style={s.meta}>
+          子スレに「完了」と伝えるか、下の「完了にする」を押すまで確認待ちです(勝手に畳みません)。
         </Text>
       ) : null}
       {visible.map((t) => (
@@ -220,7 +227,7 @@ function DoneCard({
     <View style={styles.card}>
       <View style={styles.head}>
         <Text style={acked ? styles.chipDone : styles.chipNew}>
-          {acked ? "確認済み" : "未確認"}
+          {acked ? "確認済み" : "確認待ち"}
         </Text>
         <Text style={styles.meta}>{formatDate(thread.updatedAt)}</Text>
       </View>
@@ -252,6 +259,7 @@ function DoneCard({
       {!acked && thread.summaryItemId ? (
         <Text style={styles.meta}>
           確認すると数分以内にアーカイブされます(アーカイブは既存の定期処理が行います)。
+          子スレ専用の作業フォルダだけが畳まれ、司令塔と同じ作業フォルダのスレはスレだけ畳みます。
         </Text>
       ) : null}
       {acked ? (
