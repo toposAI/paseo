@@ -28,6 +28,12 @@ const POLL_MS = 30_000;
 const COLLAPSED_KEY = "topos-child-groups-collapsed";
 const OTHER_GROUP = "";
 const OTHER_LABEL = "その他";
+/**
+ * 司令塔スレのグループのキー(登録簿の parent id と衝突しない値)。純正の固定一覧を外した後、
+ * 司令塔を開く入口をここが担う。生きている司令塔はサーバーが行として返し(`coordinator: true`)、
+ * 司令塔の子スレはすべてこのグループに並べる(司令塔ごとに見出しが分かれない)。
+ */
+const COORDINATOR_GROUP = "__coordinators";
 /** ドラッグ中は取得結果で一覧を差し替えない(キャンセル時に固まらないよう期限付き)。 */
 const DRAG_POLL_GATE_MS = 60_000;
 export const CHILD_THREADS_SCREEN_ID = "child-threads";
@@ -44,6 +50,16 @@ interface AgentNavigation {
 }
 
 const groupKeyOf = (t: ChildThread) => t.parentAgentId ?? OTHER_GROUP;
+
+/**
+ * 画面上のグループのキー。司令塔の行そのものと、司令塔の子スレは1つの「司令塔」グループへ寄せる
+ * (司令塔ごとに見出しを分けない)。並べ替えの当たり判定もこの関数を使い、グループの割り方と揃える。
+ */
+function visibleGroupKeyOf(t: ChildThread, coordinatorIds: ReadonlySet<string>): string {
+  const underCoordinator =
+    t.coordinator === true || (t.parentAgentId !== null && coordinatorIds.has(t.parentAgentId));
+  return underCoordinator ? COORDINATOR_GROUP : groupKeyOf(t);
+}
 
 function readCollapsed(): ReadonlySet<string> {
   try {
@@ -68,19 +84,32 @@ interface ThreadGroup {
   threads: ChildThread[];
 }
 
-/** サーバーの並び(グループ単位でまとまっている)を出現順のままグループへ割る。 */
-function groupThreads(threads: readonly ChildThread[]): ThreadGroup[] {
+/**
+ * サーバーの並び(グループ単位でまとまっている)を出現順のままグループへ割る。
+ * 司令塔の行と司令塔の子スレは1つの「司令塔」グループへ寄せる(キーの規則は `visibleGroupKeyOf`)。
+ */
+function groupThreads(
+  threads: readonly ChildThread[],
+  coordinatorIds: ReadonlySet<string>,
+): ThreadGroup[] {
   const groups = new Map<string, ThreadGroup>();
+  const coordinatorGroup: ThreadGroup = { key: COORDINATOR_GROUP, title: "司令塔", threads: [] };
   for (const t of threads) {
-    const key = groupKeyOf(t);
+    const key = visibleGroupKeyOf(t, coordinatorIds);
     let g = groups.get(key);
     if (!g) {
-      g = { key, title: t.parentTitle || OTHER_LABEL, threads: [] };
+      g =
+        key === COORDINATOR_GROUP
+          ? coordinatorGroup
+          : { key, title: t.parentTitle || OTHER_LABEL, threads: [] };
       groups.set(key, g);
     }
     g.threads.push(t);
   }
-  return [...groups.values()];
+  // 司令塔グループは先頭(空なら出さない)。
+  return coordinatorGroup.threads.length > 0
+    ? [coordinatorGroup, ...[...groups.values()].filter((g) => g !== coordinatorGroup)]
+    : [...groups.values()];
 }
 
 export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
@@ -151,16 +180,25 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
     [setOrder],
   );
 
+  // 司令塔の行(サーバーが先頭に置く)。子スレの親 id がこれに当たれば同じグループへ寄せる。
+  const coordinatorIds = useMemo(
+    () => new Set(threads.filter((t) => t.coordinator === true).map((t) => t.agentId)),
+    [threads],
+  );
+
   // グループ内のドラッグ結果を全体の並びへ戻す(他グループの並びはそのまま)。
+  // グループの割り方は画面と同じ `visibleGroupKeyOf` を使う(司令塔グループでも並べ替えが効く)。
   const onReorderGroup = useCallback(
     (groupKey: string, keys: string[]) => {
       const queue = [...keys];
       const flat = threads.map((t) =>
-        groupKeyOf(t) === groupKey ? (queue.shift() ?? t.agentId) : t.agentId,
+        visibleGroupKeyOf(t, coordinatorIds) === groupKey
+          ? (queue.shift() ?? t.agentId)
+          : t.agentId,
       );
       persistOrder(flat);
     },
-    [persistOrder, threads],
+    [coordinatorIds, persistOrder, threads],
   );
   const resetOrder = useCallback(() => persistOrder([]), [persistOrder]);
   const toggleGroup = useCallback((key: string) => {
@@ -171,13 +209,13 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
       return next;
     });
   }, []);
-  const groups = useMemo(() => groupThreads(threads), [threads]);
+  const groups = useMemo(() => groupThreads(threads, coordinatorIds), [threads, coordinatorIds]);
 
-  // グループ見出し(親=司令塔)は司令塔スレを開く。「その他」だけは従来どおり開閉。
+  // グループ見出し(親=司令塔)は司令塔スレを開く。「その他」と「司令塔」(複数居る)は開閉。
   const openAgent = navigation?.openAgent;
   const openGroup = useCallback(
     (key: string) => {
-      if (!key) {
+      if (!key || key === COORDINATOR_GROUP) {
         toggleGroup(key);
         return;
       }
@@ -518,7 +556,10 @@ function ThreadRow({
         >
           <ArchiveGlyph color={archiveColor} />
         </Pressable>
-        <StatusBadge text={status.text} kind={status.kind} testID={testID} />
+        {/* 司令塔の行は状態ラベルを出さない(下のグループ見出しと同じ扱い)。アーカイブのボタンは残す。 */}
+        {t.coordinator ? null : (
+          <StatusBadge text={status.text} kind={status.kind} testID={testID} />
+        )}
       </View>
     ),
     [
@@ -532,6 +573,7 @@ function ThreadRow({
       pressPin,
       status.kind,
       status.text,
+      t.coordinator,
       t.pinned,
       testID,
     ],
@@ -539,7 +581,7 @@ function ThreadRow({
   return (
     <SidebarRow
       id={t.agentId}
-      icon={ICON[status.kind]}
+      icon={t.coordinator ? "Command" : ICON[status.kind]}
       label={t.title}
       active={active}
       onPress={onPress}

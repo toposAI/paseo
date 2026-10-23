@@ -37,6 +37,11 @@ export const ChildThreadSchema = z.object({
   parentTitle: z.string().nullable().default(null),
   /** ピン止め(そのグループの先頭に固定)。 */
   pinned: z.boolean().default(false),
+  /**
+   * 司令塔スレそのもの(登録簿ではなく起こしデーモンの `coordinator_id` から出した行)。
+   * 一覧の先頭に「司令塔」グループとして並べる。
+   */
+  coordinator: z.boolean().default(false),
 });
 export type ChildThread = z.infer<typeof ChildThreadSchema>;
 

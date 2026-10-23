@@ -61,6 +61,8 @@ export function normalizeChildThreads(
           parentAgentId: str(o.parent_agent_id).slice(0, 200) || null,
           parentTitle: str(o.parent_title).slice(0, 120) || null,
           pinned: pinnedIds.has(agentId),
+          // 登録簿の行は子スレ。司令塔そのものの行は `coordinator-threads.ts` が作る。
+          coordinator: false,
         },
       ];
     });
