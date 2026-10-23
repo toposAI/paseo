@@ -318,7 +318,7 @@ export default function contribute(server: PluginServerContext) {
     }
     let childDone = 0;
     try {
-      // 画面の「未確認」と同じ定義(個別 ack が無い)。一覧とバッジの数が食い違わないようにする。
+      // 画面の「確認待ち」と同じ定義(個別 ack が無い)。一覧とバッジの数が食い違わないようにする。
       childDone = readChildThreads(dir, items).filter(
         (t) => t.status === "完了" && !t.summaryAcked,
       ).length;

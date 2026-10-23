@@ -372,7 +372,7 @@ type TabId = "items" | "bugs" | "childdone" | "notify" | "priority";
 const TABS: { id: TabId; label: string; Icon: typeof InboxIcon }[] = [
   { id: "items", label: "判断待ち", Icon: InboxIcon },
   { id: "bugs", label: "Toposバグ報告", Icon: BugIcon },
-  { id: "childdone", label: "子スレ完了報告", Icon: CheckCircleIcon },
+  { id: "childdone", label: "子スレ完了", Icon: CheckCircleIcon },
   { id: "notify", label: "通知", Icon: BellIcon },
   { id: "priority", label: "優先順位", Icon: ListIcon },
 ];

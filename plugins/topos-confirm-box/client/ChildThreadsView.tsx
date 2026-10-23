@@ -27,7 +27,7 @@ function summaryNote(thread: {
   summaryAcked: boolean;
 }): string {
   if (thread.status !== "完了" || !thread.summaryItemId) return "";
-  return thread.summaryAcked ? " ・ まとめ確認済み" : " ・ まとめ未確認";
+  return thread.summaryAcked ? " ・ 確認済み" : " ・ 確認待ち(勝手に畳みません)";
 }
 
 export function ChildThreadsView({
