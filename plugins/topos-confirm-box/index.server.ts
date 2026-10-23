@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { PaseoApi } from "@getpaseo/client";
+import type { PaseoAgentHandle, PaseoApi } from "@getpaseo/client";
 import type { PluginHandlerContext, PluginServerContext } from "@getpaseo/plugin/server";
 import {
   CHILD_THREAD_REPORT_SOURCE,
@@ -66,8 +66,8 @@ import {
 } from "./server/thread-liveness.js";
 import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
 import type { WorkspaceArchiveDecision } from "./server/workspace-membership.js";
-import { CONCEPT_THREAD_DEFAULT, notesSidebarRpc, openConceptThreadRpc } from "./shared/notes.js";
-import type { OpenConceptThreadOutput } from "./shared/notes.js";
+import { chooseConceptModel, notesSidebarRpc, openConceptThreadRpc } from "./shared/notes.js";
+import type { ConceptModelOption, OpenConceptThreadOutput } from "./shared/notes.js";
 import {
   frontmatterToNote,
   parseFrontmatter,
@@ -644,6 +644,10 @@ export default function contribute(server: PluginServerContext) {
   const createTimeouts = new Map<string, number>();
   /** 作成が決着しないまま待つのをやめる上限。過ぎたら「作り直すか」をユーザーに任せる。 */
   const CREATE_PENDING_MAX_MS = 10 * 60_000;
+  /** 作ったスレのハンドル(ノートのパス → handle)。最初の発話の成否を短く見るためだけに持つ。 */
+  const createdHandles = new Map<string, PaseoAgentHandle>();
+  /** 最初の発話が通ったかを見る待ち時間。長く待つとタップの反応が鈍るので短く切る。 */
+  const START_PROBE_MS = 2_000;
 
   /**
    * スレを1本作る。**60秒で諦める**(デーモンが応答しないまま押下が固まり、単一飛行の表に
@@ -675,12 +679,22 @@ export default function contribute(server: PluginServerContext) {
       }
       throw new Error("いま作っています(完了すると次から開けます)");
     }
+    // モデルは**デーモンが申告する一覧から選ぶ**。固定IDを書くと、そのIDが受付外の
+    // プロバイダに当たったとき「スレはできるが最初の発話が HTTP 400 で失敗」=押しても
+    // 開かないように見える失敗になる(2026-10-23 実機)。選べないなら**作らない**。
+    const model = await chooseConceptModel((p) => conceptModelCatalog(ctx, p));
+    // 作った直後の最初の発話が失敗していないかを見るため、ハンドルを控えておく
+    // (成功・失敗は `createAndRecord` が確認して表から消す)。
+    createdHandles.delete(key);
     const creating = ctx.paseo.agents.create({
       // 既定はTopos既定(DeepSeek V4.1 flash low)。画面の「最後に選んだモデル」は
       // 端末側にあり插件から読めないため、読めるようになるまでは明示する。
+      // モードも明示する: `default`(Always Ask)だと最初のターンで Vault ノート(cwd 外)を
+      // 読む所で承認待ちに止まり、ユーザーには「開かない」に見える。
       config: {
-        provider: CONCEPT_THREAD_DEFAULT.providerModel,
-        thinkingOptionId: CONCEPT_THREAD_DEFAULT.thinkingOptionId,
+        provider: model.providerModel,
+        ...(model.thinkingOptionId ? { thinkingOptionId: model.thinkingOptionId } : {}),
+        modeId: "bypassPermissions",
       },
       cwd: conceptThreadCwd(),
       title: conceptThreadTitle(note?.title || path.basename(resolved, ".md")),
@@ -693,7 +707,10 @@ export default function contribute(server: PluginServerContext) {
         CREATE_TIMEOUT_MS,
       );
     });
-    const id = creating.then((handle) => handle.id);
+    const id = creating.then((handle) => {
+      createdHandles.set(key, handle);
+      return handle.id;
+    });
     pendingCreates.set(key, id);
     createStarted.set(key, Date.now());
     void id
@@ -724,6 +741,40 @@ export default function contribute(server: PluginServerContext) {
   /** `ms` 後に `value` を返す(待ち合わせ用)。 */
   function sleepResolve(ms: number, value: string): Promise<string> {
     return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+  }
+
+  /** モデル一覧を引く上限。プロバイダのコールドスタートでも一覧自体は少し待てば返る。 */
+  const MODEL_CATALOG_TIMEOUT_MS = 20_000;
+
+  /**
+   * デーモンが申告するモデル一覧(選定に要る分だけ)。引けなければ null
+   * (=このプロバイダは使わない。固定値で補填しない: 受付外のIDで作ると
+   * スレだけ増えて最初の発話が失敗する)。
+   */
+  async function conceptModelCatalog(
+    ctx: PluginHandlerContext,
+    provider: string,
+  ): Promise<ConceptModelOption[] | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), MODEL_CATALOG_TIMEOUT_MS);
+    });
+    try {
+      const result = await Promise.race([
+        ctx.paseo.providers.listModels(provider, { cwd: conceptThreadCwd() }).catch(() => null),
+        timeout,
+      ]);
+      if (!result || result.error || !result.models) return null;
+      return result.models.map((m) => ({
+        provider,
+        id: m.id,
+        label: m.label,
+        isSelectable: m.isSelectable,
+        thinkingOptions: m.thinkingOptions?.map((o) => ({ id: o.id })),
+      }));
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   /** 対象ノート(解決済みパス・Vault の根・RPC が受け取ったパス)。 */
@@ -889,7 +940,31 @@ export default function contribute(server: PluginServerContext) {
     rememberCreated(key, threadId);
     const recorded = await recordThread(resolved, threadId, vaultDir, true);
     if (recorded.record !== "pending") unrecordedThreads.delete(key);
-    return recorded;
+    return { ...recorded, startError: await probeThreadStart(key) };
+  }
+
+  /**
+   * 作ったスレの**最初の発話**が失敗していないか、ごく短く見る。作るだけでは
+   * 「スレはできたが中身がエラー1行」=押しても開かないように見える失敗が残る
+   * (2026-10-23 実機: 受付外モデルで HTTP 400)。見切ったら null(未確認)を返す。
+   */
+  async function probeThreadStart(key: string): Promise<string | null> {
+    const handle = createdHandles.get(key);
+    if (!handle) return null;
+    try {
+      const started = await handle.waitForFinish(START_PROBE_MS).catch((error: unknown) => ({
+        status: "error" as const,
+        error: (error as Error).message,
+      }));
+      if (started.status === "timeout") return null;
+      if (started.status === "idle") return null;
+      if (started.status === "permission") {
+        return "スレは作りましたが、最初のターンが承認待ちで止まりました(スレを開いて承認してください)";
+      }
+      return started.error ?? handle.current()?.lastError ?? "最初のターンが失敗しました";
+    } finally {
+      if (createdHandles.get(key) === handle) createdHandles.delete(key);
+    }
   }
 
   // 連打対策: 同じノートの作成は1本に畳む(記録まで終わった後の分は上の `already` が受ける)。

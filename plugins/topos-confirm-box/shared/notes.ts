@@ -95,6 +95,8 @@ export type NotesSidebarOutput = z.infer<typeof notesSidebarRpc.output>;
  * - ノート側のスレID(`thread` / `threads` / 実在の子スレ)があれば、作らずにそのスレを開く。
  * - 無ければ深掘りスレを1本作り、ノートの `thread:` にIDを記録する。連打しても、
  *   同じノートの作成はサーバー側で1本に畳まれる(作成中は待ち合わせ、記録まで済んだら作り直さない)。
+ * - 作った直後、最初の発話が失敗していないかを短く見る(`startError`)。作るだけでは
+ *   「スレはあるが何も始まらない」=押しても開かないように見える失敗が残るため。
  */
 export const openConceptThreadRpc = defineRpc({
   // RPC 名は小文字のみ(`defineRpc` が `/^[a-z][a-z0-9._-]*$/` で検査する)。
@@ -112,6 +114,11 @@ export const openConceptThreadRpc = defineRpc({
     record: z.enum(["written", "already", "conflict", "pending", "skipped"]).default("skipped"),
     recordError: z.string().nullable().default(null),
     message: z.string().default(""),
+    /**
+     * **作ったが最初の発話が失敗した**(受付外モデル・残高・通信など)。画面も必ず理由を出す。
+     * 古いクライアント・サーバーと揃えるため省略可(undefined=未確認)。
+     */
+    startError: z.string().nullable().optional(),
   }),
 });
 export type OpenConceptThreadOutput = z.infer<typeof openConceptThreadRpc.output>;
@@ -121,10 +128,99 @@ export type OpenConceptThreadOutput = z.infer<typeof openConceptThreadRpc.output
  *
  * Paseo 本体の新規スレは「画面で最後に選んだモデル」を既定にするが、その選択は端末側の設定にあり、
  * 插件からは読めない(SSOT が端末に1つしかない)。読めるようになるまではこの値を明示的に渡す。
+ *
+ * **モデルIDは固定しない**(2026-10-23 実機: 固定値 `deepseek/deepseek-v4.1-flash` は当デーモンの
+ * deepseek プロバイダで受付外で、スレは作られるが最初の発話が HTTP 400 で失敗し、画面上は
+ * 「押しても開かない」ように見えた)。デーモンが申告するモデル一覧と突き合わせて選ぶ。
+ * `provider/model` の `provider` が Paseo のプロバイダID(スレの provider 欄)。
  */
 export const CONCEPT_THREAD_DEFAULT = {
-  /** `provider/model` 形式(Paseo 側の組み立て規則)。 */
-  providerModel: "deepseek/deepseek-v4.1-flash",
-  /** claude 系プロバイダの effort 語彙(off 無しの低い方)。 */
+  provider: "deepseek",
+  /**
+   * 同じプロバイダの別名口(`opencodego` など)から探す順。deepseek に受付るモデルが1つも
+   * 無ければ、ここへ落ちる。空配列なら deepseek の既定モデルを使う。
+   */
+  fallbackProviders: ["opencodego"],
+  /** 選ぶ優先順。find で最初に一致したもの(`flash` が無ければ `pro` に落ちる)。 */
+  modelPatterns: [/flash/i, /deepseek/i],
+  /** 低い方の effort(off 無しの語彙。モデル一覧に無ければ null=モデルの既定)。 */
   thinkingOptionId: "low",
 } as const;
+
+/** モデル一覧の1件(デーモンの申告のうち、選定に要る分だけ)。 */
+export interface ConceptModelOption {
+  provider: string;
+  id: string;
+  label?: string;
+  /** 一覧に出る選択肢(既定で true)。 */
+  isSelectable?: boolean;
+  thinkingOptions?: readonly { id: string }[];
+}
+
+/** プロバイダごとの、モデル一覧を引く関数(null=引けなかった)。 */
+export type ConceptModelCatalog = (
+  provider: string,
+) => Promise<readonly ConceptModelOption[] | null>;
+
+export interface ConceptModelPick {
+  /** `agents.create` の `config.provider`(`provider/model` 形式)。 */
+  providerModel: string;
+  provider: string;
+  model: string;
+  thinkingOptionId: string | null;
+}
+
+function pickModel(
+  provider: string,
+  models: readonly ConceptModelOption[],
+): ConceptModelOption | undefined {
+  const usable = models.filter((m) => m.isSelectable !== false);
+  for (const pattern of CONCEPT_THREAD_DEFAULT.modelPatterns) {
+    const hit = usable.find((m) => pattern.test(`${m.id} ${m.label ?? ""}`));
+    if (hit) return hit;
+  }
+  return usable.find((m) => m.id.toLowerCase().startsWith(provider));
+}
+
+function thinkingFor(pick: ConceptModelOption | undefined): string | null {
+  const wanted = CONCEPT_THREAD_DEFAULT.thinkingOptionId;
+  if (!pick?.thinkingOptions || pick.thinkingOptions.length === 0) return wanted;
+  return pick.thinkingOptions.some((o) => o.id === wanted) ? wanted : null;
+}
+
+/**
+ * 深掘りスレに使うモデルを選ぶ。受付るモデルが全プロバイダで見つからないときは
+ * **投げる**(受付外のIDで作ると、スレだけ増えて最初の発話が失敗するため、作らない)。
+ */
+export async function chooseConceptModel(catalog: ConceptModelCatalog): Promise<ConceptModelPick> {
+  const tried: string[] = [];
+  for (const provider of [
+    CONCEPT_THREAD_DEFAULT.provider,
+    ...CONCEPT_THREAD_DEFAULT.fallbackProviders,
+  ]) {
+    let models: readonly ConceptModelOption[] | null = null;
+    try {
+      models = await catalog(provider);
+    } catch {
+      models = null;
+    }
+    if (models === null) {
+      tried.push(`${provider}(一覧を取得できません)`);
+      continue;
+    }
+    const pick = pickModel(provider, models);
+    if (pick) {
+      return {
+        providerModel: `${provider}/${pick.id}`,
+        provider,
+        model: pick.id,
+        thinkingOptionId: thinkingFor(pick),
+      };
+    }
+    tried.push(`${provider}(該当なし)`);
+  }
+  throw new Error(
+    `使用できる DeepSeek 系モデルがデーモンに見つかりません: ${tried.join("・")}。` +
+      "モデル設定を確認するか、スレを手で開いてください",
+  );
+}

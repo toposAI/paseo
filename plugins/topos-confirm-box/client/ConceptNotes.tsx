@@ -224,6 +224,9 @@ export function ConceptNotesSection({
             } else {
               dismissNotice();
             }
+            // スレはできたが**最初の発話が失敗**した(受付外モデル・残高・承認待ちなど)。
+            // 開くだけでは「中身がエラー1行」で開かないように見えるので、理由を消えない通知に出す。
+            if (r.startError) showFailure(`${n.title}: ${r.startError}`, true);
             return;
           }
           showFailure(`${n.title}: スレを作れません${r.message ? `(${r.message})` : ""}`, true);
