@@ -3,7 +3,11 @@
  *
  * **status の正はノートの frontmatter `status:`**(正本:
  * `05_Projects/ToposAI/壁打ちノートをVaultに残す標準/標準_サイドバーの表示ルール.md`)。
- * この RPC は**読むだけ**で、ノートを書き換えない(書き手は司令塔スレに固定)。
+ * 一覧(`notesSidebarRpc`)は**読むだけ**で、ノートを書き換えない。
+ *
+ * 唯一の例外が `openConceptThreadRpc`: 構想ノートをタップしたときに**深掘りスレを作り**、
+ * そのIDを frontmatter の `thread:` 1行へ書く(2026-10-23 ユーザー決定=案B)。書き込みの
+ * ガードは `server/note-thread.ts` に隔離してあり、書くのはその1行だけ。
  *
  * Node/React のどちらのAPIも使わない(両ランタイムが import する)。
  */
@@ -84,3 +88,43 @@ export const notesSidebarRpc = defineRpc({
   }),
 });
 export type NotesSidebarOutput = z.infer<typeof notesSidebarRpc.output>;
+
+/**
+ * 構想ノートをタップしたとき: そのノートの深掘りスレを開く(無ければ作る)。
+ *
+ * - ノート側のスレID(`thread` / `threads` / 実在の子スレ)があれば、作らずにそのスレを開く。
+ * - 無ければ深掘りスレを1本作り、ノートの `thread:` にIDを記録する。連打しても、
+ *   同じノートの作成はサーバー側で1本に畳まれる(作成中は待ち合わせ、記録まで済んだら作り直さない)。
+ */
+export const openConceptThreadRpc = defineRpc({
+  // RPC 名は小文字のみ(`defineRpc` が `/^[a-z][a-z0-9._-]*$/` で検査する)。
+  name: "topos.notes.open-concept-thread",
+  input: z.object({
+    /** 一覧(`notesSidebarRpc`)が返したノートの絶対パス。サーバー側で構想ノートか確かめ直す。 */
+    path: z.string().min(1).max(4096),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    threadId: z.string().nullable().default(null),
+    /** この呼び出しでスレを作ったか(false=既存のスレを開いた)。 */
+    created: z.boolean().default(false),
+    /** ノートの `thread:` への記録(作成方式が変わると、ここが移行先になる)。 */
+    record: z.enum(["written", "already", "conflict", "pending", "skipped"]).default("skipped"),
+    recordError: z.string().nullable().default(null),
+    message: z.string().default(""),
+  }),
+});
+export type OpenConceptThreadOutput = z.infer<typeof openConceptThreadRpc.output>;
+
+/**
+ * 深掘りスレの既定(2026-10-23 の実装判断。ユーザー指示「不明ならTopos既定=DeepSeek V4.1 flash low」)。
+ *
+ * Paseo 本体の新規スレは「画面で最後に選んだモデル」を既定にするが、その選択は端末側の設定にあり、
+ * 插件からは読めない(SSOT が端末に1つしかない)。読めるようになるまではこの値を明示的に渡す。
+ */
+export const CONCEPT_THREAD_DEFAULT = {
+  /** `provider/model` 形式(Paseo 側の組み立て規則)。 */
+  providerModel: "deepseek/deepseek-v4.1-flash",
+  /** claude 系プロバイダの effort 語彙(off 無しの低い方)。 */
+  thinkingOptionId: "low",
+} as const;

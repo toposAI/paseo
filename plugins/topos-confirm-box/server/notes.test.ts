@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import {
+  HEAD_BYTES,
   frontmatterToNote,
   parseFrontmatter,
   readNoteHead,
@@ -13,6 +14,7 @@ import {
   sortNotes,
   threadIdFromBlockList,
 } from "./notes.js";
+import { indexImplementationNotes } from "../shared/sidebar-rows.js";
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "topos-notes-"));
@@ -189,9 +191,69 @@ test("resolveThreadId: 既存スレに一致する候補を優先し、無けれ
     "2165f646-cd93-4a7f-bbbe-1a4330795456",
   );
   assert.equal(resolveThreadId(["c389e3e"]), null);
+  // 一覧があるのに UUID が載っていない(アーカイブ済み)なら開かない。一覧が空なら UUID をそのまま使う。
+  assert.equal(resolveThreadId(["0b8c2f41-1111-4222-8333-944455556666"], known), null);
+  assert.equal(
+    resolveThreadId(["0b8c2f41-1111-4222-8333-944455556666"], new Set()),
+    "0b8c2f41-1111-4222-8333-944455556666",
+  );
 });
 
-test("走査: threadIdは既存スレに解決し、候補は全部残す", () => {
+test("frontmatterToNote: thread_id / agent_id が先にあっても thread: も候補に残る(出口レビュー round1 指摘2)", () => {
+  const live = "2165f646-cd93-4a7f-bbbe-1a4330795456";
+  const dead = "0b8c2f41-1111-4222-8333-944455556666";
+  const fm = parseFrontmatter(
+    `---\ntype: concept-note\nstatus: 構想\nthread_id: ${dead}\nthread: ${live}\nagent_id: ${dead}\n---\n`,
+  );
+  assert.ok(fm);
+  const parsed = frontmatterToNote(fm, "x");
+  assert.ok(parsed);
+  // thread: が先頭(このプラグインが書くキーが正)、他のキーも落とさない
+  assert.equal(parsed.threadCandidates[0], live);
+  assert.deepEqual(new Set(parsed.threadCandidates), new Set([live, dead]));
+  // 生きているのは thread_id 側だけでも、候補に残っていれば開ける
+  const other = frontmatterToNote(
+    { type: "concept-note", status: "構想", thread: dead, thread_id: live },
+    "x",
+  );
+  assert.ok(other);
+  assert.equal(resolveThreadId(other.threadCandidates, new Set([live])), live);
+});
+
+test("走査先: 明示設定でもバックアップ(Obsidian-Git)配下は拒否", () => {
+  assert.throws(
+    () => resolveNoteRoots({ TOPOS_CONFIRM_BOX_NOTE_DIR: "/x/Obsidian-Git/05_Projects" }),
+    /バックアップ/,
+  );
+});
+
+test("走査先がファイルなら「ノートが無い」と区別してthrowする", () => {
+  const dir = tmpDir();
+  const file = write(dir, "not-a-dir.md", "x");
+  assert.throws(() => readSidebarNotes({ roots: [file] }), /走査先がありません/);
+});
+
+test("indexImplementationNotes: 実装ノートだけを解決済みIDで引き、同じIDは先頭勝ち", () => {
+  const base = {
+    kind: "implementation" as const,
+    status: "実装中" as const,
+    title: "t",
+    conclusion: "",
+    threadCandidates: [],
+    conceptLinks: [],
+    updatedAt: 0,
+  };
+  const map = indexImplementationNotes([
+    { ...base, path: "/a.md", threadId: "thread-aaaa" },
+    { ...base, path: "/b.md", threadId: "thread-aaaa", title: "2枚目" },
+    { ...base, path: "/c.md", threadId: null },
+    { ...base, path: "/d.md", threadId: "thread-dddd", kind: "concept" },
+  ]);
+  assert.deepEqual([...map.keys()], ["thread-aaaa"]);
+  assert.equal(map.get("thread-aaaa")?.path, "/a.md");
+});
+
+test("走査: ブロック形式の threads はUUIDを選んで解決し、8字未満の短縮形は候補から落とす", () => {
   const dir = tmpDir();
   write(
     dir,
@@ -218,6 +280,7 @@ test("readNoteHeadは大きい本文でも先頭だけ読む", () => {
   const dir = tmpDir();
   const file = write(dir, "big.md", note("type: concept-note\nstatus: 構想", "x".repeat(100_000)));
   const head = readNoteHead(file);
-  assert.ok(head && head.length < 20_000);
+  // 上限は64KB(記録側と同じ)。それより長い本文は読まずに切る。
+  assert.ok(head && head.length <= HEAD_BYTES && head.length < 100_000);
   assert.match(head ?? "", /status: 構想/);
 });

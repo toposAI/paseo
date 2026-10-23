@@ -22,12 +22,15 @@ import type { NoteKind, NoteStatus, SidebarNote } from "../shared/notes.js";
 /** 走査するファイル数の上限(壊れた/巨大な Vault でサイドバーを止めない)。 */
 export const NOTE_SCAN_LIMIT = 20_000;
 /** 1つの frontmatter を読む上限。超えたら読まない(認めない)。 */
-const HEAD_BYTES = 16 * 1024;
+export const HEAD_BYTES = 64 * 1024;
 const CONCLUSION_MAX = 80;
 const TITLE_MAX = 120;
 const THREAD_ID_MAX = 200;
 
 const DEFAULT_VAULT = path.join(os.homedir(), "Documents", "Obsidian_Vault");
+
+/** ノート側の都合で書けない/読めない(設定ミス・種類違い・競合)。RPC は理由をそのまま返す。 */
+export class NoteThreadError extends Error {}
 const SKIP_DIRS = new Set([".obsidian", ".trash", "node_modules", ".git"]);
 
 /**
@@ -54,8 +57,21 @@ export function resolveNoteRoots(env: NodeJS.ProcessEnv = process.env): string[]
   return [root];
 }
 
-function isBackupPath(p: string): boolean {
-  return /(^|[\\/])Obsidian-Git([\\/]|$)/.test(p);
+/**
+ * 走査先を決めるのと同じ Vault の根(`05_Projects` の親)。構想ノートへの記録で、Vault 外を
+ * 拒否する境界とロックの単位に使う。明示設定(`TOPOS_CONFIRM_BOX_NOTE_DIR`)は `05_Projects`
+ * の親でも、ただのディレクトリでもよい(そのときはその親を根として扱う)。
+ */
+export function resolveVaultDir(env: NodeJS.ProcessEnv = process.env): string {
+  const vault =
+    firstNonEmpty(env.TOPOS_CONFIRM_BOX_VAULT_DIR, env.OBSIDIAN_VAULT_DIR) || DEFAULT_VAULT;
+  if (firstNonEmpty(env.TOPOS_CONFIRM_BOX_NOTE_DIR)) return path.dirname(resolveNoteRoots(env)[0]);
+  return expandHome(vault);
+}
+
+/** Vault のバックアップ(一方向同期先)。読まない・書かない。APFS は大小文字を区別しないので `i` 付き。 */
+export function isBackupPath(p: string): boolean {
+  return /(^|[\\/])obsidian-git([\\/]|$)/i.test(p);
 }
 
 function firstNonEmpty(...values: (string | undefined)[]): string {
@@ -165,17 +181,21 @@ export function frontmatterToNote(
     ...["conclusion", "summary", "one_liner"].map((k) => asText(fm[k], k)),
   );
 
-  let threadId = "";
-  for (const key of ["thread_id", "thread", "agent_id"]) {
-    threadId = threadId || asText(fm[key], key);
+  // 単一キーは**全部**候補にする(最初に見つかった1つだけだと、`thread_id:` があるノートで
+  // `thread:` が候補から落ち、生きているスレを「見つからない」と誤報する)。
+  // 並びは `thread:` が先頭(このプラグインが書くのは `thread:` なので、それを正とする)。
+  const singles: string[] = [];
+  for (const key of ["thread", "thread_id", "agent_id"]) {
+    const v = asText(fm[key], key);
+    if (v) singles.push(v);
   }
   for (const key of ["threads", "related_threads"]) {
     const v = fm[key];
-    if (!threadId && Array.isArray(v)) threadId = v.find((s) => /^[0-9a-f-]{8,}$/i.test(s)) ?? "";
+    if (Array.isArray(v)) singles.push(...v.filter((s) => /^[0-9a-f-]{8,}$/i.test(s)));
   }
 
   const links = fm.concept_notes;
-  const threadCandidates = threadIdCandidates(threadId, fm.threads);
+  const threadCandidates = threadIdCandidates(singles, fm.threads);
   return {
     kind,
     status,
@@ -188,14 +208,17 @@ export function frontmatterToNote(
 }
 
 /**
- * スレID候補を並べる。単一キー(`thread` 等)を先頭に、インライン形式 `threads: [a, b]` の全件を続ける
- * (インラインで先頭1件に潰すと、一覧と照合して選び直せなくなる)。8〜200字の英数・ハイフンだけ。
+ * スレID候補を並べる。単一キー(`thread` → `thread_id` → `agent_id`)を先頭に、インライン形式
+ * `threads: [a, b]` の全件を続ける(インラインで先頭1件に潰すと、一覧と照合して選び直せなくなる)。
+ * 8〜200字の英数・ハイフンだけ。
  */
-function threadIdCandidates(single: string, inline: string | string[] | undefined): string[] {
+function threadIdCandidates(
+  singles: readonly string[],
+  inline: string | string[] | undefined,
+): string[] {
   const ok = (s: string) => /^[A-Za-z0-9-]{8,200}$/.test(s);
   const all = (Array.isArray(inline) ? inline : []).filter(ok);
-  if (ok(single)) all.unshift(single);
-  const ordered = [...new Set(all)];
+  const ordered = [...new Set([...singles.filter(ok), ...all])];
   // 優先: UUID 形(実在するスレのID) → それ以外(短縮形など)を元の順で。
   const uuid = ordered.filter((s) => /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(s));
   return [...uuid, ...ordered.filter((s) => !uuid.includes(s))].map((s) =>
@@ -212,7 +235,9 @@ function threadIdCandidates(single: string, inline: string | string[] | undefine
  * - c389e3e
  * ```
  *
- * UUID 形だけを先頭から順に返す(無ければ空配列)。
+ * インライン形式と同じ規則(8〜200字の英数・ハイフン)で全件を並べ、UUID 形を先にする。
+ * 短縮形(`c389e3e`)も候補に残す: 落とすと、同じ内容をインライン形式で書いたときと
+ * 「未作成/未解決」の表示が変わる(出口レビュー round2 指摘2)。
  */
 export function threadIdFromBlockList(text: string): string[] {
   const ids: string[] = [];
@@ -234,12 +259,10 @@ export function threadIdFromBlockList(text: string): string[] {
       continue;
     }
     const id = unquote(item[1]);
-    // 短縮形(`c389e3e`)はリストの並びを止めない。UUID 形だけを候補にする。
-    if (/^[0-9a-f-]{8,}$/i.test(id) && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id)) {
-      ids.push(id.slice(0, THREAD_ID_MAX));
-    }
+    if (/^[A-Za-z0-9-]{8,200}$/.test(id)) ids.push(id.slice(0, THREAD_ID_MAX));
   }
-  return ids;
+  const uuid = ids.filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id));
+  return [...uuid, ...ids.filter((id) => !uuid.includes(id))];
 }
 
 function collapse(s: string): string {
@@ -304,7 +327,9 @@ export function readSidebarNotes(
   // 設定ミスは握りつぶさず throw し、呼び出し側(index.server.ts)の catch 経路で error にする。
   for (const root of roots) {
     try {
-      fs.statSync(root);
+      // ファイルでも stat は通る。ディレクトリでなければ readdir が失敗して 0件に見えるので、
+      // 「ノートが無い」と取り違えないよう設定ミスとして止める(出口レビュー round2 指摘6)。
+      if (!fs.statSync(root).isDirectory()) throw new Error("not a directory");
     } catch {
       throw new Error(`走査先がありません: ${root}`);
     }

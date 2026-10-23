@@ -9,7 +9,11 @@
  * **読み取りはファイル直読み**。既存のサーバー側確認箱(`/api/confirm-box/*`)は通さない
  * (HTTPのポートと認証が要るうえ、同じディレクトリを別経路で読む意味が無い)。
  */
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type { PaseoApi } from "@getpaseo/client";
+import type { PluginHandlerContext, PluginServerContext } from "@getpaseo/plugin/server";
 import {
   CHILD_THREAD_REPORT_SOURCE,
   KIND_LABEL,
@@ -40,8 +44,22 @@ import {
   readChildThreads,
   writeChildThreadOrder,
 } from "./server/child-threads.js";
-import { notesSidebarRpc } from "./shared/notes.js";
-import { readSidebarNotes } from "./server/notes.js";
+import { CONCEPT_THREAD_DEFAULT, notesSidebarRpc, openConceptThreadRpc } from "./shared/notes.js";
+import type { OpenConceptThreadOutput } from "./shared/notes.js";
+import {
+  frontmatterToNote,
+  parseFrontmatter,
+  readSidebarNotes,
+  resolveThreadId,
+  resolveVaultDir,
+  threadIdFromBlockList,
+} from "./server/notes.js";
+import {
+  assertWritableConceptNote,
+  readHead,
+  readThreadKey,
+  recordConceptThread,
+} from "./server/note-thread.js";
 import { readCardChat, sayToCard } from "./server/cardchat.js";
 import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
 import {
@@ -290,16 +308,52 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.handle(notesSidebarRpc, async () => {
+  /** 生存リストに印を付ける(`live: false` = デーモンの一覧を読み切れていない)。 */
+  function markLive(ids: Set<string> | undefined, live: boolean): LiveThreadIndex | undefined {
+    return ids ? Object.assign(ids, { live }) : ids;
+  }
+
+  /**
+   * タップ先にしてよい実在のスレID。2つの出所を**和**にする:
+   * (1) 子スレ一覧 `child_threads.json`(サイドバーの既存行)
+   * (2) デーモンの**アーカイブされていない**全スレ(`ctx.paseo.agents.list()`。ページ上限200の先も辿る)
+   * (2) が要るのは、構想ノートを押して作った深掘りスレが (1) にはまだ載らないため
+   * (載らないまま絞ると、毎回「未作成」に見えて2本目を作ってしまう。出口レビュー round2 指摘4)。
+   * デーモンが引けないときは (1) だけで続ける。両方引けなければ undefined(=UUID をそのまま使う)。
+   */
+  async function knownAgentIdsFor(paseo?: PaseoApi): Promise<LiveThreadIndex | undefined> {
+    let known: Set<string> | undefined;
+    try {
+      known = new Set(readChildThreads(resolveConfirmBoxDir()).map((t) => t.agentId));
+    } catch {
+      known = undefined;
+    }
+    if (!paseo) return markLive(known, false);
+    try {
+      const ids = known ?? new Set<string>();
+      // 既定ページは200件。セッションが増えると今作ったスレが2ページ目に落ち、存在しないと
+      // 誤判定される(→重複作成)ので全ページ辿る。読み切れなければ例外にして (1) へ縮退する。
+      let cursor: string | undefined;
+      for (let page = 0; page < LIVE_THREAD_PAGES_MAX; page += 1) {
+        const live = await paseo.agents.list({
+          page: { limit: 200, ...(cursor ? { cursor } : {}) },
+        });
+        for (const entry of live.entries) if (!entry.agent.archivedAt) ids.add(entry.agent.id);
+        cursor = live.pageInfo?.nextCursor ?? undefined;
+        if (!cursor) return markLive(ids, true);
+      }
+      throw new Error("一覧が長すぎます");
+    } catch {
+      // デーモンの一覧が引けなかった。呼び出し側が「生存リストは不完全」と扱えるよう印を付ける。
+      return markLive(known, false);
+    }
+  }
+
+  server.handle(notesSidebarRpc, async (_input, ctx) => {
     const generatedAt = Date.now();
     try {
       // 存在するスレだけをタップ先にする(走査のたびに1回だけ読む)。
-      let knownAgentIds: Set<string> | undefined;
-      try {
-        knownAgentIds = new Set(readChildThreads(resolveConfirmBoxDir()).map((t) => t.agentId));
-      } catch {
-        knownAgentIds = undefined;
-      }
+      const knownAgentIds = await knownAgentIdsFor(ctx.paseo);
       const r = readSidebarNotes({ knownAgentIds });
       return { ...r, generatedAt };
     } catch (error) {
@@ -315,6 +369,274 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
+  // ------------------------------------------------- 構想ノート → 深掘りスレ(2026-10-23 決定)
+
+  /**
+   * 記録に失敗した(`record: "pending"`)スレID。ノートのパス → ID。
+   * 記録できないまま次に押されるとノートには何も残っていないので**2本目**を作ってしまう。
+   * この表があれば、次の押下では作成せず**記録だけ再試行**する(出口レビュー round1 指摘1)。
+   * プロセス内の表なのでデーモン再起動で失われる(その場合の重複は残る)。
+   */
+  const unrecordedThreads = new Map<string, string>();
+  const UNRECORDED_MAX = 200;
+
+  function rememberUnrecorded(key: string, threadId: string): void {
+    unrecordedThreads.delete(key);
+    unrecordedThreads.set(key, threadId);
+    while (unrecordedThreads.size > UNRECORDED_MAX) {
+      const oldest = unrecordedThreads.keys().next().value;
+      if (oldest === undefined) break;
+      unrecordedThreads.delete(oldest);
+    }
+  }
+
+  /** ノートへ記録し、RPC の形に揃える(記録に失敗してもスレは開けるので `ok: true`)。 */
+  async function recordThread(
+    resolved: string,
+    threadId: string,
+    vaultDir: string,
+    created: boolean,
+  ): Promise<OpenConceptThreadOutput> {
+    try {
+      const { result } = await recordConceptThread(resolved, threadId, { vaultDir });
+      return { ok: true, threadId, created, record: result, recordError: null, message: "" };
+    } catch (error) {
+      return {
+        ok: true,
+        threadId,
+        created,
+        record: "pending",
+        recordError: (error as Error).message,
+        message: "",
+      };
+    }
+  }
+
+  /**
+   * 作成中のスレ(ノートのパス → Promise)。60秒で諦めた後も**作成自体は続いている**ので、
+   * 次の押下では作り直さずにこれを待つ(round2 指摘2: 諦めた直後に押されると2本目ができ、
+   * さらに孤児の方を開いてしまう)。完了したら表から消す。
+   */
+  const pendingCreates = new Map<string, Promise<string>>();
+  /** 諦めた時刻(これ以降に完了したスレは、ノートへ記録できていない)。 */
+  const createTimeouts = new Map<string, number>();
+
+  /**
+   * スレを1本作る。**60秒で諦める**(デーモンが応答しないまま押下が固まり、単一飛行の表に
+   * 残り続けるのを防ぐ)。諦めた後も作成は続くので、その Promise は `pendingCreates` に残し、
+   * 次の押下では**作り直さずに待つ**。
+   */
+  async function createConceptThread(
+    ctx: PluginHandlerContext,
+    key: string,
+    resolved: string,
+    note: ReturnType<typeof frontmatterToNote>,
+  ): Promise<string> {
+    const existing = pendingCreates.get(key);
+    if (existing) {
+      // 作成中(前回60秒で諦めた分かもしれない)。待って、まだ駄目なら「作成中」と返す。
+      const id = await Promise.race([existing, sleepResolve(PENDING_RETRY_WAIT_MS, "")]);
+      if (!id) throw new Error("いま作っています(完了すると次から開けます)");
+      return id;
+    }
+    const creating = ctx.paseo.agents.create({
+      // 既定はTopos既定(DeepSeek V4.1 flash low)。画面の「最後に選んだモデル」は
+      // 端末側にあり插件から読めないため、読めるようになるまでは明示する。
+      config: {
+        provider: CONCEPT_THREAD_DEFAULT.providerModel,
+        thinkingOptionId: CONCEPT_THREAD_DEFAULT.thinkingOptionId,
+      },
+      cwd: conceptThreadCwd(),
+      title: conceptThreadTitle(note?.title || path.basename(resolved, ".md")),
+      prompt: conceptThreadPrompt(note?.conclusion ?? "", resolved),
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`応答がありません(${CREATE_TIMEOUT_MS / 1000}秒)`)),
+        CREATE_TIMEOUT_MS,
+      );
+    });
+    const id = creating.then((handle) => handle.id);
+    pendingCreates.set(key, id);
+    void id
+      .then((threadId) => {
+        // 諦めた後に完成した: ノートへは書けていないので、次に押したら記録だけさせる。
+        if (createTimeouts.has(key)) rememberUnrecorded(key, threadId);
+        return undefined;
+      })
+      // 失敗・タイムアウトは呼び出し側が扱う(ここでは片付けだけ)。
+      .catch(() => undefined)
+      .finally(() => {
+        if (pendingCreates.get(key) === id) pendingCreates.delete(key);
+        createTimeouts.delete(key);
+      });
+    try {
+      const threadId = await Promise.race([id, timeout]);
+      return threadId;
+    } catch (error) {
+      // 諦めても `pendingCreates` には残す。次の押下は作り直さずに待つ。
+      createTimeouts.set(key, Date.now());
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /** `ms` 後に `value` を返す(待ち合わせ用)。 */
+  function sleepResolve(ms: number, value: string): Promise<string> {
+    return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+  }
+
+  /**
+   * (0) 記録だけ失敗した前回のスレがあれば、作り直さずに記録をやり直す。何も無ければ null。
+   * ノートに別のIDが書かれていたら(手で直した)、その判断を優先して控えを捨てる。
+   */
+  async function retryUnrecorded(
+    key: string,
+    resolved: string,
+    head: string,
+    vaultDir: string,
+  ): Promise<OpenConceptThreadOutput | null> {
+    const retry = unrecordedThreads.get(key);
+    if (!retry) return null;
+    const boundNow = readThreadKey(head);
+    if (boundNow && boundNow !== retry) {
+      unrecordedThreads.delete(key);
+      return null;
+    }
+    const recorded = await recordThread(resolved, retry, vaultDir, false);
+    if (recorded.record !== "pending") unrecordedThreads.delete(key);
+    // ノートには別のスレが既に書かれていた。作ったが記録できなかった方(孤児)は開かず、
+    // ノートが指す方を開く(round2 指摘2: 孤児へ飛ばさない)。
+    if (recorded.record === "conflict" && boundNow) {
+      return { ...recorded, threadId: boundNow, created: false, record: "already" };
+    }
+    return recorded;
+  }
+
+  /**
+   * 構想ノートを押したときの処理。**1ノートにつきスレは1本**が不変条件:
+   * 0. 前回このノート用に作って記録できなかったスレがあれば、**作らずに記録だけやり直す**。
+   * 1. ノートに書かれた候補のうち、生きているスレがあれば**作らずに開く**(`already`)。
+   * 2. `thread:` にIDがあるのに生きているスレが無ければ、**作らない**(作っても記録が
+   *    `conflict` になり、押すたびに2本目が増えるため)。理由と解き方を返してユーザーに任せる。
+   * 3. それ以外は1本作り、`thread:` へ記録する(記録の実装は `server/note-thread.ts` に隔離)。
+   */
+  async function openConceptThread(
+    key: string,
+    ctx: PluginHandlerContext,
+  ): Promise<OpenConceptThreadOutput> {
+    const fail = (message: string): OpenConceptThreadOutput => ({
+      ok: false,
+      threadId: null,
+      created: false,
+      record: "skipped",
+      recordError: null,
+      message,
+    });
+    let resolved: string;
+    let vaultDir: string;
+    try {
+      vaultDir = resolveVaultDir();
+      // スレを作る**前**に、書いてよいノートかを確かめる(作ってから書けないと分かるのを避ける)。
+      resolved = assertWritableConceptNote(key, vaultDir);
+    } catch (error) {
+      return fail((error as Error).message);
+    }
+
+    // 一覧を作った後に手で書き換わっていることがあるので、押された時点で読み直す。
+    // `readHead` は記録側と同じ64KB(round2 指摘5: 一覧の16KB版だと上限が食い違う)。
+    const head = readHead(resolved);
+
+    const retried = await retryUnrecorded(key, resolved, head, vaultDir);
+    if (retried) return retried;
+
+    const fm = parseFrontmatter(head);
+    const note = fm ? frontmatterToNote(fm, path.basename(resolved, ".md")) : null;
+    const live = await knownAgentIdsFor(ctx.paseo);
+    const candidates = [...(note?.threadCandidates ?? []), ...threadIdFromBlockList(head)];
+
+    const existing = resolveThreadId(candidates, live);
+    if (existing) {
+      return {
+        ok: true,
+        threadId: existing,
+        created: false,
+        record: "already",
+        recordError: null,
+        message: "",
+      };
+    }
+
+    const bound = readThreadKey(head);
+    if (bound && live?.live) {
+      // 生存リストまで読めている。このIDのスレは本当に無い(アーカイブ済みなど)。
+      return fail(
+        `ノートの thread: が指すスレ(${bound})が見つかりません(アーカイブ済みかもしれません)。` +
+          "そのスレでよければノートの thread: の行を消すと新しく作ります",
+      );
+    }
+    if (bound) {
+      // 一覧が引けなかっただけかもしれない。開くだけなら害が無いので通す(記録もしない)。
+      return {
+        ok: true,
+        threadId: bound,
+        created: false,
+        record: "already",
+        recordError: null,
+        message: "",
+      };
+    }
+
+    if (!live?.live) {
+      // 生存一覧を読み切れていない。UUID らしい候補(`thread_id:` / `threads:` だけのノート)が
+      // あれば、生きている可能性があるので**作らずに開く**(round2 指摘3: 作ると2本目になる)。
+      const uuid = candidates.find((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id));
+      if (uuid) {
+        return {
+          ok: true,
+          threadId: uuid,
+          created: false,
+          record: "already",
+          recordError: null,
+          message: "",
+        };
+      }
+    }
+
+    let threadId: string;
+    let made = false;
+    try {
+      threadId = await createConceptThread(ctx, key, resolved, note);
+      made = true;
+    } catch (error) {
+      // 以前の作成が後から完成していた(`rememberUnrecorded` が控えた)なら、それを記録する。
+      const late = unrecordedThreads.get(key);
+      if (late) return recordThread(resolved, late, vaultDir, true);
+      return fail(`スレを作れません: ${(error as Error).message}`);
+    }
+    // 記録に失敗しても、次の押下で作り直さず記録だけ再試行できるよう控える。
+    rememberUnrecorded(key, threadId);
+    const recorded = await recordThread(resolved, threadId, vaultDir, made);
+    if (recorded.record !== "pending") unrecordedThreads.delete(key);
+    return recorded;
+  }
+
+  // 連打対策: 同じノートの作成は1本に畳む(記録まで終わった後の分は上の `already` が受ける)。
+  const opening = new Map<string, Promise<OpenConceptThreadOutput>>();
+
+  server.handle(openConceptThreadRpc, async (input, ctx) => {
+    const key = path.resolve(input.path);
+    const inflight = opening.get(key);
+    if (inflight) return inflight;
+    const task = openConceptThread(key, ctx).finally(() => {
+      if (opening.get(key) === task) opening.delete(key);
+    });
+    opening.set(key, task);
+    return task;
+  });
+
   server.handle(cardChatSayRpc, async (input) => {
     try {
       return sayToCard(resolveConfirmBoxDir(), { id: input.id, key: input.key }, input.text);
@@ -324,4 +646,45 @@ export default function contribute(server: PluginServerContext) {
   });
 
   return () => {};
+}
+
+/** 生存スレの索引。`live: false` はデーモンの一覧を読み切れていない(「無い」と断定できない)。 */
+type LiveThreadIndex = Set<string> & { live?: boolean };
+
+/** 生存スレ一覧を辿るページ数の上限(1ページ200件。届かなければ (1) へ縮退する)。 */
+const LIVE_THREAD_PAGES_MAX = 25;
+/** スレ作成の待ち上限(秒)。超えたら諦めるが、後から届いたIDは記録に回す。 */
+const CREATE_TIMEOUT_MS = 60_000;
+/** 前回諦めた作成がまだ続いているとき、次の押下が待つ時間。過ぎたら「作成中」と返す。 */
+const PENDING_RETRY_WAIT_MS = 5_000;
+
+/**
+ * 深掘りスレを置く作業ディレクトリ。Paseo 本体の新規スレは「最後に使ったワークスペース」を
+ * 既定にするが、その選択は端末側にあり插件からは読めない。読めるようになるまでは決まった場所
+ * (`~/repos/_coordinator-spawned`、無ければホーム)に置く。`TOPOS_CONCEPT_THREAD_CWD` で差し替え可。
+ */
+function conceptThreadCwd(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.TOPOS_CONCEPT_THREAD_CWD?.trim();
+  if (configured) return configured;
+  const spawned = path.join(os.homedir(), "repos", "_coordinator-spawned");
+  try {
+    if (fs.statSync(spawned).isDirectory()) return spawned;
+  } catch {
+    // 無ければホーム
+  }
+  return os.homedir();
+}
+
+/** スレの題名(サイドバーに出る)。 */
+function conceptThreadTitle(title: string): string {
+  const t = title.replace(/\s+/g, " ").trim();
+  return (t.length > 120 ? `${t.slice(0, 119)}…` : t) || "構想";
+}
+
+/** 深掘りスレの最初の発話(壁打ち開始)。ノートの1行結論があれば起点にする。 */
+function conceptThreadPrompt(conclusion: string, notePath: string): string {
+  const lines = ["この構想ノートの深掘り(壁打ち)を始めます。", `ノート: ${notePath}`];
+  if (conclusion) lines.push(`いまの1行結論: ${conclusion}`);
+  lines.push("まずこの構想の要点と、決まっていない点・分岐する選択肢を整理して提示してください。");
+  return lines.join("\n");
 }

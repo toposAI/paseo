@@ -1,22 +1,24 @@
 /**
  * サイドバー二段の**下段**(進行中の構想)と、**上段の実装ノートの重ね合わせ**。
  *
- * - status の正は Vault ノートの frontmatter(標準_サイドバーの表示ルール)。ここでは書かない。
- * - 下段: 構想/壁打ち中の構想ノート。行は「題名 — 1行の結論」。押すとその構想の**スレ**を開く
- *   (ノートの `thread` / `threads` に書かれた、実在するスレ)。スレがまだ無いノートは
- *   Obsidian でノートを開く(スレの自動作成はワークスペース・モデルを決める必要があるため、
- *   夜間の実装では行わない=ユーザー判断待ち)。
+ * - status の正は Vault ノートの frontmatter(標準_サイドバーの表示ルール)。この画面は書かない。
+ * - 下段: 構想/壁打ち中の構想ノート。行は「題名 — 1行の結論」。押すとその構想の**深掘りスレ**を開く。
+ *   スレが無ければサーバー側が1本作り、IDをノートの `thread:` へ記録する(2026-10-23 決定)。
+ *   **連打対策はサーバー**: 同じノートの作成は1本に畳まれるので、ここでは画面側のフラグ
+ *   (`creating`)でサーバーを叩く回数も1回に絞るだけ。
  * - 上段: 実装ノート(status=実装中/判断待ち/確認待ち)。子スレ一覧の行に status と題名を重ねる。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
-import { notesSidebarRpc } from "../shared/notes.js";
+import { notesSidebarRpc, openConceptThreadRpc } from "../shared/notes.js";
 import type { NoteStatus, SidebarNote } from "../shared/notes.js";
-import { lowerTierNotes } from "../shared/sidebar-rows.js";
+import { indexImplementationNotes, lowerTierNotes } from "../shared/sidebar-rows.js";
 
 const POLL_MS = 60_000;
+/** 作成に失敗した理由の表示時間。消えないと、直した後も残って見える。 */
+const NOTICE_MS = 8_000;
 const LOWER_COLLAPSED_KEY = "topos-concept-notes-collapsed";
 /**
  * 下段の行右端に確保する幅。ピン止め・アーカイブ(6f957aa9 が同じ行に実装)の置き場。
@@ -38,6 +40,8 @@ export interface SidebarNotesState {
   error: string | null;
   /** 実装ノートをスレIDで引く(無ければ undefined)。 */
   implByThread: ReadonlyMap<string, SidebarNote>;
+  /** すぐに取り直す(スレを作ってノートへ記録した後。ドラッグ中のゲートは越える)。 */
+  reload: () => void;
 }
 
 /**
@@ -49,13 +53,17 @@ export function useSidebarNotes(gate?: { current: number }): SidebarNotesState {
   const [notes, setNotes] = useState<SidebarNote[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // スレを作った直後の取り直しは、ドラッグ中のゲートを越えて届ける必要がある
+  // (ノートの `thread:` に記録したIDを、次の60秒を待たずに反映する)。
+  const fetchRef = useRef<(force?: boolean) => void>(() => {});
+
   useEffect(() => {
     let alive = true;
-    const tick = () =>
+    const tick = (force = false) =>
       list({})
         .then((r) => {
           if (!alive) return null;
-          if (gate && Date.now() < gate.current) return null;
+          if (!force && gate && Date.now() < gate.current) return null;
           // 内容が同じなら配列を差し替えない(60秒ごとに上段・下段を丸ごと再描画しない。
           // ドラッグ中に行が飛ぶのも、この再描画が原因になりうる)。
           setNotes((prev) => (sameNotes(prev, r.notes) ? prev : r.notes));
@@ -63,27 +71,20 @@ export function useSidebarNotes(gate?: { current: number }): SidebarNotesState {
           return null;
         })
         .catch(() => alive && setError("ノートを取得できません"));
+    fetchRef.current = tick;
     void tick();
-    const timer = setInterval(tick, POLL_MS);
+    const timer = setInterval(() => void tick(), POLL_MS);
     return () => {
       alive = false;
       clearInterval(timer);
     };
   }, [list, gate]);
 
-  // 実装ノートをスレIDで引く。ノートは1スレに1枚(検収単位と1対1)なので、解決済みの threadId だけを張る
-  // (候補を全部張ると同じノートが複数行に重なる。1ノート=1スレの決まりは確定済み)。
-  // 同じスレに複数枚あれば新しい順の先頭。解決できない候補しか無いノートは、そのスレの行に重ねない。
-  const implByThread = useMemo(() => {
-    const map = new Map<string, SidebarNote>();
-    for (const n of notes) {
-      if (n.kind === "implementation" && n.threadId && !map.has(n.threadId)) {
-        map.set(n.threadId, n);
-      }
-    }
-    return map;
-  }, [notes]);
-  return { notes, error, implByThread };
+  const reload = useCallback(() => fetchRef.current(true), []);
+
+  // 実装ノートをスレIDで引く(規則は shared/sidebar-rows.ts の indexImplementationNotes だけ)。
+  const implByThread = useMemo(() => indexImplementationNotes(notes), [notes]);
+  return { notes, error, implByThread, reload };
 }
 
 /** 2つのノート一覧が表示上同じか(パス・種類・status・題名・結論・スレ・更新時刻)。 */
@@ -125,12 +126,6 @@ function oneLine(s: string, max = 56): string {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
-/** ノートを Obsidian で開く(スレがまだ無い構想の逃げ道)。Vault 名は既定の Obsidian_Vault。 */
-export function obsidianUrl(notePath: string): string {
-  const name = /([^/\\]+)\.md$/.exec(notePath)?.[1] ?? notePath;
-  return `obsidian://open?vault=Obsidian_Vault&file=${encodeURIComponent(name)}`;
-}
-
 function conceptLabel(n: SidebarNote): string {
   return n.conclusion ? `${n.title} — ${oneLine(n.conclusion)}` : n.title;
 }
@@ -148,6 +143,7 @@ export function ConceptNotesSection({
   serverId,
   openScreen,
   statusColor,
+  onCreated,
 }: {
   notes: readonly SidebarNote[];
   error: string | null;
@@ -156,9 +152,23 @@ export function ConceptNotesSection({
   openScreen: (input: { screenId: string; params?: Record<string, string> }) => void;
   /** 行右端の状態文字の色(WCAG AA を満たすものを親が選ぶ)。 */
   statusColor: string;
+  /** スレを作ってノートへ記録した直後に呼ぶ(一覧をすぐ取り直す)。 */
+  onCreated?: () => void;
 }) {
   const [open, setOpen] = useState(() => !readCollapsed());
-  const [busy, setBusy] = useState<string | null>(null);
+  const openThread = useRpc(openConceptThreadRpc);
+  // 作成中のノート(サーバーが1本に畳むが、画面からも連打で2回叩かない)。
+  const creatingRef = useRef<Set<string>>(new Set());
+  const [creating, setCreating] = useState<ReadonlySet<string>>(() => new Set());
+  const [notice, setNotice] = useState<{ text: string; sticky: boolean } | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
 
   const concepts = useMemo(() => lowerTierNotes(notes), [notes]);
 
@@ -169,23 +179,68 @@ export function ConceptNotesSection({
     });
   }, []);
 
-  const press = useCallback(
-    (n: SidebarNote) => {
-      if (n.threadId && openAgent) {
-        openAgent({ agentId: n.threadId, serverId });
-        return;
-      }
-      if (n.threadId) {
-        openScreen({ screenId: "child-threads", params: { focusId: n.threadId } });
-        return;
-      }
-      // スレ未作成: ノート自体を開く(Obsidian が無ければ何も起きない=行は残る)。
-      setBusy(n.path);
-      void Linking.openURL(obsidianUrl(n.path))
-        .catch(() => {})
-        .finally(() => setBusy((cur) => (cur === n.path ? null : cur)));
+  const dismissNotice = useCallback(() => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setNotice(null);
+  }, []);
+
+  /**
+   * 理由を出す。`sticky`(記録できていない = 次に押すと2本目になる状態)は、
+   * 見逃すと困るので**自動では消さない**。タップで消す。
+   */
+  const showFailure = useCallback((text: string, sticky = false) => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setNotice({ text, sticky });
+    if (!sticky) noticeTimer.current = setTimeout(() => setNotice(null), NOTICE_MS);
+  }, []);
+
+  const jumpTo = useCallback(
+    (agentId: string) => {
+      if (openAgent) openAgent({ agentId, serverId });
+      else openScreen({ screenId: "child-threads", params: { focusId: agentId } });
     },
     [openAgent, openScreen, serverId],
+  );
+
+  const press = useCallback(
+    (n: SidebarNote) => {
+      if (n.threadId) {
+        jumpTo(n.threadId);
+        return;
+      }
+      // スレ未作成: 深掘りスレを作って記録する(連打は作成中のフラグで1回に畳む)。
+      if (creatingRef.current.has(n.path)) return;
+      creatingRef.current.add(n.path);
+      setCreating(new Set(creatingRef.current));
+      void openThread({ path: n.path })
+        .then((r) => {
+          if (r.ok && r.threadId) {
+            onCreated?.();
+            jumpTo(r.threadId);
+            // 記録に失敗してもスレは開ける。サーバーは次回に作り直さず記録を再試行するが、
+            // デーモン再起動後は控えが消えるので、消えない通知で知らせる(出口レビュー round1 指摘1)。
+            if (r.record === "conflict") {
+              showFailure(`${n.title}: ノートの thread: に別のIDがあるため記録していません`, true);
+            } else if (r.record === "pending" || r.record === "skipped") {
+              showFailure(
+                `${n.title}: スレは作りましたがノートに記録できていません${r.recordError ? `(${r.recordError})` : ""}`,
+                true,
+              );
+            } else {
+              dismissNotice();
+            }
+            return;
+          }
+          showFailure(`${n.title}: スレを作れません${r.message ? `(${r.message})` : ""}`, true);
+          return;
+        })
+        .catch((e: unknown) => showFailure(`${n.title}: スレを作れません(${(e as Error).message})`))
+        .finally(() => {
+          creatingRef.current.delete(n.path);
+          setCreating(new Set(creatingRef.current));
+        });
+    },
+    [dismissNotice, jumpTo, onCreated, openThread, showFailure],
   );
 
   const headerLabel =
@@ -217,12 +272,20 @@ export function ConceptNotesSection({
             <ConceptRow
               key={n.path}
               note={n}
-              busy={busy === n.path}
+              busy={creating.has(n.path)}
               onPress={press}
               color={statusColor}
             />
           ))
         : null}
+      {open && notice ? (
+        <SidebarRow
+          id="concept-notes-notice"
+          icon="CircleAlert"
+          label={oneLine(notice.text, 80)}
+          onPress={dismissNotice}
+        />
+      ) : null}
       {open && concepts.length === 0 ? (
         <SidebarRow
           id="concept-notes-empty"

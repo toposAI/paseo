@@ -5,7 +5,11 @@ import path from "node:path";
 import { test } from "node:test";
 import type { SidebarNote } from "../shared/notes.js";
 import { readSidebarNotes } from "./notes.js";
-import { buildUpperRows, lowerTierNotes } from "../shared/sidebar-rows.js";
+import {
+  buildUpperRows,
+  indexImplementationNotes,
+  lowerTierNotes,
+} from "../shared/sidebar-rows.js";
 import type { RowThread } from "../shared/sidebar-rows.js";
 
 const thread = (
@@ -112,16 +116,13 @@ test("通し: 実走査→implByThread→buildUpperRowsで、完了ノートの�
   );
 });
 
+// 索引は本番と同じ関数を使う(写しを持つと、片方だけ直したときにテストが通ってしまう)。
 function scanAndIndex(dir: string): {
   notes: SidebarNote[];
   implByThread: ReadonlyMap<string, SidebarNote>;
 } {
   const { notes } = readSidebarNotes({ roots: [dir] });
-  const implByThread = new Map<string, SidebarNote>();
-  for (const n of notes) {
-    if (n.kind === "implementation" && n.threadId) implByThread.set(n.threadId, n);
-  }
-  return { notes, implByThread };
+  return { notes, implByThread: indexImplementationNotes(notes) };
 }
 
 test("下段: 構想/壁打ち中の構想ノートだけ", () => {

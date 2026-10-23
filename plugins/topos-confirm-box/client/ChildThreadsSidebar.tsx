@@ -91,7 +91,12 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
   const setOrder = useRpc(childThreadsSetOrderRpc);
   // ドラッグ中は取得結果で一覧を差し替えない(ノート側の取得でも同じゲートを使う)。
   const dragGateUntilRef = useRef(0);
-  const { notes, error: notesError, implByThread } = useSidebarNotes(dragGateUntilRef);
+  const {
+    notes,
+    error: notesError,
+    implByThread,
+    reload: reloadNotes,
+  } = useSidebarNotes(dragGateUntilRef);
   const [threads, setThreads] = useState<ChildThread[]>([]);
   const [failed, setFailed] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
@@ -258,7 +263,7 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
           onPress={openList}
         />
       ) : null}
-      {/* 下段: 進行中の構想(折りたたみ可)。スレがまだ無い構想は Obsidian でノートを開く。 */}
+      {/* 下段: 進行中の構想(折りたたみ可)。押すと深掘りスレを開く(無ければ作ってノートに記録)。 */}
       <ConceptNotesSection
         notes={notes}
         error={notesError}
@@ -266,6 +271,7 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
         serverId={props.host.id}
         openScreen={openScreen}
         statusColor={statusColor}
+        onCreated={reloadNotes}
       />
       {orderIsManual ? (
         <SidebarRow

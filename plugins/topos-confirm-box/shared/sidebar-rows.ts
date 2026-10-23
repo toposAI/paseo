@@ -59,6 +59,25 @@ export function buildUpperRows<T extends RowThread>(
   return rows;
 }
 
+/**
+ * 実装ノートをスレIDで引ける形にする(行に status・題名を重ねる材料)。
+ * ノートは1スレに1枚(検収単位と1対1)なので、解決済みの threadId だけを張る。
+ * 解決できない候補しか無いノートは、そのスレの行に重ねない。同じスレに複数枚あれば
+ * **先頭(新しい順の最初)勝ち**。テストの写しと本番で結果がずれないよう、クライアントは
+ * これだけを使う(出口レビュー round2 指摘1)。
+ */
+export function indexImplementationNotes(
+  notes: readonly SidebarNote[],
+): ReadonlyMap<string, SidebarNote> {
+  const map = new Map<string, SidebarNote>();
+  for (const n of notes) {
+    if (n.kind === "implementation" && n.threadId && !map.has(n.threadId)) {
+      map.set(n.threadId, n);
+    }
+  }
+  return map;
+}
+
 /** 下段(進行中の構想ノート)。構想/壁打ち中だけ。並びは入力順(サーバーが新しい順に並べる)。 */
 export function lowerTierNotes(notes: readonly SidebarNote[]): SidebarNote[] {
   return notes.filter((n) => n.kind === "concept" && LOWER_TIER_STATUSES.includes(n.status));

@@ -4,7 +4,7 @@
  * ユーザーから「状態文字が薄くて読めない」と複数回指摘されているため、テーマの
  * `foregroundMuted` をそのまま使わず、行の背景に対して 4.5:1 を満たすか確かめてから使う。
  * 満たさなければ `foreground` に落とす(落とした結果も満たさないテーマは、テーマ側の
- * 問題なのでここでは何もしない=そのまま返す)。
+ * 問題なので「より読める方」を返す。どちらも満たさないことをここで直すことはできない)。
  */
 
 /** `#rgb` / `#rrggbb` / `#rrggbbaa` を [r,g,b] にする。読めなければ null。 */
@@ -47,10 +47,9 @@ export function contrastRatio(a: string, b: string): number | null {
 }
 
 /**
- * `preferred` が **すべての** 背景に対して `min` 以上ならそれを、駄目なら `fallback` を返す。
- * 背景が1つも無い/色が読めないときは `fallback`(安全側)。
- * 色が `#hex` でない等で判定できない場合も `false` を返すので、呼び出し側で
- * 「判定不能のまま薄い色が通った」と見えるようにできる(判定自体はここでは変えない)。
+ * `color` が **すべての** 背景に対して `min` 以上のコントラスト比を持つか。
+ * 背景が1つも無いとき、色が `#hex`(不透明)でない等で比を出せないときは `false` を返す
+ * (判定できない色を「読める」扱いにしない)。
  */
 export function meetsContrast(color: string, backgrounds: readonly string[], min = 4.5): boolean {
   if (backgrounds.length === 0) return false;
