@@ -50,8 +50,6 @@ export const childThreadsListRpc = defineRpc({
     generatedAt: z.number(),
     /** 手動の並び順が保存されているか(「自動に戻す」を出す判断用)。 */
     orderIsManual: z.boolean().default(false),
-    /** ピン止めの保存(サーバー側)に失敗したか。行内でピン止めするため、失敗は一覧で知らせる。 */
-    pinSaveFailed: z.boolean().default(false),
     /** ピン止め(この箱ディレクトリの設定ファイルに保存)の読み出し失敗。画面には出さずログ用。 */
     pinReadError: z.string().nullish(),
   }),
