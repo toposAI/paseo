@@ -4,7 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { adoptOrphans, coordinatorRows, readCoordinatorIds } from "./coordinator-threads.js";
+import {
+  adoptOrphans,
+  coordinatorRows,
+  markCoordinators,
+  readCoordinatorIds,
+} from "./coordinator-threads.js";
 import type { ChildThread } from "../shared/child-threads.js";
 
 function thread(overrides: Partial<ChildThread>): ChildThread {
@@ -54,6 +59,20 @@ test("司令塔の行は一覧に居るものだけ・登録簿に既に居る�
   assert.deepEqual(
     rows.map((r) => [r.agentId, r.title, r.machineState, r.coordinator]),
     [["c1", "総司令塔", "idle", true]],
+  );
+});
+
+test("登録簿に載っている司令塔にも印を付ける(その他へ落とさない)", () => {
+  const rows = markCoordinators(
+    [thread({ agentId: "c1" }), thread({ agentId: "kid", parentAgentId: "c1" })],
+    ["c1"],
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.agentId, r.coordinator]),
+    [
+      ["c1", true],
+      ["kid", false],
+    ],
   );
 });
 

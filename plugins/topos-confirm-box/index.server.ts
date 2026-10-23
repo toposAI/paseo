@@ -48,7 +48,12 @@ import {
   writeChildThreadPin,
 } from "./server/child-threads.js";
 import { cardExists, readCardChat, sayToCard } from "./server/cardchat.js";
-import { adoptOrphans, coordinatorRows, readCoordinatorIds } from "./server/coordinator-threads.js";
+import {
+  adoptOrphans,
+  coordinatorRows,
+  markCoordinators,
+  readCoordinatorIds,
+} from "./server/coordinator-threads.js";
 import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
 import type { WorkspaceArchiveDecision } from "./server/workspace-membership.js";
 import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
@@ -104,18 +109,19 @@ export default function contribute(server: PluginServerContext) {
     const rows = readChildThreads(dir, items);
     // 司令塔は登録簿に載らない(登録簿は司令塔が建てた子スレだけ)。起こしデーモンの一覧から
     // 生きている司令塔を先頭の行として足す。取れなければ登録簿の並びのまま出す。
-    let threads = adoptOrphans(rows);
+    const ids = readCoordinatorIds();
+    let threads = adoptOrphans(markCoordinators(rows, ids));
     try {
       const listed = await ctx.paseo.agents.list();
       const coordinators = coordinatorRows(
-        readCoordinatorIds(),
+        ids,
         listed.entries.map((e) => e.agent),
         rows,
       );
       // 親の行(司令塔)が出ているなら、その子スレも同じグループへ寄せる。
-      threads = adoptOrphans([...coordinators, ...rows]);
+      threads = adoptOrphans([...coordinators, ...markCoordinators(rows, ids)]);
     } catch {
-      threads = adoptOrphans(rows);
+      threads = adoptOrphans(markCoordinators(rows, ids));
     }
     return {
       threads,

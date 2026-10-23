@@ -95,6 +95,17 @@ export function coordinatorRows(
 }
 
 /**
+ * 登録簿に既に載っている司令塔(例: 司令塔が自分で建てた子スレの一覧に自分も入っている場合)へ
+ * `coordinator` の印を付ける。印が無いと「その他」へ落ちて状態ラベル付きで出てしまう。
+ */
+export function markCoordinators(rows: ChildThread[], ids: readonly string[]): ChildThread[] {
+  const known = new Set(ids);
+  return rows.map((t) =>
+    t.coordinator === true || !known.has(t.agentId) ? t : { ...t, coordinator: true },
+  );
+}
+
+/**
  * 司令塔の子スレ(登録簿で親なし=「その他」に行くもの)を、司令塔の下へ寄せる。
  *
  * `child_thread_registry.sync` は cwd が `_coordinator-spawned` のスレしか登録せず、親は登録時にしか
