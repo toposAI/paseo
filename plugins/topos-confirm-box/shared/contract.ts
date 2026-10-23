@@ -253,6 +253,12 @@ export const PriorityProjectSchema = z.object({
   id: z.string(),
   name: z.string(),
   note: z.string(),
+  /**
+   * 担当スレ(Paseo の agent ID)。未設定は null。
+   * 台帳 (`priority_ledger.json`) が SSOT で、UI は行タップでこのスレを開くだけ
+   * (題名の一致などで推測しない=誤ったスレを開くよりは「未設定」と言う)。
+   */
+  thread: z.string().nullable(),
 });
 export type PriorityProject = z.infer<typeof PriorityProjectSchema>;
 
@@ -300,6 +306,8 @@ export const cardChatListRpc = defineRpc({
   name: "topos.confirmbox.cardchat.list",
   input: z.object(cardChatTarget),
   output: z.object({
+    /** 箱にその項目が在るか。無い id(URL 手打ち・決定済み)への送信を止めるため(2026-10-22)。 */
+    found: z.boolean(),
     messages: z.array(
       z.object({
         ts: z.number(),

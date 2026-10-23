@@ -1,8 +1,12 @@
 /**
- * 開発の優先順位(1〜10位)。▲▼で直接並べ替え(解釈を介さないので誤解釈が起きない)と、
+ * 開発の優先順位(台帳の全件)。▲▼で直接並べ替え(解釈を介さないので誤解釈が起きない)と、
  * PC=ドラッグ&ドロップ、iPhone=長押し(または左端の握り⋮⋮)して指を動かす、でも並べ替える(下の useDragReorder)。
  * 自由記述(「Xを上げて」)の送信・返答表示。解釈と台帳更新は別プロセスが行い、
  * ここは台帳と返答を30秒ごと(送信直後は即時)に読み直すだけ。
+ *
+ * 2026-10-23 ユーザー指示で件数の切り捨てを撤去した(以前は先頭10件だけ描画していて、
+ * 11件目以降が画面から消え、並べ替えの書き戻しで台帳からも消えていた)。上限は台帳側の受け入れ上限だけ。
+ * 行のタップで担当スレを開く(開く先は確認箱側のペイン=PCは右、iPhoneは全画面)。
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, Text, TextInput, View } from "react-native";
@@ -24,6 +28,8 @@ const LONG_PRESS_MS = 350;
 const MOUSE_THRESHOLD_PX = 4;
 const HANDLE_THRESHOLD_PX = 3;
 const TOUCH_CANCEL_PX = 10;
+/** 指をこの範囲で離したらタップ(行を開く)。これを超えて動いたらスクロール扱いで何もしない。 */
+const TAP_PX = 6;
 const ROW_GAP = 8;
 const SLIDE = "transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1)";
 const LIFT_SHADOW = "0 10px 24px rgba(0,0,0,0.28)";
@@ -38,14 +44,19 @@ const LIFT_SHADOW = "0 10px 24px rgba(0,0,0,0.28)";
  * - ドラッグ中はスクロールさせない(touchmove を passive:false で止める)。
  * 離したら吸い付くアニメーションの後に onDrop(from, to) を呼ぶ。transform の掃除は並び(orderKey)が
  * 変わった直後の layout effect(描画前)で行うので、並べ替え後に一瞬ずれて見えることがない。
+ * ドラッグに到らなかった短いタップ(握り以外・`TAP_PX` 以内)は onTap(row) で拾う。行を包む Pressable で
+ * 拾わないのは、`onDown` が `button` を無視するため(包むと PC で行本体からのドラッグができなくなる)。
  */
 function useDragReorder(
   listRef: React.RefObject<View | null>,
   orderKey: string,
   onDrop: (from: number, to: number) => void,
+  onTap: (row: number) => void,
 ) {
   const onDropRef = useRef(onDrop);
   onDropRef.current = onDrop;
+  const onTapRef = useRef(onTap);
+  onTapRef.current = onTap;
 
   const resetStyles = useCallback(() => {
     const el = listRef.current as unknown as HTMLElement | null;
@@ -165,9 +176,13 @@ function useDragReorder(
       target = next;
       apply(cdy);
     }
-    function onUp() {
+    function onUp(e: PointerEvent) {
       if (!active) {
+        const tap =
+          from >= 0 && !fromHandle && Math.hypot(e.clientX - startX, e.clientY - startY) <= TAP_PX;
+        const row = from;
         cleanup();
+        if (tap) onTapRef.current(row);
         return;
       }
       const f = from;
@@ -253,12 +268,15 @@ function RankRow({
   id,
   index,
   name,
+  hasThread,
   styles,
   onShift,
 }: {
   id: string;
   index: number;
   name: string;
+  /** 担当スレが台帳に入っているか。未設定でも行は押せて、押したら理由を出す(黙って無反応にしない)。 */
+  hasThread: boolean;
   styles: Styles;
   onShift: (id: string, toRank: number) => Promise<void>;
 }) {
@@ -272,7 +290,10 @@ function RankRow({
         <Text style={styles.muted}>⋮⋮</Text>
       </View>
       <Text style={styles.subject}>{index + 1}</Text>
-      <Text style={label}>{name}</Text>
+      {/* 担当スレが入っていれば「› スレ」を付ける(押すと開くという印)。入れ子の Text は作らず1行にまとめる。 */}
+      <Text style={label} numberOfLines={2}>
+        {hasThread ? `${name} › スレ` : name}
+      </Text>
       <Pressable accessibilityRole="button" style={styles.btn} onPress={up}>
         <Text style={styles.btnText}>▲</Text>
       </Pressable>
@@ -283,7 +304,16 @@ function RankRow({
   );
 }
 
-export function PriorityView({ styles, colors }: { styles: Styles; colors: Colors }) {
+export function PriorityView({
+  styles,
+  colors,
+  onOpenThread,
+}: {
+  styles: Styles;
+  colors: Colors;
+  /** 行タップ。担当スレ未設定の時は agentId が null のまま呼ぶ(理由の表示は呼び出し側)。 */
+  onOpenThread: (agentId: string | null, name: string) => void;
+}) {
   const list = useRpc(priorityListRpc);
   const move = useRpc(priorityMoveRpc);
   const say = useRpc(prioritySayRpc);
@@ -341,7 +371,14 @@ export function PriorityView({ styles, colors }: { styles: Styles; colors: Color
     [shift],
   );
   const orderKey = (data?.projects ?? []).map((p) => p.id).join("|");
-  useDragReorder(listRef, orderKey, drop);
+  const tap = useCallback(
+    (row: number) => {
+      const p = dataRef.current?.projects[row];
+      if (p) onOpenThread(p.thread, p.name);
+    },
+    [onOpenThread],
+  );
+  useDragReorder(listRef, orderKey, drop, tap);
 
   const send = useCallback(async () => {
     const t = text.trim();
@@ -373,12 +410,22 @@ export function PriorityView({ styles, colors }: { styles: Styles; colors: Color
   return (
     <View style={gap8}>
       <Text style={styles.muted}>
-        開発の優先順位(ドラッグ/長押しか▲▼で並べ替え。確認箱の判断も上位プロジェクトが先に並びます)
+        開発の優先順位(全{data?.projects.length ?? 0}
+        件)。行タップで担当スレを開く。ドラッグ/長押しか▲▼で
+        並べ替え。確認箱の判断も上位プロジェクトが先に並びます
       </Text>
       {notice ? <Text style={styles.muted}>{notice}</Text> : null}
       <View ref={listRef} style={gap8}>
         {data?.projects.map((p, i) => (
-          <RankRow key={p.id} id={p.id} index={i} name={p.name} styles={styles} onShift={shift} />
+          <RankRow
+            key={p.id}
+            id={p.id}
+            index={i}
+            name={p.name}
+            hasThread={p.thread !== null}
+            styles={styles}
+            onShift={shift}
+          />
         ))}
       </View>
       <TextInput

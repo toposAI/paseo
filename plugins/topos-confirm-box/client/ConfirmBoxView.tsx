@@ -3,6 +3,7 @@
  *
  * v1: 一覧(優先度順)・展開・背景の4段階開示・選択して決定を記録・Paseo承認待ちへの応答。
  * 決定の記録は押した時だけ(自動では何も決めない)。
+ * カードごとの会話は 💬 から開く専用ペイン(CardChatPane)に一本化した(旧・カード内の自由記述欄は廃止)。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
@@ -24,7 +25,9 @@ import { ChildDoneView } from "./ChildDoneView.js";
 import { NotificationsView } from "./NotificationsView.js";
 import { BellIcon, BugIcon, CheckCircleIcon, InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
-import { CardChat } from "./CardChat.js";
+import { CardChatPane } from "./CardChatPane.js";
+import { useCardPaneRoute } from "./useCardPaneRoute.js";
+import { useConfirmBoxPane } from "./useConfirmBoxPane.js";
 import { QuestionAnswer } from "./QuestionAnswer.js";
 import type { QuestionAnswerColors } from "./QuestionAnswer.js";
 import type {
@@ -39,8 +42,11 @@ const REFRESH_MS = 30_000;
 export function ConfirmBoxView({
   theme,
   navigation,
+  containerWidth,
 }: Pick<PluginHostProps, "theme"> & {
   navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
+  /** 描画先の箱の幅。省略時は窓幅。ポップオーバーは窓が広くても箱が狭いので実測値を渡す。 */
+  containerWidth?: number;
 }) {
   const list = useRpc(confirmBoxListRpc);
   const decide = useRpc(confirmBoxDecideRpc);
@@ -76,13 +82,40 @@ export function ConfirmBoxView({
 
   const c = theme.colors;
   // タッチ幅(iPhone等)ではタップ領域を44pt以上・間隔8pxに広げる。PC幅は従来の大きさ。
-  const { width } = useWindowDimensions();
+  const { width: windowWidth } = useWindowDimensions();
+  // 幅の判定は「描画されている箱」基準。ポップオーバーは窓が広くても箱は最大420pxなので、
+  // 窓幅で判定すると一覧とチャットペインが同じ狭い箱に横並びで押し込まれる。
+  const width = layoutWidth(containerWidth, windowWidth);
   const touch = width < 600;
+  // 一覧とチャットの並べ方。Paseo の compact 境界(720px)に合わせる。
+  const compact = width < 720;
+  // カードチャットは画面を問わずこのペインに一本化した(旧・自由記述欄は廃止=2026-10-22ユーザー決定)。
+  // ヘッダのポップオーバーも幅<720なので、ペインは全画面スライドとして重なる。
+  // ペインの相手は2種: カードの投函元スレ(💬)と、優先順位の行の担当スレ(行タップ)。
+  // どちらも同じペイン・同じURL面(`?card=` / `?thread=`)を使う(2026-10-23 ユーザー指示)。
+  const { pane, open: openPane, close: closePane } = useCardPaneRoute(true);
+  const {
+    paneCardId,
+    paneThreadId,
+    paneItem,
+    paneThreadTitle,
+    threadNotice,
+    openCard: openPaneFor,
+    openThread,
+  } = useConfirmBoxPane({ items: data?.items, pane, openPane });
+  const openCard = useCallback(
+    (item: ConfirmBoxItem) => {
+      setDepth("chat");
+      openPaneFor(item);
+    },
+    [openPaneFor],
+  );
   const s = useMemo(() => {
     const tap = touch ? { minHeight: 44, justifyContent: "center" as const } : {};
     return {
       root: { flex: 1, backgroundColor: c.surface0 },
       flex: { flex: 1 },
+      splitRow: { flex: 1, flexDirection: "row" as const },
       body: { padding: 12, gap: 8 },
       card: {
         backgroundColor: c.surface1,
@@ -191,19 +224,6 @@ export function ConfirmBoxView({
     setDepth("expanded");
   }, []);
   const openBackground = useCallback(() => setDepth("background"), []);
-  const openChat = useCallback(
-    (item: ConfirmBoxItem) => {
-      const agentId = threadAgentId(item);
-      if (agentId && navigation) {
-        setDepth("chat");
-        navigation.openAgent({ agentId });
-      } else {
-        setNotice(threadDisabledReason(item, Boolean(navigation)) ?? "スレを開けません");
-      }
-    },
-    [navigation],
-  );
-
   const choose = useCallback(
     async (item: ConfirmBoxItem, optionId: string) => {
       try {
@@ -277,12 +297,44 @@ export function ConfirmBoxView({
   );
 
   const toggleFilter = useCallback(() => setFilterOpen((v) => !v), []);
-  const filterSummary = `${prio === "all" ? "全て" : PRIORITY_LABEL[prio as keyof typeof PRIORITY_LABEL]} · ${sortNew ? "新しい順" : "優先度順"}${showDone ? " · 決定済み含む" : ""}${legacyOff ? "" : " · 旧形式含む"} · ${visible.length}件`;
+  const filterSummary = summarizeFilter({
+    prio,
+    sortNew,
+    showDone,
+    legacyOff,
+    count: visible.length,
+  });
+
+  // 幅で置き場所が変わる(右に並べる/全画面で重ねる)ので、SplitLayout へ要素ごと渡す。
+  // ペインの相手は投函元スレ(2026-10-22 ユーザー決定)。まだ一覧に来ていないカードは null。
+  const paneAgentId = paneItem ? threadAgentId(paneItem) : paneThreadId;
+  const openPaneThread = useMemo(() => {
+    if (!paneAgentId || !navigation) return undefined;
+    return () => navigation.openAgent({ agentId: paneAgentId });
+  }, [paneAgentId, navigation]);
+  // eslint-disable-next-line eslint-plugin-react-perf/jsx-no-jsx-as-prop -- 同一レンダーの子として一度だけ置く
+  const paneEl = pane ? (
+    <CardChatPane
+      item={paneItem}
+      agentId={paneAgentId}
+      title={paneThreadTitle ?? undefined}
+      colors={c}
+      compact={compact}
+      width={width}
+      onClose={closePane}
+      onOpenThread={openPaneThread}
+    />
+  ) : null;
 
   // タブごとの中身。入れ子の三項を JSX へ書かないよう if 連鎖で組み立てる。
   let content: ReactNode;
   if (tab === "priority") {
-    content = <PriorityView styles={s} colors={c} />;
+    content = (
+      <>
+        {threadNotice ? <Text style={s.muted}>{threadNotice}</Text> : null}
+        <PriorityView styles={s} colors={c} onOpenThread={openThread} />
+      </>
+    );
   } else if (tab === "bugs") {
     content = <BugReportsView theme={theme} />;
   } else if (tab === "childdone") {
@@ -326,10 +378,10 @@ export function ConfirmBoxView({
             open={openId === item.id}
             onToggle={toggle}
             onBackground={openBackground}
-            onChat={openChat}
-            canNavigate={Boolean(navigation)}
             onChoose={choose}
             onAnswer={answer}
+            paneOpen={paneCardId === item.id}
+            onOpenPane={openCard}
           />
         ))}
       </>
@@ -337,34 +389,67 @@ export function ConfirmBoxView({
   }
 
   return (
-    <View style={s.root}>
-      <ScrollView style={s.flex} contentContainerStyle={s.body}>
-        {content}
-      </ScrollView>
-      {tab === "priority" ? <ChatDock colors={c} agentId={PRIORITY_CHAT_AGENT_ID} /> : null}
-      <View style={s.bottomBar}>
-        {/* `flexGrow:1` で5枚を等分。狭い幅では等分を保ったまま横スクロールへ落ちる。 */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={s.tabStrip}
-        >
-          {TABS.map((tb) => (
-            <TabButton
-              key={tb.id}
-              tab={tb}
-              on={tab === tb.id}
-              styles={s}
-              accent={c.accent}
-              muted={c.foregroundMuted}
-              count={counts[tb.id] ?? 0}
-              onSelect={setTab}
-            />
-          ))}
+    <SplitLayout styles={s} compact={compact} pane={paneEl}>
+      <View style={s.flex}>
+        <ScrollView style={s.flex} contentContainerStyle={s.body}>
+          {content}
         </ScrollView>
+        {tab === "priority" ? <ChatDock colors={c} agentId={PRIORITY_CHAT_AGENT_ID} /> : null}
+        <View style={s.bottomBar}>
+          {/* `flexGrow:1` で5枚を等分。狭い幅では等分を保ったまま横スクロールへ落ちる。 */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.tabStrip}
+          >
+            {TABS.map((tb) => (
+              <TabButton
+                key={tb.id}
+                tab={tb}
+                on={tab === tb.id}
+                styles={s}
+                accent={c.accent}
+                muted={c.foregroundMuted}
+                count={counts[tb.id] ?? 0}
+                onSelect={setTab}
+              />
+            ))}
+          </ScrollView>
+        </View>
       </View>
+    </SplitLayout>
+  );
+}
+
+/**
+ * 一覧とチャットペインの並べ方。720px以上は右に並べ(一覧は残る)、
+ * 狭い幅(iPhone)は右から全画面で重ねる。
+ */
+function SplitLayout({
+  styles,
+  compact,
+  pane,
+  children,
+}: {
+  styles: Styles;
+  compact: boolean;
+  pane: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <View style={styles.root}>
+      <View style={styles.splitRow}>
+        {children}
+        {compact ? null : pane}
+      </View>
+      {compact ? pane : null}
     </View>
   );
+}
+
+/** 幅の判定に使う値。ポップオーバーは窓が広くても箱が狭いので、測った箱幅を優先する。 */
+function layoutWidth(containerWidth: number | undefined, windowWidth: number): number {
+  return containerWidth ?? windowWidth;
 }
 
 type TabId = "items" | "bugs" | "childdone" | "notify" | "priority";
@@ -461,17 +546,34 @@ const NO_QUESTIONS: NonNullable<ConfirmBoxItem["questions"]> = [];
 
 type Styles = Record<string, object>;
 
+/** 判断タブの絞り込みバーの1行要約。 */
+function summarizeFilter({
+  prio,
+  sortNew,
+  showDone,
+  legacyOff,
+  count,
+}: {
+  prio: string;
+  sortNew: boolean;
+  showDone: boolean;
+  legacyOff: boolean;
+  count: number;
+}): string {
+  const parts = [
+    prio === "all" ? "全て" : PRIORITY_LABEL[prio as keyof typeof PRIORITY_LABEL],
+    sortNew ? "新しい順" : "優先度順",
+    showDone ? "決定済み含む" : "",
+    legacyOff ? "" : "旧形式含む",
+    `${count}件`,
+  ];
+  return parts.filter(Boolean).join(" · ");
+}
+
 /** 元スレの agent ID。投函の thread_ref(paseo_agent)優先、無ければ承認待ちの agentId。 */
 function threadAgentId(item: ConfirmBoxItem): string | null {
   if (item.threadRef?.kind === "paseo_agent") return item.threadRef.id;
   return item.agentId;
-}
-
-/** 押せない理由。押せるなら null。 */
-function threadDisabledReason(item: ConfirmBoxItem, canNavigate: boolean): string | null {
-  if (!threadAgentId(item)) return "元スレを特定できません(投函に thread_ref がありません)";
-  if (!canNavigate) return "この画面からはスレを開けません(全画面の確認箱から開いてください)";
-  return null;
 }
 
 function formatCreated(ts: number): string {
@@ -515,10 +617,10 @@ function ItemCard({
   open,
   onToggle,
   onBackground,
-  onChat,
-  canNavigate,
   onChoose,
   onAnswer,
+  paneOpen,
+  onOpenPane,
 }: {
   item: ConfirmBoxItem;
   styles: Styles;
@@ -526,23 +628,21 @@ function ItemCard({
   open: boolean;
   onToggle: (id: string) => void;
   onBackground: () => void;
-  onChat: (item: ConfirmBoxItem) => void;
-  canNavigate: boolean;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
   onAnswer: (item: ConfirmBoxItem, answers: Record<string, string>) => Promise<void>;
+  /** このカードの会話ペインが開いているか。 */
+  paneOpen: boolean;
+  onOpenPane: (item: ConfirmBoxItem) => void;
 }) {
   const [bgOpen, setBgOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
   const toggle = useCallback(() => onToggle(item.id), [onToggle, item.id]);
-  const thread = useCallback(() => onChat(item), [onChat, item]);
-  const threadReason = threadDisabledReason(item, canNavigate);
   const toggleBg = useCallback(() => {
     setBgOpen((v) => {
       if (!v) onBackground();
       return !v;
     });
   }, [onBackground]);
-  const toggleChat = useCallback(() => setChatOpen((v) => !v), []);
+  const openPane = useCallback(() => onOpenPane(item), [onOpenPane, item]);
   const deny = useCallback(() => void onChoose(item, "__deny"), [item, onChoose]);
   const answer = useCallback(
     (answers: Record<string, string>) => void onAnswer(item, answers),
@@ -582,34 +682,26 @@ function ItemCard({
       )}
       {open && questions.length === 0 ? <Text style={styles.text}>{item.summary}</Text> : null}
       {bgOpen && item.background ? <Text style={styles.text}>{item.background}</Text> : null}
-      {chatOpen ? <CardChat itemId={item.id} itemKey={item.key} styles={styles} /> : null}
       <View style={styles.footRow}>
         {item.background ? (
           <Pressable accessibilityRole="button" style={styles.footBtn} onPress={toggleBg}>
             <Text style={styles.footText}>{bgOpen ? "▼背景" : "▶背景"}</Text>
           </Pressable>
         ) : null}
+        {/* 会話ボタンは1つだけ(2026-10-23 ユーザー指示)。押すと投函元スレの会話を右ペイン(狭い幅は全画面)で開く。
+            実スレ画面への全面遷移(旧 ↩ スレ)は、単独ボタンからの「スレを開く」としてペインのヘッダーだけに残している。 */}
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="このカードのチャット欄を開く"
+          accessibilityLabel="投函元スレの会話を右に開く"
           style={styles.footBtn}
-          onPress={toggleChat}
+          onPress={openPane}
         >
-          <Text style={styles.footText}>{chatOpen ? "▼💬" : "💬"}</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="元のスレに戻る"
-          style={threadReason === null ? styles.footBtn : styles.footBtnOff}
-          onPress={thread}
-        >
-          <Text style={styles.footText}>↩ スレ</Text>
+          <Text style={styles.footText}>{paneOpen ? "▼会話" : "💬 会話"}</Text>
         </Pressable>
         <Text style={styles.created} numberOfLines={1}>
           {created}
         </Text>
       </View>
-      {threadReason && open ? <Text style={styles.muted}>{threadReason}</Text> : null}
     </View>
   );
 }

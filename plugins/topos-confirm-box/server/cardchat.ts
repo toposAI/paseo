@@ -6,10 +6,10 @@
  * 箱の正本 `events-YYYYMM.jsonl` に一本化した。PaseoコアのPWAが既に書いている
  * `{"t":"chat",…}` と同じ形なので、**同じ箱に質問と返事が1本の列として残る**。
  *
- * 既知の残差(2026-10-22): コアPWA(`packages/server/.../confirm-box/store.ts`)の
- * `applyLine` は `t:"reply"` を折り畳まない(`default: return false`)。よって
- * **コアPWAの画面から聞くと、返事は箱に書かれるが見えない**(表示はこのプラグインUIのみ)。
- * 直すにはコア側に `case "reply"` を足してサーバを作り直す必要がある(別スレの作業)。
+ * 表示するUIは2つあり、どちらも同じイベント列を読む: このプラグインのカードチャットペインと、
+ * コアPWAの確認箱ページ(`packages/server/src/server/confirm-box/page.ts`)。
+ * コア側も `applyLine` が `t:"reply"` を折り畳む(e3c435bc9 で対応。それ以前は
+ * **PWAから聞くと返事が見えなかった**=旧コメントの残差は解消済み)。
  *
  * - 質問: `{t:"chat", id, key, ts, question, client_message_id}`
  * - 返事: `{t:"reply", id, key, ts, re, by, text}`(`re` = 質問の client_message_id)
@@ -17,8 +17,7 @@
  *
  * UIが書くのは質問と**即時の受領(ack)**だけ。本回答は `confirm_box_reply_worker.py`
  * (60秒ごと)が元スレへの転送かLLMで書き戻す=**このプラグインUIから聞いた限りは**
- * 受領が同期で必ず1行返る(fail-open)。コアPWAの入力欄から聞いた場合は ack も
- * 本回答も表示されない(上の既知の残差)。
+ * 受領が同期で必ず1行返る(fail-open)。
  * 未知の `t` は既存の読み手が無視する契約なので、この2行を足しても箱は壊れない。
  */
 import fs from "node:fs";
@@ -193,6 +192,15 @@ function legacyMessages(dir: string, keys: string[]): CardChatMessage[] {
     }
   }
   return out;
+}
+
+/**
+ * その id/key の項目が箱(item 行)にあるか。URL 手打ち・決定済みで消えた項目の会話を
+ * 開いた時に「送っても迷子になる」ことをUIで伝えるために使う(2026-10-22)。
+ */
+export function cardExists(dir: string, target: CardChatTarget): boolean {
+  const keys = targetKeys(target);
+  return boxRows(dir).some((r) => (r.t === "item" || !r.t) && cardMatcher(keys)(r));
 }
 
 export function readCardChat(dir: string, target: CardChatTarget): CardChatMessage[] {

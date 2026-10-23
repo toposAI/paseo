@@ -1,7 +1,7 @@
 /**
- * 開発の優先順位台帳(1〜10位)。確認箱ディレクトリ配下の4ファイルで持つ:
+ * 開発の優先順位台帳。確認箱ディレクトリ配下の4ファイルで持つ:
  *
- * - `priority_ledger.json`          … 正本。`{version,updated_ts,projects:[{id,name,note}]}`。順位=配列の添字
+ * - `priority_ledger.json`          … 正本。`{version,updated_ts,projects:[{id,name,note,thread?}]}`。順位=配列の添字
  * - `priority_ledger_history.jsonl` … 変更のたびに変更前の projects を1行追記(戻す用。上書きしない)
  * - `priority_requests.jsonl`       … 自由記述の要求 `{ts,text}`(解釈担当が読む)
  * - `priority_replies.jsonl`        … 返答 `{ts,re,by,text}`(`re` = 要求の ts)。by=ack|worker|fallback
@@ -17,22 +17,21 @@ export const LEDGER_FILE = "priority_ledger.json";
 export const HISTORY_FILE = "priority_ledger_history.jsonl";
 export const REQUESTS_FILE = "priority_requests.jsonl";
 export const REPLIES_FILE = "priority_replies.jsonl";
-export const MAX_RANKS = 10;
 const TEXT_MAX = 400;
 const REPLIES_SHOWN = 20;
 
 /** 初期値。1位は依頼どおり「確認箱とサイドバー拡充」。2位以降は仮置き(ユーザーが並べ替える前提)。 */
 export const DEFAULT_PROJECTS: readonly PriorityProject[] = [
-  { id: "confirm-box", name: "確認箱とサイドバー拡充", note: "" },
-  { id: "topos-family-ui", name: "Topos家族版(UI・配布)", note: "" },
-  { id: "f80", name: "F-80(逐語ゲート・出典)", note: "" },
-  { id: "vault-search-topos", name: "Paseo Vault検索のTopos寄せ", note: "" },
-  { id: "ios-139", name: "139番 iOSアプリ(音声・Paseo画面)", note: "" },
-  { id: "ocr-145", name: "145番 医学書OCR再開", note: "" },
-  { id: "topos-web-search", name: "Topos Web検索(BYOK)", note: "" },
-  { id: "memory-daemons", name: "メモリ・常駐デーモン軽量化", note: "" },
-  { id: "thread-automation", name: "司令塔・スレ運用の自動化", note: "" },
-  { id: "ebm-107", name: "107番 EBMアシスタント", note: "" },
+  { id: "confirm-box", name: "確認箱とサイドバー拡充", note: "", thread: null },
+  { id: "topos-family-ui", name: "Topos家族版(UI・配布)", note: "", thread: null },
+  { id: "f80", name: "F-80(逐語ゲート・出典)", note: "", thread: null },
+  { id: "vault-search-topos", name: "Paseo Vault検索のTopos寄せ", note: "", thread: null },
+  { id: "ios-139", name: "139番 iOSアプリ(音声・Paseo画面)", note: "", thread: null },
+  { id: "ocr-145", name: "145番 医学書OCR再開", note: "", thread: null },
+  { id: "topos-web-search", name: "Topos Web検索(BYOK)", note: "", thread: null },
+  { id: "memory-daemons", name: "メモリ・常駐デーモン軽量化", note: "", thread: null },
+  { id: "thread-automation", name: "司令塔・スレ運用の自動化", note: "", thread: null },
+  { id: "ebm-107", name: "107番 EBMアシスタント", note: "", thread: null },
 ];
 
 function readJson(file: string): unknown {
@@ -43,7 +42,13 @@ function readJson(file: string): unknown {
   }
 }
 
-function normalizeProjects(raw: unknown): PriorityProject[] | null {
+/**
+ * 台帳の projects を正規化する。**件数で切らない**(2026-10-23 ユーザー指示):
+ * 以前は先頭10件に切り捨てて返していたため、11位以降が画面に出ず、画面で並べ替えると
+ * 台帳からも消えていた。上限は台帳側(データ担当の受け入れ上限)が持つ。
+ * 未知のフィールドは捨てるが **`thread` は残す**(並べ替えで書き戻すので、落とすと紐付けが消える)。
+ */
+export function normalizeProjects(raw: unknown): PriorityProject[] | null {
   if (!Array.isArray(raw)) return null;
   const out: PriorityProject[] = [];
   const seen = new Set<string>();
@@ -54,9 +59,14 @@ function normalizeProjects(raw: unknown): PriorityProject[] | null {
     const name = typeof rec.name === "string" ? rec.name.trim() : "";
     if (!id || !name || seen.has(id)) continue;
     seen.add(id);
-    out.push({ id, name, note: typeof rec.note === "string" ? rec.note : "" });
+    out.push({
+      id,
+      name,
+      note: typeof rec.note === "string" ? rec.note : "",
+      thread: typeof rec.thread === "string" && rec.thread.trim() ? rec.thread.trim() : null,
+    });
   }
-  return out.length > 0 ? out.slice(0, MAX_RANKS) : null;
+  return out.length > 0 ? out : null;
 }
 
 /** 台帳を読む。無い/壊れていれば初期値(ディスクには書かない=読むだけで副作用を出さない)。 */

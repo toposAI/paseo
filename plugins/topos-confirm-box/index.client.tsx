@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Linking, Text, View } from "react-native";
+import { Linking, Text, View, type LayoutChangeEvent } from "react-native";
 import {
   getPaseoClient,
   useHosts,
@@ -60,12 +60,25 @@ function ChildThreadsScreen({ theme, params }: PluginScreenProps) {
 }
 
 const badgeText = { color: "#ffffff", fontSize: 10, fontWeight: "700" as const };
-const popoverStyle = { height: 480 };
+// ホストのポップオーバー面は maxHeight 440 で、超えた分は中でスクロールになる。
+// チャットペインは下端に入力欄を置くので、箱からはみ出させない(440 に収める)。
+const popoverStyle = { height: 420 };
 
+/**
+ * ポップオーバーは最大420pxの箱に収まる(ホスト側 `PluginPopoverContent` の maxWidth)。
+ * ペインの出し分けは**窓幅ではなく箱の幅**で決める必要があるので、自分の幅を測って渡す
+ * (窓が広いPCでもポップオーバーは狭いため、窓幅で判定すると一覧とチャットが同じ箱に
+ * 押し込まれて潰れる)。
+ */
 function Popover({ theme }: PluginButtonContentProps) {
+  const [width, setWidth] = useState(0);
+  const onLayout = useCallback(
+    (e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width)),
+    [],
+  );
   return (
-    <View style={popoverStyle}>
-      <ConfirmBoxView theme={theme} />
+    <View style={popoverStyle} onLayout={onLayout}>
+      <ConfirmBoxView theme={theme} containerWidth={width || undefined} />
     </View>
   );
 }
