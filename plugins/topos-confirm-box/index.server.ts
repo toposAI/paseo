@@ -614,7 +614,12 @@ export default function contribute(server: PluginServerContext) {
       // 以前の作成が後から完成していた(`rememberUnrecorded` が控えた)なら、それを記録する。
       const late = unrecordedThreads.get(key);
       if (late) return recordThread(resolved, late, vaultDir, true);
-      return fail(`スレを作れません: ${(error as Error).message}`);
+      // 待ち切っただけで、作成自体はまだ続いていることがある(round2 指摘2c)。
+      // その場合もう一度押すと**作り直さずに**待つ(または完成したIDを記録する)。
+      return fail(
+        `スレを作れません: ${(error as Error).message}` +
+          "(作成が続いている場合があります。少し待ってからもう一度押してください。2本目は作りません)",
+      );
     }
     // 記録に失敗しても、次の押下で作り直さず記録だけ再試行できるよう控える。
     rememberUnrecorded(key, threadId);
@@ -630,9 +635,21 @@ export default function contribute(server: PluginServerContext) {
     const key = path.resolve(input.path);
     const inflight = opening.get(key);
     if (inflight) return inflight;
-    const task = openConceptThread(key, ctx).finally(() => {
-      if (opening.get(key) === task) opening.delete(key);
-    });
+    // 想定外の例外でも、押した人に理由の文面が届くようにする(無言の失敗を作らない)。
+    const task = openConceptThread(key, ctx)
+      .catch(
+        (error: unknown): OpenConceptThreadOutput => ({
+          ok: false,
+          threadId: null,
+          created: false,
+          record: "skipped",
+          recordError: null,
+          message: `スレを開けません: ${(error as Error).message}`,
+        }),
+      )
+      .finally(() => {
+        if (opening.get(key) === task) opening.delete(key);
+      });
     opening.set(key, task);
     return task;
   });
