@@ -7,6 +7,7 @@ import { test } from "node:test";
 import {
   adoptOrphans,
   coordinatorRows,
+  dropDeadCoordinators,
   markCoordinators,
   readCoordinatorIds,
 } from "./coordinator-threads.js";
@@ -28,9 +29,31 @@ function thread(overrides: Partial<ChildThread>): ChildThread {
     parentTitle: null,
     pinned: false,
     coordinator: false,
+    access: null,
     ...overrides,
   };
 }
+
+test("閉じた/アーカイブ済みの司令塔の行は落とし、生きている・一覧に居ない行は残す", () => {
+  const rows = dropDeadCoordinators(
+    [
+      thread({ agentId: "live", coordinator: true }),
+      thread({ agentId: "closed", coordinator: true }),
+      thread({ agentId: "archived", coordinator: true }),
+      thread({ agentId: "away", coordinator: true }),
+      thread({ agentId: "kid" }),
+    ],
+    [
+      { id: "live", status: "idle" },
+      { id: "closed", status: "closed" },
+      { id: "archived", status: "idle", archivedAt: "2026-10-23T00:00:00Z" },
+    ],
+  );
+  assert.deepEqual(
+    rows.map((r) => r.agentId),
+    ["live", "away", "kid"],
+  );
+});
 
 test("司令塔の一覧は領域ごとに読み、cid の無い/壊れた領域は飛ばす", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coord-"));

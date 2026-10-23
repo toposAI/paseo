@@ -51,9 +51,15 @@ import { cardExists, readCardChat, sayToCard } from "./server/cardchat.js";
 import {
   adoptOrphans,
   coordinatorRows,
+  dropDeadCoordinators,
   markCoordinators,
   readCoordinatorIds,
 } from "./server/coordinator-threads.js";
+import { applyThreadAccess, threadAccessById } from "./server/thread-liveness.js";
+
+/** ワークスペース一覧の1ページの上限(プロトコルの上限と同じ)と、辿るページ数の上限。 */
+const WORKSPACE_PAGE_SIZE = 200;
+const WORKSPACE_PAGE_LIMIT = 20;
 import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
 import type { WorkspaceArchiveDecision } from "./server/workspace-membership.js";
 import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
@@ -113,13 +119,52 @@ export default function contribute(server: PluginServerContext) {
     let threads = adoptOrphans(markCoordinators(rows, ids));
     try {
       const listed = await ctx.paseo.agents.list();
+      // 印付けにはアーカイブ済みのスレも要る(既定の一覧はアーカイブ済みを返さない)。
+      // 取れなければ既定の一覧で代用する(閉じたスレは単に「一覧に居ない」=印なしのまま)。
+      let forAccess = listed;
+      try {
+        forAccess = await ctx.paseo.agents.list({
+          filter: { includeArchived: true, includeBackground: true },
+        });
+      } catch {
+        forAccess = listed;
+      }
+      // ファイルの `coordinator_id` は古い id を指し続けることがあるので、閉じた司令塔は落とす。
+      const alive = dropDeadCoordinators(
+        markCoordinators(rows, ids),
+        forAccess.entries.map((e) => e.agent),
+      );
       const coordinators = coordinatorRows(
         ids,
         listed.entries.map((e) => e.agent),
-        rows,
+        alive,
       );
       // 親の行(司令塔)が出ているなら、その子スレも同じグループへ寄せる。
-      threads = adoptOrphans([...coordinators, ...markCoordinators(rows, ids)]);
+      threads = adoptOrphans([...coordinators, ...alive]);
+      // 押して開けるか(ワークスペースがアーカイブ済みだと会話に着かない)。取れなければ印を付けない。
+      try {
+        // 一覧は**生きている**ワークスペースしか返さない(アーカイブ済みは含まれない)。
+        // よって「在る=開ける、無い=閉じた」で判定する。ワークスペースは1回の上限が200なので、
+        // 続きがあれば辿る(辿り切れないと生きた行を閉じたと誤判定する)。
+        const live: { workspaceId: unknown }[] = [];
+        let cursor: string | undefined;
+        for (let page = 0; page < WORKSPACE_PAGE_LIMIT; page++) {
+          const res = await ctx.paseo.workspaces.list({
+            includeBackground: true,
+            ...(cursor ? { page: { limit: WORKSPACE_PAGE_SIZE, cursor } } : {}),
+          });
+          live.push(...res.entries.map((w) => ({ workspaceId: w.id })));
+          cursor = res.pageInfo?.nextCursor ?? undefined;
+          if (!cursor) break;
+        }
+        const access = threadAccessById(
+          forAccess.entries.map((e) => e.agent),
+          live,
+        );
+        threads = applyThreadAccess(threads, access);
+      } catch {
+        threads = applyThreadAccess(threads, new Map());
+      }
     } catch {
       threads = adoptOrphans(markCoordinators(rows, ids));
     }

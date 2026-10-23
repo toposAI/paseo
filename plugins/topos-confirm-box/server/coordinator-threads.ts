@@ -54,6 +54,7 @@ export interface CoordinatorAgent {
   id?: unknown;
   title?: unknown;
   status?: unknown;
+  archivedAt?: unknown;
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -89,6 +90,7 @@ export function coordinatorRows(
       parentTitle: null,
       pinned: false,
       coordinator: true,
+      access: null,
     });
   }
   return rows;
@@ -103,6 +105,26 @@ export function markCoordinators(rows: ChildThread[], ids: readonly string[]): C
   return rows.map((t) =>
     t.coordinator === true || !known.has(t.agentId) ? t : { ...t, coordinator: true },
   );
+}
+
+/**
+ * 生きていない司令塔(closed/アーカイブ済み)の行を落とす。
+ * ファイルの `coordinator_id` は起こしデーモンが書き換えるまで古い id を指し続けるので、
+ * Paseo の一覧と突き合わせないと、閉じた司令塔の行が一覧に残って押しても開けない
+ * (2026-10-23 ユーザー報告「タップしてもスレが開かない」の一因)。
+ * 一覧に居ない id(範囲外・取得の隙間)は落とさない(消す側に倒さない)。
+ */
+export function dropDeadCoordinators(
+  rows: ChildThread[],
+  agents: readonly CoordinatorAgent[],
+): ChildThread[] {
+  const byId = new Map(agents.map((a) => [str(a.id), a]));
+  return rows.filter((t) => {
+    if (t.coordinator !== true) return true;
+    const agent = byId.get(t.agentId);
+    if (!agent) return true;
+    return str(agent.status) !== "closed" && agent.archivedAt == null;
+  });
 }
 
 /**

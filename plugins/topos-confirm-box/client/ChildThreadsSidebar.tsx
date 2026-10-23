@@ -21,7 +21,8 @@ import {
   childThreadsSetOrderRpc,
 } from "../shared/child-threads.js";
 import type { ChildThread } from "../shared/child-threads.js";
-import { displayStatus, type StatusKind } from "../shared/thread-status-label.js";
+import { blockedMessage } from "../server/thread-liveness.js";
+import { displayStatus, type StatusKind, type StatusLabel } from "../shared/thread-status-label.js";
 import { StatusBadge } from "./sidebar-badge.js";
 
 const POLL_MS = 30_000;
@@ -211,22 +212,48 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
   }, []);
   const groups = useMemo(() => groupThreads(threads, coordinatorIds), [threads, coordinatorIds]);
 
-  // グループ見出し(親=司令塔)は司令塔スレを開く。「その他」と「司令塔」(複数居る)は開閉。
   const openAgent = navigation?.openAgent;
-  const openGroup = useCallback(
-    (key: string) => {
-      if (!key || key === COORDINATOR_GROUP) {
-        toggleGroup(key);
+  /**
+   * スレを開く。**コンパクト(スマホ)ではホストのサイドバーがドロワーのまま残る**ため、
+   * `openAgent` だけだと遷移はしても目の前の画面が変わらず「押しても開かない」ように見える
+   * (ホスト側で `openScreen` にだけ `onBeforeNavigate`(サイドバーを閉じる)が配線されている)。
+   * そこでコンパクトのときは先に自前の画面へ push してドロワーを閉じ、そのうえでスレへ遷移する。
+   * 開けない行(ワークスペースがアーカイブ済み)は遷移せず理由を出す(押しても会話に着かない)。
+   */
+  const openThread = useCallback(
+    (agentId: string, access: ChildThread["access"]): void => {
+      const blocked = blockedMessage(access);
+      if (blocked) {
+        setNotice(blocked);
         return;
       }
       if (openAgent) {
-        openAgent({ agentId: key, serverId: props.host.id });
+        if (props.layout.compact)
+          openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: { focusId: agentId } });
+        openAgent({ agentId, serverId: props.host.id });
         return;
       }
       // navigationの無い古いホストは一覧画面へ退避。
-      openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: { focusId: key } });
+      openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: { focusId: agentId } });
     },
-    [openAgent, openScreen, props.host.id, toggleGroup],
+    [openAgent, openScreen, props.host.id, props.layout.compact],
+  );
+
+  // グループ見出し: 生きている司令塔の行が在るときだけ、その司令塔スレを開く。
+  // 行が無い(閉じた/一覧に居ない)親の見出しを押して開きに行くと、開けない画面へ落ちるだけなので開閉にする。
+  const openableParents = useMemo(
+    () => new Set(threads.filter((t) => t.coordinator === true).map((t) => t.agentId)),
+    [threads],
+  );
+  const openGroup = useCallback(
+    (key: string) => {
+      if (!key || key === COORDINATOR_GROUP || !openableParents.has(key)) {
+        toggleGroup(key);
+        return;
+      }
+      openThread(key, threads.find((t) => t.agentId === key)?.access ?? null);
+    },
+    [openThread, openableParents, threads, toggleGroup],
   );
 
   const focusId = (currentScreen?.params as { focusId?: string } | undefined)?.focusId;
@@ -304,27 +331,14 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
         thread={t}
         failed={failed}
         active={onScreen && focusId === t.agentId}
-        openScreen={openScreen}
-        openAgent={navigation?.openAgent}
-        serverId={props.host.id}
+        onOpen={openThread}
         colors={colors}
         confirmingArchive={pendingId === t.agentId}
         onArchive={onArchive}
         onTogglePin={onTogglePin}
       />
     ),
-    [
-      colors,
-      failed,
-      focusId,
-      navigation?.openAgent,
-      onArchive,
-      onScreen,
-      onTogglePin,
-      openScreen,
-      pendingId,
-      props.host.id,
-    ],
+    [colors, failed, focusId, onArchive, onScreen, onTogglePin, openThread, pendingId],
   );
 
   return (
@@ -493,9 +507,7 @@ function ThreadRow({
   thread: t,
   failed,
   active,
-  openScreen,
-  openAgent,
-  serverId,
+  onOpen,
   colors,
   confirmingArchive,
   onArchive,
@@ -504,20 +516,19 @@ function ThreadRow({
   thread: ChildThread;
   failed: boolean;
   active: boolean;
-  openScreen: PluginSidebarItemProps["openScreen"];
-  openAgent?: (input: { agentId: string; serverId?: string }) => void;
-  serverId: string;
+  /** 押したらそのスレを開く(開けない行の判定・ドロワーを閉じる処理は呼び出し側 `openThread`)。 */
+  onOpen: (agentId: string, access: ChildThread["access"]) => void;
   colors: SidebarColors;
   confirmingArchive: boolean;
   onArchive: (t: ChildThread) => void;
   onTogglePin: (t: ChildThread) => void;
 }) {
-  // 押したらそのスレの会話(エージェント画面)を開く。navigationが無い古いホストだけ一覧画面へ退避。
-  const onPress = useCallback(() => {
-    if (openAgent) openAgent({ agentId: t.agentId, serverId });
-    else openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: { focusId: t.agentId } });
-  }, [openAgent, openScreen, serverId, t.agentId]);
-  const status = displayStatus(t.status, t.machineState, failed);
+  const onPress = useCallback(() => onOpen(t.agentId, t.access), [onOpen, t.agentId, t.access]);
+  // 開けない行は状態より先に「要復元」を出す(押しても会話に着かないことが行末で分かる)。
+  const status: StatusLabel =
+    t.access === "workspace-archived"
+      ? { text: "要復元", kind: "closed" }
+      : displayStatus(t.status, t.machineState, failed);
   const testID = `child-thread-status-${t.agentId}`;
   const pressArchive = useCallback(() => onArchive(t), [onArchive, t]);
   const pressPin = useCallback(() => onTogglePin(t), [onTogglePin, t]);

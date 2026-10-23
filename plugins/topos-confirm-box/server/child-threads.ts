@@ -63,6 +63,8 @@ export function normalizeChildThreads(
           pinned: pinnedIds.has(agentId),
           // 登録簿の行は子スレ。司令塔そのものの行は `coordinator-threads.ts` が作る。
           coordinator: false,
+          // 開けるかは Paseo に聞いてから付ける(`thread-liveness.ts`)。ここでは未判定。
+          access: null,
         },
       ];
     });

@@ -42,6 +42,11 @@ export const ChildThreadSchema = z.object({
    * 一覧の先頭に「司令塔」グループとして並べる。
    */
   coordinator: z.boolean().default(false),
+  /**
+   * いま開けるか(`server/thread-liveness.ts` が判定)。null=不明(取得に失敗した)。
+   * `workspace-archived` は行を押しても会話に着かない(Paseo がアーカイブ済みワークスペースの画面を出す)。
+   */
+  access: z.enum(["open", "workspace-archived", "thread-archived"]).nullable().default(null),
 });
 export type ChildThread = z.infer<typeof ChildThreadSchema>;
 
