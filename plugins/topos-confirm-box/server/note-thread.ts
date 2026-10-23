@@ -27,7 +27,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { NoteThreadError, isBackupPath, parseFrontmatter } from "./notes.js";
+import { NoteThreadError, isBackupPath, parseFrontmatter, readNoteHead } from "./notes.js";
 
 /** 記録の結果(`shared/notes.ts` の `openConceptThreadRpc` の `record` と同じ語彙)。 */
 export type RecordResult = "written" | "already" | "conflict";
@@ -40,7 +40,8 @@ const LOCK_WAIT_MS = 4_000;
 const LOCK_RETRY_MS = 40;
 /** これより古い lock は落ちた持ち主のものとみなして取り直す。 */
 const LOCK_STALE_MS = 10_000;
-const HEAD_BYTES = 64 * 1024;
+/** 記録できる形かを試算するときの仮ID(実在しない UUID 形)。 */
+const PROBE_ID = "00000000-0000-4000-8000-000000000000";
 /** lock の置き場(Vault の外)。 */
 const LOCK_DIR = path.join(os.tmpdir(), "topos-note-thread-locks");
 
@@ -98,18 +99,35 @@ export function applyThreadLine(
   return { next: next.join(eol), result: "written" };
 }
 
-/** ノートの先頭だけ読む(frontmatter の判定用)。 */
+/**
+ * ノートの先頭だけ読む(frontmatter の判定用)。実体は `notes.ts` の `readNoteHead`
+ * (上限 `HEAD_BYTES` もそちらが SSOT)。読めないことを黙って空文字にしないため throw する。
+ */
 export function readHead(file: string): string {
-  let fd: number | undefined;
+  const head = readNoteHead(file);
+  if (head === null) throw new NoteThreadError(`ノートを読めません: ${file}`);
+  return head;
+}
+
+/**
+ * このノートに `thread:` を書ける形か(**スレを作る前に**確かめる)。
+ *
+ * `thread:` が空でも、直後がリスト/インデント行なら1行だけ埋めると YAML が壊れるので
+ * `applyThreadLine` は `conflict` を返す。そのノートで作成まで進むと、毎回作っては記録に
+ * 失敗する(押すたびにスレが1本増える)ため、作成前に止める(出口レビュー round3 指摘1)。
+ */
+export function canRecordThread(head: string): boolean {
+  // 既にIDが書かれているノートは「作る前」の対象外(`openConceptThread` がそこへ来ない)。
+  // この段階で止めるのは、**書ける形になっていないノート**だけ。
+  if (readThreadKey(head)) return true;
   try {
-    fd = fs.openSync(file, "r");
-    const buf = Buffer.alloc(HEAD_BYTES);
-    const n = fs.readSync(fd, buf, 0, buf.length, 0);
-    return buf.subarray(0, n).toString("utf8");
-  } catch (error) {
-    throw new NoteThreadError(`ノートを読めません: ${(error as Error).message}`);
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd);
+    // 先頭だけ読んでいるので、閉じ `---` が上限の外にあると判断できない。
+    // 「読めた範囲に閉じが無い」ときは frontmatter 無しではなく**読めなかった**とみなす。
+    const lines = head.split(/\r?\n/);
+    const closed = lines.some((l, i) => i > 0 && l.trim() === "---");
+    return closed && applyThreadLine(head, PROBE_ID).result !== "conflict";
+  } catch {
+    return false; // frontmatter が無い等。書けないので作らない
   }
 }
 
@@ -177,6 +195,17 @@ export function readThreadKey(text: string): string {
     if (m) return cleanValue(m[1]);
   }
   return "";
+}
+
+/**
+ * 記録が `conflict` になったとき、実際に開くべきスレID(ノートが指している方)。無ければ null。
+ *
+ * 「作ったが記録できなかったスレ(孤児)」を開くと、ユーザーにはノートと無関係なスレが見える。
+ * ノートに別のIDが書かれているなら、そちらが正(出口レビュー round2 指摘2 / round3 指摘2)。
+ */
+export function conflictRedirect(head: string, threadId: string): string | null {
+  const bound = readThreadKey(head);
+  return bound.length > 0 && bound !== threadId ? bound : null;
 }
 
 /** 鍵に対応する lock ファイル(すべて Vault の外・`$TMPDIR` 配下のハッシュ名)。検査から使える。 */

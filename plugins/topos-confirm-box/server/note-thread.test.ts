@@ -6,6 +6,8 @@ import { test } from "node:test";
 import {
   applyThreadLine,
   assertWritableConceptNote,
+  canRecordThread,
+  conflictRedirect,
   lockFileFor,
   readThreadKey,
   recordConceptThread,
@@ -197,4 +199,21 @@ test("recordConceptThread: 同時に呼んでも書くのは1回だけ(片方は
   assert.deepEqual(results.map((r) => r.result).sort(), ["already", "written"]);
   const text = fs.readFileSync(file, "utf8");
   assert.equal(text.match(/^thread:/gm)?.length, 1);
+});
+
+test("canRecordThread: 書ける形だけ true(リスト形式の空 thread: や frontmatter 無しは作る前に止める)", () => {
+  // 書ける: キーが無い / 空の thread: の次が別のキー / 既に thread: がある
+  assert.equal(canRecordThread(`---\n${CONCEPT}\n---\n`), true);
+  assert.equal(canRecordThread(`---\n${CONCEPT}\nthread:\nsummary: x\n---\n`), true);
+  assert.equal(canRecordThread(`---\n${CONCEPT}\nthread: ${UUID}\n---\n`), true);
+  // 書けない: リスト形式の空 thread:(1行埋めると YAML が壊れる)、frontmatter 無し
+  assert.equal(canRecordThread(`---\n${CONCEPT}\nthread:\n  - a\n  - b\n---\n`), false);
+  assert.equal(canRecordThread("# 本文だけ\n"), false);
+});
+
+test("conflictRedirect: ノートが別のスレを指しているときだけ、そのIDへ差し替える", () => {
+  const other = `---\n${CONCEPT}\nthread: ${OTHER}\n---\n`;
+  assert.equal(conflictRedirect(other, UUID), OTHER);
+  assert.equal(conflictRedirect(other, OTHER), null); // 同じIDなら差し替え不要
+  assert.equal(conflictRedirect(`---\n${CONCEPT}\n---\n`, UUID), null); // 空なら孤児のまま
 });

@@ -49,6 +49,7 @@ import type { OpenConceptThreadOutput } from "./shared/notes.js";
 import {
   frontmatterToNote,
   parseFrontmatter,
+  readNoteHead,
   readSidebarNotes,
   resolveThreadId,
   resolveVaultDir,
@@ -56,6 +57,8 @@ import {
 } from "./server/notes.js";
 import {
   assertWritableConceptNote,
+  canRecordThread,
+  conflictRedirect,
   readHead,
   readThreadKey,
   recordConceptThread,
@@ -378,6 +381,24 @@ export default function contribute(server: PluginServerContext) {
    * プロセス内の表なのでデーモン再起動で失われる(その場合の重複は残る)。
    */
   const unrecordedThreads = new Map<string, string>();
+  /**
+   * このプラグインが**作った**スレID(ノートのパス → ID と時刻)。記録できている場合も残す。
+   * 記録直後は `agents.list` にまだ載っていないことがあり、その間に押すと
+   * 「thread: の行を消すと新しく作ります」と案内して2本目を誘発する(round3 指摘4)。
+   */
+  const createdHere = new Map<string, { threadId: string; at: number }>();
+  /** `createdHere` を生きているとみなす時間(一覧への反映待ちとして十分な長さ)。 */
+  const CREATED_HERE_TTL_MS = 10 * 60_000;
+
+  function rememberCreated(key: string, threadId: string): void {
+    createdHere.delete(key);
+    createdHere.set(key, { threadId, at: Date.now() });
+    while (createdHere.size > UNRECORDED_MAX) {
+      const oldest = createdHere.keys().next().value;
+      if (oldest === undefined) break;
+      createdHere.delete(oldest);
+    }
+  }
   const UNRECORDED_MAX = 200;
 
   function rememberUnrecorded(key: string, threadId: string): void {
@@ -399,6 +420,20 @@ export default function contribute(server: PluginServerContext) {
   ): Promise<OpenConceptThreadOutput> {
     try {
       const { result } = await recordConceptThread(resolved, threadId, { vaultDir });
+      // 別の書き手が先に別IDを書いていた(`conflict`)。作ってしまった方(孤児)は開かず、
+      // **ノートが指す方**を開く。押下の入口(再試行)と作成直後の両方に効かせるため、
+      // 判定はここ1か所に置く(出口レビュー round3 指摘2)。
+      const bound = result === "conflict" ? conflictRedirect(readHeadOf(resolved), threadId) : null;
+      if (bound) {
+        return {
+          ok: true,
+          threadId: bound,
+          created: false,
+          record: "already",
+          recordError: null,
+          message: "",
+        };
+      }
       return { ok: true, threadId, created, record: result, recordError: null, message: "" };
     } catch (error) {
       return {
@@ -412,14 +447,27 @@ export default function contribute(server: PluginServerContext) {
     }
   }
 
+  /** 記録後の読み直し用(読めなければ空 = ノートのIDを優先しない)。 */
+  function readHeadOf(file: string): string {
+    try {
+      return readHead(file);
+    } catch {
+      return "";
+    }
+  }
+
   /**
    * 作成中のスレ(ノートのパス → Promise)。60秒で諦めた後も**作成自体は続いている**ので、
    * 次の押下では作り直さずにこれを待つ(round2 指摘2: 諦めた直後に押されると2本目ができ、
    * さらに孤児の方を開いてしまう)。完了したら表から消す。
    */
   const pendingCreates = new Map<string, Promise<string>>();
+  /** 作成を始めた時刻(±の待ちに上限を置き、決着しない作成でノートを詰まらせない。round3 指摘3)。 */
+  const createStarted = new Map<string, number>();
   /** 諦めた時刻(これ以降に完了したスレは、ノートへ記録できていない)。 */
   const createTimeouts = new Map<string, number>();
+  /** 作成が決着しないまま待つのをやめる上限。過ぎたら「作り直すか」をユーザーに任せる。 */
+  const CREATE_PENDING_MAX_MS = 10 * 60_000;
 
   /**
    * スレを1本作る。**60秒で諦める**(デーモンが応答しないまま押下が固まり、単一飛行の表に
@@ -436,8 +484,20 @@ export default function contribute(server: PluginServerContext) {
     if (existing) {
       // 作成中(前回60秒で諦めた分かもしれない)。待って、まだ駄目なら「作成中」と返す。
       const id = await Promise.race([existing, sleepResolve(PENDING_RETRY_WAIT_MS, "")]);
-      if (!id) throw new Error("いま作っています(完了すると次から開けます)");
-      return id;
+      if (id) return id;
+      const startedAt = createStarted.get(key) ?? Date.now();
+      if (Date.now() - startedAt > CREATE_PENDING_MAX_MS) {
+        // 決着しない作成はここで諦めて表から外す。**この押下では作らない**が、押し直せば
+        // 作り直せる(2本目になりうるので、黙って作らず一度は理由を出す。round3 指摘3)。
+        if (pendingCreates.get(key) === existing) pendingCreates.delete(key);
+        createStarted.delete(key);
+        const minutes = Math.round((Date.now() - startedAt) / 60_000);
+        throw new Error(
+          `前回の作成がまだ終わっていません(開始から約${minutes}分)。` +
+            "もう一度押すと作り直します(2本目になる可能性があります)",
+        );
+      }
+      throw new Error("いま作っています(完了すると次から開けます)");
     }
     const creating = ctx.paseo.agents.create({
       // 既定はTopos既定(DeepSeek V4.1 flash low)。画面の「最後に選んだモデル」は
@@ -459,6 +519,7 @@ export default function contribute(server: PluginServerContext) {
     });
     const id = creating.then((handle) => handle.id);
     pendingCreates.set(key, id);
+    createStarted.set(key, Date.now());
     void id
       .then((threadId) => {
         // 諦めた後に完成した: ノートへは書けていないので、次に押したら記録だけさせる。
@@ -469,6 +530,7 @@ export default function contribute(server: PluginServerContext) {
       .catch(() => undefined)
       .finally(() => {
         if (pendingCreates.get(key) === id) pendingCreates.delete(key);
+        createStarted.delete(key);
         createTimeouts.delete(key);
       });
     try {
@@ -488,16 +550,51 @@ export default function contribute(server: PluginServerContext) {
     return new Promise((resolve) => setTimeout(() => resolve(value), ms));
   }
 
+  /** 対象ノート(解決済みパス・Vault の根・RPC が受け取ったパス)。 */
+  interface NoteContext {
+    key: string;
+    resolved: string;
+    vaultDir: string;
+  }
+
+  /** 失敗の戻り値。 */
+  function failOutput(message: string): OpenConceptThreadOutput {
+    return {
+      ok: false,
+      threadId: null,
+      created: false,
+      record: "skipped",
+      recordError: null,
+      message,
+    };
+  }
+
+  /**
+   * 押下時に読む先頭。一覧と同じ `readNoteHead`(上限 `HEAD_BYTES` は `notes.ts` が SSOT。
+   * round3 指摘7)。読めなければ null。
+   */
+  function prepareHead(ctx: NoteContext): string | null {
+    return readNoteHead(ctx.resolved) || null;
+  }
+
+  /** 直前にここで作ったスレなら、一覧に載っていなくても存在する(round3 指摘4)。 */
+  function recentlyCreated(key: string, threadId: string): boolean {
+    const mine = createdHere.get(key);
+    if (!mine || mine.threadId !== threadId) return false;
+    if (Date.now() - mine.at <= CREATED_HERE_TTL_MS) return true;
+    createdHere.delete(key);
+    return false;
+  }
+
   /**
    * (0) 記録だけ失敗した前回のスレがあれば、作り直さずに記録をやり直す。何も無ければ null。
    * ノートに別のIDが書かれていたら(手で直した)、その判断を優先して控えを捨てる。
    */
   async function retryUnrecorded(
-    key: string,
-    resolved: string,
+    ctx: NoteContext,
     head: string,
-    vaultDir: string,
   ): Promise<OpenConceptThreadOutput | null> {
+    const { key, resolved, vaultDir } = ctx;
     const retry = unrecordedThreads.get(key);
     if (!retry) return null;
     const boundNow = readThreadKey(head);
@@ -505,13 +602,10 @@ export default function contribute(server: PluginServerContext) {
       unrecordedThreads.delete(key);
       return null;
     }
+    // ノートに別のスレが既に書かれていた場合(作ったが記録できなかった方=孤児を開かない)は
+    // `recordThread` がノートのIDへ差し替えて返す。
     const recorded = await recordThread(resolved, retry, vaultDir, false);
     if (recorded.record !== "pending") unrecordedThreads.delete(key);
-    // ノートには別のスレが既に書かれていた。作ったが記録できなかった方(孤児)は開かず、
-    // ノートが指す方を開く(round2 指摘2: 孤児へ飛ばさない)。
-    if (recorded.record === "conflict" && boundNow) {
-      return { ...recorded, threadId: boundNow, created: false, record: "already" };
-    }
     return recorded;
   }
 
@@ -527,13 +621,14 @@ export default function contribute(server: PluginServerContext) {
     key: string,
     ctx: PluginHandlerContext,
   ): Promise<OpenConceptThreadOutput> {
-    const fail = (message: string): OpenConceptThreadOutput => ({
-      ok: false,
-      threadId: null,
+    const fail = failOutput;
+    const openExisting = (threadId: string): OpenConceptThreadOutput => ({
+      ok: true,
+      threadId,
       created: false,
-      record: "skipped",
+      record: "already",
       recordError: null,
-      message,
+      message: "",
     });
     let resolved: string;
     let vaultDir: string;
@@ -545,11 +640,11 @@ export default function contribute(server: PluginServerContext) {
       return fail((error as Error).message);
     }
 
-    // 一覧を作った後に手で書き換わっていることがあるので、押された時点で読み直す。
-    // `readHead` は記録側と同じ64KB(round2 指摘5: 一覧の16KB版だと上限が食い違う)。
-    const head = readHead(resolved);
+    const ctxOf: NoteContext = { resolved, vaultDir, key };
+    const head = prepareHead(ctxOf);
+    if (!head) return fail(`ノートを読めません: ${resolved}`);
 
-    const retried = await retryUnrecorded(key, resolved, head, vaultDir);
+    const retried = await retryUnrecorded(ctxOf, head);
     if (retried) return retried;
 
     const fm = parseFrontmatter(head);
@@ -558,18 +653,10 @@ export default function contribute(server: PluginServerContext) {
     const candidates = [...(note?.threadCandidates ?? []), ...threadIdFromBlockList(head)];
 
     const existing = resolveThreadId(candidates, live);
-    if (existing) {
-      return {
-        ok: true,
-        threadId: existing,
-        created: false,
-        record: "already",
-        recordError: null,
-        message: "",
-      };
-    }
+    if (existing) return openExisting(existing);
 
     const bound = readThreadKey(head);
+    if (bound && recentlyCreated(key, bound)) return openExisting(bound);
     if (bound && live?.live) {
       // 生存リストまで読めている。このIDのスレは本当に無い(アーカイブ済みなど)。
       return fail(
@@ -577,53 +664,54 @@ export default function contribute(server: PluginServerContext) {
           "そのスレでよければノートの thread: の行を消すと新しく作ります",
       );
     }
-    if (bound) {
-      // 一覧が引けなかっただけかもしれない。開くだけなら害が無いので通す(記録もしない)。
-      return {
-        ok: true,
-        threadId: bound,
-        created: false,
-        record: "already",
-        recordError: null,
-        message: "",
-      };
-    }
+    // 一覧が引けなかっただけかもしれない。開くだけなら害が無いので通す(記録もしない)。
+    if (bound) return openExisting(bound);
 
     if (!live?.live) {
       // 生存一覧を読み切れていない。UUID らしい候補(`thread_id:` / `threads:` だけのノート)が
       // あれば、生きている可能性があるので**作らずに開く**(round2 指摘3: 作ると2本目になる)。
       const uuid = candidates.find((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id));
-      if (uuid) {
-        return {
-          ok: true,
-          threadId: uuid,
-          created: false,
-          record: "already",
-          recordError: null,
-          message: "",
-        };
-      }
+      if (uuid) return openExisting(uuid);
     }
 
+    if (!canRecordThread(head)) {
+      // `thread:` が空で直後がリスト等の形は、1行だけ埋めると YAML が壊れる(記録は必ず
+      // conflict)。ここで止めないと**押すたびにスレが1本増える**(round3 指摘1)。
+      return fail(
+        `ノートの frontmatter に thread: を書ける形がありません(${resolved})。` +
+          "frontmatter を整えるとスレを作れます",
+      );
+    }
+
+    return createAndRecord(ctxOf, ctx, note);
+  }
+
+  /** 作成 → 控え → 記録。作成に失敗したときの後始末(完成済みの控えの提示)も含む。 */
+  async function createAndRecord(
+    ctxOf: NoteContext,
+    ctx: PluginHandlerContext,
+    note: ReturnType<typeof frontmatterToNote>,
+  ): Promise<OpenConceptThreadOutput> {
+    const { key, resolved, vaultDir } = ctxOf;
     let threadId: string;
-    let made = false;
     try {
       threadId = await createConceptThread(ctx, key, resolved, note);
-      made = true;
     } catch (error) {
       // 以前の作成が後から完成していた(`rememberUnrecorded` が控えた)なら、それを記録する。
       const late = unrecordedThreads.get(key);
       if (late) return recordThread(resolved, late, vaultDir, true);
       // 待ち切っただけで、作成自体はまだ続いていることがある(round2 指摘2c)。
       // その場合もう一度押すと**作り直さずに**待つ(または完成したIDを記録する)。
-      return fail(
+      return failOutput(
         `スレを作れません: ${(error as Error).message}` +
           "(作成が続いている場合があります。少し待ってからもう一度押してください。2本目は作りません)",
       );
     }
     // 記録に失敗しても、次の押下で作り直さず記録だけ再試行できるよう控える。
+    // 記録できた場合も控える(直後の押下で「見つかりません」と誤報しないため)。
     rememberUnrecorded(key, threadId);
-    const recorded = await recordThread(resolved, threadId, vaultDir, made);
+    rememberCreated(key, threadId);
+    const recorded = await recordThread(resolved, threadId, vaultDir, true);
     if (recorded.record !== "pending") unrecordedThreads.delete(key);
     return recorded;
   }
