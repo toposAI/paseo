@@ -20,11 +20,6 @@ const POLL_MS = 60_000;
 /** 作成に失敗した理由の表示時間。消えないと、直した後も残って見える。 */
 const NOTICE_MS = 8_000;
 const LOWER_COLLAPSED_KEY = "topos-concept-notes-collapsed";
-/**
- * 下段の行右端に確保する幅。ピン止め・アーカイブ(6f957aa9 が同じ行に実装)の置き場。
- * 状態文字がずれないよう、上段と同じ幅を空けておく。
- */
-const CONCEPT_ACTIONS_WIDTH = 44;
 const CONCEPT_ICON: Record<NoteStatus, string> = {
   構想: "Lightbulb",
   壁打ち中: "MessageCircle",
@@ -345,12 +340,11 @@ function ConceptRow({
   const trailing = useMemo(
     () => (
       <View style={styles.trailing}>
-        {/* ピン止め・アーカイブの置き場(6f957aa9)。今は空けておく。 */}
-        <View style={styles.actionsSlot} testID={`concept-row-actions-${n.path}`} />
+        {/* 下段の行に操作ボタンは無い。空の置き場は題名を削るだけなので置かない。 */}
         {busy ? <ActivityIndicator size="small" /> : <Text style={textStyle}>{status}</Text>}
       </View>
     ),
-    [busy, textStyle, status, n.path],
+    [busy, textStyle, status],
   );
   return (
     <SidebarRow
@@ -367,5 +361,4 @@ const styles = StyleSheet.create({
   trailing: { flexDirection: "row", alignItems: "center", gap: 4 },
   chevron: { fontSize: 11 },
   toggleHit: { minWidth: 32, minHeight: 32, alignItems: "center", justifyContent: "center" },
-  actionsSlot: { width: CONCEPT_ACTIONS_WIDTH },
 });
