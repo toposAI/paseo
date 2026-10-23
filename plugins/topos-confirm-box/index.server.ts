@@ -37,12 +37,14 @@ import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/b
 import {
   childThreadsArchiveRpc,
   childThreadsListRpc,
+  childThreadsPinRpc,
   childThreadsSetOrderRpc,
 } from "./shared/child-threads.js";
 import {
   readChildThreadOrder,
   readChildThreads,
   writeChildThreadOrder,
+  writeChildThreadPin,
 } from "./server/child-threads.js";
 import { cardExists, readCardChat, sayToCard } from "./server/cardchat.js";
 import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
@@ -176,6 +178,20 @@ export default function contribute(server: PluginServerContext) {
       return {
         ok: true,
         message: `スレはアーカイブしましたが、ワークスペースを閉じられません: ${(error as Error).message}`,
+      };
+    }
+  });
+
+  // ピン止めの切り替え。保存先は `child_threads_pins.json` だけで、登録簿(`child_threads.json`)は触らない。
+  server.handle(childThreadsPinRpc, async (input) => {
+    try {
+      const pins = writeChildThreadPin(resolveConfirmBoxDir(), input.agentId, input.pinned);
+      return { ok: true, pins };
+    } catch (error) {
+      return {
+        ok: false,
+        pins: [],
+        message: `ピン止めを保存できません: ${(error as Error).message}`,
       };
     }
   });
