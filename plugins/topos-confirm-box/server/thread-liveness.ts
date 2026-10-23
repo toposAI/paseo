@@ -16,7 +16,7 @@
  * 一覧の取得に失敗したときは**印を付けない**(unknown)。取れないことを「アーカイブ済み」と言い換えると、
  * 一時的な失敗が全行「開けません」に見えてしまう。
  */
-import type { ChildThread } from "../shared/child-threads.js";
+import type { ChildThread, ThreadAccess } from "../shared/child-threads.js";
 
 /** `ctx.paseo.agents.list()` / `ctx.paseo.workspaces.list()` の要素(読む所だけ緩く持つ)。 */
 export interface LivenessAgent {
@@ -29,8 +29,6 @@ export interface LivenessWorkspace {
   workspaceId?: unknown;
   archivedAt?: unknown;
 }
-
-export type ThreadAccess = "open" | "workspace-archived" | "thread-archived";
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
@@ -76,12 +74,4 @@ export function applyThreadAccess(
     const next = access.get(t.agentId) ?? null;
     return t.access === next ? t : { ...t, access: next };
   });
-}
-
-/** 開けない行を押したときに画面へ出す理由。開ける/不明なら null。 */
-export function blockedMessage(access: ThreadAccess | null | undefined): string | null {
-  if (access === "workspace-archived")
-    return "このスレのワークスペースはアーカイブ済みのため開けません(アプリでワークスペースを戻す必要があります)";
-  if (access === "thread-archived") return "このスレはアーカイブ済みです(開けません)";
-  return null;
 }

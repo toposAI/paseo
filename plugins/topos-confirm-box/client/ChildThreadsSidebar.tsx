@@ -21,7 +21,7 @@ import {
   childThreadsSetOrderRpc,
 } from "../shared/child-threads.js";
 import type { ChildThread } from "../shared/child-threads.js";
-import { blockedMessage } from "../server/thread-liveness.js";
+import { blockedMessage } from "../shared/child-threads.js";
 import { displayStatus, type StatusKind, type StatusLabel } from "../shared/thread-status-label.js";
 import { StatusBadge } from "./sidebar-badge.js";
 

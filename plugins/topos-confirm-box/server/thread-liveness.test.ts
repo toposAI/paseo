@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { applyThreadAccess, blockedMessage, threadAccessById } from "./thread-liveness.js";
+import { applyThreadAccess, threadAccessById } from "./thread-liveness.js";
+import { blockedMessage } from "../shared/child-threads.js";
 import type { ChildThread } from "../shared/child-threads.js";
 
 function thread(overrides: Partial<ChildThread>): ChildThread {

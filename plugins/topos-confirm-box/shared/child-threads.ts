@@ -50,6 +50,20 @@ export const ChildThreadSchema = z.object({
 });
 export type ChildThread = z.infer<typeof ChildThreadSchema>;
 
+/** 開けるかの印。 */
+export type ThreadAccess = NonNullable<ChildThread["access"]>;
+
+/**
+ * 開けない行を押したときに画面へ出す理由。開ける/不明なら null。
+ * **クライアントから import するので shared に置く**(`server/` はプラグインのクライアント束へ入れられない)。
+ */
+export function blockedMessage(access: ChildThread["access"] | undefined): string | null {
+  if (access === "workspace-archived")
+    return "このスレのワークスペースはアーカイブ済みのため開けません(アプリでワークスペースのアーカイブを解除してください)";
+  if (access === "thread-archived") return "このスレはアーカイブ済みです(開けません)";
+  return null;
+}
+
 export const childThreadsListRpc = defineRpc({
   name: "topos.childthreads.list",
   input: z.object({}),
