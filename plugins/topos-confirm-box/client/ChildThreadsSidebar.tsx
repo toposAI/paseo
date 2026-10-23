@@ -567,8 +567,9 @@ function ThreadRow({
         >
           <ArchiveGlyph color={archiveColor} />
         </Pressable>
-        {/* 司令塔の行は状態ラベルを出さない(下のグループ見出しと同じ扱い)。アーカイブのボタンは残す。 */}
-        {t.coordinator ? null : (
+        {/* 司令塔の行も状態ラベルを出さない(下のグループ見出しと同じ扱い。開けない印だけは出す)。
+            アーカイブのボタンは残す。 */}
+        {t.coordinator && t.access !== "workspace-archived" ? null : (
           <StatusBadge text={status.text} kind={status.kind} testID={testID} />
         )}
       </View>
@@ -584,6 +585,7 @@ function ThreadRow({
       pressPin,
       status.kind,
       status.text,
+      t.access,
       t.coordinator,
       t.pinned,
       testID,
