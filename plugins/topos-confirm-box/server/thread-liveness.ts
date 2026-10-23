@@ -65,6 +65,52 @@ export function threadAccessById(
   return out;
 }
 
+/** ワークスペース一覧の1ページの上限(プロトコルの上限と同じ)と、辿るページ数の上限。 */
+const WORKSPACE_PAGE_SIZE = 200;
+const WORKSPACE_PAGE_LIMIT = 20;
+
+interface WorkspacePage {
+  entries: { id: string }[];
+  pageInfo?: { nextCursor?: string | null };
+}
+
+/**
+ * 生きているワークスペースの id を全部引く。1回の上限は200なので続きを辿る。
+ * `includeBackground` はホストの機能フラグを要求するので、断られたら付けずに引き直す
+ * (背景のワークスペースは見えないが、通常のワークスペースは判定できる)。
+ * 引けない・辿り切れないときは throw する(「無い=閉じた」と読ませないため、呼び出し側は空の印にする)。
+ */
+export async function listLiveWorkspaceIds(ctx: {
+  paseo: { workspaces: { list(o?: unknown): Promise<unknown> } };
+}): Promise<string[]> {
+  type List = (o: {
+    includeBackground?: boolean;
+    page?: { limit: number; cursor: string };
+  }) => Promise<WorkspacePage>;
+  const list = ctx.paseo.workspaces.list as List;
+  // まず背景込みで引く。ホストが機能フラグを要求して断ったら、背景無しで引き直す。
+  let background = true;
+  let res: WorkspacePage;
+  try {
+    res = await list({ includeBackground: true });
+  } catch {
+    background = false;
+    res = await list({});
+  }
+  const ids = res.entries.map((w) => w.id);
+  let cursor = res.pageInfo?.nextCursor ?? undefined;
+  for (let n = 1; n < WORKSPACE_PAGE_LIMIT && cursor; n++) {
+    res = await list({
+      includeBackground: background,
+      page: { limit: WORKSPACE_PAGE_SIZE, cursor },
+    });
+    ids.push(...res.entries.map((w) => w.id));
+    cursor = res.pageInfo?.nextCursor ?? undefined;
+  }
+  if (cursor) throw new Error("ワークスペースの一覧を辿り切れませんでした");
+  return ids;
+}
+
 /** 行へ印を付ける(判定に無い行は null=不明)。 */
 export function applyThreadAccess(
   rows: readonly ChildThread[],

@@ -56,11 +56,10 @@ import {
   readCoordinatorIds,
 } from "./server/coordinator-threads.js";
 import { applyThreadAccess, threadAccessById } from "./server/thread-liveness.js";
+import type { ThreadAccess } from "./shared/child-threads.js";
 
-/** ワークスペース一覧の1ページの上限(プロトコルの上限と同じ)と、辿るページ数の上限。 */
-const WORKSPACE_PAGE_SIZE = 200;
-const WORKSPACE_PAGE_LIMIT = 20;
 import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
+import { listLiveWorkspaceIds } from "./server/thread-liveness.js";
 import type { WorkspaceArchiveDecision } from "./server/workspace-membership.js";
 import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
 import {
@@ -141,30 +140,21 @@ export default function contribute(server: PluginServerContext) {
       );
       // 親の行(司令塔)が出ているなら、その子スレも同じグループへ寄せる。
       threads = adoptOrphans([...coordinators, ...alive]);
-      // 押して開けるか(ワークスペースがアーカイブ済みだと会話に着かない)。取れなければ印を付けない。
+      // 押して開けるか(ワークスペースがアーカイブ済みだと会話に着かない)。
+      // 一覧は**生きている**ワークスペースしか返さない(アーカイブ済みは含まれない)ので
+      // 「在る=開ける、無い=閉じた」で判定する(`listLiveWorkspaceIds` が続きのページも辿る)。
+      // 引けなければ空の印を付ける(=行は今まで通り押せる)。
+      let access: Map<string, ThreadAccess> = new Map();
       try {
-        // 一覧は**生きている**ワークスペースしか返さない(アーカイブ済みは含まれない)。
-        // よって「在る=開ける、無い=閉じた」で判定する。ワークスペースは1回の上限が200なので、
-        // 続きがあれば辿る(辿り切れないと生きた行を閉じたと誤判定する)。
-        const live: { workspaceId: unknown }[] = [];
-        let cursor: string | undefined;
-        for (let page = 0; page < WORKSPACE_PAGE_LIMIT; page++) {
-          const res = await ctx.paseo.workspaces.list({
-            includeBackground: true,
-            ...(cursor ? { page: { limit: WORKSPACE_PAGE_SIZE, cursor } } : {}),
-          });
-          live.push(...res.entries.map((w) => ({ workspaceId: w.id })));
-          cursor = res.pageInfo?.nextCursor ?? undefined;
-          if (!cursor) break;
-        }
-        const access = threadAccessById(
+        const live = await listLiveWorkspaceIds(ctx);
+        access = threadAccessById(
           forAccess.entries.map((e) => e.agent),
-          live,
+          live.map((workspaceId) => ({ workspaceId })),
         );
-        threads = applyThreadAccess(threads, access);
       } catch {
-        threads = applyThreadAccess(threads, new Map());
+        access = new Map();
       }
+      threads = applyThreadAccess(threads, access);
     } catch {
       threads = adoptOrphans(markCoordinators(rows, ids));
     }
