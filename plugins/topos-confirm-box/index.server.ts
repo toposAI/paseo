@@ -41,6 +41,7 @@ import {
   childThreadsSetOrderRpc,
 } from "./shared/child-threads.js";
 import {
+  childThreadPinsReadError,
   readChildThreadOrder,
   readChildThreads,
   writeChildThreadOrder,
@@ -104,6 +105,8 @@ export default function contribute(server: PluginServerContext) {
       dir: readDir,
       generatedAt: Date.now(),
       orderIsManual: readChildThreadOrder(dir).length > 0,
+      // ピンのファイルが壊れていても一覧は出すが、黙って「ピン無し」に見せない(画面は console.warn)。
+      pinReadError: childThreadPinsReadError(dir),
     };
   });
 
@@ -111,7 +114,8 @@ export default function contribute(server: PluginServerContext) {
    * 行のアーカイブ(agent + そのスレの workspace)。完了→確認箱→アーカイブの自動経路
    * (`child_thread_registry.archive_confirmed`)と同じ2つを閉じる。一覧(登録簿)は書き換えない
    * — サイドバーは Paseo 側のアーカイブと登録簿の同期(`child_thread_registry.sync`)で消える。
-   * 実行中のスレは止めないよう断る(会話を途中で殺さない)。
+   * 実行中のスレは止めないよう断る(会話を途中で殺さない)。ワークスペースは、このスレ以外に
+   * 生きている(closed 以外の)スレが1本でも居れば閉じない。数えられないときも閉じない。
    */
   server.handle(childThreadsArchiveRpc, async (input, ctx) => {
     const ref = ctx.paseo.agents.ref(input.agentId);
@@ -123,18 +127,21 @@ export default function contribute(server: PluginServerContext) {
     const agent = ref.current();
     if (!agent)
       return { ok: false, message: "スレが見つかりません(既にアーカイブ済みかもしれません)" };
-    if (agent.status === "running") {
+    if (agent.status === "running" || agent.status === "initializing") {
       return {
         ok: false,
         message: "実行中のスレはアーカイブできません(止まってから操作してください)",
       };
     }
-    // ワークスペースを閉じる前に、そのワークスペースを共有している他のスレを数える
-    // (アーカイブ前に取る: 自分自身をアーカイブ済みとして除外させるため)。
-    // `scope:"active"` は一度に200件しか返さないためフルディレクトリ(全件)で数える。
+    // ワークスペースを閉じる前に、そのワークスペースを共有している他のスレを数える。
     const workspaceId = typeof agent.workspaceId === "string" ? agent.workspaceId : "";
-    let decision: WorkspaceArchiveDecision | null = null;
-    if (workspaceId) {
+    // 数えられない・上限に達した・ページ情報が欠けているときは**閉じない**(共有ワークスペースを
+    // 巻き込む方の事故の方が重い)。そのため安全側の失敗もここで null ではなく unsafe として返す。
+    const UNSAFE = (detail: string): WorkspaceArchiveDecision => ({
+      safe: false,
+      message: `スレをアーカイブしました。ワークスペースの共有状態を確認できないため閉じませんでした(${detail})`,
+    });
+    const countMembers = async (): Promise<WorkspaceArchiveDecision> => {
       try {
         const listed = await ctx.paseo.agents.list({
           includeBackground: true,
@@ -150,15 +157,17 @@ export default function contribute(server: PluginServerContext) {
             status: entry.agent.status,
             archived: entry.agent.archivedAt != null,
           }));
-        decision = decideWorkspaceArchive(input.agentId, members, listed.pageInfo.hasMore);
+        // `hasMore` が無い/undefined の経路を「続き無し」と読み替えない(読めないなら安全側)。
+        // 一覧が上限ちょうどのときは、続きが無いと言い切れる場合を除き切れている可能性を残す。
+        const hasMore =
+          listed.pageInfo?.hasMore !== false &&
+          (members.length >= WORKSPACE_SCAN_LIMIT || listed.pageInfo?.hasMore === true);
+        return decideWorkspaceArchive(input.agentId, members, hasMore);
       } catch (error) {
-        // 数えられないなら閉じない(共有ワークスペースを巻き込む方の事故の方が重い)。
-        decision = {
-          safe: false,
-          message: `スレをアーカイブしました。ワークスペースの共有状態を確認できないため閉じませんでした: ${(error as Error).message}`,
-        };
+        return UNSAFE((error as Error).message);
       }
-    }
+    };
+    const decision = workspaceId ? await countMembers() : null;
     try {
       await ref.archive();
     } catch (error) {
@@ -167,8 +176,14 @@ export default function contribute(server: PluginServerContext) {
     if (!workspaceId) {
       return { ok: true, message: "スレをアーカイブしました(ワークスペースは不明のため未処理)" };
     }
-    if (decision && !decision.safe) {
-      return { ok: true, message: decision.message };
+    // 判定直後に同じワークスペースへ新しいスレが生まれる競合があるので、閉じる直前に数え直す
+    // (窓は消えないが縮む。closed は数えないので、いま閉じた自分が増えても判定は変わらない)。
+    const second = await countMembers();
+    const blocker = [decision, second].find((d): d is { safe: false; message: string } => {
+      return d != null && !d.safe;
+    });
+    if (blocker) {
+      return { ok: true, message: blocker.message };
     }
     try {
       await ctx.paseo.workspaces.archive(ctx.paseo.workspaces.ref(workspaceId));

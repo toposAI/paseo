@@ -11,7 +11,8 @@ test("自分だけのワークスペースは閉じてよい", () => {
 });
 
 test("他のスレが idle/running/error で残っていれば閉じない(司令塔ワークスペースの巻き込み防止)", () => {
-  for (const status of ["idle", "running", "error", "initializing"]) {
+  // "waiting" は知らない状態の代表(許可リスト方式だと閉じてしまう=出口レビュー指摘1の回帰テスト)
+  for (const status of ["idle", "running", "error", "initializing", "waiting"]) {
     const d = decideWorkspaceArchive(
       self,
       [
@@ -51,6 +52,20 @@ test("アーカイブ済みの他のスレは数えない", () => {
 test("ページに続きがあれば共有の可能性として閉じない(安全側)", () => {
   const d = decideWorkspaceArchive(self, [{ id: self, status: "idle" }], true);
   assert.equal(d.safe, false);
+});
+
+test("知らない状態は生きている側に倒す(許可リストにしない)", () => {
+  for (const status of ["waiting", "starting", "paused", "", "CLOSED"]) {
+    const d = decideWorkspaceArchive(
+      self,
+      [
+        { id: self, status: "closed" },
+        { id: "a_other", status },
+      ],
+      false,
+    );
+    assert.equal(d.safe, false, status);
+  }
 });
 
 test("閉じないときのメッセージは「スレは閉じた」ことと理由を含む", () => {
