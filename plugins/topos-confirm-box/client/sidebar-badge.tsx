@@ -9,7 +9,7 @@
  * 帯/サイドバー背景 = ライト(#f4f4f5)で4.6〜7.0、ダーク(#141716)で2.3〜3.6(帯として判別できる)。
  */
 import { useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { StatusKind, StatusLabel } from "../shared/thread-status-label.js";
 
 export const STATUS_STYLE: Record<StatusKind, { background: string; text: string }> = {
@@ -19,20 +19,53 @@ export const STATUS_STYLE: Record<StatusKind, { background: string; text: string
   closed: { background: "#52525b", text: "#ffffff" }, // zinc-600
 };
 
-type StatusLabelProps = StatusLabel & { testID?: string };
+type StatusLabelProps = StatusLabel & {
+  testID?: string;
+  /**
+   * 押したときの動作。渡すと帯そのものがボタンになる(ピン/アーカイブの操作メニューの入口、
+   * 2026-10-24 ユーザー指示)。渡さない行の帯は従来どおり表示だけ(支配人は押すと行が開く)。
+   */
+  onPress?: () => void;
+};
 
 /** 状態の帯。文字色は必ずここで与える(親の色を継承させない)。 */
-export function StatusBadge({ text, kind, testID }: StatusLabelProps) {
+export function StatusBadge({ text, kind, testID, onPress }: StatusLabelProps) {
   const tone = STATUS_STYLE[kind];
   const boxStyle = useMemo(() => [styles.badge, { backgroundColor: tone.background }], [tone]);
   const labelStyle = useMemo(() => [styles.text, { color: tone.text }], [tone]);
-  return (
-    <View testID={testID} accessible accessibilityLabel={`状態: ${text}`} style={boxStyle}>
-      <Text style={labelStyle} numberOfLines={1}>
-        {text}
-      </Text>
-    </View>
+  // `style` に毎回新しい関数を渡さない(react-perf)ので、押下時の見た目はフックで1つ作る
+  // (フックは早期 return より前で呼ぶ)。
+  const pressableStyle = usePressableStyle(boxStyle);
+  const label = (
+    <Text style={labelStyle} numberOfLines={1}>
+      {text}
+    </Text>
   );
+  if (!onPress) {
+    return (
+      <View testID={testID} accessible accessibilityLabel={`状態: ${text}`} style={boxStyle}>
+        {label}
+      </View>
+    );
+  }
+  // 帯の押下でメニューを開く。タッチ端末の当たり判定が細くなりすぎないよう最小高さを持たせる。
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={`状態: ${text}(押すとピン止め・アーカイブのメニュー)`}
+      onPress={onPress}
+      hitSlop={6}
+      style={pressableStyle}
+    >
+      {label}
+    </Pressable>
+  );
+}
+
+/** `Pressable` の style プロパティ用(押下中だけ薄くする)。 */
+function usePressableStyle(base: object): (state: { pressed: boolean }) => object | object[] {
+  return useMemo(() => (state) => (state.pressed ? [base, styles.pressed] : base), [base]);
 }
 
 const styles = StyleSheet.create({
@@ -46,5 +79,8 @@ const styles = StyleSheet.create({
   text: {
     fontSize: 11,
     fontWeight: "600",
+  },
+  pressed: {
+    opacity: 0.6,
   },
 });

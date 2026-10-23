@@ -64,6 +64,8 @@ import {
   listLiveWorkspaceIds,
   threadAccessById,
 } from "./server/thread-liveness.js";
+import { mergeUnregisteredThreads } from "./server/unregistered-threads.js";
+import type { ListedAgentLike } from "./server/unregistered-threads.js";
 import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
 import type { WorkspaceArchiveDecision } from "./server/workspace-membership.js";
 import { chooseConceptModel, notesSidebarRpc, openConceptThreadRpc } from "./shared/notes.js";
@@ -133,6 +135,25 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(confirmBoxListRpc, async (_input, ctx) => collect(ctx));
 
+  /**
+   * `agents.list()` を**全ページ**辿って要素を返す(未登録スレの取り込み用)。
+   * 既定ページは200件で、セッションが増えると後から建てたスレが2ページ目に落ちるので
+   * `knownAgentIdsFor` と同じ辿り方にする。読み切れなければ例外(呼び出し元が縮退する)。
+   */
+  async function listAllAgents(paseo: PaseoApi): Promise<ListedAgentLike[]> {
+    const agents: ListedAgentLike[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < LIVE_THREAD_PAGES_MAX; page += 1) {
+      const result = await paseo.agents.list({
+        page: { limit: 200, ...(cursor ? { cursor } : {}) },
+      });
+      for (const entry of result.entries) agents.push(entry.agent);
+      cursor = result.pageInfo?.nextCursor ?? undefined;
+      if (!cursor) return agents;
+    }
+    throw new Error("一覧が長すぎます");
+  }
+
   server.handle(childThreadsListRpc, async (_input, ctx) => {
     const dir = resolveConfirmBoxDir();
     const { items, dir: readDir } = readConfirmBox(dir);
@@ -165,6 +186,16 @@ export default function contribute(server: PluginServerContext) {
       );
       // 親の行(司令塔)が出ているなら、その子スレも同じグループへ寄せる。
       threads = adoptOrphans([...coordinators, ...alive]);
+      // 登録簿に載っていないスレ(= Paseo の「新しいワークスペース」から人が直接始めたスレ)も行にする
+      // (2026-10-24 ユーザー報告)。取れなければ従来どおり登録簿の行だけを出す(行が消えるより出す)。
+      try {
+        const unregistered = await listAllAgents(ctx.paseo);
+        if (unregistered.length > 0) {
+          threads = mergeUnregisteredThreads(threads, unregistered, ids).rows;
+        }
+      } catch {
+        // 一覧が引けない: 登録簿の行だけで続ける。
+      }
       // 押して開けるか(ワークスペースがアーカイブ済みだと会話に着かない)。
       // 一覧は**生きている**ワークスペースしか返さない(アーカイブ済みは含まれない)ので
       // 「在る=開ける、無い=閉じた」で判定する(`listLiveWorkspaceIds` が続きのページも辿る)。
