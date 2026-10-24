@@ -21,6 +21,7 @@ function thread(overrides: Partial<ChildThread>): ChildThread {
     parentTitle: null,
     pinned: false,
     coordinator: false,
+    parentOpenable: false,
     access: null,
     ...overrides,
   };
@@ -77,4 +78,30 @@ test("開けない理由は開けない印のときだけ返す", () => {
   assert.equal(blockedMessage(null), null);
   assert.match(blockedMessage("workspace-archived") ?? "", /アーカイブ済み/);
   assert.match(blockedMessage("thread-archived") ?? "", /アーカイブ済み/);
+});
+
+// 出口レビュー round2 指摘2: 本番の呼び出しは生存ワークスペースの id しか渡さないので、
+// `workspace-archived` は付かない(既知の残差)。この写しは「本番の形」を固定する。
+test("本番の形(生存idのみ)では workspace-archived が付かない(既知の残差)", () => {
+  const access = threadAccessById(
+    [{ id: "a", workspaceId: "w-gone" }],
+    [{ workspaceId: "w-live" }],
+  );
+  assert.equal(access.get("a"), "open");
+});
+
+// 出口レビュー round3 指摘4: 背景のスレを「不明」にする処置は、元から `open` と同じ表示で
+// 効果が無かったため外した。背景のスレは「全 id」に居ないので `open` になる(既知の残差)ことも固定する。
+test("背景のスレ(ワークスペースが引けない)は open のまま(既知の残差。表示は変えない)", () => {
+  const access = threadAccessById(
+    [
+      { id: "bg", workspaceId: "w-background" },
+      { id: "no-ws", workspaceId: "" },
+      { id: "live", workspaceId: "w-live" },
+    ],
+    [{ workspaceId: "w-live" }],
+  );
+  assert.equal(access.get("bg"), "open");
+  assert.equal(access.get("no-ws"), "open");
+  assert.equal(access.get("live"), "open");
 });

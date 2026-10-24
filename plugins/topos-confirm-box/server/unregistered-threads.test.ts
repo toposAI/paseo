@@ -19,6 +19,7 @@ function row(agentId: string, over: Partial<ChildThread> = {}): ChildThread {
     parentTitle: null,
     pinned: false,
     coordinator: false,
+    parentOpenable: false,
     access: "open",
     ...over,
   };

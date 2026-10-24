@@ -43,6 +43,11 @@ export const ChildThreadSchema = z.object({
    */
   coordinator: z.boolean().default(false),
   /**
+   * 子を持つ親(=グループ見出しになる `parentAgentId`)のうち、Paseo の一覧に生きているもの。
+   * 見出しの押下でそのスレを開く(`parentTitle` は登録時に引き直さないことがあるので一覧の題名で上書きする)。
+   */
+  parentOpenable: z.boolean().default(false),
+  /**
    * いま開けるか(`server/thread-liveness.ts` が判定)。null=不明(取得に失敗した)。
    * `workspace-archived` は行を押しても会話に着かない(Paseo がアーカイブ済みワークスペースの画面を出す)。
    */
@@ -76,6 +81,11 @@ export const childThreadsListRpc = defineRpc({
     orderIsManual: z.boolean().default(false),
     /** ピン止め(この箱ディレクトリの設定ファイルに保存)の読み出し失敗。画面には出さずログ用。 */
     pinReadError: z.string().nullish(),
+    /**
+     * Paseo の一覧を取れず、見出し(グループの親スレ)を「開ける親」に判定できなかった。
+     * このとき見出しは開閉だけになるので、理由を通知行に出す(黙って挙動が変わらないように)。
+     */
+    parentsUnknown: z.boolean().default(false),
   }),
 });
 export type ChildThreadsListOutput = z.infer<typeof childThreadsListRpc.output>;

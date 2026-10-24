@@ -32,7 +32,14 @@ import {
 } from "../shared/child-threads.js";
 import type { ChildThread } from "../shared/child-threads.js";
 import { blockedMessage } from "../shared/child-threads.js";
-import { buildUpperRows } from "../shared/sidebar-rows.js";
+import {
+  buildUpperRows,
+  coordinatorIdSet,
+  groupPressAction,
+  openableParentIds,
+  visibleGroupKeyOf,
+} from "../shared/sidebar-rows.js";
+import { COORDINATOR_GROUP } from "../shared/sidebar-section-mode.js";
 import type { SidebarRowView } from "../shared/sidebar-rows.js";
 import type { NoteStatus, SidebarNote } from "../shared/notes.js";
 import { emptySectionLabel } from "../shared/sidebar-section-mode.js";
@@ -48,14 +55,7 @@ import { ThreadMenu } from "./ThreadMenu.js";
 
 const POLL_MS = 30_000;
 const COLLAPSED_KEY = "topos-child-groups-collapsed";
-const OTHER_GROUP = "";
 const OTHER_LABEL = "その他";
-/**
- * 司令塔スレのグループのキー(登録簿の parent id と衝突しない値)。純正の固定一覧を外した後、
- * 司令塔を開く入口をここが担う。生きている司令塔はサーバーが行として返し(`coordinator: true`)、
- * 司令塔の子スレはすべてこのグループに並べる(司令塔ごとに見出しが分かれない)。
- */
-const COORDINATOR_GROUP = "__coordinators";
 /** ドラッグ中は取得結果で一覧を差し替えない(キャンセル時に固まらないよう期限付き)。 */
 const DRAG_POLL_GATE_MS = 60_000;
 export const CHILD_THREADS_SCREEN_ID = "child-threads";
@@ -80,16 +80,13 @@ interface AgentNavigation {
   navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
 }
 
-const groupKeyOf = (t: ChildThread) => t.parentAgentId ?? OTHER_GROUP;
-
 /**
- * 画面上のグループのキー。司令塔の行そのものと、司令塔の子スレは1つの「司令塔」グループへ寄せる
- * (司令塔ごとに見出しを分けない)。並べ替えの当たり判定もこの関数を使い、グループの割り方と揃える。
+ * グループ見出しの題名。「司令塔」グループは呼び出し元が固定の `coordinatorGroup` を使うので
+ * ここへは来ない。それ以外は親の題名(サーバーが Paseo の一覧の題名で上書きする)を使い、
+ * 無ければ「その他」。
  */
-function visibleGroupKeyOf(t: ChildThread, coordinatorIds: ReadonlySet<string>): string {
-  const underCoordinator =
-    t.coordinator === true || (t.parentAgentId !== null && coordinatorIds.has(t.parentAgentId));
-  return underCoordinator ? COORDINATOR_GROUP : groupKeyOf(t);
+function groupTitleOf(r: SidebarRowView<ChildThread>): string {
+  return r.thread.parentTitle || OTHER_LABEL;
 }
 
 function readCollapsed(): ReadonlySet<string> {
@@ -127,13 +124,10 @@ function groupRows(
   const groups = new Map<string, ThreadGroup>();
   const coordinatorGroup: ThreadGroup = { key: COORDINATOR_GROUP, title: "司令塔", rows: [] };
   for (const r of rows) {
-    const key = visibleGroupKeyOf(r.thread, coordinatorIds);
+    const key = visibleGroupKeyOf(r.thread, coordinatorIds, COORDINATOR_GROUP);
     let g = groups.get(key);
     if (!g) {
-      g =
-        key === COORDINATOR_GROUP
-          ? coordinatorGroup
-          : { key, title: r.thread.parentTitle || OTHER_LABEL, rows: [] };
+      g = key === COORDINATOR_GROUP ? coordinatorGroup : { key, title: groupTitleOf(r), rows: [] };
       groups.set(key, g);
     }
     g.rows.push(r);
@@ -162,6 +156,8 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   } = useSidebarNotes(dragGateUntilRef);
   const [threads, setThreads] = useState<ChildThread[]>([]);
   const [failed, setFailed] = useState(false);
+  // サーバーが Paseo の一覧を取れず、見出しの親を「開ける親」に判定できなかったか(理由を通知行で出す)。
+  const [parentsUnknown, setParentsUnknown] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [orderIsManual, setOrderIsManual] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(readCollapsed);
@@ -187,6 +183,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
           setThreads(r.threads);
           setOrderIsManual(r.orderIsManual);
           setFailed(false);
+          setParentsUnknown(r.parentsUnknown === true);
           if (r.pinReadError) console.warn(`[child-threads] ${r.pinReadError}`);
           return null;
         })
@@ -230,10 +227,8 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     () => props.rows ?? buildUpperRows(threads, implByThread),
     [props.rows, threads, implByThread],
   );
-  const coordinatorIds = useMemo(
-    () => new Set(threads.filter((t) => t.coordinator === true).map((t) => t.agentId)),
-    [threads],
-  );
+  // 描画(SidebarContents)と並べ替えで同じ集合を使う(全スレから作る。common のコメント参照)。
+  const coordinatorIds = useMemo(() => coordinatorIdSet(threads), [threads]);
   const visibleIds = useMemo(() => new Set(rows.map((r) => r.thread.agentId)), [rows]);
 
   // グループ内のドラッグ結果を全体の並びへ戻す(他グループ・上段に出ていない行の並びはそのまま)。
@@ -243,7 +238,8 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     (groupKey: string, keys: string[]) => {
       const queue = [...keys];
       const flat = threads.map((t) =>
-        visibleGroupKeyOf(t, coordinatorIds) === groupKey && visibleIds.has(t.agentId)
+        visibleGroupKeyOf(t, coordinatorIds, COORDINATOR_GROUP) === groupKey &&
+        visibleIds.has(t.agentId)
           ? (queue.shift() ?? t.agentId)
           : t.agentId,
       );
@@ -287,22 +283,22 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     [openAgent, openScreen, props.host.id, props.layout.compact],
   );
 
-  // グループ見出し: 生きている司令塔の行が在るときだけ、その司令塔スレを開く。
-  // 行が無い(閉じた/一覧に居ない)親の見出しを押して開きに行くと、開けない画面へ落ちるだけなので開閉にする。
-  // 「司令塔」グループの見出しは開閉だけ(行が複数あるため、どの司令塔を開くか決められない)。
-  const openableParents = useMemo(
-    () => new Set(threads.filter((t) => t.coordinator === true).map((t) => t.agentId)),
-    [threads],
-  );
+  // グループ見出し: 生きた親だけ、その親スレを開く。判定はサーバーが行に付けた `parentOpenable`
+  // (子司令塔はデーモンの `coordinator_id` に載らないため、`coordinator` の印だけでは足りない。
+  // 2026-10-24 ユーザー報告)。開閉は見出しのシェブロンが別に担う(開けない親でも開閉できる)。
+  const openableParents = useMemo(() => openableParentIds(threads), [threads]);
   const openGroup = useCallback(
     (key: string) => {
-      if (!key || key === COORDINATOR_GROUP || !openableParents.has(key)) {
+      if (groupPressAction(key, openableParents, COORDINATOR_GROUP) === "toggle") {
         toggleGroup(key);
         return;
       }
-      openThread(key, threads.find((t) => t.agentId === key)?.access ?? null);
+      // 開くかは一覧の印が決めた。行に付く `access` は子の印なので使わない(出口レビュー round1 指摘2)。
+      // 親がアーカイブ済み/閉じていればサーバーが `parentOpenable` を立てないので、開けない対象へは
+      // 行かない。ワークスペースだけがアーカイブ済みの親は、いまの判定では止められない(既知の残差)。
+      openThread(key, null);
     },
-    [openThread, openableParents, threads, toggleGroup],
+    [openThread, openableParents, toggleGroup],
   );
 
   const focusId = (currentScreen?.params as { focusId?: string } | undefined)?.focusId;
@@ -322,8 +318,9 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     if (failed) return "スレ一覧を取得できません(表示は古い内容です)";
     if (saveFailed) return "並び順を保存できません(次の取得で戻ります)";
     if (notesError) return `ノート未取得: ${notesError}`;
+    if (parentsUnknown) return "スレの一覧を取れず、見出しからは開けません(開閉のみ)";
     return "";
-  }, [failed, notesError, saveFailed]);
+  }, [failed, notesError, parentsUnknown, saveFailed]);
 
   const dropThread = useCallback((agentId: string) => {
     setThreads((prev) => prev.filter((x) => x.agentId !== agentId));
@@ -424,6 +421,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
       <SidebarContents
         section={section}
         rows={rows}
+        coordinatorIds={coordinatorIds}
         collapsed={collapsed}
         statusNotice={statusNotice}
         notice={notice}
@@ -464,6 +462,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
 function SidebarContents({
   section,
   rows,
+  coordinatorIds,
   collapsed,
   statusNotice,
   notice,
@@ -487,6 +486,8 @@ function SidebarContents({
 }: {
   section: SidebarSectionKey;
   rows: readonly SidebarRowView<ChildThread>[];
+  /** 司令塔の id 集合(全スレから作ったもの。呼び出し元の並べ替えと同じ集合)。 */
+  coordinatorIds: ReadonlySet<string>;
   collapsed: ReadonlySet<string>;
   /** 取得の失敗など、一覧が欠けていることの通知(空なら出さない)。 */
   statusNotice: string;
@@ -510,10 +511,8 @@ function SidebarContents({
   openScreen: (input: { screenId: string; params?: Record<string, string> }) => void;
   onNotesCreated: () => void;
 }) {
-  const coordinatorIds = useMemo(
-    () => new Set(rows.filter((r) => r.thread.coordinator === true).map((r) => r.thread.agentId)),
-    [rows],
-  );
+  // `coordinatorIds` は呼び出し元から受ける(上段に出ている行だけで作ると、上段から外れた司令塔の
+  // 子スレが「司令塔」から漏れ、並べ替え側のキーとずれる。出口レビュー round3 指摘3)。
   const groups = useMemo(() => groupRows(rows, coordinatorIds), [rows, coordinatorIds]);
   const noticeStyle = useMemo(() => [styles.noticeText, { color: noticeColor }], [noticeColor]);
   const statusNoticeStyle = useMemo(
@@ -605,8 +604,8 @@ function ThreadGroupSection({
     (keys: string[]) => onReorderGroup(group.key, keys),
     [group.key, onReorderGroup],
   );
-  // 純正の固定済み一覧を外したので、司令塔(親)行そのものが司令塔スレへの入口になる。
-  // 開閉は行末のケアットだけが担う(行の押下と開閉を分ける)。
+  // 見出しの押下 = 生きた親のスレを開く(開けるかは `onOpenCoordinator` が親の一覧の印で決める)。
+  // 開閉は行末のシェブロンだけが担う(行の押下と開閉を分ける。開けない親でも開閉はできる)。
   const openCoordinator = useCallback(() => {
     if (!onOpenCoordinator) {
       onToggle(group.key);
@@ -618,6 +617,7 @@ function ThreadGroupSection({
   const textStyle = useMemo(() => ({ color: statusColor }), [statusColor]);
   const chevronStyle = useMemo(() => [styles.chevron, { color: statusColor }], [statusColor]);
   const count = group.rows.length;
+  // 件数とシェブロンは同じ行末に並べる(シェブロンは開閉専用の当たり判定)。
   const trailing = useMemo(
     () => (
       <View style={styles.trailing}>
@@ -685,7 +685,7 @@ function pinFirstPerGroup(
 ): ChildThread[] {
   const groups = new Map<string, ChildThread[]>();
   for (const t of threads) {
-    const key = visibleGroupKeyOf(t, coordinatorIds);
+    const key = visibleGroupKeyOf(t, coordinatorIds, COORDINATOR_GROUP);
     const g = groups.get(key);
     if (g) g.push(t);
     else groups.set(key, [t]);

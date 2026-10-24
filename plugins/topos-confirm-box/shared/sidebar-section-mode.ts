@@ -73,6 +73,12 @@ export function saveStoredSection(
   }
 }
 
+/**
+ * 画面のグループ「司令塔」(司令塔の行とその子を1つに寄せる。groupPressAction の開閉のみのキー)。
+ * クライアントと通しテストの両方で同じ値を使うため、ここに置く。
+ */
+export const COORDINATOR_GROUP = "__coordinators";
+
 /** 一覧が空のときの行の文言(タブごと)。 */
 export function emptySectionLabel(section: SidebarSectionKey): string {
   return section === "concepts" ? "進行中の構想はありません" : "実装中のスレはありません";

@@ -53,7 +53,7 @@ export interface UnregisteredThreads {
 
 /**
  * 登録簿の行(`rows`)に無いスレを、Paseo の一覧(`agents`)から行として足す。
- * 足し���行は並び替えずに後ろへ置く(既定順そのまま。グループ分けは画面側が行う)。
+ * 足した行は並び替えずに後ろへ置く(既定順そのまま。グループ分けは画面側が行う)。
  */
 export function mergeUnregisteredThreads(
   rows: readonly ChildThread[],
@@ -117,6 +117,7 @@ export function mergeUnregisteredThreads(
       parentTitle: null,
       pinned: false,
       coordinator: false,
+      parentOpenable: false,
       // 開けるかは `thread-liveness.ts` が後で付ける(ここでは未判定)。
       access: null,
     });

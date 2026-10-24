@@ -33,6 +33,74 @@ export interface SidebarRowView<T> {
 const isUpperStatus = (s: NoteStatus) => UPPER_TIER_STATUSES.includes(s);
 
 /**
+ * 司令塔スレと、司令塔の子スレを寄せる「司令塔」グループの id 集合。
+ * 集合の作り元は**全スレ**(`threads`)でなければならない。画面に出ている行だけから作ると、
+ * 上段から外れている司令塔の子スレが「司令塔」グループから漏れ、司令塔の見出しが本人の題名の
+ * グループとして開く(並べ替え側は全スレから作るため、描画とキーがずれる。出口レビュー round3 指摘3)。
+ */
+export function coordinatorIdSet(
+  threads: readonly { agentId: string; coordinator?: boolean }[],
+): Set<string> {
+  return new Set(threads.filter((t) => t.coordinator === true).map((t) => t.agentId));
+}
+
+/**
+ * 画面上のグループのキー。司令塔の行そのものと、司令塔の子スレは1つの「司令塔」グループへ寄せる
+ * (司令塔ごとに見出しを分けない)。並べ替えの当たり判定もこの関数を使い、グループの割り方と揃える。
+ * 「司令塔」の値は `sidebar-section-mode.ts` が持つ(見出しの押下の通しテストと共有)。
+ */
+export function visibleGroupKeyOf(
+  t: { agentId: string; parentAgentId: string | null; coordinator?: boolean },
+  coordinatorIds: ReadonlySet<string>,
+  coordinatorGroup: string,
+): string {
+  const underCoordinator =
+    t.coordinator === true || (t.parentAgentId !== null && coordinatorIds.has(t.parentAgentId));
+  return underCoordinator ? coordinatorGroup : (t.parentAgentId ?? "");
+}
+
+/** グループ見出しを押したときの動作。 */
+export type GroupPress = "open" | "toggle";
+
+/**
+ * 見出しで開ける親スレの id(`parentOpenable` を立てた行の `parentAgentId`)。
+ *
+ * 親は**行として出ない**ことが多い(グループ見出しだけになる)。`parentOpenable` は子の行に付くので、
+ * ここで親の id を集めないと、見出しのキー(=親の id)と突き合わせられない
+ * (出口レビュー round1 指摘1: `agentId` を集める実装では症状が残っていた)。
+ * `coordinator: true` の行は足さない — 画面上は必ず「司令塔」グループ(開閉のみ)へ寄るので、
+ * ここへ入れても見出しの判定には届かない(`visibleGroupKeyOf`)。
+ */
+export function openableParentIds(
+  rows: readonly { parentAgentId: string | null; parentOpenable?: boolean }[],
+): Set<string> {
+  const ids = new Set<string>();
+  for (const r of rows) {
+    if (r.parentOpenable === true && r.parentAgentId !== null) ids.add(r.parentAgentId);
+  }
+  return ids;
+}
+
+/**
+ * グループ見出しの押下で、その親スレを開くか、開閉だけにするか。
+ *
+ * - 「その他」(`key === ""`)は開く先が無いので開閉。
+ * - 「司令塔」グループ(`coordinatorGroup`)は複数の司令塔が混ざるので、従来どおり開閉だけ。
+ * - 生きた親(`openableParents` にある id)だけ開く。一覧に居ない/アーカイブ済みの親は開閉だけ
+ *   (押しても会話に着かない画面へ落とさない)。
+ *
+ * 開閉は見出しのシェブロンが別に担うので、ここが `toggle` でも開閉できなくならない。
+ */
+export function groupPressAction(
+  key: string,
+  openableParents: ReadonlySet<string>,
+  coordinatorGroup: string,
+): GroupPress {
+  if (!key || key === coordinatorGroup || !openableParents.has(key)) return "toggle";
+  return "open";
+}
+
+/**
  * 上段の行を作る。ノートの無いスレは従来どおり(実装中/ユーザー判断待ちのみ)残す。
  * 並びは入力の順を保つ(ドラッグ並びを壊さない)。
  */

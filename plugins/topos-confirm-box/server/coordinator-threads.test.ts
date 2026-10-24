@@ -9,6 +9,7 @@ import {
   coordinatorRows,
   dropDeadCoordinators,
   markCoordinators,
+  markOpenableParents,
   readCoordinatorIds,
 } from "./coordinator-threads.js";
 import type { ChildThread } from "../shared/child-threads.js";
@@ -29,6 +30,7 @@ function thread(overrides: Partial<ChildThread>): ChildThread {
     parentTitle: null,
     pinned: false,
     coordinator: false,
+    parentOpenable: false,
     access: null,
     ...overrides,
   };
@@ -119,4 +121,69 @@ test("司令塔が複数/ゼロなら親なしの子スレを推測で付け替�
   assert.equal(two[2].parentAgentId, null);
   const none = adoptOrphans([thread({ agentId: "kid" })]);
   assert.equal(none[0].parentAgentId, null);
+});
+
+test("子を持つ生きた親は開ける親にする(司令塔の印は付けない。行は増やさない)", () => {
+  const rows = markOpenableParents(
+    [
+      thread({ agentId: "kid1", parentAgentId: "child-coord", parentTitle: "古い題名" }),
+      thread({ agentId: "kid2", parentAgentId: "child-coord", parentTitle: "古い題名" }),
+      thread({ agentId: "other", parentAgentId: null }),
+    ],
+    [{ id: "child-coord", title: "子司令塔", status: "idle" }],
+  );
+  assert.equal(rows.length, 3);
+  assert.deepEqual(
+    rows.map((r) => [r.agentId, r.parentOpenable, r.parentTitle, r.coordinator]),
+    [
+      ["kid1", true, "子司令塔", false],
+      ["kid2", true, "子司令塔", false],
+      ["other", false, null, false],
+    ],
+  );
+});
+
+test("アーカイブ済み/閉じた/一覧に居ない親は開閉だけ(印を立てない)", () => {
+  const rows = markOpenableParents(
+    [
+      thread({ agentId: "a", parentAgentId: "archived", parentTitle: "閉じた親" }),
+      thread({ agentId: "b", parentAgentId: "closed", parentTitle: "終わった親" }),
+      thread({ agentId: "c", parentAgentId: "gone", parentTitle: "一覧に居ない親" }),
+    ],
+    [
+      { id: "archived", status: "idle", archivedAt: "2026-10-23T00:00:00Z" },
+      { id: "closed", status: "closed" },
+    ],
+  );
+  assert.deepEqual(
+    rows.map((r) => r.parentOpenable),
+    [false, false, false],
+  );
+  // 登録時の題名はそのまま(印が立たない行の見出しを消さない)
+  assert.equal(rows[1].parentTitle, "終わった親");
+});
+
+test("デーモン登録の司令塔の行は従来どおり(開ける親の印は付けない)", () => {
+  const rows = markOpenableParents(
+    [thread({ agentId: "c1", coordinator: true }), thread({ agentId: "kid", parentAgentId: "c1" })],
+    [{ id: "c1", title: "総司令塔", status: "idle" }],
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.agentId, r.coordinator, r.parentOpenable]),
+    [
+      ["c1", true, false],
+      ["kid", false, true],
+    ],
+  );
+});
+
+test("印が workspace-archived の親は開ける親にしない(印が直接来た場合の単体の挙動)", () => {
+  // 本番の呼び出しは生存ワークスペースの id しか渡さないので、この印は実際には付かない
+  // (thread-liveness.test.ts の「本番の形」テストが既知の残差として固定している)。
+  const rows = markOpenableParents(
+    [thread({ agentId: "kid", parentAgentId: "closed-ws", parentTitle: "閉じたWSの親" })],
+    [{ id: "closed-ws", title: "閉じたWSの親", status: "idle" }],
+    new Map([["closed-ws", "workspace-archived" as const]]),
+  );
+  assert.equal(rows[0].parentOpenable, false);
 });

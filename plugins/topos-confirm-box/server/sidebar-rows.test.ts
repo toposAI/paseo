@@ -7,9 +7,14 @@ import type { SidebarNote } from "../shared/notes.js";
 import { readSidebarNotes } from "./notes.js";
 import {
   buildUpperRows,
+  coordinatorIdSet,
+  groupPressAction,
   indexImplementationNotes,
   lowerTierNotes,
+  openableParentIds,
+  visibleGroupKeyOf,
 } from "../shared/sidebar-rows.js";
+import { COORDINATOR_GROUP } from "../shared/sidebar-section-mode.js";
 import type { RowThread } from "../shared/sidebar-rows.js";
 
 const thread = (
@@ -136,4 +141,104 @@ test("下段: 構想/壁打ち中の構想ノートだけ", () => {
     lowerTierNotes(notes).map((n) => n.path),
     ["/v/1.md", "/v/2.md"],
   );
+});
+
+test("見出しの押下: 生きた親だけ開く(子司令塔でも一覧に生きていれば開く)", () => {
+  const openable = new Set(["child-coordinator"]);
+  assert.equal(groupPressAction("child-coordinator", openable, "__coordinators"), "open");
+});
+
+test("見出しの押下: 「司令塔」グループ・「その他」・開けない親は開閉", () => {
+  const openable = new Set(["child-coordinator"]);
+  assert.equal(groupPressAction("__coordinators", openable, "__coordinators"), "toggle");
+  assert.equal(groupPressAction("", openable, "__coordinators"), "toggle");
+  assert.equal(groupPressAction("archived-parent", openable, "__coordinators"), "toggle");
+});
+
+// 出口レビュー round1 指摘1: 親は行として出ない(見出しだけ)。本番の形(子だけが行)で
+// 見出しキーと突き合わせられること。
+test("見出しの押下: 親の行が無く子の行だけでも、生きている親の見出しで開く", () => {
+  const rows = [
+    { agentId: "kid-1", parentAgentId: "a59b3f21", parentOpenable: true },
+    { agentId: "kid-2", parentAgentId: "a59b3f21", parentOpenable: true },
+    { agentId: "orphan", parentAgentId: null, parentOpenable: false },
+  ];
+  const openable = openableParentIds(rows);
+  assert.deepEqual([...openable], ["a59b3f21"]);
+  assert.equal(groupPressAction("a59b3f21", openable, "__coordinators"), "open");
+  // 子の id を親の id と取り違えない
+  assert.equal(groupPressAction("kid-1", openable, "__coordinators"), "toggle");
+});
+
+test("見出しの押下: 開けない親の子しか無ければ開閉(開けない画面に落とさない)", () => {
+  const rows = [{ agentId: "kid", parentAgentId: "dead-parent", parentOpenable: false }];
+  const openable = openableParentIds(rows);
+  assert.equal(openable.size, 0);
+  assert.equal(groupPressAction("dead-parent", openable, "__coordinators"), "toggle");
+});
+
+// 出口レビュー round2 指摘4: 「行 → グループのキー → 見出しの押下」を通しで検査する
+// (行の `parentOpenable` が立っていても、グループのキーが「司令塔」なら開閉のみ)。
+test("通し: 子司令塔の見出しは開き、司令塔の行が上段から外れた司令塔の見出しは開閉のみ", () => {
+  const rows = [
+    { agentId: "kid", parentAgentId: "child-coord", parentOpenable: true },
+    { agentId: "kid2", parentAgentId: "chief", parentOpenable: true },
+  ];
+  const openable = openableParentIds(rows);
+
+  // 1) 子司令塔は coordinatorIds に居ない → 見出しのキーは親の id になり、押すと開く
+  const key = visibleGroupKeyOf(rows[0], new Set(), COORDINATOR_GROUP);
+  assert.equal(key, "child-coord");
+  assert.equal(groupPressAction(key, openable, COORDINATOR_GROUP), "open");
+
+  // 2) 総司令は coordinatorIds に居る → 「司令塔」グループへ寄り、見出しは開閉のみ
+  const chiefKey = visibleGroupKeyOf(rows[1], new Set(["chief"]), COORDINATOR_GROUP);
+  assert.equal(chiefKey, COORDINATOR_GROUP);
+  assert.equal(groupPressAction(chiefKey, openable, COORDINATOR_GROUP), "toggle");
+});
+
+// 出口レビュー round3 指摘3: 通しテストが手で作った集合ではなく、**画面と同じ作り方**
+// (`coordinatorIdSet(全スレ)`)でキーを決める。上段から外れた司令塔(子スレだけ上段に出る形)でも
+// 子スレは「司令塔」へ寄り、押しても開閉のみのままになる。
+test("通し(画面と同じ集合): 司令塔が上段から外れていても、子スレは「司令塔」へ寄る", () => {
+  const row = (
+    agentId: string,
+    parentAgentId: string | null,
+    coordinator: boolean,
+    parentOpenable = false,
+  ): RowThread & {
+    parentAgentId: string | null;
+    coordinator: boolean;
+    parentOpenable: boolean;
+  } => ({
+    agentId,
+    title: agentId,
+    status: "実装中",
+    parentAgentId,
+    coordinator,
+    parentOpenable,
+  });
+  const allThreads = [
+    row("chief", null, true),
+    row("kid2", "chief", false, true),
+    row("kid", "child-coord", false, true),
+  ];
+  const coordinatorIds = coordinatorIdSet(allThreads);
+  assert.deepEqual([...coordinatorIds], ["chief"]);
+  // 上段の行 = 子スレだけ(司令塔の行は上段に無い。ノートの status で絞られるため)。
+  const upper = buildUpperRows(
+    allThreads.filter((t) => !t.coordinator),
+    new Map(),
+  ).map((r) => r.thread);
+  const openable = openableParentIds(upper);
+  const keyOf = (id: string) =>
+    visibleGroupKeyOf(upper.find((t) => t.agentId === id)!, coordinatorIds, COORDINATOR_GROUP);
+  assert.equal(keyOf("kid2"), COORDINATOR_GROUP);
+  assert.equal(groupPressAction(COORDINATOR_GROUP, openable, COORDINATOR_GROUP), "toggle");
+  // 子司令塔の子スレは本人の見出しになり、押すと開く
+  assert.equal(keyOf("kid"), "child-coord");
+  assert.equal(groupPressAction(keyOf("kid"), openable, COORDINATOR_GROUP), "open");
+  // 並べ替え側(全スレ)のキーと揃う
+  const reorderKey = visibleGroupKeyOf(allThreads[1], coordinatorIds, COORDINATOR_GROUP);
+  assert.equal(reorderKey, keyOf("kid2"));
 });

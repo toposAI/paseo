@@ -19,7 +19,7 @@ test("初期値はスレ一覧", () => {
   assert.equal(normalizeSidebarSection("bogus"), "threads");
 });
 
-test("タブを押すと切り替わる(同じタブを押しても入れ替え��ない)", () => {
+test("タブを押すと切り替わる(同じタブを押しても入れ替えない)", () => {
   assert.equal(sectionAfterPress("threads", "concepts"), "concepts");
   assert.equal(sectionAfterPress("concepts", "threads"), "threads");
   assert.equal(sectionAfterPress("concepts", "concepts"), "concepts");

@@ -15,7 +15,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { ChildThread } from "../shared/child-threads.js";
+import type { ChildThread, ThreadAccess } from "../shared/child-threads.js";
 
 /** 起こしデーモンの状態ディレクトリ(正本: `antigravity/utils/coordinator_wakeup_daemon.py` の `STATE_DIR`)。 */
 export function coordinatorStateDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -90,10 +90,58 @@ export function coordinatorRows(
       parentTitle: null,
       pinned: false,
       coordinator: true,
+      parentOpenable: false,
       access: null,
     });
   }
   return rows;
+}
+
+/**
+ * 子を持つ親(グループ見出しになる `parentAgentId`)を開ける親として扱う。
+ *
+ * なぜ要るか(2026-10-24 ユーザー報告「子司令塔の見出しを押すと開かず開閉だけになる」): 見出しの押下で
+ * 開くのは「`coordinator: true` の行がある親」だけだった。司令塔の行は起こしデーモンの
+ * `coordinator_id` からしか作られず、子司令塔はそこに載らない。そのため、生きている子司令塔でも
+ * 「開けない親」=開閉だけになっていた。ここではデーモンの一覧に居る(アーカイブされていない)親なら
+ * `parentOpenable` を立てる。行そのものは増やさない(見出しは既にある `parentTitle`)。
+ *
+ * 一覧に居ない親(取得の隙間・範囲外)は立てない(開けない画面へ落とさない)。`coordinator` の印は
+ * 変えない(「司令塔」グループへの寄せ方は呼び出し元の id 一覧が決める)。登録簿へは書き戻さない。
+ */
+export function markOpenableParents(
+  rows: ChildThread[],
+  agents: readonly CoordinatorAgent[],
+  /**
+   * 親を開けるか(`thread-liveness.ts` の判定)。アーカイブ済み・workspace-archived の親は開けない側に
+   * 倒す。ただし**いまの呼び出し元は生存ワークスペースの id しか渡さない**ため、`workspace-archived`
+   * は実際には付かない(出口レビュー round2 指摘2。既存の欠陥として残差に記録)。実際に効くのは
+   * `a.archivedAt` と `status === "closed"` の2つ。
+   * `agents` はアーカイブ済みを含まない全ページ版(`server/agent-pages.ts`)で渡される想定
+   * (含まれて来ても `archivedAt` で落とす)。
+   */
+  access: ReadonlyMap<string, ThreadAccess> = new Map(),
+): ChildThread[] {
+  const alive = new Map<string, string>();
+  for (const a of agents) {
+    const id = str(a.id);
+    if (!id || a.archivedAt != null || str(a.status) === "closed") continue;
+    const canOpen = access.get(id);
+    if (canOpen === "workspace-archived" || canOpen === "thread-archived") continue;
+    alive.set(id, str(a.title));
+  }
+  return rows.map((t) => {
+    const parent = t.parentAgentId;
+    const title = parent === null ? undefined : alive.get(parent);
+    if (parent === null || title === undefined) {
+      return t.parentOpenable ? { ...t, parentOpenable: false } : t;
+    }
+    return {
+      ...t,
+      parentOpenable: true,
+      parentTitle: title.trim() || t.parentTitle,
+    };
+  });
 }
 
 /**
