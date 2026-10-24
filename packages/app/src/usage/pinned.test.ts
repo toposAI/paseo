@@ -294,6 +294,18 @@ it("keeps only the 5h and weekly windows on the sidebar lines", () => {
   expect(shown.map((window) => window.shortLabel)).toEqual(["wk"]);
 });
 
+it("keeps a source that pins only its monthly window, so OpenCode Go still gets a line", () => {
+  const opencode = report({
+    sourceId: "opencode-go-key",
+    sourceLabel: "OpenCode Go",
+    windows: [{ id: "monthly", label: "Monthly", usedPct: 50, summary: true }],
+  });
+  const rows = splitPinnedUsageRows(resolvePinnedUsage([opencode], preferences(null)), [opencode]);
+  const shown = rows.flatMap((row) => row.sources).flatMap((source) => source.windows);
+  expect(rows.map((row) => row.title)).toEqual(["OpenCode Go"]);
+  expect(shown.map((window) => window.percentText)).toEqual(["50%"]);
+});
+
 it("keeps unavailable and error reports out of the sidebar summary", () => {
   const expired: UsageReportEntry = {
     ...claude,

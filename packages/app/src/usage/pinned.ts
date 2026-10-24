@@ -104,12 +104,17 @@ export function splitPinnedUsageRows(
         const sourceId = sourceIdByReportId.get(source.key);
         return sourceId !== undefined && row.matches(sourceId);
       })
-      // The sidebar only ever shows the 5h and weekly windows; monthly etc. stay in the modal.
-      .map((source) => ({
-        key: source.key,
-        icon: source.icon,
-        windows: source.windows.filter((w) => w.shortLabel === "5h" || w.shortLabel === "wk"),
-      }))
+      // The sidebar shows the 5h and weekly windows; other windows stay in the modal. A source that
+      // pins only another one (OpenCode Go pins its monthly budget) keeps what it pinned, so it
+      // still gets a line instead of dropping out of the summary entirely.
+      .map((source) => {
+        const brief = source.windows.filter((w) => w.shortLabel === "5h" || w.shortLabel === "wk");
+        return {
+          key: source.key,
+          icon: source.icon,
+          windows: brief.length > 0 ? brief : source.windows,
+        };
+      })
       .filter((source) => source.windows.length > 0);
     return rowSources.length > 0 ? [{ key: row.key, title: row.title, sources: rowSources }] : [];
   });
