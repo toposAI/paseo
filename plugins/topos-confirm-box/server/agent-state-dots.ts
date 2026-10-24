@@ -16,6 +16,7 @@
  */
 import type { ChildThread } from "../shared/child-threads.js";
 import type { StateDotKind } from "../shared/state-dot.js";
+import { statusWithDot } from "../shared/state-dot.js";
 import { stateDotOf } from "./unregistered-threads.js";
 import type { ListedAgentLike } from "./unregistered-threads.js";
 
@@ -32,13 +33,15 @@ export function stateDotsById(agents: readonly ListedAgentLike[]): Map<string, S
   return out;
 }
 
-/** 行へ点を付ける(判定に無い行は null=不明)。 */
+/** 行へ点を付ける(判定に無い行は null=不明)。承認待ちの行は帯の語彙も揃える(`statusWithDot`)。 */
 export function applyStateDots(
   rows: readonly ChildThread[],
   dots: ReadonlyMap<string, StateDotKind>,
 ): ChildThread[] {
   return rows.map((t) => {
     const next = dots.get(t.agentId) ?? null;
-    return t.stateDot === next ? t : { ...t, stateDot: next };
+    const status = statusWithDot(t.status, next);
+    if (t.stateDot === next && t.status === status) return t;
+    return { ...t, stateDot: next, status };
   });
 }

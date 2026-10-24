@@ -8,6 +8,8 @@ import test from "node:test";
 import { applyStateDots, stateDotsById } from "./agent-state-dots.js";
 import { mergeUnregisteredThreads, stateDotOf } from "./unregistered-threads.js";
 import type { ChildThread } from "../shared/child-threads.js";
+import { buildUpperRows } from "../shared/sidebar-rows.js";
+import type { RowThread } from "../shared/sidebar-rows.js";
 
 function row(agentId: string, over: Partial<ChildThread> = {}): ChildThread {
   return {
@@ -77,6 +79,33 @@ test("行へ点を付ける(一覧に無い行は null=点を出さない)", () 
   const same = applyStateDots(out, new Map([["a", "needs_input" as const]]));
   assert.equal(same[0], out[0]);
   assert.equal(same[1], out[1]);
+});
+
+test("承認待ちの点が付いた行は帯も「ユーザー判断待ち」に揃う(登録簿の行も)", () => {
+  // 登録簿の行は「実装中」と自己申告していても、いま Ask で止まっているなら判断待ちにする
+  // (点=橙・帯=実装中 の食い違いを残さない。2026-10-24 実機確認で発覚)
+  const [waiting] = applyStateDots(
+    [row("registered", { status: "実装中", machineState: "running" })],
+    new Map([["registered", "needs_input" as const]]),
+  );
+  assert.equal(waiting?.status, "ユーザー判断待ち");
+  // 承認待ち以外では帯を動かさない(登録簿の自己申告が正)
+  const [running] = applyStateDots(
+    [row("registered", { status: "実装中" })],
+    new Map([["registered", "running" as const]]),
+  );
+  assert.equal(running?.status, "実装中");
+  // 完了の行でも、いま承認待ちなら判断待ちへ上げる(上段から消えて見落とされるのを防ぐ)
+  const [completed] = applyStateDots(
+    [row("registered", { status: "完了" })],
+    new Map([["registered", "needs_input" as const]]),
+  );
+  assert.equal(completed?.status, "ユーザー判断待ち");
+  const upper = buildUpperRows([completed as ChildThread & RowThread], new Map());
+  assert.deepEqual(
+    upper.map((r) => r.statusLabel),
+    ["判断待ち"],
+  );
 });
 
 test("登録簿に載らないスレも、承認待ちなら橙の点になる", () => {

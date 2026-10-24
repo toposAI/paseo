@@ -25,7 +25,7 @@
  */
 import type { ChildThread } from "../shared/child-threads.js";
 import { compareChildThreads } from "../shared/child-threads.js";
-import { deriveStateDot } from "../shared/state-dot.js";
+import { deriveStateDot, statusWithDot } from "../shared/state-dot.js";
 import type { StateDotKind } from "../shared/state-dot.js";
 import { statusKindOfMachine } from "../shared/thread-status-label.js";
 
@@ -65,16 +65,9 @@ export function stateDotOf(a: ListedAgentLike): StateDotKind {
  * (表示は「判断待ち」)、それ以外(idle・closed 等)は `待機中`。規則は
  * `shared/thread-status-label.ts` の `statusKindOfMachine` が正で、ここはそれを使うだけ。
  */
-function statusHintOfMachine(
-  machineState: string | null,
-  dot: StateDotKind,
-): ChildThread["status"] {
-  // 承認待ちは機械状態では `running` のままなので、点と同じ材料で先に判定する。ここを見ないと
-  // 「点は橙(承認待ち)なのに帯は実装中」と食い違う(2026-10-24 実機確認で発覚)。
-  if (dot === "needs_input") return "ユーザー判断待ち";
+function machineHint(machineState: string | null): ChildThread["status"] {
   // **写しは1か所**(`statusKindOfMachine`)。以前は同じ規則をここへ二重に書いていて、
-  // `closed` の扱いが帯と食い違った(出口レビュー round2 指摘2)。生の機械状態
-  // (`initializing` 等)は `statusKindOfMachine` 側が吸収する(承認待ちの名前もそちら)。
+  // `closed` の扱いが帯と食い違った(出口レビュー round2 指摘2)。
   switch (statusKindOfMachine(machineState)) {
     case "running":
       return "実装中";
@@ -85,6 +78,14 @@ function statusHintOfMachine(
       // 一覧から消すと、元の「出ない」症状と見分けが付かない)。
       return "待機中";
   }
+}
+
+/** 承認待ちは機械状態では `running` のままなので、点(同じ材料で決めたもの)で上書きする。 */
+function statusHintOfMachine(
+  machineState: string | null,
+  dot: StateDotKind,
+): ChildThread["status"] {
+  return statusWithDot(machineHint(machineState), dot);
 }
 
 /** 一覧に足さなかったスレの理由(テストと報告のための語彙)。 */

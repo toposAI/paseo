@@ -153,6 +153,21 @@ export function stateDotStyle(kind: StateDotKind, appearance: DotAppearance): St
  */
 export const DOT_BACKGROUND_KEYS = ["surface0", "surface1", "surface2"] as const;
 
+/**
+ * 承認待ち(点が橙)の行は、**帯の語彙も**「ユーザー判断待ち」に揃える。
+ *
+ * 揃えないと「点は橙(止まっている)のに帯は実装中(動いている)」と読めてしまう
+ * (2026-10-24 実機確認で発覚)。承認待ちの間 Paseo の status は running のままなので、
+ * 帯の材料(登録簿の `status`・機械状態)だけでは止まっていると分からないため、点の判定を正にする。
+ * **登録簿の書き込み語彙は変えない**(この揃えは一覧を出すときだけの上書き)。
+ */
+export function statusWithDot<T extends string>(
+  status: T,
+  dot: StateDotKind | null,
+): T | "ユーザー判断待ち" {
+  return dot === "needs_input" ? "ユーザー判断待ち" : status;
+}
+
 function parseHex(hex: string | null | undefined): [number, number, number] | null {
   if (typeof hex !== "string") return null;
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
