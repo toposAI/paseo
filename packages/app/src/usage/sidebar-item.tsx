@@ -159,8 +159,8 @@ function PinnedUsageTrigger({
 }
 
 /**
- * One provider's line, identified by its icon only. Off-screen copies measure it with labels and with percents alone; the
- * richest layout that fits is shown, and what it leaves out takes no space at all.
+ * One provider's line, led by its name. Off-screen copies measure it with labels and with percents alone; the richest
+ * layout that fits is shown, and what it leaves out takes no space at all.
  */
 function PinnedUsageRowView({ row }: { row: PinnedUsageRow }) {
   const [available, setAvailable] = useState<number | null>(null);
@@ -183,6 +183,9 @@ function PinnedUsageRowView({ row }: { row: PinnedUsageRow }) {
   });
   return (
     <View style={styles.row}>
+      <Text style={styles.rowTitle} numberOfLines={1}>
+        {row.title}
+      </Text>
       <View style={styles.line} onLayout={handleAvailableLayout}>
         <PinnedUsageLine sources={row.sources} layout={layout} />
       </View>
@@ -278,6 +281,13 @@ const styles = StyleSheet.create((theme) => ({
   row: {
     flexDirection: "row",
     alignItems: "center",
+  },
+  // The provider's name leads its line, so the two lines stay tellable apart at a glance.
+  rowTitle: {
+    flexShrink: 0,
+    marginRight: theme.spacing[1.5],
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
   },
   line: {
     flex: 1,

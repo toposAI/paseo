@@ -11,9 +11,8 @@ import { getPaseoClient, useHosts } from "@getpaseo/plugin/client";
 import { BubbleIcon } from "./Icons.js";
 import { notifyBoxChanged } from "./events.js";
 
-/** このページ専用の会話スレッドの agent ID。総司令から連絡があり次第ここへ設定する。 */
-/** カード💬の会話スレッド(確認箱チャット用)の agent ID。未確定の間は null(会話先未設定を表示)。 */
-export const CARD_CHAT_AGENT_ID: string | null = null;
+/** カード💬の会話スレッド(確認箱チャット用)の agent ID。優先順位ページの常駐会話と共通。 */
+export const CARD_CHAT_AGENT_ID: string | null = "887a6133-01de-498a-be7e-0262c61e0bc9";
 
 export const PRIORITY_CHAT_AGENT_ID: string | null = "887a6133-01de-498a-be7e-0262c61e0bc9";
 
