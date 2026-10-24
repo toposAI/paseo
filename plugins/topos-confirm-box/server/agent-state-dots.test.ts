@@ -94,6 +94,8 @@ test("登録簿に載らないスレも、承認待ちなら橙の点になる",
   );
   assert.equal(rows[1]?.agentId, "direct");
   assert.equal(rows[1]?.stateDot, "needs_input");
+  // 帯も承認待ちに揃える(点だけ橙で帯が「実装中」だと食い違う。2026-10-24 実機確認で発覚)
+  assert.equal(rows[1]?.status, "ユーザー判断待ち");
   // 登録簿の行はここでは点を付けない(サーバーの配線が付ける)
   assert.equal(rows[0]?.stateDot, undefined);
 });
