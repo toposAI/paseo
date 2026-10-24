@@ -1,7 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import {
-  COORDINATOR_AGENT_ID,
   cardIdFromSearch,
   paneTargetFromSearch,
   searchWithCard,
@@ -83,7 +82,6 @@ test("総司令塔への振り替え: カードで参照無し/閉じている�
   assert.equal(f({ hasCard: true, agentId: "a1", closedText: null }), false);
   assert.equal(f({ hasCard: false, agentId: "a1", closedText: "担当スレが閉じています" }), false);
   assert.equal(f({ hasCard: false, agentId: null, closedText: null }), false);
-  assert.match(COORDINATOR_AGENT_ID, /^1800e2f7-/);
 });
 
 test("withCardHeader: 先頭に題名とID、本文があれば続けて、利用者の文は最後", () => {

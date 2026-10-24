@@ -11,6 +11,7 @@ import {
   markCoordinators,
   markOpenableParents,
   readCoordinatorIds,
+  readGeneralCoordinatorId,
 } from "./coordinator-threads.js";
 import type { ChildThread } from "../shared/child-threads.js";
 
@@ -66,6 +67,19 @@ test("司令塔の一覧は領域ごとに読み、cid の無い/壊れた領域
   fs.mkdirSync(path.join(dir, "domains", "bad"), { recursive: true });
   fs.writeFileSync(path.join(dir, "domains", "bad", "coordinator_id"), "../../etc/passwd");
   assert.deepEqual(readCoordinatorIds(dir), [id]);
+});
+
+test("総司令塔(general)のIDだけを返す。無い・不正は null", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coord-"));
+  assert.equal(readGeneralCoordinatorId(dir), null);
+  fs.mkdirSync(path.join(dir, "domains", "f80"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "domains", "f80", "coordinator_id"), "afe8d176-d92c-4cb2-933b");
+  assert.equal(readGeneralCoordinatorId(dir), null);
+  fs.mkdirSync(path.join(dir, "domains", "general"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "domains", "general", "coordinator_id"), "../../etc/passwd");
+  assert.equal(readGeneralCoordinatorId(dir), null);
+  fs.writeFileSync(path.join(dir, "domains", "general", "coordinator_id"), "1800e2f7-63a5-40b7\n");
+  assert.equal(readGeneralCoordinatorId(dir), "1800e2f7-63a5-40b7");
 });
 
 test("状態ディレクトリが無くても空で返す(一覧を止めない)", () => {

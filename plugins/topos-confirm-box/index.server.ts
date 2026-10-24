@@ -25,6 +25,7 @@ import {
   confirmBoxListRpc,
   confirmBoxPermitRpc,
   cardChatListRpc,
+  coordinatorTargetRpc,
   cardChatSayRpc,
   countUnreadNotifications,
   isJudgmentItem,
@@ -69,6 +70,7 @@ import {
   markCoordinators,
   markOpenableParents,
   readCoordinatorIds,
+  readGeneralCoordinatorId,
 } from "./server/coordinator-threads.js";
 import {
   applyThreadAccess,
@@ -646,6 +648,8 @@ export default function contribute(server: PluginServerContext) {
       return { ok: false, message: `送れません: ${(error as Error).message}` };
     }
   });
+
+  server.handle(coordinatorTargetRpc, async () => ({ agentId: readGeneralCoordinatorId() }));
 
   server.handle(cardChatListRpc, async (input) => {
     try {

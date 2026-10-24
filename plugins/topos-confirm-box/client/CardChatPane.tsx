@@ -39,12 +39,11 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { getPaseoClient, useHosts } from "@getpaseo/plugin/client";
+import { getPaseoClient, useHosts, useRpc } from "@getpaseo/plugin/client";
 import type { PluginHostProps } from "@getpaseo/plugin/client";
-import { KIND_LABEL, PRIORITY_LABEL } from "../shared/contract.js";
+import { KIND_LABEL, PRIORITY_LABEL, coordinatorTargetRpc } from "../shared/contract.js";
 import type { ConfirmBoxItem } from "../shared/contract.js";
 import {
-  COORDINATOR_AGENT_ID,
   COORDINATOR_FALLBACK_NOTICE,
   shouldFallbackToCoordinator,
   threadUnavailableReason,
@@ -185,6 +184,10 @@ export function CardChatPane({
   const [sending, setSending] = useState(false);
   // 総司令塔へ振り替えて1回でも送ったか。返事の購読はこの後だけ(相手/カードを変えたら戻す)。
   const [coordSent, setCoordSent] = useState(false);
+  // 総司令塔のID(サーバが起こしデーモンの正本から読む。undefined=未取得、null=見つからない)と、閉じているか。
+  const coordinatorRpc = useRpc(coordinatorTargetRpc);
+  const [coordId, setCoordId] = useState<string | null | undefined>(undefined);
+  const [coordClosed, setCoordClosed] = useState(false);
   const [liveness, setLiveness] = useState<Liveness>(UNKNOWN_LIVENESS);
   // 同じ描画フレーム内の二度押しで同じ文を2件送らない。
   const sendingRef = useRef(false);
@@ -199,9 +202,14 @@ export function CardChatPane({
   const closedText = threadUnavailableReason(access, item ? "card" : "thread");
   // 投函元が無い/閉じているカードは総司令塔へ振り替える(スレ直接=item無しは対象外)。
   const fallback = shouldFallbackToCoordinator({ hasCard: item !== null, agentId, closedText });
-  const sendAgentId = fallback ? COORDINATOR_AGENT_ID : agentId;
+  const sendAgentId = fallback ? (coordId ?? null) : agentId;
   const reason = useMemo(() => {
-    if (fallback) return serverId ? null : "ホストに接続できません";
+    if (fallback) {
+      if (!serverId) return "ホストに接続できません";
+      if (coordId === null) return "総司令塔が見つかりません(送信できません)";
+      if (coordClosed) return "総司令塔も閉じています(送信できません)";
+      return null;
+    }
     // スレ直接(優先順位の行)はカードが無いのが正常なので、カードの有無を先に問わない。
     if (!agentId) {
       if (!item) return "このカードは一覧にありません(決定済みか、URLのカードIDが違います)";
@@ -209,7 +217,7 @@ export function CardChatPane({
     }
     if (!serverId) return "ホストに接続できません";
     return closedText;
-  }, [fallback, item, agentId, serverId, closedText]);
+  }, [fallback, coordId, coordClosed, item, agentId, serverId, closedText]);
 
   // 元スレの履歴 + 購読。カードを切り替えると前のスレの応答が後から届くので、
   // 生きている間だけ反映する(alive フラグ)うえで、履歴は読み直す。
@@ -250,12 +258,35 @@ export function CardChatPane({
     };
   }, [agentId, serverId]);
 
+  // 振り替える時だけ総司令塔のIDを引き、閉じていないか確かめる(閉じていれば送信を止める)。
+  useEffect(() => {
+    if (!fallback || !serverId) return undefined;
+    let alive = true;
+    setCoordClosed(false);
+    coordinatorRpc({})
+      .then(async (res) => {
+        if (!alive) return;
+        setCoordId(res.agentId);
+        if (!res.agentId) return;
+        const snap = await getPaseoClient(serverId).agents.ref(res.agentId).refresh();
+        if (!alive) return;
+        const archivedAt = (snap?.agent as { archivedAt?: string | null } | undefined)?.archivedAt;
+        setCoordClosed(archivedAt != null);
+      })
+      .catch(() => {
+        // 引けないだけ。IDが取れていれば送信は試せる(失敗は通知欄に出る)。
+      });
+    return () => {
+      alive = false;
+    };
+  }, [fallback, serverId, coordinatorRpc]);
+
   // 総司令塔へ振り替えて送った後だけ、その返事を購読して流す(履歴は読まない=総司令塔の会話が混ざらない)。
   useEffect(() => {
-    if (!fallback || !coordSent || !serverId) return undefined;
+    if (!fallback || !coordSent || !serverId || !coordId) return undefined;
     let alive = true;
     const off = getPaseoClient(serverId)
-      .agents.ref(COORDINATOR_AGENT_ID)
+      .agents.ref(coordId)
       .timeline.subscribe((evt) => {
         if (!alive) return;
         const ev = (evt as { event?: { type?: string; item?: TimelineItemLike } }).event;
@@ -268,7 +299,7 @@ export function CardChatPane({
       alive = false;
       off();
     };
-  }, [fallback, coordSent, serverId]);
+  }, [fallback, coordSent, coordId, serverId]);
 
   // 生死。引けなかった時は印を付けない(不明を「閉じています」と言い換えない)。
   useEffect(() => {

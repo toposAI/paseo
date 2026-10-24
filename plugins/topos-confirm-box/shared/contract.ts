@@ -324,6 +324,14 @@ export const cardChatListRpc = defineRpc({
 });
 export type CardChatListOutput = z.infer<typeof cardChatListRpc.output>;
 
+/** 総司令塔スレの agent ID(起こしデーモンの実行時の正本 `domains/general/coordinator_id`)。
+ * 読めない/形が不正なら null。投函元が閉じているカードの質問の振り替え先。 */
+export const coordinatorTargetRpc = defineRpc({
+  name: "topos.confirmbox.coordinator",
+  input: z.object({}),
+  output: z.object({ agentId: z.string().nullable() }),
+});
+
 export const cardChatSayRpc = defineRpc({
   name: "topos.confirmbox.cardchat.say",
   input: z.object({ ...cardChatTarget, text: z.string() }),
