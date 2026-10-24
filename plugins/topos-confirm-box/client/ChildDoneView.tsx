@@ -9,9 +9,9 @@
  * 隠れるため残す)。ここから削除経路を増やさない。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, Text, TextInput, View } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
-import { childThreadsListRpc } from "../shared/child-threads.js";
+import { childThreadsListRpc, childThreadsRevertRpc } from "../shared/child-threads.js";
 import type { ChildThread, ChildThreadsListOutput } from "../shared/child-threads.js";
 import { confirmBoxAckRpc, boxSignalRpc } from "../shared/contract.js";
 import { notifyBoxChanged } from "./events.js";
@@ -52,6 +52,11 @@ export function ChildDoneView({
   const list = useRpc(childThreadsListRpc);
   const ack = useRpc(confirmBoxAckRpc);
   const signalTimes = useRpc(boxSignalRpc);
+  const revertRpc = useRpc(childThreadsRevertRpc);
+  // 差し戻した結果。カードは一覧から消えるので、結果の1行はここに残す(押し間違いに気づける。取り消しは無い)
+  const [reverted, setReverted] = useState<{ agentId: string; title: string; message: string }[]>(
+    [],
+  );
   const [data, setData] = useState<ChildThreadsListOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -160,6 +165,17 @@ export function ChildDoneView({
         paddingHorizontal: 12,
       },
       subText: { color: c.foreground, fontSize: 13 },
+      revertBox: { gap: 6 },
+      revertInput: {
+        color: c.foreground,
+        backgroundColor: c.surface2,
+        borderColor: c.border,
+        borderWidth: 1,
+        borderRadius: 6,
+        padding: 8,
+        minHeight: 60,
+        fontSize: 13,
+      },
     }),
     [c],
   );
@@ -193,6 +209,26 @@ export function ChildDoneView({
     [ack, reload],
   );
 
+  const revert = useCallback(
+    async (t: ChildThread, instruction: string) => {
+      setBusy(t.agentId);
+      try {
+        const r = await revertRpc({ agentId: t.agentId, instruction });
+        setReverted((prev) => [
+          { agentId: t.agentId, title: t.title, message: r.message },
+          ...prev.filter((x) => x.agentId !== t.agentId),
+        ]);
+        notifyBoxChanged();
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(null);
+      }
+      void reload();
+    },
+    [revertRpc, reload],
+  );
+
   return (
     <View style={s.root}>
       <View style={s.head}>
@@ -207,6 +243,15 @@ export function ChildDoneView({
         </View>
       ) : null}
       {notice ? <Text style={s.meta}>{notice}</Text> : null}
+      {reverted.map((r) => (
+        <View key={r.agentId} style={s.card} testID={`childdone-reverted-${r.agentId}`}>
+          <Text style={s.title}>差し戻し: {r.title}</Text>
+          <Text style={s.text}>{r.message}</Text>
+          <Text style={s.meta}>
+            子スレが [STATUS] 完了 か ユーザー判断待ち を宣言すると、カードが作り直されます。
+          </Text>
+        </View>
+      ))}
       {data && visible.length === 0 && !error ? (
         <Text style={s.meta}>
           {done.length === 0 ? "完了した子スレはありません" : "確認待ちの完了報告はありません"}
@@ -225,6 +270,7 @@ export function ChildDoneView({
           acked={isAcked(t)}
           busy={busy === t.agentId}
           onConfirm={confirm}
+          onRevert={revert}
           navigation={navigation}
         />
       ))}
@@ -238,6 +284,7 @@ function DoneCard({
   acked,
   busy,
   onConfirm,
+  onRevert,
   navigation,
 }: {
   thread: ChildThread;
@@ -245,6 +292,7 @@ function DoneCard({
   acked: boolean;
   busy: boolean;
   onConfirm: (t: ChildThread) => Promise<void>;
+  onRevert: (t: ChildThread, instruction: string) => Promise<void>;
   navigation?: { openAgent: (input: { agentId: string }) => void };
 }) {
   const confirm = useCallback(() => void onConfirm(thread), [onConfirm, thread]);
@@ -253,6 +301,13 @@ function DoneCard({
     [navigation, thread.agentId],
   );
   const disabled = acked || busy || !thread.summaryItemId;
+  const [revertOpen, setRevertOpen] = useState(false);
+  const [instruction, setInstruction] = useState("");
+  const toggleRevert = useCallback(() => setRevertOpen((v) => !v), []);
+  const submitRevert = useCallback(() => {
+    setRevertOpen(false);
+    void onRevert(thread, instruction.trim());
+  }, [onRevert, thread, instruction]);
   return (
     <View style={styles.card}>
       <View style={styles.head}>
@@ -275,12 +330,51 @@ function DoneCard({
             {confirmLabel(acked, busy)}
           </Text>
         </Pressable>
+        {!acked ? (
+          <Pressable
+            accessibilityRole="button"
+            testID={`childdone-revert-${thread.agentId}`}
+            style={styles.sub}
+            onPress={busy ? undefined : toggleRevert}
+          >
+            <Text style={styles.subText}>差し戻し</Text>
+          </Pressable>
+        ) : null}
         {navigation ? (
           <Pressable accessibilityRole="button" style={styles.sub} onPress={open}>
             <Text style={styles.subText}>スレを開く</Text>
           </Pressable>
         ) : null}
       </View>
+      {revertOpen ? (
+        <View style={styles.revertBox}>
+          <Text style={styles.meta}>
+            子スレへの追加指示(空でも差し戻せます。子スレは作業後に [STATUS] 完了 か
+            ユーザー判断待ち のどちらかで終わります)
+          </Text>
+          <TextInput
+            testID={`childdone-revert-input-${thread.agentId}`}
+            style={styles.revertInput}
+            multiline
+            value={instruction}
+            onChangeText={setInstruction}
+            placeholder="例: 表の列を直して"
+          />
+          <View style={styles.row}>
+            <Pressable
+              accessibilityRole="button"
+              testID={`childdone-revert-submit-${thread.agentId}`}
+              style={styles.btn}
+              onPress={submitRevert}
+            >
+              <Text style={styles.btnText}>差し戻す</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" style={styles.sub} onPress={toggleRevert}>
+              <Text style={styles.subText}>やめる</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
       {!acked && !thread.summaryItemId ? (
         <Text style={styles.meta}>
           完了まとめが確認箱に無いため、ここからは確認できません。「スレを開く」から手でアーカイブしてください。

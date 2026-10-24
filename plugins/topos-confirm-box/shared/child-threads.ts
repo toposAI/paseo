@@ -141,6 +141,21 @@ export const childThreadsSetOrderRpc = defineRpc({
 });
 export type ChildThreadsSetOrderOutput = z.infer<typeof childThreadsSetOrderRpc.output>;
 
+/**
+ * 完了カードの差し戻し。登録簿の `child_thread_registry.py revert` を呼ぶ
+ * (自動取り下げと同じ後始末+子スレへの通知+送達確認)。結果は短い文で画面に出す。
+ */
+export const childThreadsRevertRpc = defineRpc({
+  name: "topos.childthreads.revert",
+  input: z.object({
+    agentId: z.string().uuid(),
+    /** 子スレへ添える追加指示(空でも押せる。空なら子スレが何を直すかを自分で確認する)。 */
+    instruction: z.string().max(2000).default(""),
+  }),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
+export type ChildThreadsRevertOutput = z.infer<typeof childThreadsRevertRpc.output>;
+
 /** 行のアーカイブ(スレ + そのスレのワークスペース)。 */
 export const childThreadsArchiveRpc = defineRpc({
   name: "topos.childthreads.archive",
