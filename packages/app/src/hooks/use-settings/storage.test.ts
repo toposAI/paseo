@@ -257,6 +257,8 @@ describe("loadAppSettingsFromStorage", () => {
     const result = await loadAppSettingsFromStorage(deps);
 
     expect(result.sidebarFooterItems).toEqual([
+      // Add project starts hidden; the migration adds it once for installs with stored rows.
+      { key: "add-project", visible: false },
       { key: "help", visible: false },
       { key: "plugin:sync:status", visible: true },
       { key: "usage", visible: false },

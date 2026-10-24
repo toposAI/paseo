@@ -1230,6 +1230,7 @@ export const zhCN: TranslationResources = {
     },
     footer: {
       usage: "使用情况",
+      addProject: "添加 project",
     },
     help: {
       trigger: "帮助与支持",
@@ -2276,7 +2277,7 @@ export const zhCN: TranslationResources = {
         },
         footer: {
           title: "底部",
-          description: "选择侧边栏底部显示的行及其顺序。添加项目和图标行始终显示",
+          description: "选择侧边栏底部显示的行及其顺序。图标行始终显示",
         },
         moveUp: "上移",
         moveDown: "下移",

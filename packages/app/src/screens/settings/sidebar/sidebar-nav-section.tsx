@@ -7,6 +7,7 @@ import {
   ArrowUp,
   Blocks,
   CalendarClock,
+  FolderPlus,
   Gauge,
   History,
   Plus,
@@ -44,6 +45,7 @@ const BUILTIN_ICONS: Record<BuiltinSidebarItemId, LucideIcon> = {
   history: History,
   search: Search,
   schedules: CalendarClock,
+  "add-project": FolderPlus,
   usage: Gauge,
 };
 
@@ -63,6 +65,15 @@ function navItemIcon(item: SidebarNavItem): LucideIcon {
 
 function navItemLabel(t: TFunction, item: SidebarNavItem): string {
   return item.kind === "builtin" ? t(builtinSidebarNavLabelKey(item.id)) : item.group.title;
+}
+
+/** Add project is the one footer builtin that is not drawn by the footer (it is a plain action), so name its row explicitly. */
+const BUILTIN_ROW_KEYS: Partial<Record<BuiltinSidebarItemId, string>> = {
+  "add-project": "footer:add-project",
+};
+
+function navItemKey(item: SidebarNavItem): string {
+  return item.kind === "builtin" ? (BUILTIN_ROW_KEYS[item.id] ?? item.id) : item.key;
 }
 
 /** Own component so the row can stay hook-free about which items have a shortcut. */
@@ -103,8 +114,9 @@ function SidebarNavRow({
     [isFirst],
   );
 
+  const rowKey = navItemKey(item);
   return (
-    <View style={rowStyle} testID={`sidebar-nav-item-${item.key}`}>
+    <View style={rowStyle} testID={`sidebar-nav-item-${rowKey}`}>
       <View style={styles.rowMain}>
         <ThemedNavIcon Icon={navItemIcon(item)} uniProps={mutedColorMapping} />
         <Text style={settingsStyles.rowTitle} numberOfLines={1}>
@@ -179,7 +191,10 @@ function SidebarItemsCard({ section }: { section: SidebarSection }): ReactElemen
   );
 }
 
-/** Settings > Sidebar: one card per section. The footer's bottom line is fixed and not listed. */
+/**
+ * Settings > Sidebar: one card per section. The footer's bottom line (the fixed icons after the
+ * rows) is not listed; Add project is a row here because it can be turned on and off.
+ */
 export function SidebarNavSection(): ReactElement {
   return (
     <>

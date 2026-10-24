@@ -1247,6 +1247,7 @@ export const ko: TranslationResources = {
     },
     footer: {
       usage: "사용량",
+      addProject: "프로젝트 추가",
     },
     help: {
       trigger: "도움말 및 지원",
@@ -2314,8 +2315,7 @@ export const ko: TranslationResources = {
         },
         footer: {
           title: "푸터",
-          description:
-            "사이드바 하단에 표시할 행과 순서를 선택하세요. 프로젝트 추가와 아이콘 행은 항상 표시됩니다",
+          description: "사이드바 하단에 표시할 행과 순서를 선택하세요. 아이콘 행은 항상 표시됩니다",
         },
         moveUp: "위로 이동",
         moveDown: "아래로 이동",

@@ -1268,6 +1268,7 @@ export const fr: TranslationResources = {
     },
     footer: {
       usage: "Utilisation",
+      addProject: "Ajouter un projet",
     },
     help: {
       trigger: "Aide et assistance",
@@ -2355,7 +2356,7 @@ export const fr: TranslationResources = {
         footer: {
           title: "Pied de page",
           description:
-            "Choisissez les lignes affichées en bas de la barre latérale et leur ordre. « Ajouter un projet » et la rangée d’icônes restent toujours visibles",
+            "Choisissez les lignes affichées en bas de la barre latérale et leur ordre. La rangée d’icônes reste toujours visible",
         },
         moveUp: "Monter",
         moveDown: "Descendre",

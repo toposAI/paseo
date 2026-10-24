@@ -1238,6 +1238,7 @@ export const ar: TranslationResources = {
     },
     footer: {
       usage: "الاستخدام",
+      addProject: "إضافة مشروع",
     },
     help: {
       trigger: "المساعدة والدعم",
@@ -2301,8 +2302,7 @@ export const ar: TranslationResources = {
         },
         footer: {
           title: "التذييل",
-          description:
-            "اختر الصفوف التي تظهر أسفل الشريط الجانبي وترتيبها. يظهر «إضافة مشروع» وصف الأيقونات دائمًا",
+          description: "اختر الصفوف التي تظهر أسفل الشريط الجانبي وترتيبها. صف الأيقونات ظاهر دائمًا",
         },
         moveUp: "نقل لأعلى",
         moveDown: "نقل لأسفل",

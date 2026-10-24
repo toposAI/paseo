@@ -17,6 +17,24 @@ const STEER_DEFAULT_MIGRATION = "steer-default";
 const MOBILE_CONTENT_16_MIGRATION = "mobile-content-16";
 
 /**
+ * Add project used to be a fixed button on the footer's bottom line; it is now a footer row that
+ * starts hidden. An install that already stored its footer items would otherwise get it back as a
+ * visible row (rows missing from stored preferences are appended visible), so hide it once for
+ * those installs only. An empty list means "nothing stored yet" and already resolves to hidden.
+ */
+const ADD_PROJECT_ROW_MIGRATION = "add-project-row";
+const ADD_PROJECT_ROW_KEY = "add-project";
+
+function hideAddProjectRow(settings: AppSettings): AppSettings {
+  const rows = settings.sidebarFooterItems;
+  if (rows.length === 0 || rows.some((row) => row.key === ADD_PROJECT_ROW_KEY)) return settings;
+  return {
+    ...settings,
+    sidebarFooterItems: [{ key: ADD_PROJECT_ROW_KEY, visible: false }, ...rows],
+  };
+}
+
+/**
  * Brings stored settings up to date, returning what the caller should use. Owns both writes so
  * the marker can only ever be written after the settings it describes: a failed marker write
  * leaves the migration to re-run harmlessly, while a failed settings write must leave the marker
@@ -47,6 +65,12 @@ export async function migrateAppSettings(
   if (options.native && !applied.has(MOBILE_CONTENT_16_MIGRATION)) {
     migrated = migrated.contentFontSize === 15 ? { ...migrated, contentFontSize: 16 } : migrated;
     applied.add(MOBILE_CONTENT_16_MIGRATION);
+    addedMigration = true;
+  }
+
+  if (!applied.has(ADD_PROJECT_ROW_MIGRATION)) {
+    migrated = hideAddProjectRow(migrated);
+    applied.add(ADD_PROJECT_ROW_MIGRATION);
     addedMigration = true;
   }
 

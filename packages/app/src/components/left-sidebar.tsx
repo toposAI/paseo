@@ -27,7 +27,6 @@ import { buttonControlHeight } from "@/components/ui/control-geometry";
 import { Shortcut } from "@/components/ui/shortcut";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HEADER_INNER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
-import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { RetainedPanelActivity } from "@/components/retained-panel";
 import { PluginSidebarItem } from "@/plugins/sidebar-items";
@@ -54,7 +53,6 @@ const DEV_BUILD_LABEL = process.env.EXPO_PUBLIC_PASEO_DEV_BUILD_LABEL?.trim() ||
 const NAV_IDS_IN_USE: readonly BuiltinSidebarNavId[] = ["new-workspace", "search"];
 
 interface SidebarLabels {
-  addProject: string;
   settings: string;
   usage: string;
   closeSidebar: string;
@@ -63,7 +61,6 @@ interface SidebarLabels {
 interface SidebarSharedProps {
   theme: SidebarTheme;
   labels: SidebarLabels;
-  handleOpenProject: () => void;
   handleSettings: () => void;
 }
 
@@ -85,17 +82,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const isCompactLayout = useIsCompactFormFactor();
   const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
 
-  const openProjectPicker = useOpenAddProject();
-
-  const handleOpenProjectMobile = useCallback(() => {
-    showMobileAgent();
-    void openProjectPicker();
-  }, [showMobileAgent, openProjectPicker]);
-
-  const handleOpenProjectDesktop = useCallback(() => {
-    void openProjectPicker();
-  }, [openProjectPicker]);
-
   const handleSettingsMobile = useCallback(() => {
     showMobileAgent();
     router.push(buildSettingsRoute());
@@ -107,7 +93,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
 
   const labels = useMemo(
     (): SidebarLabels => ({
-      addProject: t("sidebar.actions.addProject"),
       settings: t("sidebar.actions.settings"),
       usage: t(builtinSidebarNavLabelKey("usage")),
       closeSidebar: t("sidebar.actions.closeSidebar"),
@@ -124,7 +109,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           insetsTop={insets.top}
           insetsBottom={0}
           closeSidebar={showMobileAgent}
-          handleOpenProject={handleOpenProjectMobile}
           handleSettings={handleSettingsMobile}
         />
       </RetainedPanelActivity>
@@ -138,7 +122,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         labels={labels}
         insetsTop={insets.top}
         active={active}
-        handleOpenProject={handleOpenProjectDesktop}
         handleSettings={handleSettingsDesktop}
       />
     </RetainedPanelActivity>
@@ -212,48 +195,37 @@ function IconTooltipContent({
   );
 }
 
-// Plugin footer items that render as icons in the bottom bar (next to Add project and Settings)
-// instead of as rows above it.
+// The bottom line used to open with a fixed Add project button. That button now lives in Settings >
+// Sidebar as an off-by-default row (the `add-project` builtin, hidden once for existing installs by
+// the `add-project-row` settings migration), so the line is only plugin bar items (registered by
+// `topos-confirm-box`, in their registration order) followed by Settings.
 const BAR_PLUGIN_ID = "topos-confirm-box";
 
 function SidebarFooter({
   theme,
-  handleOpenProject,
   handleSettings,
   labels,
   onBeforeNavigate,
 }: {
   theme: SidebarTheme;
-  handleOpenProject: () => void;
   handleSettings: () => void;
   labels: {
-    addProject: string;
     settings: string;
     usage: string;
   };
   onBeforeNavigate?: () => void;
 }) {
-  const newAgentKeys = useShortcutKeys("new-agent");
   const settingsKeys = useShortcutKeys("toggle-settings");
   const { items: footerItems } = useSidebarNavItems("footer");
   const barRef = useRef<View | null>(null);
   const barItems = footerItems.filter(isBarItem);
 
-  // One line of icons: Add project, the confirm-box/mail pair, then Settings at the end.
+  // One line of icons: the plugin bar items, then Settings at the end.
   return (
     <UsageSidebarRoot>
       <View style={styles.footerContainer} testID="sidebar-footer">
         <SidebarFooterRows onBeforeNavigate={onBeforeNavigate} />
         <View style={styles.sidebarFooter} testID="sidebar-footer-bottom-line">
-          <FooterIconButton
-            onPress={handleOpenProject}
-            testID="sidebar-add-project"
-            label={labels.addProject}
-            icon={FolderPlus}
-            shortcutKeys={newAgentKeys}
-            theme={theme}
-          />
-          <View style={styles.footerSpacer} />
           <View ref={barRef} collapsable={false} style={styles.footerBarItems}>
             {barItems.map((item) =>
               item.kind === "plugin" ? (
@@ -268,6 +240,7 @@ function SidebarFooter({
               ) : null,
             )}
           </View>
+          <View style={styles.footerSpacer} />
           <FooterIconButton
             onPress={handleSettings}
             testID="sidebar-settings"
@@ -282,12 +255,11 @@ function SidebarFooter({
   );
 }
 
-/**
- * The footer rows in the user's `sidebarFooterItems` order: the Usage item and plugin rows. The
- * Usage item is left out while it has no summary to show.
- */
+/** Whether a footer item is drawn as an icon in the bottom bar (plugin items only). */
 function isBarItem(item: { kind: string; visible: boolean; group?: { pluginId?: string } }) {
-  return item.kind === "plugin" && item.visible && item.group?.pluginId === BAR_PLUGIN_ID;
+  if (!item.visible) return false;
+  if (item.kind === "builtin") return false;
+  return item.group?.pluginId === BAR_PLUGIN_ID;
 }
 
 function SidebarFooterRows({ onBeforeNavigate }: { onBeforeNavigate?: () => void }) {
@@ -320,7 +292,6 @@ function SidebarFooterRows({ onBeforeNavigate }: { onBeforeNavigate?: () => void
 function MobileSidebar({
   theme,
   labels,
-  handleOpenProject,
   handleSettings,
   insetsTop,
   insetsBottom,
@@ -376,7 +347,6 @@ function MobileSidebar({
 
         <SidebarFooter
           theme={theme}
-          handleOpenProject={handleOpenProject}
           handleSettings={handleSettings}
           labels={labels}
           onBeforeNavigate={closeSidebar}
@@ -386,14 +356,7 @@ function MobileSidebar({
   );
 }
 
-function DesktopSidebar({
-  theme,
-  labels,
-  handleOpenProject,
-  handleSettings,
-  insetsTop,
-  active,
-}: DesktopSidebarProps) {
+function DesktopSidebar({ theme, labels, handleSettings, insetsTop, active }: DesktopSidebarProps) {
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
@@ -507,12 +470,7 @@ function DesktopSidebar({
 
         <SidebarCalloutSlot />
 
-        <SidebarFooter
-          theme={theme}
-          handleOpenProject={handleOpenProject}
-          handleSettings={handleSettings}
-          labels={labels}
-        />
+        <SidebarFooter theme={theme} handleSettings={handleSettings} labels={labels} />
 
         <SidebarResizeHandle
           edge="right"

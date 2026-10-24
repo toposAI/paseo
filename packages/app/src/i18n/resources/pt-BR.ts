@@ -1265,6 +1265,7 @@ export const ptBR: TranslationResources = {
     },
     footer: {
       usage: "Uso",
+      addProject: "Adicionar projeto",
     },
     help: {
       trigger: "Ajuda e suporte",
@@ -2338,7 +2339,7 @@ export const ptBR: TranslationResources = {
         footer: {
           title: "Rodapé",
           description:
-            "Escolha quais linhas aparecem na parte inferior da barra lateral e em que ordem. Adicionar projeto e a linha de ícones sempre aparecem",
+            "Escolha quais linhas aparecem na parte inferior da barra lateral e em que ordem. A linha de ícones sempre aparece",
         },
         moveUp: "Mover para cima",
         moveDown: "Mover para baixo",

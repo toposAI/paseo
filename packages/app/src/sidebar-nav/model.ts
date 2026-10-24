@@ -5,11 +5,12 @@ export type SidebarSection = PluginSidebarSection;
 
 /**
  * Each section's built-in items in their default order. The footer's bottom line
- * (Add project and the Hosts, Help and support, Settings icons) is fixed.
+ * (the Hosts, Help and support and Settings icons) is fixed; Add project is a footer
+ * row so it can be turned off from Settings > Sidebar (2026-10-24 Topos: hidden by default).
  */
 export const BUILTIN_SIDEBAR_ITEM_IDS = {
   header: ["new-workspace", "history", "search", "schedules"],
-  footer: ["usage"],
+  footer: ["add-project", "usage"],
 } as const satisfies Record<SidebarSection, readonly string[]>;
 
 export type BuiltinSidebarItemId<Section extends SidebarSection = SidebarSection> =
@@ -45,6 +46,7 @@ const BUILTIN_LABEL_KEYS: Record<BuiltinSidebarItemId, string> = {
   history: "sidebar.sections.sessions",
   search: "sidebar.sections.search",
   schedules: "sidebar.sections.schedules",
+  "add-project": "sidebar.footer.addProject",
   usage: "sidebar.footer.usage",
 };
 
@@ -62,6 +64,7 @@ const BUILTIN_SHORTCUT_ACTIONS: Record<BuiltinSidebarItemId, string | null> = {
   history: null,
   search: "toggle-command-center",
   schedules: null,
+  "add-project": null,
   usage: null,
 };
 
@@ -69,8 +72,12 @@ export function builtinSidebarNavShortcutAction(id: BuiltinSidebarItemId): strin
   return BUILTIN_SHORTCUT_ACTIONS[id];
 }
 
-/** Builtins that start hidden until the user turns them on. Usage is always-on by default (a device with no saved preference, e.g. a fresh iPhone, must still show it). */
-const HIDDEN_BY_DEFAULT: ReadonlySet<BuiltinSidebarItemId> = new Set();
+/**
+ * Builtins that start hidden until the user turns them on. Usage is always-on by default (a device
+ * with no saved preference, e.g. a fresh iPhone, must still show it). Add project starts hidden
+ * (Topos keeps the footer for the confirm-box bar); Settings > Sidebar can bring it back.
+ */
+const HIDDEN_BY_DEFAULT: ReadonlySet<BuiltinSidebarItemId> = new Set(["add-project"]);
 
 function builtinVisibleByDefault(id: BuiltinSidebarItemId): boolean {
   return !HIDDEN_BY_DEFAULT.has(id);

@@ -45,7 +45,7 @@ describe("migrateAppSettings", () => {
 
     expect(result.sendBehavior).toBe("steer");
     expect(storedSendBehavior(storage)).toBe("steer");
-    expect(appliedIds(storage)).toEqual(["steer-default"]);
+    expect(appliedIds(storage)).toEqual(["steer-default", "add-project-row"]);
   });
 
   it("leaves interrupt alone once the migration has run", async () => {
@@ -64,7 +64,7 @@ describe("migrateAppSettings", () => {
 
     expect(result.sendBehavior).toBe("queue");
     expect(storage.entries.has(APP_SETTINGS_KEY)).toBe(false);
-    expect(appliedIds(storage)).toEqual(["steer-default"]);
+    expect(appliedIds(storage)).toEqual(["steer-default", "add-project-row"]);
   });
 
   it("marks itself applied on a fresh install without rewriting settings", async () => {
@@ -73,7 +73,7 @@ describe("migrateAppSettings", () => {
     await migrateAppSettings(settingsWith("steer"), storage);
 
     expect(storage.entries.has(APP_SETTINGS_KEY)).toBe(false);
-    expect(appliedIds(storage)).toEqual(["steer-default"]);
+    expect(appliedIds(storage)).toEqual(["steer-default", "add-project-row"]);
   });
 
   it("keeps unknown migration ids written by a newer client", async () => {
@@ -83,7 +83,11 @@ describe("migrateAppSettings", () => {
 
     await migrateAppSettings(settingsWith("interrupt"), storage);
 
-    expect(appliedIds(storage)).toEqual(["some-later-migration", "steer-default"]);
+    expect(appliedIds(storage)).toEqual([
+      "some-later-migration",
+      "steer-default",
+      "add-project-row",
+    ]);
   });
 
   it("migrates every mobile 15px content preference to 16px", async () => {
@@ -94,7 +98,7 @@ describe("migrateAppSettings", () => {
 
     expect(result.contentFontSize).toBe(16);
     expect(storedContentFontSize(storage)).toBe(16);
-    expect(appliedIds(storage)).toEqual(["steer-default", "mobile-content-16"]);
+    expect(appliedIds(storage)).toEqual(["steer-default", "mobile-content-16", "add-project-row"]);
   });
 
   it("leaves a 15px web content preference unchanged", async () => {
@@ -105,7 +109,7 @@ describe("migrateAppSettings", () => {
 
     expect(result.contentFontSize).toBe(15);
     expect(storedContentFontSize(storage)).toBeUndefined();
-    expect(appliedIds(storage)).toEqual(["steer-default"]);
+    expect(appliedIds(storage)).toEqual(["steer-default", "add-project-row"]);
   });
 
   it("lets a mobile user choose 15px after the default migration ran", async () => {
@@ -127,6 +131,38 @@ describe("migrateAppSettings", () => {
     expect(result.contentFontSize).toBe(15);
   });
 
+  it("hides Add project once for an install that already stored footer rows", async () => {
+    const storage = createInMemoryKeyValueStorage();
+    const settings: AppSettings = {
+      ...settingsWith("steer"),
+      sidebarFooterItems: [{ key: "usage", visible: true }],
+    };
+
+    const result = await migrateAppSettings(settings, storage);
+
+    expect(result.sidebarFooterItems).toEqual([
+      { key: "add-project", visible: false },
+      { key: "usage", visible: true },
+    ]);
+    expect(JSON.parse(storage.entries.get(APP_SETTINGS_KEY)!).sidebarFooterItems).toEqual([
+      { key: "add-project", visible: false },
+      { key: "usage", visible: true },
+    ]);
+  });
+
+  it("keeps an Add project row the user turned on after the migration ran", async () => {
+    const storage = createInMemoryKeyValueStorage();
+    const settings: AppSettings = {
+      ...settingsWith("steer"),
+      sidebarFooterItems: [{ key: "add-project", visible: true }],
+    };
+    await migrateAppSettings(settings, storage);
+
+    const result = await migrateAppSettings(settings, storage);
+
+    expect(result.sidebarFooterItems).toEqual([{ key: "add-project", visible: true }]);
+  });
+
   it("stays unmarked when the settings write fails, so a later launch retries", async () => {
     const storage = createFailingWriteStorage(APP_SETTINGS_KEY);
 
@@ -144,6 +180,6 @@ describe("migrateAppSettings", () => {
     const result = await migrateAppSettings(settingsWith("steer"), recovered);
 
     expect(result.sendBehavior).toBe("steer");
-    expect(appliedIds(recovered)).toEqual(["steer-default"]);
+    expect(appliedIds(recovered)).toEqual(["steer-default", "add-project-row"]);
   });
 });

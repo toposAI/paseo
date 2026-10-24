@@ -1247,6 +1247,7 @@ export const en = {
     },
     footer: {
       usage: "Usage",
+      addProject: "Add project",
     },
     help: {
       trigger: "Help and support",
@@ -2427,7 +2428,7 @@ export const en = {
         footer: {
           title: "Footer",
           description:
-            "Choose which rows appear at the bottom of the sidebar and in what order. Add project and the icon row always show",
+            "Choose which rows appear at the bottom of the sidebar and in what order. The icon row always shows",
         },
         moveUp: "Move up",
         moveDown: "Move down",

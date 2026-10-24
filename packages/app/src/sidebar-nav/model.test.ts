@@ -119,8 +119,25 @@ describe("resolveSidebarNavItems for the Usage item", () => {
     const resolve = (preferences: SidebarNavPreference[]) =>
       summarize(resolveSidebarNavItems({ section: "footer", pluginGroups: [], preferences }));
 
-    expect(resolve([])).toEqual([{ key: "usage", visible: true }]);
-    expect(resolve([{ key: "usage", visible: false }])).toEqual([{ key: "usage", visible: false }]);
+    expect(resolve([])).toEqual([
+      { key: "add-project", visible: false },
+      { key: "usage", visible: true },
+    ]);
+    // A stored preference keeps its position; the new row is appended after it.
+    expect(resolve([{ key: "usage", visible: false }])).toEqual([
+      { key: "usage", visible: false },
+      { key: "add-project", visible: false },
+    ]);
+  });
+
+  it("hides Add project by default and honors turning it back on", () => {
+    const resolve = (preferences: SidebarNavPreference[]) =>
+      summarize(resolveSidebarNavItems({ section: "footer", pluginGroups: [], preferences }));
+
+    expect(resolve([{ key: "add-project", visible: true }])).toEqual([
+      { key: "add-project", visible: true },
+      { key: "usage", visible: true },
+    ]);
   });
 });
 
@@ -289,7 +306,7 @@ describe("footer section", () => {
   const sync = group("sync", "status");
   const syncKey = pluginSidebarNavKey(sync);
 
-  it("resolves the Usage item first, then plugin rows", () => {
+  it("resolves the built-in rows first, then plugin rows", () => {
     const items = resolveSidebarNavItems({
       section: "footer",
       pluginGroups: [sync],
@@ -297,38 +314,46 @@ describe("footer section", () => {
     });
 
     expect(summarize(items)).toEqual([
+      { key: "add-project", visible: false },
       { key: "usage", visible: true },
       { key: syncKey, visible: true },
     ]);
   });
 
-  it("ignores header built-ins stored in footer preferences", () => {
+  it("ignores header built-ins and the fixed icon buttons stored in footer preferences", () => {
     const items = resolveSidebarNavItems({
       section: "footer",
       pluginGroups: [],
-      preferences: [{ key: "history", visible: false }],
+      preferences: [
+        { key: "history", visible: false },
+        { key: "hosts", visible: false },
+        { key: "import", visible: false },
+        { key: "help", visible: false },
+      ],
     });
 
-    expect(summarize(items)).toEqual([{ key: "usage", visible: true }]);
+    expect(summarize(items)).toEqual([
+      { key: "add-project", visible: false },
+      { key: "usage", visible: true },
+    ]);
   });
 
-  it("ignores the footer icon buttons, which are fixed and not items", () => {
+  it("honors a stored Add project preference from when it was a fixed button", () => {
     const items = resolveSidebarNavItems({
       section: "footer",
       pluginGroups: [sync],
       preferences: [
-        { key: "add-project", visible: false },
         { key: "hosts", visible: false },
-        { key: "import", visible: false },
-        { key: "help", visible: false },
         { key: syncKey, visible: true },
         { key: "usage", visible: false },
+        { key: "add-project", visible: false },
       ],
     });
 
     expect(summarize(items)).toEqual([
       { key: syncKey, visible: true },
       { key: "usage", visible: false },
+      { key: "add-project", visible: false },
     ]);
   });
 
@@ -355,6 +380,7 @@ describe("footer section", () => {
 
     expect(shown).toEqual([
       notesPreference,
+      { key: "add-project", visible: false },
       { key: syncKey, visible: true },
       { key: "usage", visible: true },
     ]);

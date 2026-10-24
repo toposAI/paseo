@@ -1276,6 +1276,7 @@ export const es: TranslationResources = {
     },
     footer: {
       usage: "Uso",
+      addProject: "Agregar proyecto",
     },
     help: {
       trigger: "Ayuda y soporte",
@@ -2357,7 +2358,7 @@ export const es: TranslationResources = {
         footer: {
           title: "Pie",
           description:
-            "Elige qué filas aparecen en la parte inferior de la barra lateral y en qué orden. Añadir proyecto y la fila de iconos siempre se muestran",
+            "Elige qué filas aparecen en la parte inferior de la barra lateral y en qué orden. La fila de iconos siempre se muestra",
         },
         moveUp: "Mover hacia arriba",
         moveDown: "Mover hacia abajo",

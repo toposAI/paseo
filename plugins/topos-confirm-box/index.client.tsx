@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactElement } from "react";
-import { Linking, Text, View, useWindowDimensions, type LayoutChangeEvent } from "react-native";
+import { Linking, Text, View, type LayoutChangeEvent } from "react-native";
 import {
   getPaseoClient,
   useHosts,
@@ -22,9 +22,8 @@ import {
   FOOTER_TABS,
   BOX_TAB_SCREEN_ID,
   boxTabMode,
-  confirmBoxBadgeCount,
+  bugBadgeCount,
   footerTitle,
-  showsMovedFooterTabs,
   type FooterTabId,
 } from "./shared/footer-tabs";
 
@@ -44,12 +43,13 @@ function openMailUi() {
 }
 
 function MailLink() {
-  return <SidebarRow icon="Mail" label="メール" onPress={openMailUi} />;
+  return <SidebarRow icon="Mail" label={footerTitle("mail")} onPress={openMailUi} />;
 }
 
 /**
- * サイドバー下部のタブ(PC幅の並び: ユーザー判断 / 子スレ完了 / 確認箱 / メール / スレ一覧 / 構想一覧)。
- * 2026-10-24 ユーザー指示で「ユーザー判断」「子スレ完了」を確認箱の中から下部バーへ出した。
+ * サイドバー下部のタブ(PC も iPhone も同じ並び: ユーザー判断 / 子スレ完了 / バグ報告 / スレ一覧 /
+ * 構想一覧 / メールUI)。2026-10-24 ユーザー指示で「ユーザー判断」「子スレ完了」を確認箱の中から
+ * 下部バーへ出し、確認箱そのものは「バグ報告」から開く形にした。
  * バーの項目はアイコンだけが出るので、`label` は読み上げ用(と設定画面の項目名)になる。
  */
 function SidebarSectionLink({ section, icon }: { section: "threads" | "concepts"; icon: string }) {
@@ -111,7 +111,7 @@ function useBoxTabCount(tab: BoxTab): number | undefined {
 }
 
 /**
- * 下部バーの「ユーザー判断」「子スレ完了」の1行。PC幅のときだけ呼ばれる(呼び出し側で判定)。
+ * 下部バーの「ユーザー判断」「子スレ完了」の1行(PC も iPhone も同じ)。
  * 件数は確認箱のタブと同じ数え方(`open`=判断印つきで未承認 / `childDone`=完了かつ未確認)。
  */
 function BoxTabLink({ tab, currentScreen, openScreen }: { tab: BoxTab } & BoxTabLinkProps) {
@@ -138,37 +138,15 @@ function BoxTabLink({ tab, currentScreen, openScreen }: { tab: BoxTab } & BoxTab
 
 type BoxTabLinkProps = Pick<PluginSidebarItemProps, "currentScreen" | "openScreen">;
 
-/**
- * 下部バーの項目として登録する入口。狭い幅(iPhone)では**何も描かない**(= バーに出ない)。
- * 判定と非表示を `BoxTabLink` の外に置いているので、隠れている間は件数の問い合わせも走らない。
- */
-function BoxTabFooterItem({
-  tab,
-  currentScreen,
-  openScreen,
-  layout,
-}: { tab: BoxTab } & BoxTabLinkProps & Pick<PluginSidebarItemProps, "layout">) {
-  const { width, height } = useWindowDimensions();
-  if (!showsMovedFooterTabs(layout.compact, width, height)) return null;
-  return <BoxTabLink tab={tab} currentScreen={currentScreen} openScreen={openScreen} />;
-}
-
-/**
- * 下部バーの「確認箱」のバッジ。PC幅は中に残る項目(バグ報告+通知)の合計、狭い幅は従来どおり判断待ちの数
- * (狭い幅では「ユーザー判断」をバーに出さないので、二重にならず1か所で数える)。
- */
-function useBoxBadge(narrow: boolean): number | undefined {
+/** 下部バーの「バグ報告」のバッジ=未対応のバグ報告の数(通知の未読は箱の中に出す)。 */
+function useBugBadge(): number | undefined {
   const count = useRpc(confirmBoxCountRpc);
   const [n, setN] = useState<number | null>(null);
   useEffect(() => {
     let alive = true;
     const tick = () =>
       count({})
-        .then(
-          (r) =>
-            alive &&
-            setN(narrow ? r.open : confirmBoxBadgeCount({ bugs: r.bugs, notify: r.notifications })),
-        )
+        .then((r) => alive && setN(bugBadgeCount(r)))
         // 一時的な失敗では前回の件数を残す(`BoxTabLink` と同じ)。
         .catch(() => {});
     void tick();
@@ -179,21 +157,24 @@ function useBoxBadge(narrow: boolean): number | undefined {
       clearInterval(timer);
       off();
     };
-  }, [count, narrow]);
+  }, [count]);
   return n ?? undefined;
 }
 
-function Sidebar({ currentScreen, openScreen, layout }: PluginSidebarItemProps) {
-  const { width, height } = useWindowDimensions();
-  // 判定は下部バーの2項目と同じ1本(`showsMovedFooterTabs`)。バッジだけ高さを見ないと、
-  // 横倒しの iPhone(932×430)で「ユーザー判断」がバーに出ないのにバッジも判断待ちを数えなくなる。
-  const n = useBoxBadge(!showsMovedFooterTabs(layout.compact, width, height));
+/**
+ * 下部バーの「バグ報告」1行。確認箱そのものを開く(中は バグ報告・通知・優先順位 の3枚)。
+ * ヘッダボタン(各ワークスペースの確認箱ポップオーバー)の登録もここで行う
+ * (この行は どの幅でも必ず描かれるので、登録の入口として常駐する)。
+ */
+function Sidebar({ currentScreen, openScreen }: PluginSidebarItemProps) {
+  const n = useBugBadge();
   return <SidebarWithHeaderButton currentScreen={currentScreen} openScreen={openScreen} n={n} />;
 }
 
 /**
- * ワークスペースごとの確認箱ヘッダボタンの登録と、下部バーの「確認箱」1行。
+ * ワークスペースごとの確認箱ヘッダボタンの登録と、下部バーの「バグ報告」1行。
  * 登録簿はモジュール側に置く(項目が再マウントされても取り直さず、ワークスペースの増減だけを見る)。
+ * ワークスペースを1つも持たないとき(登録先が無いとき)は何も描かない。
  */
 function SidebarWithHeaderButton({
   currentScreen,
@@ -242,8 +223,8 @@ function SidebarWithHeaderButton({
   const trailing = CountBadge({ n });
   return (
     <SidebarRow
-      icon="Inbox"
-      label="確認箱"
+      icon="Bug"
+      label={footerTitle("bugs")}
       active={currentScreen?.screenId === SCREEN_ID}
       onPress={open}
       trailing={trailing ?? undefined}
@@ -309,11 +290,9 @@ function Popover({ theme }: PluginButtonContentProps) {
 }
 
 // 下部バーの各項目の中身。キーは `FOOTER_TABS` の id(並び順だけを SSOT に持たせ、中身はここで結ぶ)。
-const FooterJudgment = (props: PluginSidebarItemProps) => (
-  <BoxTabFooterItem {...props} tab="items" />
-);
+const FooterJudgment = (props: PluginSidebarItemProps) => <BoxTabLink {...props} tab="items" />;
 const FooterChildDone = (props: PluginSidebarItemProps) => (
-  <BoxTabFooterItem {...props} tab="childdone" />
+  <BoxTabLink {...props} tab="childdone" />
 );
 const FooterThreads = () => <SidebarSectionLink section="threads" icon="ListTree" />;
 const FooterConcepts = () => <SidebarSectionLink section="concepts" icon="Lightbulb" />;
@@ -321,10 +300,10 @@ const FooterConcepts = () => <SidebarSectionLink section="concepts" icon="Lightb
 const FOOTER_COMPONENTS: Record<FooterTabId, (props: PluginSidebarItemProps) => ReactElement> = {
   judgment: FooterJudgment,
   childdone: FooterChildDone,
-  box: Sidebar,
-  mail: MailLink,
+  bugs: Sidebar,
   "sidebar-threads": FooterThreads,
   "sidebar-concepts": FooterConcepts,
+  mail: MailLink,
 };
 
 /** ヘッダボタンを外す。`contribute` 冒頭と片付けの両方から呼ぶ(登録簿を残したまま捨てると外せなくなる)。 */
@@ -346,8 +325,7 @@ export default function contribute(ctx: PluginClientContext) {
   });
   ctx.addScreen({ id: SCREEN_ID, title: "確認箱", Component: Screen });
   ctx.addScreen({ id: BOX_TAB_SCREEN_ID, title: "確認箱", Component: BoxTabScreen });
-  // 並びは `FOOTER_TABS`(SSOT)の順で登録する。先頭2つは PC幅だけその場で描画する
-  // (狭い幅では何も出さない=iPhone のバーは従来どおり)。
+  // 並びは `FOOTER_TABS`(SSOT)の順で登録する。PC も iPhone も同じ6項目を出す。
   for (const tab of FOOTER_TABS) {
     ctx.addSidebarFooterItem({
       id: tab.id,

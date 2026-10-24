@@ -19,7 +19,7 @@ import {
   confirmBoxPermitRpc,
   judgmentTabRows,
 } from "../shared/contract.js";
-import { confirmBoxTabs, showsMovedFooterTabs } from "../shared/footer-tabs.js";
+import { confirmBoxTabs, isWideLayout } from "../shared/footer-tabs.js";
 import { onBoxChanged, notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
 import { BugReportsView } from "./BugReportsView.js";
@@ -54,7 +54,7 @@ export function ConfirmBoxView({
   /** 描画先の箱の幅。省略時は窓幅。ポップオーバーは窓が広くても箱が狭いので実測値を渡す。 */
   containerWidth?: number;
   /**
-   * 開き方。`box`=確認箱そのもの(PC幅では下部バーへ移した2枚を外す)、
+   * 開き方。`box`=確認箱そのもの(下部バー:「バグ報告」等から開く。中は バグ報告・通知・優先順位 の3枚)、
    * `items`/`childdone`=下部バーの「ユーザー判断」「子スレ完了」から開いた画面(そのタブだけ)。
    */
   mode?: "box" | "items" | "childdone";
@@ -97,13 +97,12 @@ export function ConfirmBoxView({
   // 窓幅で判定すると一覧とチャットペインが同じ狭い箱に横並びで押し込まれる。
   const width = layoutWidth(containerWidth, windowSize.width);
   const touch = width < 600;
-  // PC幅の確認箱は「ユーザー判断」「子スレ完了」を下部バーへ出したので、中には残るタブだけを出す
-  // (二重に出さない)。狭い幅(iPhone)は従来どおり5枚。下部バーから開いた画面はそのタブだけ。
-  // 判定は下部バーと同じ1本(ホストの compact も見る。ホスト側の境界が変わってもバーと箱が食い違わない)。
-  // 一覧とチャットの並べ方も同じ判定(PC幅なら横並び、狭い幅は全画面で重ねる)。
+  // 「ユーザー判断」「子スレ完了」は下部バーへ出したので、確認箱の中は PC も iPhone も3枚
+  // (バグ報告・通知・優先順位)。下部バーから開いた画面はそのタブだけ。
+  // 幅の判定は一覧とチャットの並べ方にだけ使う(PC幅なら横並び、狭い幅は全画面で重ねる)。
   const wide = isBoxWide(containerWidth, windowSize, layout);
   const compact = !wide;
-  const { shownTab, tabs, selectTab } = useBoxTabs(mode, wide);
+  const { shownTab, tabs, selectTab } = useBoxTabs(mode);
   // カードチャットは画面を問わずこのペインに一本化した(旧・自由記述欄は廃止=2026-10-22ユーザー決定)。
   // ヘッダのポップオーバーも幅<720なので、ペインは全画面スライドとして重なる。
   // ペインの相手は2種: カードの投函元スレ(💬)と、優先順位の行の担当スレ(行タップ)。
@@ -465,8 +464,8 @@ function boxHeight(containerWidth: number | undefined, windowHeight: number): nu
 }
 
 /**
- * 確認箱を PC 幅で出すか(下部バーの「ユーザー判断」「子スレ完了」と二重に出さない側)。
- * 箱幅を渡された(ポップオーバー)ときは高さを見ず、箱の幅だけで決める。
+ * 一覧とチャットを横に並べるか(PC 幅で出すか)。箱幅を渡された(ポップオーバー)ときは
+ * 高さを見ず、箱の幅だけで決める。
  */
 function isBoxWide(
   containerWidth: number | undefined,
@@ -474,10 +473,10 @@ function isBoxWide(
   layout: PluginHostProps["layout"] | undefined,
 ): boolean {
   const width = layoutWidth(containerWidth, windowSize.width);
-  return showsMovedFooterTabs(
-    layout?.compact ?? false,
+  return isWideLayout(
     width,
     boxHeight(containerWidth, windowSize.height),
+    layout?.compact ?? false,
   );
 }
 
@@ -485,22 +484,22 @@ type TabId = "items" | "bugs" | "childdone" | "notify" | "priority";
 
 /**
  * 出すタブの並びと現在のタブ。
- * - `box`: 確認箱そのもの。PC幅は下部バーへ移した2枚(ユーザー判断/子スレ完了)を外し、狭い幅は従来の5枚
+ * - `box`: 確認箱そのもの。下部バーへ移した2枚(ユーザー判断/子スレ完了)を外した3枚(PC も iPhone も同じ)
  * - `items`/`childdone`: 下部バーから開いた画面。そのタブだけを出す(並びは出さない)
- * 初期タブは、開いた画面ならそのタブ、確認箱なら出ているタブの先頭(PC幅=バグ報告、狭い幅=判断待ち)。
+ * 初期タブは、開いた画面ならそのタブ、確認箱ならバグ報告。
  */
-function useBoxTabs(
-  mode: "box" | "items" | "childdone",
-  wide: boolean,
-): { shownTab: TabId; tabs: readonly (typeof TABS)[number][]; selectTab: (id: TabId) => void } {
+function useBoxTabs(mode: "box" | "items" | "childdone"): {
+  shownTab: TabId;
+  tabs: readonly (typeof TABS)[number][];
+  selectTab: (id: TabId) => void;
+} {
   const [picked, setPicked] = useState<TabId | null>(null);
   const forcedTab: TabId | null = mode === "box" ? null : mode;
-  const tabs =
-    mode === "box" ? confirmBoxTabs(TABS, wide) : TABS.filter((tb) => tb.id === forcedTab);
-  // 選んだタブが今の並びに無くなった(起動後にPC幅へ→狭い幅へ等で前に選んだ子スレ完了が戻った場合)ときは、
-  // 選んだ値を捨てて既定(先頭)へ戻す。並びに無いタブの中身が出続けるのを防ぐ。
+  const tabs = mode === "box" ? confirmBoxTabs(TABS) : TABS.filter((tb) => tb.id === forcedTab);
+  // 選んだタブが今の並びに無くなったときは、選んだ値を捨てて既定へ戻す
+  // (並びに無いタブの中身が出続けるのを防ぐ)。
   const valid = picked !== null && tabs.some((tb) => tb.id === picked);
-  const shownTab: TabId = (valid && picked) || forcedTab || (wide ? "bugs" : "items");
+  const shownTab: TabId = (valid && picked) || forcedTab || "bugs";
   const selectTab = useCallback((id: TabId) => setPicked(id), []);
   return { shownTab, tabs, selectTab };
 }
@@ -526,8 +525,7 @@ function TabStrip({
   if (mode !== "box") return null;
   return (
     <View style={s.bottomBar}>
-      {/* `flexGrow:1` で等分(狭い幅は5枚、PC幅は下部バーへ移した2枚を除く3枚)。
-          狭い幅では等分を保ったまま横スクロールへ落ちる。 */}
+      {/* `flexGrow:1` で等分(PC も iPhone も3枚)。狭い幅では等分を保ったまま横スクロールへ落ちる。 */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
