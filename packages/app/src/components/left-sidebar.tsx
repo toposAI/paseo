@@ -4,10 +4,12 @@ import { useTranslation } from "react-i18next";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   Pressable,
+  ScrollView,
   StyleSheet as RNStyleSheet,
   Text,
   useWindowDimensions,
   View,
+  type LayoutChangeEvent,
 } from "react-native";
 import { Gesture } from "react-native-gesture-handler";
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
@@ -23,7 +25,6 @@ import {
 import { SidebarSeparator } from "@/components/sidebar/sidebar-separator";
 import { SidebarNavRows } from "@/components/sidebar/sidebar-nav-rows";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
-import { buttonControlHeight } from "@/components/ui/control-geometry";
 import { Shortcut } from "@/components/ui/shortcut";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { HEADER_INNER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
@@ -219,28 +220,50 @@ function SidebarFooter({
   const { items: footerItems } = useSidebarNavItems("footer");
   const barRef = useRef<View | null>(null);
   const barItems = footerItems.filter(isBarItem);
+  const hasBarItems = barItems.length > 0;
+  // The six items are 192px wide; the line has 194px for them at the default sidebar width, and
+  // less once the sidebar is dragged narrower. Comparing the two lets the line show a scrollbar
+  // exactly when it is clipping, so a visible last icon always means "this is the whole line".
+  const [barViewport, setBarViewport] = useState(0);
+  const [barContent, setBarContent] = useState(0);
+  const barOverflowing = barContent > barViewport + 1;
+  const onBarLayout = useCallback((e: LayoutChangeEvent) => {
+    setBarViewport(e.nativeEvent.layout.width);
+  }, []);
+  const onBarContentSize = useCallback((width: number) => setBarContent(width), []);
 
-  // One line of icons: the plugin bar items, then Settings at the end.
+  // One line of icons: the plugin bar items, then Settings at the end. React Native Web drops a
+  // horizontal scroll view's `overflow-x: auto` when `horizontal` sets `flexDirection`, so the
+  // overflowing state adds it back (web-only; native scroll views already scroll).
   return (
     <UsageSidebarRoot>
       <View style={styles.footerContainer} testID="sidebar-footer">
         <SidebarFooterRows onBeforeNavigate={onBeforeNavigate} />
         <View style={styles.sidebarFooter} testID="sidebar-footer-bottom-line">
-          <View ref={barRef} collapsable={false} style={styles.footerBarItems}>
-            {barItems.map((item) =>
-              item.kind === "plugin" ? (
-                <PluginSidebarItem
-                  key={item.key}
-                  group={item.group}
-                  section="footer"
-                  bar
-                  fallbackAnchorRef={barRef}
-                  onBeforeNavigate={onBeforeNavigate}
-                />
-              ) : null,
-            )}
-          </View>
-          <View style={styles.footerSpacer} />
+          <ScrollView
+            testID="sidebar-footer-bar-scroll"
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={[styles.footerBarScroll, barOverflowing && styles.footerBarOverflowing]}
+            contentContainerStyle={styles.footerBarItems}
+            onLayout={hasBarItems ? onBarLayout : undefined}
+            onContentSizeChange={hasBarItems ? onBarContentSize : undefined}
+          >
+            <View ref={barRef} collapsable={false} style={styles.footerBarGroup}>
+              {barItems.map((item) =>
+                item.kind === "plugin" ? (
+                  <PluginSidebarItem
+                    key={item.key}
+                    group={item.group}
+                    section="footer"
+                    bar
+                    fallbackAnchorRef={barRef}
+                    onBeforeNavigate={onBeforeNavigate}
+                  />
+                ) : null,
+              )}
+            </View>
+          </ScrollView>
           <FooterIconButton
             onPress={handleSettings}
             testID="sidebar-settings"
@@ -577,18 +600,28 @@ const styles = StyleSheet.create((theme) => ({
     borderTopWidth: 1,
     borderTopColor: theme.colors.border,
   },
-  // Buttons sit edge to edge; their own inset spaces the glyphs.
+  // Buttons sit edge to edge; their own inset spaces the glyphs. The horizontal inset is tight
+  // because six plugin items plus Settings share this line in a sidebar that can be 200px wide.
   sidebarFooter: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: theme.spacing[2],
+    paddingHorizontal: theme.spacing[1.5],
     paddingVertical: theme.spacing[1.5],
   },
-  // Pushes the confirm-box/mail pair and Settings to the end of the icon line.
-  footerSpacer: {
-    flex: 1,
+  // The item row scrolls sideways (7 buttons can exceed a narrow sidebar) instead of clipping
+  // Settings. Grows into spare room so Settings trails the items when the sidebar is wide enough.
+  footerBarScroll: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  footerBarOverflowing: {
+    overflowX: "auto",
   },
   footerBarItems: {
+    flexGrow: 1,
+  },
+  footerBarGroup: {
     flexDirection: "row",
     alignItems: "center",
   },
@@ -599,8 +632,9 @@ const styles = StyleSheet.create((theme) => ({
     gap: 2,
   },
   footerIconButton: (isCompact: boolean) => ({
-    width: isCompact ? buttonControlHeight.md : buttonControlHeight.xs,
-    height: isCompact ? buttonControlHeight.md : buttonControlHeight.xs,
+    // 32 rather than 36: the six 32px items need every pixel the line has at the default width.
+    width: isCompact ? 36 : 32,
+    height: 36,
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: theme.spacing[1],

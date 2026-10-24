@@ -205,7 +205,9 @@ function ReorderableRow({
 
 const styles = StyleSheet.create((theme) => ({
   barButton: {
-    width: 36,
+    // Six of these plus the Settings gear share one line in a sidebar that can be 200px wide, so
+    // 32 rather than 36 (192px of the 194px the line has at the default 234px sidebar width).
+    width: 32,
     height: 36,
     alignItems: "center",
     justifyContent: "center",
