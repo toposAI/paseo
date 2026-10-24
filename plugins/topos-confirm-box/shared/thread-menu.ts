@@ -70,6 +70,22 @@ export function nextMenu(state: ThreadMenuState, action: ThreadMenuAction): Thre
   }
 }
 
+/**
+ * その行のメニューにアーカイブ項目を出すか。
+ *
+ * **子を持つ行(= 司令塔)はアーカイブさせない**(2026-10-24 子司令塔の決定: 誤って親を畳むより、
+ * 隠して安全側に倒す)。ピン止めは残す。司令塔の行は登録簿ではなく起こしデーモンの id から作られるので
+ * `coordinator` で判定し、加えて他の行の親になっている id(`parentIds`)も対象にする
+ * (司令塔の印が付かない親の行が混ざっても畳めないように)。
+ */
+export function menuCanArchive(
+  thread: { agentId: string; coordinator?: boolean },
+  parentIds: ReadonlySet<string>,
+): boolean {
+  if (thread.coordinator === true) return false;
+  return !parentIds.has(thread.agentId);
+}
+
 /** メニューのアーカイブ項目の文言(1回目と2回目で変える)。 */
 export function archiveMenuLabel(confirmingArchive: boolean): string {
   return confirmingArchive ? "もう一度押すとアーカイブ" : "アーカイブする";

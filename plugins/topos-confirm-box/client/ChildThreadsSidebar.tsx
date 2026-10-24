@@ -46,7 +46,7 @@ import { emptySectionLabel } from "../shared/sidebar-section-mode.js";
 import type { SidebarSectionKey } from "../shared/sidebar-section-mode.js";
 import { type StatusKind } from "../shared/thread-status-label.js";
 import { pickReadableText } from "../shared/contrast.js";
-import { CLOSED_MENU, nextMenu } from "../shared/thread-menu.js";
+import { CLOSED_MENU, menuCanArchive, nextMenu } from "../shared/thread-menu.js";
 import type { ThreadMenuAction, ThreadMenuState } from "../shared/thread-menu.js";
 import { ConceptNotesList, useSidebarNotes } from "./ConceptNotes.js";
 import { StatusBadge } from "./sidebar-badge.js";
@@ -432,6 +432,14 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   }, [menu, menuThread]);
   // 題名は**行に出ている題名**(ノートがあればノートの題名)を渡す。スレ側の題名は古いことがある。
   const menuTitle = menu ? rows.find((r) => r.thread.agentId === menu.agentId)?.title : undefined;
+  // 他の行の親になっている id(司令塔の印が付いていなくても、親の行は畳ませない)。
+  const menuCanArchiveNow = useMemo(() => {
+    if (!menuThread) return false;
+    const parentIds = new Set(
+      threads.map((t) => t.parentAgentId).filter((id): id is string => id !== null),
+    );
+    return menuCanArchive(menuThread, parentIds);
+  }, [menuThread, threads]);
   const onMenuAction = useCallback(
     (action: ThreadMenuAction) => {
       if (menuThread) applyMenuAction(menuThread, action);
@@ -471,6 +479,9 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
           thread={menuThread}
           title={menuTitle ?? menuThread.title}
           state={menu.state}
+          // 司令塔(子を持つ行)はアーカイブさせない(誤って親を畳まない安全側。2026-10-24 子司令塔決定)。
+          // ピンは残す。規則は純粋関数が正。
+          canArchive={menuCanArchiveNow}
           colors={colors}
           onAction={onMenuAction}
         />

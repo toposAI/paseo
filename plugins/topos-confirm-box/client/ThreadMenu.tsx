@@ -26,6 +26,11 @@ export interface ThreadMenuProps {
   /** 行に出ている題名(ノートがあればノートの題名)。メニューの題名はこれを使う。 */
   title: string;
   state: ThreadMenuState;
+  /**
+   * アーカイブ項目を出すか。司令塔(子を持つ行)は false(誤って親を畳まない安全側。
+   * 2026-10-24 子司令塔の決定)。項目ごと出さないので、確認の2回目にも届かない。
+   */
+  canArchive?: boolean;
   colors: SidebarColors;
   /** 状態遷移を親へ返す(親が `nextMenu` で次状態を決め、実行すべき副作用を走らせる)。 */
   onAction: (action: ThreadMenuAction) => void;
@@ -35,7 +40,14 @@ export interface ThreadMenuProps {
  * メニュー本体。開いていない間は何も出さない。題名はアクセシビリティ用にだけ持たせ、
  * 画面側でどれのメニューか分かるようにする。
  */
-export function ThreadMenu({ thread, title, state, colors, onAction }: ThreadMenuProps) {
+export function ThreadMenu({
+  thread,
+  title,
+  state,
+  canArchive = true,
+  colors,
+  onAction,
+}: ThreadMenuProps) {
   const onOpenChange = useCallback(
     (open: boolean) => {
       // 背景タップ・戻る・×で閉じたときも「閉じる」と同じ意味(確認は捨てる)
@@ -57,6 +69,8 @@ export function ThreadMenu({ thread, title, state, colors, onAction }: ThreadMen
   const mutedStyle = useMemo(() => ({ color: colors.foregroundMuted }), [colors]);
   const openTextStyle = useMemo(() => [styles.itemText, labelStyle], [labelStyle]);
   const closeTextStyle = useMemo(() => [styles.itemText, mutedStyle], [mutedStyle]);
+  // 司令塔の行にアーカイブが出ない理由を、メニューの中で1行だけ示す(消えた理由を聞き返さずに済む)
+  const mutedNoteStyle = useMemo(() => [styles.noteText, mutedStyle], [mutedStyle]);
   const dangerStyle = useMemo(() => [styles.item, { borderColor: "#b91c1c" }], []);
   const dangerTextStyle = useMemo(() => ({ color: "#b91c1c", fontWeight: "600" as const }), []);
   // 確認待ち(1回目)のときだけ背景を薄赤にする。2回目で押せることは文言で示す
@@ -86,18 +100,28 @@ export function ThreadMenu({ thread, title, state, colors, onAction }: ThreadMen
             textStyle={pinTextStyle}
             onPress={togglePin}
           />
-          <MenuItem
-            testID={`child-thread-menu-archive-${thread.agentId}`}
-            label={archiveMenuLabel(state.confirmingArchive)}
-            accessibilityLabel={
-              state.confirmingArchive
-                ? `${title}をアーカイブする(もう一度押す)`
-                : `${title}をアーカイブ`
-            }
-            style={archiveStyle}
-            textStyle={archiveTextStyle}
-            onPress={archive}
-          />
+          {canArchive ? (
+            <MenuItem
+              testID={`child-thread-menu-archive-${thread.agentId}`}
+              label={archiveMenuLabel(state.confirmingArchive)}
+              accessibilityLabel={
+                state.confirmingArchive
+                  ? `${title}をアーカイブする(もう一度押す)`
+                  : `${title}をアーカイブ`
+              }
+              style={archiveStyle}
+              textStyle={archiveTextStyle}
+              onPress={archive}
+            />
+          ) : null}
+          {canArchive ? null : (
+            <Text
+              testID={`child-thread-menu-archive-hidden-${thread.agentId}`}
+              style={mutedNoteStyle}
+            >
+              司令塔のスレはアーカイブできません
+            </Text>
+          )}
           <MenuItem
             testID={`child-thread-menu-open-${thread.agentId}`}
             label="スレを開く"
@@ -191,5 +215,9 @@ const styles = StyleSheet.create({
   },
   itemTextStrong: {
     fontWeight: "600",
+  },
+  noteText: {
+    fontSize: 12,
+    paddingHorizontal: 4,
   },
 });

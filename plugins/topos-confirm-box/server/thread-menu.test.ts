@@ -4,9 +4,19 @@ import {
   CLOSED_MENU,
   OPEN_MENU,
   archiveMenuLabel,
+  menuCanArchive,
   nextMenu,
   pinMenuLabel,
 } from "../shared/thread-menu.js";
+
+test("司令塔(子を持つ行)はアーカイブ項目を出さない(ピンは残す)", () => {
+  // 司令塔の印が付いた行
+  assert.equal(menuCanArchive({ agentId: "c", coordinator: true }, new Set()), false);
+  // 印は無いが他の行の親になっている行(親を畳むと子の見出しが行き場を失う)
+  assert.equal(menuCanArchive({ agentId: "p" }, new Set(["p"])), false);
+  // 普通の行
+  assert.equal(menuCanArchive({ agentId: "x" }, new Set(["p"])), true);
+});
 
 test("openで開き、確認はリセットされる", () => {
   const step = nextMenu(CLOSED_MENU, "open");
