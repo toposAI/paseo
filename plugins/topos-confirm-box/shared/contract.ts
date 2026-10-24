@@ -118,6 +118,10 @@ export const ConfirmBoxItemSchema = z.object({
   workspaceId: z.string().nullable(),
   /** permit かつ質問の時だけ入る(選択肢ボタンの代わりに質問フォームを描く)。 */
   questions: z.array(ConfirmBoxQuestionSchema).optional(),
+  /** 通知の束ね: 同一source+同一内容の未読をまとめた件数(2件以上のときだけ入る)。 */
+  dupCount: z.number().int().optional(),
+  /** 束ねた全項目の id(代表を含む)。既読にするときは全部に ack する。 */
+  memberIds: z.array(z.string()).optional(),
   ts: z.number(),
 });
 export type ConfirmBoxItem = z.infer<typeof ConfirmBoxItemSchema>;

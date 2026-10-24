@@ -59,6 +59,8 @@ export function foldBoxEvents(
   // `key` だけで付いた判断印(中間形式の行へ付けたもの)。同じ key の item が**後から**
   // 箱へ流れてきても印が失われないよう、畳んだ後に1回だけ当てる。
   const keyMarks = new Set<string>();
+  // `hide` イベントで隠された id(`unhide` で戻せる。追記順で後勝ち)。item 行は書き換えない。
+  const hidden = new Set<string>();
   for (const e of records) {
     switch (e.t) {
       case "item":
@@ -69,6 +71,12 @@ export function foldBoxEvents(
         break;
       case "ackall":
         applyAckAll(items, e);
+        break;
+      case "hide":
+        if (typeof e.id === "string" && e.id) hidden.add(e.id);
+        break;
+      case "unhide":
+        if (typeof e.id === "string") hidden.delete(e.id);
         break;
       case "judgment":
         applyJudgment(items, e);
@@ -88,6 +96,7 @@ export function foldBoxEvents(
       if (item.key && keyMarks.has(item.key)) item.judgment = true;
     }
   }
+  for (const id of hidden) items.delete(id);
   return items;
 }
 

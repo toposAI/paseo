@@ -212,6 +212,9 @@ function NotificationCard({
     <View style={read ? styles.cardRead : styles.card}>
       <View style={styles.head}>
         <Text style={styles.meta}>{item.source}</Text>
+        {item.dupCount && item.dupCount > 1 ? (
+          <Text style={styles.meta}>×{item.dupCount}件</Text>
+        ) : null}
         <Text style={styles.meta}>{formatCreated(item.ts)}</Text>
       </View>
       <Pressable accessibilityRole="button" onPress={press}>

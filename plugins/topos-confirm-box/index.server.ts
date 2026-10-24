@@ -39,6 +39,14 @@ import { readFeedbackReports } from "./server/feedback.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
 import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/box.js";
 import {
+  VAULT_KEY_PREFIX,
+  answerVaultDecision,
+  applyVaultSource,
+  bundleNotifications,
+  readVaultDecisions,
+  vaultSourceEnabled,
+} from "./server/vault-decisions.js";
+import {
   childThreadsArchiveRpc,
   childThreadsListRpc,
   childThreadsPinRpc,
@@ -108,7 +116,23 @@ export default function contribute(server: PluginServerContext) {
     paseo: { agents: { list(): Promise<{ entries: { agent: PermitAgentLike }[] }> } };
   }) {
     const dir = resolveConfirmBoxDir();
-    const { items, sources, dir: readDir } = readConfirmBox(dir);
+    const read = readConfirmBox(dir);
+    const { dir: readDir } = read;
+    let items = read.items;
+    const sources = [...read.sources];
+    // --- 判断項目の出所は Vault の判断ノートに一本化する(箱側の旧 judgment 行は隠すだけ)
+    if (vaultSourceEnabled()) {
+      const vault = readVaultDecisions();
+      items = applyVaultSource(items, vault.items).items;
+      sources.push({
+        id: "pending",
+        label: "Vault判断ノート",
+        ok: vault.error === null,
+        detail: vault.error ?? vault.dir,
+        count: vault.items.length,
+      });
+    }
+    items = bundleNotifications(items, isNotificationItem);
 
     // --- Paseo の承認待ち(実行時に引く)
     let permitItems: ConfirmBoxItem[] = [];
@@ -457,7 +481,8 @@ export default function contribute(server: PluginServerContext) {
         input.action,
       );
       if (reject) return { ok: false, message: reject };
-      appendAck(dir, input.id, input.action);
+      const target = (await collect(ctx)).items.find((i) => i.id === input.id);
+      for (const id of target?.memberIds ?? [input.id]) appendAck(dir, id, input.action);
       return {
         ok: true,
         message: input.action === "approve" ? "確認しました" : "既読にしました",
@@ -489,6 +514,21 @@ export default function contribute(server: PluginServerContext) {
   server.handle(confirmBoxDecideRpc, async (input) => {
     if (!input.key) return { ok: false, message: "key が空です" };
     try {
+      // Vault の判断ノートへの回答は、まずノート(正本)を answered にする。失敗したら台帳にも書かない。
+      let noteNote = "";
+      if (input.key.startsWith(VAULT_KEY_PREFIX)) {
+        const label =
+          readVaultDecisions()
+            .items.find((i) => i.key === input.key)
+            ?.options.find((o) => o.id === input.chosen)?.label ?? null;
+        const file = answerVaultDecision({
+          key: input.key,
+          chosenId: input.chosen,
+          chosenLabel: label,
+          reason: input.reason,
+        });
+        noteNote = `・ノート更新 ${file.split("/").pop()}`;
+      }
       appendDecision(resolveConfirmBoxDir(), {
         key: input.key,
         chosen: input.chosen,
@@ -497,7 +537,10 @@ export default function contribute(server: PluginServerContext) {
         reason: input.reason,
         source: input.source,
       });
-      return { ok: true, message: `記録しました(${input.key} → ${input.chosen ?? "選択なし"})` };
+      return {
+        ok: true,
+        message: `記録しました(${input.key} → ${input.chosen ?? "選択なし"})${noteNote}`,
+      };
     } catch (error) {
       return { ok: false, message: `記録できません: ${(error as Error).message}` };
     }
