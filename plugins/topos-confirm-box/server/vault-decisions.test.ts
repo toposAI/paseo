@@ -234,6 +234,16 @@ test("legacy_keys を持つノートは(answered でも)箱側の判断行を隠
   assert.equal(applyVaultSource([fresh("x", "box-a")], [], true, ["box-a"]).items.length, 1);
 });
 
+test("legacy_keys は YAML リスト形式でも読む", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(
+    path.join(dir, "j-1.md"),
+    NOTE("j-1", "open").replace("legacy_keys: []", "legacy_keys:\n- box-a\n- box-b"),
+  );
+  const r = readVaultDecisions({ TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir });
+  assert.deepEqual(r.claimedKeys.sort(), ["box-a", "box-b"]);
+});
+
 test("BOM・クォート付き state は読み、id とファイル名が違うノートは skipped に数える", () => {
   const dir = tmpDir();
   fs.writeFileSync(path.join(dir, "j-1.md"), `﻿${NOTE("j-1", '"Open"')}`);

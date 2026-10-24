@@ -151,14 +151,27 @@ export interface VaultDecisionRead {
   claimedKeys: string[];
 }
 
-/** `legacy_keys: [a, b]`(インライン)を key の配列へ。空・未指定・読めない形は []。 */
-export function parseLegacyKeys(raw: string | undefined): string[] {
-  const m = /^\[(.*)\]$/.exec((raw ?? "").trim());
+/**
+ * frontmatter の `legacy_keys` を key の配列へ。`[a, b]`(インライン)と YAML リスト
+ * (`legacy_keys:` の次行以降に `- a`。Vault 側の整形処理がこの形に書き換えることがある)の両方を読む。
+ */
+export function parseLegacyKeys(text: string): string[] {
+  const m = /^---\n([\s\S]*?)\n---/.exec(text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n"));
   if (!m) return [];
-  return m[1]
-    .split(",")
-    .map((k) => k.trim().replace(/^(["'])(.*)\1$/, "$2"))
-    .filter(Boolean);
+  const unq = (k: string) => k.trim().replace(/^(["'])(.*)\1$/, "$2");
+  const lines = m[1].split("\n");
+  const at = lines.findIndex((l) => l.startsWith("legacy_keys:"));
+  if (at < 0) return [];
+  const rest = lines[at].replace(/^legacy_keys:\s*/, "").trim();
+  const inline = /^\[(.*)\]$/.exec(rest);
+  if (inline) return inline[1].split(",").map(unq).filter(Boolean);
+  const out: string[] = [];
+  for (let i = at + 1; i < lines.length; i += 1) {
+    const li = /^\s*-\s+(.+)$/.exec(lines[i]);
+    if (!li) break;
+    out.push(unq(li[1]));
+  }
+  return out.filter(Boolean);
 }
 
 /** 判断ノートを読む。**例外を投げない**(読めない時は error に理由を入れる)。 */
@@ -186,7 +199,7 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
         }
         const text = fs.readFileSync(full, "utf8");
         // 状態を問わず legacy_keys を集める(answered/superseded でも箱側の行は復活させない)
-        for (const k of parseLegacyKeys(splitFrontmatter(text)?.front.legacy_keys)) claimed.add(k);
+        for (const k of parseLegacyKeys(text)) claimed.add(k);
         const item = parseDecisionNote(text, st.mtimeMs);
         if (!item) continue; // open/waiting_materials 以外・frontmatter なしは対象外(欠落ではない)
         // ファイル名と id が違うノートは、回答の書き先が別ノートになるので出さない
