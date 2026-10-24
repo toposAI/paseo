@@ -89,16 +89,18 @@ export function ConfirmBoxView({
 
   const c = theme.colors;
   // タッチ幅(iPhone等)ではタップ領域を44pt以上・間隔8pxに広げる。PC幅は従来の大きさ。
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   // 幅の判定は「描画されている箱」基準。ポップオーバーは窓が広くても箱は最大420pxなので、
   // 窓幅で判定すると一覧とチャットペインが同じ狭い箱に横並びで押し込まれる。
   const width = layoutWidth(containerWidth, windowWidth);
   const touch = width < 600;
-  // 一覧とチャットの並べ方。Paseo の compact 境界(720px)に合わせる。
-  const compact = width < 720;
   // PC幅の確認箱は「ユーザー判断」「子スレ完了」を下部バーへ出したので、中には残るタブだけを出す
   // (二重に出さない)。狭い幅(iPhone)は従来どおり5枚。下部バーから開いた画面はそのタブだけ。
-  const { shownTab, tabs, selectTab } = useBoxTabs(mode, isWideLayout(containerWidth, windowWidth));
+  // 判定は下部バーと同じ1本(箱の幅・高さで見る。横倒しの iPhone は狭い扱い)。
+  const wide = isWideLayout(width, layoutHeight(containerWidth, windowHeight));
+  // 一覧とチャットの並べ方。PC幅なら横並び、狭い幅は全画面で重ねる。
+  const compact = !wide;
+  const { shownTab, tabs, selectTab } = useBoxTabs(mode, wide);
   // カードチャットは画面を問わずこのペインに一本化した(旧・自由記述欄は廃止=2026-10-22ユーザー決定)。
   // ヘッダのポップオーバーも幅<720なので、ペインは全画面スライドとして重なる。
   // ペインの相手は2種: カードの投函元スレ(💬)と、優先順位の行の担当スレ(行タップ)。
@@ -451,6 +453,17 @@ function layoutWidth(containerWidth: number | undefined, windowWidth: number): n
   return containerWidth ?? windowWidth;
 }
 
+/**
+ * 高さの判定に使う値。箱幅を渡された(ポップオーバー)ときは**箱の幅だけで決める**ので高さは見ない
+ * (窓は高くても箱は狭いため。横倒しの iPhone 判定は画面全体を描くときにだけ効かせる)。
+ */
+function layoutHeight(
+  containerWidth: number | undefined,
+  windowHeight: number,
+): number | undefined {
+  return containerWidth === undefined ? windowHeight : undefined;
+}
+
 type TabId = "items" | "bugs" | "childdone" | "notify" | "priority";
 
 /**
@@ -465,9 +478,12 @@ function useBoxTabs(
 ): { shownTab: TabId; tabs: readonly (typeof TABS)[number][]; selectTab: (id: TabId) => void } {
   const [picked, setPicked] = useState<TabId | null>(null);
   const forcedTab: TabId | null = mode === "box" ? null : mode;
-  const shownTab: TabId = picked ?? forcedTab ?? (wide ? "bugs" : "items");
   const tabs =
     mode === "box" ? confirmBoxTabs(TABS, wide) : TABS.filter((tb) => tb.id === forcedTab);
+  // 選んだタブが今の並びに無くなった(起動後にPC幅へ→狭い幅へ等で前に選んだ子スレ完了が戻った場合)ときは、
+  // 選んだ値を捨てて既定(先頭)へ戻す。並びに無いタブの中身が出続けるのを防ぐ。
+  const valid = picked !== null && tabs.some((tb) => tb.id === picked);
+  const shownTab: TabId = (valid && picked) || forcedTab || (wide ? "bugs" : "items");
   const selectTab = useCallback((id: TabId) => setPicked(id), []);
   return { shownTab, tabs, selectTab };
 }

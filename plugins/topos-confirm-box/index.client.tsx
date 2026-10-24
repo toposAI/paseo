@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { Linking, Text, View, type LayoutChangeEvent } from "react-native";
+import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { Linking, Text, View, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import {
   getPaseoClient,
   useHosts,
@@ -19,9 +19,13 @@ import { SIDEBAR_SECTION_LABELS } from "./shared/sidebar-section-mode";
 import { confirmBoxCountRpc } from "./shared/contract";
 import {
   BOX_TAB_MODE_PARAM,
+  FOOTER_TABS,
   BOX_TAB_SCREEN_ID,
   boxTabMode,
   confirmBoxBadgeCount,
+  footerTitle,
+  showsMovedFooterTabs,
+  type FooterTabId,
 } from "./shared/footer-tabs";
 
 const COUNT_MS = 30_000;
@@ -69,24 +73,31 @@ function CountBadge({ n }: { n: number | undefined }) {
   return <Text style={badgeText}>{n > 99 ? "99+" : n}</Text>;
 }
 
-/** 下部バーの「ユーザー判断」「子スレ完了」の id(= 確認箱のタブと `?mode=` の値)。 */
-type BoxTab = "items" | "childdone";
-
-const BOX_TAB: Record<BoxTab, { icon: string; label: string }> = {
-  items: { icon: "CircleHelp", label: "ユーザー判断" },
-  childdone: { icon: "CircleCheck", label: "子スレ完了" },
+/**
+ * 下部バーの「ユーザー判断」「子スレ完了」。`tab` は確認箱のタブの id と `?mode=` の値、
+ * `footerId` は下部バーの項目 id(表示名は `FOOTER_TABS` から取る)。
+ */
+const BOX_TAB: Record<
+  "items" | "childdone",
+  { icon: string; footerId: FooterTabId; pick: (r: { open: number; childDone?: number }) => number }
+> = {
+  items: { icon: "CircleHelp", footerId: "judgment", pick: (r) => r.open },
+  childdone: { icon: "CircleCheck", footerId: "childdone", pick: (r) => r.childDone ?? 0 },
 };
+type BoxTab = keyof typeof BOX_TAB;
 
 /** 下部バーの2項目が持つ件数。確認箱のバッジと同じ回り方(30秒毎 + 変更通知)で取り直す。 */
 function useBoxTabCount(tab: BoxTab): number | undefined {
   const count = useRpc(confirmBoxCountRpc);
+  const pick = BOX_TAB[tab].pick;
   const [n, setN] = useState<number | undefined>(undefined);
   useEffect(() => {
     let alive = true;
+    // 一時的な失敗では前回の件数を残す(バッジが消えると「未確認が無くなった」と読めるため)。
     const tick = () =>
       count({})
-        .then((r) => alive && setN(tab === "items" ? r.open : r.childDone))
-        .catch(() => alive && setN(undefined));
+        .then((r) => alive && setN(pick(r)))
+        .catch(() => {});
     void tick();
     const timer = setInterval(tick, COUNT_MS);
     const off = onBoxChanged(() => void tick());
@@ -95,20 +106,15 @@ function useBoxTabCount(tab: BoxTab): number | undefined {
       clearInterval(timer);
       off();
     };
-  }, [count, tab]);
+  }, [count, pick]);
   return n;
 }
 
 /**
- * 下部バーの「ユーザー判断」「子スレ完了」。PC幅だけ出す(狭い幅は確認箱の中のタブのまま=従来どおり)。
+ * 下部バーの「ユーザー判断」「子スレ完了」の1行。PC幅のときだけ呼ばれる(呼び出し側で判定)。
  * 件数は確認箱のタブと同じ数え方(`open`=判断印つきで未承認 / `childDone`=完了かつ未確認)。
  */
-function BoxTabLink({
-  tab,
-  currentScreen,
-  openScreen,
-  layout,
-}: { tab: BoxTab } & Pick<PluginSidebarItemProps, "currentScreen" | "openScreen" | "layout">) {
+function BoxTabLink({ tab, currentScreen, openScreen }: { tab: BoxTab } & BoxTabLinkProps) {
   const n = useBoxTabCount(tab);
   const press = useCallback(
     () => openScreen({ screenId: BOX_TAB_SCREEN_ID, params: { [BOX_TAB_MODE_PARAM]: tab } }),
@@ -119,16 +125,32 @@ function BoxTabLink({
     currentScreen.params[BOX_TAB_MODE_PARAM] === tab;
   // jsx を prop に渡すと lint(react-perf)に当たるので、要素は一度だけ作る。
   const trailing = CountBadge({ n });
-  if (layout.compact) return null;
   return (
     <SidebarRow
       icon={BOX_TAB[tab].icon}
-      label={BOX_TAB[tab].label}
+      label={footerTitle(BOX_TAB[tab].footerId)}
       active={active}
       onPress={press}
       trailing={trailing ?? undefined}
     />
   );
+}
+
+type BoxTabLinkProps = Pick<PluginSidebarItemProps, "currentScreen" | "openScreen">;
+
+/**
+ * 下部バーの項目として登録する入口。狭い幅(iPhone)では**何も描かない**(= バーに出ない)。
+ * 判定と非表示を `BoxTabLink` の外に置いているので、隠れている間は件数の問い合わせも走らない。
+ */
+function BoxTabFooterItem({
+  tab,
+  currentScreen,
+  openScreen,
+  layout,
+}: { tab: BoxTab } & BoxTabLinkProps & Pick<PluginSidebarItemProps, "layout">) {
+  const { width, height } = useWindowDimensions();
+  if (!showsMovedFooterTabs(layout.compact, width, height)) return null;
+  return <BoxTabLink tab={tab} currentScreen={currentScreen} openScreen={openScreen} />;
 }
 
 /**
@@ -149,7 +171,8 @@ function useBoxBadge(compact: boolean): number | undefined {
               compact ? r.open : confirmBoxBadgeCount({ bugs: r.bugs, notify: r.notifications }),
             ),
         )
-        .catch(() => alive && setN(null));
+        // 一時的な失敗では前回の件数を残す(`BoxTabLink` と同じ)。
+        .catch(() => {});
     void tick();
     const timer = setInterval(tick, COUNT_MS);
     const off = onBoxChanged(() => void tick());
@@ -180,6 +203,8 @@ function SidebarWithHeaderButton({
   const open = useCallback(() => openScreen({ screenId: SCREEN_ID }), [openScreen]);
   const registered = useRegisteredHeaderButtons();
 
+  // 効果の本体は `hosts`・`registered` だけを読む。列挙し直しの tick を依存に入れる必要はない
+  // (`registered` はモジュール側の Map で中身はその場で書き換わり、古い参照でも最新の登録を見る)。
   useEffect(() => {
     let alive = true;
     for (const host of hosts) {
@@ -239,15 +264,14 @@ function Screen({ theme, navigation }: PluginScreenProps) {
   return <ConfirmBoxView theme={theme} navigation={navigation} />;
 }
 
-/** 下部バーの「ユーザー判断」「子スレ完了」から開く画面。そのタブを出し、下の並びで確認箱の中へ移れる。 */
+/**
+ * 下部バーの「ユーザー判断」「子スレ完了」から開く画面。そのタブだけを出す(並びは出さない)。
+ * 画面は寄与 id でしか分かれないので、同じ画面のまま `?mode=` だけ変わっても同じ部品が使い回される。
+ * タブごとに状態(絞り込み・並び)を持ち越さないよう `key` で作り直す。
+ */
 function BoxTabScreen({ theme, navigation, params }: PluginScreenProps) {
-  return (
-    <ConfirmBoxView
-      theme={theme}
-      navigation={navigation}
-      mode={boxTabMode(params[BOX_TAB_MODE_PARAM])}
-    />
-  );
+  const mode = boxTabMode(params[BOX_TAB_MODE_PARAM]);
+  return <ConfirmBoxView key={mode} theme={theme} navigation={navigation} mode={mode} />;
 }
 
 function ChildThreadsScreen({ theme, params }: PluginScreenProps) {
@@ -278,6 +302,31 @@ function Popover({ theme }: PluginButtonContentProps) {
   );
 }
 
+// 下部バーの各項目の中身。キーは `FOOTER_TABS` の id(並び順だけを SSOT に持たせ、中身はここで結ぶ)。
+const FooterJudgment = (props: PluginSidebarItemProps) => (
+  <BoxTabFooterItem {...props} tab="items" />
+);
+const FooterChildDone = (props: PluginSidebarItemProps) => (
+  <BoxTabFooterItem {...props} tab="childdone" />
+);
+const FooterThreads = () => <SidebarSectionLink section="threads" icon="ListTree" />;
+const FooterConcepts = () => <SidebarSectionLink section="concepts" icon="Lightbulb" />;
+
+const FOOTER_COMPONENTS: Record<FooterTabId, (props: PluginSidebarItemProps) => ReactElement> = {
+  judgment: FooterJudgment,
+  childdone: FooterChildDone,
+  box: Sidebar,
+  mail: MailLink,
+  "sidebar-threads": FooterThreads,
+  "sidebar-concepts": FooterConcepts,
+};
+
+/** ヘッダボタンを外す。`contribute` 冒頭と片付けの両方から呼ぶ(登録簿を残したまま捨てると外せなくなる)。 */
+function removeHeaderButtons() {
+  for (const r of headerButtons.values()) r.remove();
+  headerButtons.clear();
+}
+
 export default function contribute(ctx: PluginClientContext) {
   client = ctx;
   // ヘッダボタンはワークスペース単位でしか登録できないため、サイドバー項目(常駐)が
@@ -291,35 +340,19 @@ export default function contribute(ctx: PluginClientContext) {
   });
   ctx.addScreen({ id: SCREEN_ID, title: "確認箱", Component: Screen });
   ctx.addScreen({ id: BOX_TAB_SCREEN_ID, title: "確認箱", Component: BoxTabScreen });
-  // 並びは登録順(ユーザー判断 → 子スレ完了 → 確認箱 → メール → スレ一覧 → 構想一覧)。
-  // 先頭2つは PC幅だけその場で描画する(狭い幅では何も出さない=iPhone のバーは従来どおり)。
-  ctx.addSidebarFooterItem({
-    id: "judgment",
-    title: BOX_TAB.items.label,
-    Component: (props) => <BoxTabLink {...props} tab="items" />,
-  });
-  ctx.addSidebarFooterItem({
-    id: "childdone",
-    title: BOX_TAB.childdone.label,
-    Component: (props) => <BoxTabLink {...props} tab="childdone" />,
-  });
-  ctx.addSidebarFooterItem({ id: "box", title: "確認箱", Component: Sidebar });
-  ctx.addSidebarFooterItem({ id: "mail", title: "メール", Component: MailLink });
-  ctx.addSidebarFooterItem({
-    id: "sidebar-threads",
-    title: SIDEBAR_SECTION_LABELS.threads,
-    Component: () => <SidebarSectionLink section="threads" icon="ListTree" />,
-  });
-  ctx.addSidebarFooterItem({
-    id: "sidebar-concepts",
-    title: SIDEBAR_SECTION_LABELS.concepts,
-    Component: () => <SidebarSectionLink section="concepts" icon="Lightbulb" />,
-  });
+  // 並びは `FOOTER_TABS`(SSOT)の順で登録する。先頭2つは PC幅だけその場で描画する
+  // (狭い幅では何も出さない=iPhone のバーは従来どおり)。
+  for (const tab of FOOTER_TABS) {
+    ctx.addSidebarFooterItem({
+      id: tab.id,
+      title: tab.title,
+      Component: FOOTER_COMPONENTS[tab.id],
+    });
+  }
   // ヘッダボタンの登録簿は下部バーの項目の寿命に合わせて消す(再マウント時に作り直す)。
-  headerButtons.clear();
+  removeHeaderButtons();
   return () => {
-    for (const r of headerButtons.values()) r.remove();
-    headerButtons.clear();
+    removeHeaderButtons();
     client = null;
   };
 }

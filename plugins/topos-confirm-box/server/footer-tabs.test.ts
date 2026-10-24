@@ -5,7 +5,9 @@ import {
   boxTabMode,
   confirmBoxBadgeCount,
   confirmBoxTabs,
+  footerTitle,
   isWideLayout,
+  showsMovedFooterTabs,
 } from "../shared/footer-tabs.js";
 
 // 確認箱の画面のタブ(実装と同じ並び)。id だけを見れば足りる。
@@ -36,13 +38,26 @@ test("確認箱のバッジは中に残るタブ(バグ報告+通知)の合計�
   assert.equal(confirmBoxBadgeCount({ bugs: 2 }), 2);
 });
 
-test("広い画面の判定は720px境界(狭いほうに倒す)", () => {
-  assert.equal(isWideLayout(undefined, 1440), true);
-  assert.equal(isWideLayout(undefined, 720), true);
-  assert.equal(isWideLayout(undefined, 719), false);
-  assert.equal(isWideLayout(undefined, 390), false);
-  // ポップオーバーは窓が広くても箱が狭い: 箱幅を優先する。
-  assert.equal(isWideLayout(420, 1440), false);
+test("PC幅の判定は幅720px・高さ480pxのどちらも満たすとき(高さ未指定は幅だけで見る)", () => {
+  assert.equal(isWideLayout(1440, 900), true);
+  // 境界は含む。
+  assert.equal(isWideLayout(720, 480), true);
+  assert.equal(isWideLayout(719, 900), false);
+  assert.equal(isWideLayout(1440, 479), false);
+  // 高さが取れない呼び出し(ポップオーバーは箱幅を渡す)では幅だけで決める。
+  assert.equal(isWideLayout(420, undefined), false);
+  assert.equal(isWideLayout(1440, undefined), true);
+});
+
+test("下部バーの2項目: iPhone縦・横倒しは出さない、iPadとPCは出す", () => {
+  // iPhone 縦(390×844)/ 横(932×430): ホストの compact は横幅で決まるので横倒しでは false になる。
+  assert.equal(showsMovedFooterTabs(true, 390, 844), false);
+  assert.equal(showsMovedFooterTabs(false, 932, 430), false);
+  // iPad 768×1024 と PC。
+  assert.equal(showsMovedFooterTabs(false, 768, 1024), true);
+  assert.equal(showsMovedFooterTabs(false, 1440, 900), true);
+  // ホストが compact と言ったら出さない(ホスト側の境界が変わっても従来どおりへ倒れる)。
+  assert.equal(showsMovedFooterTabs(true, 1440, 900), false);
 });
 
 test("下部バーから開く画面のタブは ?mode= で決まる(不正値はユーザー判断)", () => {
@@ -64,4 +79,8 @@ test("下部バーの並び: ユーザー判断 → 子スレ完了 → 確認�
       ["sidebar-concepts", "構想一覧"],
     ],
   );
+});
+
+test("登録タイトルと読み上げ名は FOOTER_TABS と同じ文字列", () => {
+  for (const t of FOOTER_TABS) assert.equal(footerTitle(t.id), t.title);
 });

@@ -6,7 +6,8 @@
  * iPhone等の狭い幅は**従来どおり**(下部バーに出さず、確認箱の中の5枚タブのまま)。
  *
  * 幅の判定は2種類ある。下部バーの項目はホストが `layout.compact`(画面幅 <720 で true)を渡すので
- * それに従い、確認箱の中のタブは**描画先の箱の幅**(ポップオーバーは窓が広くてもね箱が420px)で決める。
+ * それに従い、確認箱の中のタブは**描画先の箱の幅**(ポップオーバーは窓が広くても箱が420px)で決める。
+ * どちらも最終的には `showsMovedFooterTabs`(幅720以上かつ高さ480以上)1本で揃える。
  *
  * 並びはホストが `addSidebarFooterItem` の**登録順**で決める(`sidebarFooterItems` の保存設定が
  * 空のときの既定)。保存設定が入っている場合はホストの設定が優先される(プラグインからは触らない)。
@@ -21,6 +22,14 @@ export const FOOTER_TABS = [
   { id: "sidebar-threads", title: "スレ一覧" },
   { id: "sidebar-concepts", title: "構想一覧" },
 ] as const;
+
+export type FooterTabId = (typeof FOOTER_TABS)[number]["id"];
+
+/** footer 項目の表示名。登録タイトルと読み上げで同じ文字列を使う(SSOT は `FOOTER_TABS`)。 */
+export function footerTitle(id: FooterTabId): string {
+  const tab = FOOTER_TABS.find((t) => t.id === id);
+  return tab ? tab.title : id;
+}
 
 /** 下部バーの2項目から開く画面の id。`?mode=` と同じ値。 */
 export const BOX_TAB_SCREEN_ID = "box-tab";
@@ -43,9 +52,32 @@ export function confirmBoxBadgeCount(counts: Partial<Record<string, number>>): n
   return BOX_BADGE_TAB_IDS.reduce((n, id) => n + (counts[id] ?? 0), 0);
 }
 
-/** PC幅か。確認箱の画面は描画先の箱の幅で判定する(狭い幅=iPhone は従来のまま)。 */
-export function isWideLayout(containerWidth: number | undefined, windowWidth: number): boolean {
-  return (containerWidth ?? windowWidth) >= 720;
+/** PC幅の下限(ホストの compact 境界と同じ720px。`packages/app/src/styles/unistyles.ts` の md)。 */
+export const WIDE_MIN_WIDTH = 720;
+/**
+ * PC幅とみなす高さの下限。横倒しにした iPhone(例 932×430)は幅だけ見ると PC 幅になるが、
+ * 「iPhone版はそのまま」という指示に反するので、高さで狭い側へ倒す。iPad(768×1024)は PC 扱い。
+ * プラグインにはタッチ端末かどうかが届かないため、判定材料は幅と高さだけ。
+ */
+export const WIDE_MIN_HEIGHT = 480;
+
+/** 描画先が PC 幅か。高さが取れない呼び出しでは幅だけで判定する。 */
+export function isWideLayout(width: number, height: number | undefined): boolean {
+  return width >= WIDE_MIN_WIDTH && (height === undefined || height >= WIDE_MIN_HEIGHT);
+}
+
+/**
+ * 下部バーに移した2項目を出すか(= 確認箱のタブを3枚にするか)。
+ * サイドバーの下部バー(幅=窓幅)と確認箱の画面(幅=描画先の箱)の両方でこれ1本を使い、
+ * 同じ画面の中で「バーに出たのに箱は5枚」のような食い違いを作らない。
+ * ホストの `compact`(幅<720)は幅の判定と重なるが、ホスト側の境界が変わっても従来どおりへ倒れるよう残す。
+ */
+export function showsMovedFooterTabs(
+  compact: boolean,
+  width: number,
+  height: number | undefined,
+): boolean {
+  return !compact && isWideLayout(width, height);
 }
 
 /** 下部バーから開いた画面のタブ。不正な値は「ユーザー判断」に倒す。 */
