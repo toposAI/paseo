@@ -244,6 +244,30 @@ test("legacy_keys は YAML リスト形式でも読む", () => {
   assert.deepEqual(r.claimedKeys.sort(), ["box-a", "box-b"]);
 });
 
+test("state が読めないノートは legacy_keys を claim しない(箱の行だけ消えるのを防ぐ)", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "j-1.md"), "---\nid: j-1\nlegacy_keys: [box-a]\n---\n# t\n");
+  const r = readVaultDecisions({ TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir });
+  assert.deepEqual(r.claimedKeys, []);
+});
+
+const MAX_NOTES = 1000; // vault-decisions.ts の上限と同じ
+
+test("上限を超えたら古い(ファイル名の小さい)ノートから落とす", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "j-20260101-old.md"), NOTE("j-20260101-old", "open"));
+  for (let i = 0; i < MAX_NOTES; i++) {
+    const id = `j-20261024-n${String(i).padStart(4, "0")}`;
+    fs.writeFileSync(path.join(dir, `${id}.md`), NOTE(id, "open"));
+  }
+  const r = readVaultDecisions({ TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir });
+  assert.equal(
+    r.items.some((i) => i.key === "vault:j-20260101-old"),
+    false,
+  );
+  assert.equal(r.items.length, MAX_NOTES);
+});
+
 test("BOM・クォート付き state は読み、id とファイル名が違うノートは skipped に数える", () => {
   const dir = tmpDir();
   fs.writeFileSync(path.join(dir, "j-1.md"), `﻿${NOTE("j-1", '"Open"')}`);

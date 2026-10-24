@@ -97,7 +97,7 @@ export function parseDecisionNote(text: string, mtimeMs: number): ConfirmBoxItem
   const { front, body } = parsed;
   const id = front.id;
   if (!id || !NOTE_ID.test(id)) return null;
-  if (!SHOWN_STATES.has(front.state.toLowerCase())) return null;
+  if (!SHOWN_STATES.has((front.state ?? "").toLowerCase())) return null;
   const title = /^#\s+(.+)$/m.exec(body)?.[1].trim() ?? id;
   const background = section(body, "背景");
   const { options, recommended } = parseOptions(section(body, "選択肢と推奨"));
@@ -174,6 +174,12 @@ export function parseLegacyKeys(text: string): string[] {
   return out.filter(Boolean);
 }
 
+/** 状態を問わず legacy_keys を集める(answered/superseded でも箱側の行は復活させない)。
+ * ただし state が読めない壊れたノートは claim しない(箱の行だけ隠れて判断が消えるのを防ぐ)。 */
+function claimableKeys(text: string): string[] {
+  return splitFrontmatter(text)?.front.state ? parseLegacyKeys(text) : [];
+}
+
 /** 判断ノートを読む。**例外を投げない**(読めない時は error に理由を入れる)。 */
 export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultDecisionRead {
   let dir = "";
@@ -183,6 +189,7 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
       .readdirSync(dir)
       .filter((n) => NOTE_FILE.test(n))
       .sort()
+      .toReversed() // 上限を超えたら古い(日付の小さい)ノートから落とす
       .slice(0, MAX_NOTES);
     const items: ConfirmBoxItem[] = [];
     const skipped: { name: string; reason: string }[] = [];
@@ -198,8 +205,7 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
           continue;
         }
         const text = fs.readFileSync(full, "utf8");
-        // 状態を問わず legacy_keys を集める(answered/superseded でも箱側の行は復活させない)
-        for (const k of parseLegacyKeys(text)) claimed.add(k);
+        for (const k of claimableKeys(text)) claimed.add(k);
         const item = parseDecisionNote(text, st.mtimeMs);
         if (!item) continue; // open/waiting_materials 以外・frontmatter なしは対象外(欠落ではない)
         // ファイル名と id が違うノートは、回答の書き先が別ノートになるので出さない
