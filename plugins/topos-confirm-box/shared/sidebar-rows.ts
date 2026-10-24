@@ -10,6 +10,7 @@
  */
 import { LOWER_TIER_STATUSES, UPPER_TIER_STATUSES } from "./notes.js";
 import type { NoteStatus, SidebarNote } from "./notes.js";
+import type { StateDotKind } from "./state-dot.js";
 
 /**
  * 子スレ一覧側の status。登録簿の行は `shared/child-threads.ts` の3語彙、登録簿に載らない
@@ -23,6 +24,13 @@ export interface RowThread {
   agentId: string;
   title: string;
   status: ThreadStatusHint;
+  /** 司令塔の行か(点を出す条件が子スレと違う。`shouldShowDot`)。未指定は司令塔でない。 */
+  coordinator?: boolean;
+  /**
+   * 行の左端の点の種類(純正 Paseo の点と同じ意味)。サーバーが実時間の値から決めて載せる。
+   * 無い/分からない行は null(点を出さない)。意味は status と別の軸(いまどう見えているか)。
+   */
+  stateDot?: StateDotKind | null;
 }
 
 export interface SidebarRowView<T> {
@@ -36,6 +44,32 @@ export interface SidebarRowView<T> {
   statusLabel: NoteStatus | "待機中";
   /** この行に対応する実装ノート(無ければ null)。 */
   note: SidebarNote | null;
+  /**
+   * 行の左端の点の種類(純正 Paseo と同じ意味。`shared/state-dot.ts`)。
+   * 材料が無い行は null(点を出さない)。
+   */
+  dot: StateDotKind | null;
+}
+
+/**
+ * 行の左端に点を出すか。
+ *
+ * - **子スレ行(司令塔グループ内を含む)はすべて出す**。ユーザーの目的は「どのスレが承認待ちで
+ *   止まっているかを一覧で見つける」ことで、点が無い行が混ざると「点が無い=止まっていない」と
+ *   読めてしまう(見つけ損なう側に倒れる)。
+ * - **司令塔の行そのものは、承認待ち/失敗のときだけ出す**。司令塔は常に一覧の先頭グループに並ぶので、
+ *   全部に灰色の点を置くと点の列が「意味の無い飾り」に見え、オレンジの見落としにつながる。
+ */
+export function shouldShowDot(thread: RowThread): boolean {
+  const kind = thread.stateDot ?? null;
+  if (kind === null) return false;
+  if (thread.coordinator !== true) return true;
+  return kind === "needs_input" || kind === "failed";
+}
+
+/** 行の左端に出す点の種類(出さない行は null)。 */
+export function dotOf(thread: RowThread): StateDotKind | null {
+  return shouldShowDot(thread) ? (thread.stateDot ?? null) : null;
 }
 
 const isUpperStatus = (s: NoteStatus) => UPPER_TIER_STATUSES.includes(s);
@@ -139,9 +173,10 @@ export function buildUpperRows<T extends RowThread>(
   const rows: SidebarRowView<T>[] = [];
   for (const t of threads) {
     const note = implByThread.get(t.agentId) ?? null;
+    const dot = dotOf(t);
     if (note) {
       if (!isUpperStatus(note.status)) continue;
-      rows.push({ thread: t, title: note.title || t.title, statusLabel: note.status, note });
+      rows.push({ thread: t, title: note.title || t.title, statusLabel: note.status, note, dot });
       continue;
     }
     if (!keepsWithoutNote(t.status)) continue;
@@ -150,6 +185,7 @@ export function buildUpperRows<T extends RowThread>(
       title: t.title,
       statusLabel: labelOfThreadStatus(t.status),
       note: null,
+      dot,
     });
   }
   return rows;

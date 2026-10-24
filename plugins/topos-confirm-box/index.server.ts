@@ -68,6 +68,7 @@ import {
   threadAccessById,
 } from "./server/thread-liveness.js";
 import { listAllAgents } from "./server/agent-pages.js";
+import { applyStateDots, stateDotsById } from "./server/agent-state-dots.js";
 import { mergeUnregisteredThreads } from "./server/unregistered-threads.js";
 import type { ListedAgentLike } from "./server/unregistered-threads.js";
 import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
@@ -248,6 +249,14 @@ export default function contribute(server: PluginServerContext) {
         access = new Map();
       }
       threads = applyThreadAccess(threads, access);
+      // 行の左端の点(橙=承認待ち / 赤=失敗 / 青=実行中 / 緑=新着)。判定は純正 Paseo と同じで、
+      // `pendingPermissions` と `attentionReason` が要るため**実時間の一覧からここで決める**
+      // (`server/agent-state-dots.ts`)。一覧に居ない行は null(点を出さない=推測しない)。
+      // 入力は全ページの一覧と、アーカイブ済みを含む1ページ目の一覧(アーカイブ済みは判定側で落とす)。
+      threads = applyStateDots(
+        threads,
+        stateDotsById([...finalAgents, ...forAccess.entries.map((e) => e.agent)]),
+      );
       // 子を持つ親(=グループ見出し)のうち、一覧に生きていて開けるものを「開ける親」にする。
       // 子司令塔はデーモンの `coordinator_id` に載らないため、これが無いと見出しを押しても開けない
       // (2026-10-24 ユーザー報告)。行は増やさない(親の行は見出しが既に担う)。

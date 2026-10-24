@@ -50,6 +50,10 @@ import { CLOSED_MENU, menuCanArchive, nextMenu } from "../shared/thread-menu.js"
 import type { ThreadMenuAction, ThreadMenuState } from "../shared/thread-menu.js";
 import { ConceptNotesList, useSidebarNotes } from "./ConceptNotes.js";
 import { StatusBadge } from "./sidebar-badge.js";
+import { stateDotIcons } from "./StateDot.js";
+import type { StateDotIcon } from "./StateDot.js";
+import { appearanceOf } from "../shared/state-dot.js";
+import type { StateDotKind } from "../shared/state-dot.js";
 import { useSidebarMode } from "./sidebar-mode.js";
 import { ThreadMenu } from "./ThreadMenu.js";
 
@@ -440,6 +444,11 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     [applyMenuAction, menuThread],
   );
 
+  // 点の色は純正のパレットを明暗で選ぶ(プラグインには appearance が渡らないので背景の輝度で判定)。
+  const dotIcons = useMemo(
+    () => stateDotIcons(appearanceOf(colors.surface2 ?? colors.surface1 ?? colors.surface0)),
+    [colors.surface0, colors.surface1, colors.surface2],
+  );
   // メニューは開いた行の直下に差し込む(帯のすぐ下に出る。全画面にしない)。
   const renderThread = useCallback(
     (row: SidebarRowView<ChildThread>) => {
@@ -450,6 +459,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
           row={row}
           failed={failed}
           active={onScreen && focusId === t.agentId}
+          dotIcons={dotIcons}
           onOpen={openThread}
           onOpenMenu={onMenuOpen}
         >
@@ -470,6 +480,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     },
     [
       colors,
+      dotIcons,
       failed,
       focusId,
       menu,
@@ -786,6 +797,7 @@ function ThreadRow({
   row,
   failed,
   active,
+  dotIcons,
   onOpen,
   onOpenMenu,
   children,
@@ -795,6 +807,8 @@ function ThreadRow({
   children?: React.ReactNode;
   failed: boolean;
   active: boolean;
+  /** 状態の点(左端のアイコンの位置に出す。明暗は呼び出し元が選ぶ)。 */
+  dotIcons: Record<StateDotKind, StateDotIcon>;
   /** 押したらそのスレを開く(開けない行の判定・ドロワーを閉じる処理は呼び出し側 `openThread`)。 */
   onOpen: (agentId: string, access: ChildThread["access"]) => void;
   /** 状態の帯を押した: ピン/アーカイブのメニューを開く。 */
@@ -829,7 +843,9 @@ function ThreadRow({
     <View>
       <SidebarRow
         id={t.agentId}
-        icon={rowIcon(row, t)}
+        // 点が出せる行は先頭のアイコンを点に置き換える(純正と同じ意味・色)。点の材料が無い行
+        // (一覧に居ない等)だけ従来のアイコンを残す。
+        icon={row.dot ? dotIcons[row.dot] : rowIcon(row, t)}
         label={row.title}
         active={active}
         onPress={onPress}

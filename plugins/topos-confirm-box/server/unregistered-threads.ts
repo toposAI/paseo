@@ -25,6 +25,8 @@
  */
 import type { ChildThread } from "../shared/child-threads.js";
 import { compareChildThreads } from "../shared/child-threads.js";
+import { deriveStateDot } from "../shared/state-dot.js";
+import type { StateDotKind } from "../shared/state-dot.js";
 import { statusKindOfMachine } from "../shared/thread-status-label.js";
 
 /** `ctx.paseo.agents.list()` の要素(読む所だけ緩く持つ)。 */
@@ -36,9 +38,27 @@ export interface ListedAgentLike {
   archivedAt?: unknown;
   internal?: unknown;
   hidden?: unknown;
+  /** 未読の結果があるか(純正サイドバーの点の材料)。 */
+  requiresAttention?: unknown;
+  /** 注意の理由。`permission` が「承認待ち」。 */
+  attentionReason?: unknown;
+  /** 承認待ち(permission)の配列。長さが件数。 */
+  pendingPermissions?: unknown;
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
+
+/** 一覧の1件から、行の左端の点の種類を決める(`shared/state-dot.ts` の判定をそのまま使う)。 */
+export function stateDotOf(a: ListedAgentLike): StateDotKind {
+  const pending = Array.isArray(a.pendingPermissions) ? a.pendingPermissions.length : 0;
+  const reason = str(a.attentionReason);
+  return deriveStateDot({
+    machineState: str(a.status) || null,
+    requiresAttention: a.requiresAttention === true,
+    attentionReason: reason || null,
+    pendingPermissionCount: pending,
+  });
+}
 
 /**
  * 機械状態 → 上段の語彙。**動いているものだけ `実装中`**にし、承認待ちは `ユーザー判断待ち`
@@ -137,6 +157,7 @@ export function mergeUnregisteredThreads(
       // (`buildUpperRows` が `待機中` を「動いていない」として扱う)。
       status: statusHintOfMachine(machineState),
       machineState,
+      stateDot: stateDotOf(a),
       request: "",
       summaryItemId: null,
       summary: null,

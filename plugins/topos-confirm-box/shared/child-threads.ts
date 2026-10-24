@@ -8,6 +8,7 @@
  */
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
+import { STATE_DOT_KINDS } from "./state-dot.js";
 
 export const CHILD_THREAD_STATUSES = ["実装中", "ユーザー判断待ち", "完了"] as const;
 export type ChildThreadStatus = (typeof CHILD_THREAD_STATUSES)[number];
@@ -25,6 +26,16 @@ export const ChildThreadSchema = z.object({
   status: z.enum(CHILD_THREAD_ROW_STATUSES),
   /** Paseo の機械状態(busy/idle/承認待ち)。意味のある状態(status)とは混ぜない。 */
   machineState: z.string().nullable(),
+  /**
+   * 行の左端の点の種類(純正 Paseo の点と同じ意味・同じ色。`shared/state-dot.ts`)。
+   *
+   * サーバーが `agents.list()` の**実時間の値**から決めて行に載せる。`machineState` だけでは
+   * 「承認待ちで止まっている」が出せないため: 承認待ちの間 Paseo の `status` は `running` のまま
+   * (返事を待つターンが開いている)で、止まっていることは `pendingPermissions` と
+   * `attentionReason === "permission"` にしか現れない(2026-10-24 ユーザー依頼)。
+   * 一覧に居ないスレ(アーカイブ済み等)は null(点を出さない=分からないものを推測しない)。
+   */
+  stateDot: z.enum(STATE_DOT_KINDS).nullable().optional(),
   request: z.string(),
   /** 完了まとめを投函した確認箱 item の id。未完了なら null。 */
   summaryItemId: z.string().nullable(),
