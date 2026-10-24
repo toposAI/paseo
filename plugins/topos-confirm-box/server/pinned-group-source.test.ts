@@ -14,6 +14,8 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const clientDir = join(here, "..", "client");
 const sidebarSource = readFileSync(join(clientDir, "ChildThreadsSidebar.tsx"), "utf8");
+/** コメントを外した本体。禁止の形を検査するとき、コメント中の例示(説明文)を拾わないため。 */
+const sidebarCode = sidebarSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 function countMatches(source: string, pattern: RegExp): number {
   return source.match(pattern)?.length ?? 0;
@@ -31,9 +33,22 @@ test("グループの振り分けは `rowGroupKeyOf` の1か所だけ(司令塔�
 });
 
 test("ピン止めグループは司令塔より前に、常に開いたまま出す(折りたたみ不可)", () => {
+  // 固定グループは `groups` にも入っているので、そのまま `...groups.values()` を足すと2回描画される
+  // (2026-10-25 実機: ピン止め・司令塔が丸ごと2回出た)。`groups` の値のうち固定2つは一度だけ並べる。
   assert.match(
     sidebarSource,
-    /return \[fixed\[PINNED_GROUP\], fixed\[COORDINATOR_GROUP\], \.\.\.groups\.values\(\)\]/,
+    /for \(const key of \[PINNED_GROUP, COORDINATOR_GROUP\]\)/,
+    "固定2つを先に取り出す",
+  );
+  assert.match(
+    sidebarSource,
+    /if \(g\.key !== PINNED_GROUP && g\.key !== COORDINATOR_GROUP\)/,
+    "残りだけを後ろへ",
+  );
+  assert.doesNotMatch(sidebarCode, /\.\.\.groups\.values\(\)/, "groups を丸ごと足さない(二重描画)");
+  assert.ok(
+    sidebarSource.indexOf("for (const key of [PINNED_GROUP, COORDINATOR_GROUP])") <
+      sidebarSource.indexOf("if (g.key !== PINNED_GROUP && g.key !== COORDINATOR_GROUP)"),
     "並びは ピン止め → 司令塔 → その他",
   );
   // 見出しの行末(件数+シェブロン)はピン止めグループだけ出さない

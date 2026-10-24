@@ -186,9 +186,19 @@ function groupRows(
     g.rows.push(r);
   }
   // ピン止め → 司令塔 → その他(出現順)。空のグループは出さない。
-  return [fixed[PINNED_GROUP], fixed[COORDINATOR_GROUP], ...groups.values()].filter(
-    (g) => g.rows.length > 0,
-  );
+  // `groups` には固定グループも入っている(行があった時点で `groups.set` している)ので、
+  // そのまま `...groups.values()` を足すと同じグループが2回描画される(実測 2026-10-25:
+  // ピン止め・司令塔の見出しと行が丸ごと2回ずつ出た)。固定の2つは `groups` から取り出し、
+  // 残りだけを出現順で後ろに置く。
+  const ordered: ThreadGroup[] = [];
+  for (const key of [PINNED_GROUP, COORDINATOR_GROUP]) {
+    const g = groups.get(key);
+    if (g) ordered.push(g);
+  }
+  for (const g of groups.values()) {
+    if (g.key !== PINNED_GROUP && g.key !== COORDINATOR_GROUP) ordered.push(g);
+  }
+  return ordered.filter((g) => g.rows.length > 0);
 }
 
 export function ChildThreadsSidebar(input: PluginSidebarItemProps) {

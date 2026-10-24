@@ -1,13 +1,5 @@
 import type { SidebarIcon, SidebarRowProps } from "@getpaseo/plugin/client/ui";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  type ComponentType,
-  type ReactNode,
-  type Ref,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, type ComponentType, type ReactNode } from "react";
 import { Pressable, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { DraggableList, type DraggableRenderItemInfo } from "@/components/draggable-list";
@@ -192,14 +184,17 @@ function ReorderableRow({
     "aria-roledescription": _dragRoleDescription,
     ...dragAttributes
   } = dragHandleProps.attributes ?? {};
+  // Web では React Native Web の View がドラッグ用の DOM イベント(onMouseDown 等)を転送しないため、
+  // 素の div に付ける(実測 2026-10-25: View では onMouseDown が子に付かず、ドラッグが一切開始しなかった)。
+  // 行の幅・高さは子が決める(div は幅いっぱいの通常のブロックなので行間は変わらない)。
   return (
-    <View
-      {...dragAttributes}
+    <div
+      {...(dragAttributes as Record<string, unknown>)}
       {...(dragHandleProps.listeners ?? {})}
-      ref={dragHandleProps.setActivatorNodeRef as unknown as Ref<View>}
+      ref={dragHandleProps.setActivatorNodeRef as unknown as (node: HTMLDivElement | null) => void}
     >
       {children}
-    </View>
+    </div>
   );
 }
 
