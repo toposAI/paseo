@@ -14,9 +14,10 @@ import { ChildThreadsSidebar, CHILD_THREADS_SCREEN_ID } from "./client/ChildThre
 import { ChildThreadsView } from "./client/ChildThreadsView";
 import { ConfirmBoxView } from "./client/ConfirmBoxView";
 import { onBoxChanged } from "./client/events";
+import { watchBoxSignal } from "./client/change-signal";
 import { setSidebarMode, useSidebarMode } from "./client/sidebar-mode";
 import { SIDEBAR_SECTION_LABELS } from "./shared/sidebar-section-mode";
-import { confirmBoxCountRpc } from "./shared/contract";
+import { boxSignalRpc, confirmBoxCountRpc } from "./shared/contract";
 import {
   BOX_TAB_MODE_PARAM,
   FOOTER_TABS,
@@ -89,6 +90,7 @@ type BoxTab = keyof typeof BOX_TAB;
 /** 下部バーの2項目が持つ件数。確認箱のバッジと同じ回り方(30秒毎 + 変更通知)で取り直す。 */
 function useBoxTabCount(tab: BoxTab): number | undefined {
   const count = useRpc(confirmBoxCountRpc);
+  const signalTimes = useRpc(boxSignalRpc);
   const pick = BOX_TAB[tab].pick;
   const [n, setN] = useState<number | undefined>(undefined);
   useEffect(() => {
@@ -101,12 +103,18 @@ function useBoxTabCount(tab: BoxTab): number | undefined {
     void tick();
     const timer = setInterval(tick, COUNT_MS);
     const off = onBoxChanged(() => void tick());
+    // 子スレの完了・取り下げの合図でも取り直す(下部バーのバッジを30秒待たせない。2026-10-24)
+    const stop = watchBoxSignal(
+      () => signalTimes({}),
+      () => void tick(),
+    );
     return () => {
       alive = false;
       clearInterval(timer);
       off();
+      stop();
     };
-  }, [count, pick]);
+  }, [count, pick, signalTimes]);
   return n;
 }
 

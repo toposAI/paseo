@@ -34,6 +34,7 @@ import {
   childThreadsPinRpc,
   childThreadsSetOrderRpc,
 } from "../shared/child-threads.js";
+import { boxSignalRpc } from "../shared/contract.js";
 import type { ChildThread } from "../shared/child-threads.js";
 import { blockedMessage } from "../shared/child-threads.js";
 import {
@@ -61,6 +62,7 @@ import { appearanceOf } from "../shared/state-dot.js";
 import type { StateDotKind } from "../shared/state-dot.js";
 import { useSidebarMode } from "./sidebar-mode.js";
 import { ThreadMenu } from "./ThreadMenu.js";
+import { watchBoxSignal } from "./change-signal.js";
 
 const POLL_MS = 30_000;
 const COLLAPSED_KEY = "topos-child-groups-collapsed";
@@ -184,6 +186,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   const section = useSidebarMode();
   const navigation = (props as PluginSidebarItemProps & AgentNavigation).navigation;
   const list = useRpc(childThreadsListRpc);
+  const signalTimes = useRpc(boxSignalRpc);
   const setOrder = useRpc(childThreadsSetOrderRpc);
   const archive = useRpc(childThreadsArchiveRpc);
   const pin = useRpc(childThreadsPinRpc);
@@ -234,11 +237,19 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
         .catch(() => alive && setFailed(true));
     void tick();
     const timer = setInterval(tick, POLL_MS);
+    // 登録簿の合図(完了・取り下げ・再投函)で即取り直す(30秒の定期取得を待たない)
+    const stop = watchBoxSignal(
+      () => signalTimes({}),
+      (which) => {
+        if (which === "child_threads") void tick();
+      },
+    );
     return () => {
       alive = false;
       clearInterval(timer);
+      stop();
     };
-  }, [list]);
+  }, [list, signalTimes]);
 
   // アーカイブ/ピンの操作直後も取得結果で一覧を差し替えない(操作の行が飛んだり戻ったりしない)。
   const gatePoll = useCallback((ms: number) => {

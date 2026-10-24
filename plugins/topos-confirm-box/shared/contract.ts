@@ -151,6 +151,22 @@ export const confirmBoxListRpc = defineRpc({
 });
 export type ConfirmBoxListOutput = z.infer<typeof confirmBoxListRpc.output>;
 
+// ---------------------------------------------------------------- RPC: 変更の合図(即時反映用)
+
+/** 箱の書き手(Python)が投函・取り下げ・再投函の直後に書く合図ファイルの最終更新時刻(ms)。
+ * 画面はこの値が進んだ時だけ一覧とバッジを取り直す(30秒の定期取得を待たない。2026-10-24)。 */
+export const boxSignalRpc = defineRpc({
+  name: "topos.confirmbox.signal",
+  input: z.object({}),
+  output: z.object({
+    /** box.signal.jsonl(項目の投函・取り下げ)。無ければ 0。 */
+    box: z.number(),
+    /** child_threads.signal.jsonl(子スレの完了・取り下げ・再投函)。無ければ 0。 */
+    child_threads: z.number(),
+  }),
+});
+export type BoxSignalOutput = z.infer<typeof boxSignalRpc.output>;
+
 // ---------------------------------------------------------------- RPC: 件数(バッジ用)
 
 /** バッジ用の軽い件数。一覧を3箇所(画面・サイドバー・ヘッダ)から引くと重いので分ける。 */

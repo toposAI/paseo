@@ -24,6 +24,7 @@ import { onBoxChanged, notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
 import { BugReportsView } from "./BugReportsView.js";
 import { ChildDoneView } from "./ChildDoneView.js";
+import { ReloadButton } from "./ReloadButton.js";
 import { NotificationsView } from "./NotificationsView.js";
 import { BellIcon, BugIcon, CheckCircleIcon, InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
@@ -79,8 +80,10 @@ export function ConfirmBoxView({
     try {
       setData(await list({}));
       setError(null);
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return false;
     }
   }, [list]);
 
@@ -88,6 +91,13 @@ export function ConfirmBoxView({
     void reload();
     const timer = setInterval(() => void reload(), REFRESH_MS);
     return () => clearInterval(timer);
+  }, [reload]);
+
+  // 手動の更新。取れた時だけバッジ(件数)も取り直す(カードとバッジが同じ時点になる)
+  const manualReload = useCallback(async () => {
+    const ok = await reload();
+    if (ok) notifyBoxChanged();
+    return ok;
   }, [reload]);
 
   const c = theme.colors;
@@ -162,6 +172,13 @@ export function ConfirmBoxView({
         alignItems: "center" as const,
         justifyContent: "flex-start" as const,
         gap: 4,
+      },
+      // 一覧の右上(更新ボタン)。見出し行を持たないタブなので、ボタンだけを右に寄せた1行を置く。
+      headLine: {
+        flexDirection: "row" as const,
+        alignItems: "center" as const,
+        justifyContent: "flex-end" as const,
+        gap: 8,
       },
       filterLine: {
         flexDirection: "row" as const,
@@ -358,6 +375,9 @@ export function ConfirmBoxView({
   } else {
     content = (
       <>
+        <View style={s.headLine}>
+          <ReloadButton colors={c} onRefresh={manualReload} testID="judgment-reload" />
+        </View>
         <Pressable accessibilityRole="button" style={s.filterLine} onPress={toggleFilter}>
           <Text style={s.text}>{filterSummary}</Text>
           <Text style={s.muted}>{filterOpen ? "▲" : "▼"}</Text>

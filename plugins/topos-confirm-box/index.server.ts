@@ -17,6 +17,7 @@ import type { PluginHandlerContext, PluginServerContext } from "@getpaseo/plugin
 import {
   CHILD_THREAD_REPORT_SOURCE,
   KIND_LABEL,
+  boxSignalRpc,
   compareConfirmBoxItems,
   confirmBoxAckAllRpc,
   confirmBoxAckRpc,
@@ -184,6 +185,19 @@ export default function contribute(server: PluginServerContext) {
   }
 
   server.handle(confirmBoxListRpc, async (_input, ctx) => collect(ctx));
+
+  // 変更の合図(合図ファイルの mtime。ms)。読めなければ 0=画面は定期取得のまま。
+  server.handle(boxSignalRpc, async () => {
+    const dir = resolveConfirmBoxDir();
+    const mtime = (name: string) => {
+      try {
+        return fs.statSync(path.join(dir, name)).mtimeMs;
+      } catch {
+        return 0;
+      }
+    };
+    return { box: mtime("box.signal.jsonl"), child_threads: mtime("child_threads.signal.jsonl") };
+  });
 
   server.handle(childThreadsListRpc, async (_input, ctx) => {
     const dir = resolveConfirmBoxDir();

@@ -13,8 +13,10 @@ import { Pressable, Text, View } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import { childThreadsListRpc } from "../shared/child-threads.js";
 import type { ChildThread, ChildThreadsListOutput } from "../shared/child-threads.js";
-import { confirmBoxAckRpc } from "../shared/contract.js";
+import { confirmBoxAckRpc, boxSignalRpc } from "../shared/contract.js";
 import { notifyBoxChanged } from "./events.js";
+import { watchBoxSignal } from "./change-signal.js";
+import { ReloadButton } from "./ReloadButton.js";
 
 const REFRESH_MS = 30_000;
 
@@ -49,6 +51,7 @@ export function ChildDoneView({
 }) {
   const list = useRpc(childThreadsListRpc);
   const ack = useRpc(confirmBoxAckRpc);
+  const signalTimes = useRpc(boxSignalRpc);
   const [data, setData] = useState<ChildThreadsListOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -59,15 +62,37 @@ export function ChildDoneView({
     try {
       setData(await list({}));
       setError(null);
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return false;
     }
   }, [list]);
 
   useEffect(() => {
     void reload();
     const timer = setInterval(() => void reload(), REFRESH_MS);
-    return () => clearInterval(timer);
+    // 子スレの完了・取り下げ・再投函の合図で即取り直す(定期取得の30秒を待たない)。
+    // box の合図(他の項目の投函・ack)には反応しない=重い一覧を無関係な変化で引かない(round6指摘6)。
+    // 他端末の「完了にする」は ack で、サーバが child_threads でなく box の合図を書くので、
+    // この端末は定期取得(30秒)で追いつく。
+    const stop = watchBoxSignal(
+      () => signalTimes({}),
+      (which) => {
+        if (which === "child_threads") void reload();
+      },
+    );
+    return () => {
+      clearInterval(timer);
+      stop();
+    };
+  }, [reload, signalTimes]);
+
+  // 手動の更新。取れた時だけバッジ(件数)も取り直す(カードとバッジが同じ時点になる)
+  const manualReload = useCallback(async () => {
+    const ok = await reload();
+    if (ok) notifyBoxChanged();
+    return ok;
   }, [reload]);
 
   const c = theme.colors;
@@ -92,6 +117,8 @@ export function ChildDoneView({
         justifyContent: "space-between" as const,
         gap: 8,
       },
+      // 見出しは左、更新ボタンは右上。長いエラー文でもボタンを押し出さない
+      headText: { flex: 1, color: c.foregroundMuted, fontSize: 12 },
       chipNew: {
         color: c.accentForeground,
         fontSize: 11,
@@ -168,7 +195,10 @@ export function ChildDoneView({
 
   return (
     <View style={s.root}>
-      <Text style={s.meta}>{header}</Text>
+      <View style={s.head}>
+        <Text style={s.headText}>{header}</Text>
+        <ReloadButton colors={c} onRefresh={manualReload} testID="childdone-reload" />
+      </View>
       {done.length > 0 ? (
         <View style={s.row}>
           <Pressable accessibilityRole="button" style={s.sub} onPress={toggleShowAcked}>

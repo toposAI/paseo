@@ -25,14 +25,18 @@ export function eventsFileName(now: number): string {
   return `events-${d.getFullYear()}${p2(d.getMonth() + 1)}.jsonl`;
 }
 
-function appendLine(dir: string, event: Record<string, unknown>): void {
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const fd = fs.openSync(path.join(dir, eventsFileName(Date.now())), "a");
+function writeAt(file: string, line: string): void {
+  const fd = fs.openSync(file, "a");
   try {
-    fs.writeSync(fd, `${JSON.stringify(event)}\n`);
+    fs.writeSync(fd, line);
   } finally {
     fs.closeSync(fd);
   }
+}
+
+function appendLine(dir: string, event: Record<string, unknown>): void {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeAt(path.join(dir, eventsFileName(Date.now())), `${JSON.stringify(event)}\n`);
 }
 
 /** 1件を既読/承認にする。`id` が空なら書かない(呼び出し側の取り違えを黙って通さない)。 */
@@ -45,4 +49,14 @@ export function appendAck(
   const itemId = id.trim();
   if (!itemId) throw new Error("id が空です");
   appendLine(dir, { t: "ack", id: itemId, ts: now, action });
+  // 画面への合図(Python `notify_box.signal` と同じファイル・同じ1行)。別端末(PC と iPhone)の
+  // バッジ・一覧も5秒以内に取り直す(2026-10-24 round6指摘8)。合図は副次経路なので失敗は握る。
+  try {
+    writeAt(
+      path.join(dir, "box.signal.jsonl"),
+      `${JSON.stringify({ t: "signal", ts: now, event: "ack", id: itemId })}\n`,
+    );
+  } catch {
+    // 取れなくても定期取得(30秒)が補う
+  }
 }
