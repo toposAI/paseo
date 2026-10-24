@@ -50,7 +50,7 @@ import type { NoteStatus, SidebarNote } from "../shared/notes.js";
 import type { SidebarPlace, ZoneCounts } from "../shared/concept-places.js";
 import { emptySectionLabel } from "../shared/sidebar-section-mode.js";
 import type { SidebarSectionKey } from "../shared/sidebar-section-mode.js";
-import { type StatusKind, statusKindOfMachine } from "../shared/thread-status-label.js";
+import type { StatusKind } from "../shared/thread-status-label.js";
 import { pickReadableText } from "../shared/contrast.js";
 import { menuCanArchive } from "../shared/thread-menu.js";
 import type { ThreadMenuIntent } from "../shared/thread-menu.js";
@@ -1060,8 +1060,9 @@ function rowIcon(row: SidebarRowView<ChildThread>, t: ChildThread): string {
  * `closed` は行末の印(箱)と揃える(`shared/thread-status-label` の `displayStatus` と同じ規則。
  * 出口レビュー round3 指摘1)。
  */
-function kindOfStatusLabel(label: NoteStatus | "待機中", machineState: string | null): StatusKind {
-  if (statusKindOfMachine(machineState) === "closed") return "closed";
+function kindOfStatusLabel(label: NoteStatus | "待機中", _machineState: string | null): StatusKind {
+  // 帯の文字は実装ノートの status なので、色も機械状態(closed)で上書きせず文字の語彙で選ぶ
+  // (上書きすると「判断待ち」「実装中」の文字が灰色の帯になり、同じ状態で色が割れる)。
   if (label === "待機中") return "idle";
   if (label === "完了") return "done";
   if (label === "判断待ち" || label === "構想") return "waiting";
