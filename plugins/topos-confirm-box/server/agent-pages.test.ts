@@ -29,6 +29,21 @@ test("全ページを辿る(続きのカーソルが無くなるまで。背景�
   assert.equal(queries[0]?.filter, undefined);
 });
 
+test("アーカイブ済みを含める指定は、背景の指定が無くてもフィルタに載る", async () => {
+  // 行の取り込みは「背景を含めず・アーカイブ済みは含めて」引く(閉じたスレを弾く側で落とすため)。
+  const queries: (AgentPageQuery | undefined)[] = [];
+  await listAllAgents(
+    {
+      async list(q) {
+        queries.push(q);
+        return page(["a"]);
+      },
+    },
+    { includeArchived: true },
+  );
+  assert.deepEqual(queries[0]?.filter, { includeArchived: true });
+});
+
 test("背景込みを頼んだら背景込みで引く", async () => {
   const res = await listAllAgents(
     {

@@ -62,12 +62,9 @@ export const CHILD_THREADS_SCREEN_ID = "child-threads";
 
 /**
  * サイドバーのカスタム内容(`addSidebarHeaderItem` の Component)が受ける props。
- * 出し分けはタブ(`client/sidebar-mode.ts`)から購読する。`rows` を渡すとスレ一覧の行をそれに
- * 差し替える(テスト・将来の別の一覧用。省略時は実装ノートで絞ったスレ一覧)。
+ * 出し分けはタブ(`client/sidebar-mode.ts`)から購読する(行は実装ノートで絞ったスレ一覧)。
  */
-export type ChildThreadsSidebarProps = PluginSidebarItemProps & {
-  rows?: readonly SidebarRowView<ChildThread>[];
-};
+export type ChildThreadsSidebarProps = PluginSidebarItemProps;
 
 const ICON: Record<StatusKind, string> = {
   waiting: "CircleHelp",
@@ -222,11 +219,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
 
   // 上段の行(ノートの status で絞り込んだ後)。司令塔の行(サーバーが先頭に置く)は
   // ノートが無ければ実装中として通る。子スレの親 id がこれに当たれば同じグループへ寄せる。
-  // タブ切替UIから `rows` が渡された場合はそれを出す(構想一覧も同じ口で受ける)。
-  const rows = useMemo(
-    () => props.rows ?? buildUpperRows(threads, implByThread),
-    [props.rows, threads, implByThread],
-  );
+  const rows = useMemo(() => buildUpperRows(threads, implByThread), [threads, implByThread]);
   // 描画(SidebarContents)と並べ替えで同じ集合を使う(全スレから作る。common のコメント参照)。
   const coordinatorIds = useMemo(() => coordinatorIdSet(threads), [threads]);
   const visibleIds = useMemo(() => new Set(rows.map((r) => r.thread.agentId)), [rows]);

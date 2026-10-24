@@ -22,7 +22,7 @@ export const AGENT_PAGE_SIZE = 200;
 export const AGENT_PAGE_LIMIT = 20;
 
 export interface AgentPageQuery {
-  filter?: { includeBackground?: boolean };
+  filter?: { includeArchived?: boolean; includeBackground?: boolean };
   page?: { limit: number; cursor?: string };
 }
 
@@ -50,26 +50,35 @@ export interface ListAllAgentsResult {
  */
 export async function listAllAgents(
   pager: AgentPager,
-  opts: { includeBackground?: boolean } = {},
+  opts: { includeBackground?: boolean; includeArchived?: boolean } = {},
 ): Promise<ListAllAgentsResult> {
-  if (opts.includeBackground !== true) return await walk(pager, false);
+  const background = opts.includeBackground === true;
+  if (!background) return await walk(pager, false, opts.includeArchived === true);
   try {
-    return await walk(pager, true);
+    return await walk(pager, true, opts.includeArchived === true);
   } catch {
     // 背景込みを断られた(古いホスト)。背景無しで最初から引き直す。
-    const res = await walk(pager, false);
+    const res = await walk(pager, false, opts.includeArchived === true);
     return { ...res, backgroundDropped: true };
   }
 }
 
-async function walk(pager: AgentPager, background: boolean): Promise<ListAllAgentsResult> {
+async function walk(
+  pager: AgentPager,
+  background: boolean,
+  includeArchived: boolean,
+): Promise<ListAllAgentsResult> {
   const agents: ListedAgentLike[] = [];
   let cursor: string | undefined;
   for (let pageNo = 0; pageNo < AGENT_PAGE_LIMIT; pageNo += 1) {
     let res: AgentPage;
     try {
+      const filter = {
+        ...(background ? { includeBackground: true } : {}),
+        ...(includeArchived ? { includeArchived: true } : {}),
+      };
       res = await pager.list({
-        ...(background ? { filter: { includeBackground: true } } : {}),
+        ...(Object.keys(filter).length > 0 ? { filter } : {}),
         page: { limit: AGENT_PAGE_SIZE, ...(cursor ? { cursor } : {}) },
       });
     } catch (err) {

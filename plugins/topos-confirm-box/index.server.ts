@@ -188,21 +188,17 @@ export default function contribute(server: PluginServerContext) {
       threads = adoptOrphans([...coordinators, ...alive]);
       // 登録簿に載っていないスレ(= Paseo の「新しいワークスペース」から人が直接始めたスレ)も行にする
       // (2026-10-24 ユーザー報告)。取れなければ従来どおり登録簿の行だけを出す(行が消えるより出す)。
-      if (pagedAgents !== null) {
-        // 全ページ版はすでに取れている(同じ取得を2回しない)。アーカイブ済みを含まないので、
-        // `mergeUnregisteredThreads` の `archived` の弾きは効かないが、既定の一覧にも載らない。
-        if (pagedAgents.length > 0) {
-          threads = mergeUnregisteredThreads(threads, pagedAgents, ids).rows;
+      // 取り込みは**背景を含めず・アーカイブ済みは明示的に含めて**引く。背景を含めると、Paseo が
+      // 内部用途で建てた背景ワークスペースのスレ(通常の一覧には出ない)まで行として出てしまう。
+      // アーカイブ済みを明示的に含めるのは `mergeUnregisteredThreads` の `archived` の弾きを効かせる
+      // ため(既定の一覧は返さないが、ホストの既定が変わっても閉じたスレが行にならないように)。
+      try {
+        const unregistered = await listAllAgents(ctx.paseo.agents, { includeArchived: true });
+        if (unregistered.agents.length > 0) {
+          threads = mergeUnregisteredThreads(threads, unregistered.agents, ids).rows;
         }
-      } else {
-        try {
-          const unregistered = await listAllAgents(ctx.paseo.agents);
-          if (unregistered.agents.length > 0) {
-            threads = mergeUnregisteredThreads(threads, unregistered.agents, ids).rows;
-          }
-        } catch {
-          // 一覧が引けない: 登録簿の行だけで続ける。
-        }
+      } catch {
+        // 一覧が引けない: 登録簿の行だけで続ける。
       }
       // 押して開けるか。いまの判定は**スレのアーカイブと `closed`**だけを止める
       // (`thread-liveness.ts` のコメント参照)。ワークスペースがアーカイブ済みの場合は
