@@ -10,6 +10,7 @@ import {
   answerVaultDecision,
   applyVaultSource,
   bundleNotifications,
+  LEGACY_CUTOVER_MS,
   parseDecisionNote,
   parseOptions,
   readVaultDecisions,
@@ -191,4 +192,57 @@ test("同一 source+内容の未読通知を束ね、既読と別内容は束ね
   const rep = out.find((i) => i.id === "2");
   assert.equal(rep?.dupCount, 2);
   assert.deepEqual(rep?.memberIds?.sort(), ["1", "2"]);
+});
+
+test("切替後に投函された judgment 行と、Vault 読取失敗時の旧行は隠さない", () => {
+  const old = item({ id: "old", judgment: true, ts: 1 });
+  const fresh = item({ id: "fresh", judgment: true, ts: LEGACY_CUTOVER_MS + 1 });
+  assert.deepEqual(
+    applyVaultSource([old, fresh], []).items.map((i) => i.id),
+    ["fresh"],
+  );
+  assert.deepEqual(
+    applyVaultSource([old, fresh], [], true).items.map((i) => i.id),
+    ["old", "fresh"],
+  );
+});
+
+test("BOM・クォート付き state は読み、id とファイル名が違うノートは skipped に数える", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "j-1.md"), `﻿${NOTE("j-1", '"Open"')}`);
+  fs.writeFileSync(path.join(dir, "j-2.md"), NOTE("j-3", "open"));
+  const r = readVaultDecisions({ TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir });
+  assert.deepEqual(
+    r.items.map((i) => i.key),
+    ["vault:j-1"],
+  );
+  assert.deepEqual(
+    r.skipped.map((s) => s.name),
+    ["j-2.md"],
+  );
+});
+
+test("シンボリックリンクのノートには書かない / 選択の改行は1行に潰す", () => {
+  const dir = tmpDir();
+  const real = path.join(tmpDir(), "real.md");
+  fs.writeFileSync(real, NOTE("j-1", "open"));
+  fs.symlinkSync(real, path.join(dir, "j-1.md"));
+  const env = { TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir };
+  assert.throws(
+    () =>
+      answerVaultDecision(
+        { key: "vault:j-1", chosenId: "a", chosenLabel: null, reason: "" },
+        new Date(),
+        env,
+      ),
+    /シンボリックリンク/,
+  );
+  fs.rmSync(path.join(dir, "j-1.md"));
+  fs.writeFileSync(path.join(dir, "j-1.md"), NOTE("j-1", "open"));
+  answerVaultDecision(
+    { key: "vault:j-1", chosenId: "a", chosenLabel: null, reason: "x\n## 乗っ取り" },
+    new Date(),
+    env,
+  );
+  assert.ok(!/^## 乗っ取り/m.test(fs.readFileSync(path.join(dir, "j-1.md"), "utf8")));
 });

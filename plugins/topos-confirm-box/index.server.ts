@@ -123,12 +123,18 @@ export default function contribute(server: PluginServerContext) {
     // --- 判断項目の出所は Vault の判断ノートに一本化する(箱側の旧 judgment 行は隠すだけ)
     if (vaultSourceEnabled()) {
       const vault = readVaultDecisions();
-      items = applyVaultSource(items, vault.items).items;
+      items = applyVaultSource(items, vault.items, vault.error !== null).items;
+      const skippedNote = vault.skipped.length
+        ? `(読めず${vault.skipped.length}件: ${vault.skipped
+            .slice(0, 3)
+            .map((k) => `${k.name}=${k.reason}`)
+            .join("、")})`
+        : "";
       sources.push({
         id: "pending",
         label: "Vault判断ノート",
-        ok: vault.error === null,
-        detail: vault.error ?? vault.dir,
+        ok: vault.error === null && vault.skipped.length === 0,
+        detail: vault.error ?? `${vault.dir}${skippedNote}`,
         count: vault.items.length,
       });
     }
@@ -517,10 +523,12 @@ export default function contribute(server: PluginServerContext) {
       // Vault の判断ノートへの回答は、まずノート(正本)を answered にする。失敗したら台帳にも書かない。
       let noteNote = "";
       if (input.key.startsWith(VAULT_KEY_PREFIX)) {
-        const label =
-          readVaultDecisions()
-            .items.find((i) => i.key === input.key)
-            ?.options.find((o) => o.id === input.chosen)?.label ?? null;
+        const noteItem = readVaultDecisions().items.find((i) => i.key === input.key);
+        const option = noteItem?.options.find((o) => o.id === input.chosen);
+        if (input.chosen !== null && !option) {
+          return { ok: false, message: `選択肢 ${input.chosen} はこの判断にありません` };
+        }
+        const label = option?.label ?? null;
         const file = answerVaultDecision({
           key: input.key,
           chosenId: input.chosen,
@@ -529,14 +537,23 @@ export default function contribute(server: PluginServerContext) {
         });
         noteNote = `・ノート更新 ${file.split("/").pop()}`;
       }
-      appendDecision(resolveConfirmBoxDir(), {
-        key: input.key,
-        chosen: input.chosen,
-        recommended: input.recommended,
-        depth: input.depth,
-        reason: input.reason,
-        source: input.source,
-      });
+      try {
+        appendDecision(resolveConfirmBoxDir(), {
+          key: input.key,
+          chosen: input.chosen,
+          recommended: input.recommended,
+          depth: input.depth,
+          reason: input.reason,
+          source: input.source,
+        });
+      } catch (ledgerError) {
+        // ノート(正本)は更新済み。台帳だけ失敗しても再回答は「上書きしません」で詰むので、成功として警告を添える。
+        if (!noteNote) throw ledgerError;
+        return {
+          ok: true,
+          message: `ノートは更新しました(${input.key})が台帳への記録に失敗: ${(ledgerError as Error).message}${noteNote}`,
+        };
+      }
       return {
         ok: true,
         message: `記録しました(${input.key} → ${input.chosen ?? "選択なし"})${noteNote}`,

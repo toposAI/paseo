@@ -50,12 +50,14 @@ interface Parsed {
 }
 
 function splitFrontmatter(text: string): Parsed | null {
-  const m = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text.replace(/\r\n/g, "\n"));
+  const m = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(
+    text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n"),
+  );
   if (!m) return null;
   const front: Record<string, string> = {};
   for (const line of m[1].split("\n")) {
     const kv = /^([A-Za-z_]+):\s*(.*)$/.exec(line);
-    if (kv) front[kv[1]] = kv[2].trim();
+    if (kv) front[kv[1]] = kv[2].trim().replace(/^(["'])(.*)\1$/, "$2");
   }
   return { front, body: m[2] };
 }
@@ -95,11 +97,11 @@ export function parseDecisionNote(text: string, mtimeMs: number): ConfirmBoxItem
   const { front, body } = parsed;
   const id = front.id;
   if (!id || !NOTE_ID.test(id)) return null;
-  if (!SHOWN_STATES.has(front.state)) return null;
+  if (!SHOWN_STATES.has(front.state.toLowerCase())) return null;
   const title = /^#\s+(.+)$/m.exec(body)?.[1].trim() ?? id;
   const background = section(body, "背景");
   const { options, recommended } = parseOptions(section(body, "選択肢と推奨"));
-  const waiting = front.state === "waiting_materials";
+  const waiting = front.state.toLowerCase() === "waiting_materials";
   const materials = front.materials && front.materials !== "null" ? front.materials : "";
   const summaryBase = background.split("\n").find((l) => l.trim()) ?? "";
   const summary = waiting
@@ -135,6 +137,8 @@ export interface VaultDecisionRead {
   /** 画面に出す理由のある失敗(ディレクトリが読めない等)。無ければ null。 */
   error: string | null;
   dir: string;
+  /** 読めずに出せなかったノート(件数だけ画面の状態表示に出す。無言で欠落させない)。 */
+  skipped: { name: string; reason: string }[];
 }
 
 /** 判断ノートを読む。**例外を投げない**(読めない時は error に理由を入れる)。 */
@@ -148,39 +152,64 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
       .sort()
       .slice(0, MAX_NOTES);
     const items: ConfirmBoxItem[] = [];
+    const skipped: { name: string; reason: string }[] = [];
+    const seen = new Set<string>();
     for (const name of names) {
       try {
         const full = path.join(dir, name);
         const st = fs.statSync(full);
-        if (!st.isFile() || st.size > MAX_BYTES) continue;
+        if (!st.isFile() || st.size > MAX_BYTES) {
+          skipped.push({ name, reason: "ファイルでない/大きすぎる" });
+          continue;
+        }
         const item = parseDecisionNote(fs.readFileSync(full, "utf8"), st.mtimeMs);
-        if (item) items.push(item);
+        if (!item) continue; // open/waiting_materials 以外・frontmatter なしは対象外(欠落ではない)
+        // ファイル名と id が違うノートは、回答の書き先が別ノートになるので出さない
+        if (
+          `${(item.key ?? "").slice(VAULT_KEY_PREFIX.length)}.md` !== name ||
+          seen.has(item.key ?? "")
+        ) {
+          skipped.push({ name, reason: "id がファイル名と違う/重複" });
+          continue;
+        }
+        seen.add(item.key ?? "");
+        items.push(item);
       } catch {
-        // 1本読めなくても他は出す
+        skipped.push({ name, reason: "読めない" });
       }
     }
-    return { items, error: null, dir };
+    return { items, error: null, dir, skipped };
   } catch (error) {
-    return { items: [], error: (error as Error).message, dir };
+    return { items: [], error: (error as Error).message, dir, skipped: [] };
   }
 }
 
 // ---------------------------------------------------------------- 箱側の旧judgment行を隠す
 
-/** 画面に出さない箱側の判断行か。Vault 出所の項目・permit(Paseo の承認待ち)は対象外。 */
+/**
+ * 切替時刻(2026-10-24 18:00 JST)。これより前に箱へ入った judgment 行だけを旧項目として隠す。
+ * 以降に投函された判断(confirm_box_deposit が今も箱へ書く)は Vault にノートが無くても見せる
+ * (全隠しにすると新規の判断が誰にも見えなくなる: 出口レビュー round1 指摘4)。
+ */
+export const LEGACY_CUTOVER_MS = 1792832436000;
+
+/** 画面に出さない箱側の判断行か。Vault 出所の項目・permit(Paseo の承認待ち)・切替後の投函は対象外。 */
 export function isHiddenLegacyJudgment(item: ConfirmBoxItem): boolean {
   if (item.kind === "permit" || item.source === VAULT_DECISION_SOURCE) return false;
+  if (item.ts >= LEGACY_CUTOVER_MS) return false;
   return item.judgment === true || isLegacyOptionItem(item);
 }
 
+/** Vault を読めなかった(`vaultFailed`)ときは旧行を隠さない(空表示にしない)。 */
 export function applyVaultSource(
   boxItems: readonly ConfirmBoxItem[],
   vaultItems: readonly ConfirmBoxItem[],
+  vaultFailed = false,
 ): { items: ConfirmBoxItem[]; hidden: ConfirmBoxItem[] } {
   const hidden: ConfirmBoxItem[] = [];
   const kept: ConfirmBoxItem[] = [];
   for (const item of boxItems) {
-    if (isHiddenLegacyJudgment(item)) hidden.push(item);
+    if (!vaultFailed && isHiddenLegacyJudgment(item)) hidden.push(item);
     else kept.push(item);
   }
   return { items: [...kept, ...vaultItems], hidden };
@@ -216,16 +245,18 @@ function rewriteFrontmatter(fm: string[], date: string, iso: string): string[] {
   const entry = `- ${date} (user: 確認箱で回答)`;
   const hi = out.findIndex((l) => l.startsWith("modified_history:"));
   if (hi < 0) return [...out, "modified_history:", entry];
+  if (/^modified_history:\s*\[\s*\]\s*$/.test(out[hi])) out[hi] = "modified_history:";
   let at = hi + 1;
-  while (at < out.length && out[at].startsWith("- ")) at += 1;
+  while (at < out.length && /^\s*- /.test(out[at])) at += 1;
   out.splice(at, 0, entry);
   return out;
 }
 
 function answerLine(answer: VaultAnswer, date: string): string {
   const label = answer.chosenLabel ? `「${answer.chosenLabel}」` : "";
-  const chosen = answer.chosenId ? `選択 ${answer.chosenId}${label}` : "選択なし";
-  const reason = answer.reason.trim() ? `(理由: ${answer.reason.trim().replace(/\n/g, " ")})` : "";
+  const one = (t: string) => t.replace(/[\r\n]+/g, " ").trim();
+  const chosen = answer.chosenId ? `選択 ${one(answer.chosenId)}${one(label)}` : "選択なし";
+  const reason = answer.reason.trim() ? `(理由: ${one(answer.reason)})` : "";
   return `- 「${date} (確認箱): ${chosen}${reason}」`;
 }
 
@@ -265,10 +296,14 @@ export function answerVaultDecision(
   if (path.dirname(path.resolve(file)) !== path.resolve(dir) || isBackupPath(file)) {
     throw new Error("書き込み先が判断ノートのディレクトリの外です");
   }
+  // シンボリックリンク経由でバックアップへ書かない(実体パスでも判定。ノート自体のリンクも拒否)
+  if (isBackupPath(fs.realpathSync(dir)) || fs.lstatSync(file).isSymbolicLink()) {
+    throw new Error("書き込み先がバックアップまたはシンボリックリンクです");
+  }
   const text = fs.readFileSync(file, "utf8");
   const parsed = splitFrontmatter(text);
   if (!parsed || parsed.front.id !== id) throw new Error("判断ノートの frontmatter を読めません");
-  if (!SHOWN_STATES.has(parsed.front.state)) {
+  if (!SHOWN_STATES.has(parsed.front.state.toLowerCase())) {
     throw new Error(`すでに ${parsed.front.state} です(上書きしません)`);
   }
   const { date, iso } = stamp(now);
