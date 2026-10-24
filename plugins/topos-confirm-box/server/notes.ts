@@ -18,6 +18,9 @@ import os from "node:os";
 import path from "node:path";
 import { normalizeNoteStatus } from "../shared/notes.js";
 import type { NoteKind, NoteStatus, SidebarNote } from "../shared/notes.js";
+import { conceptPlace, isDirectChild, placeName, zoneOfPath } from "../shared/concept-places.js";
+import { collapseRepeatedTitle } from "../shared/concept-row.js";
+import type { ConceptReadPlan, SidebarPlace, ZoneCounts } from "../shared/concept-places.js";
 
 /** 走査するファイル数の上限(壊れた/巨大な Vault でサイドバーを止めない)。 */
 export const NOTE_SCAN_LIMIT = 20_000;
@@ -61,12 +64,58 @@ export function resolveNoteRoots(env: NodeJS.ProcessEnv = process.env): string[]
  * 走査先を決めるのと同じ Vault の根(`05_Projects` の親)。構想ノートへの記録で、Vault 外を
  * 拒否する境界とロックの単位に使う。明示設定(`TOPOS_CONFIRM_BOX_NOTE_DIR`)は `05_Projects`
  * の親でも、ただのディレクトリでもよい(そのときはその親を根として扱う)。
+ *
+ * **ロックの鍵はこの戻り値の realpath で取る**(記録も移動も)。以前は移動だけ
+ * `Paseo/構想` を単位にしていて、記録と噛み合っていなかった(構想タブ出口レビュー round1 指摘1)。
  */
 export function resolveVaultDir(env: NodeJS.ProcessEnv = process.env): string {
   const vault =
     firstNonEmpty(env.TOPOS_CONFIRM_BOX_VAULT_DIR, env.OBSIDIAN_VAULT_DIR) || DEFAULT_VAULT;
   if (firstNonEmpty(env.TOPOS_CONFIRM_BOX_NOTE_DIR)) return path.dirname(resolveNoteRoots(env)[0]);
   return expandHome(vault);
+}
+
+/**
+ * 構想の置き場(`Paseo/構想/検討中`・`あとで`)の読み出し計画を決める。
+ *
+ * 新置き場(`Paseo/構想/`)が無ければ旧置き場だけを読む(移行前でもサイドバーは今までどおり動く)。
+ * `検討中/` と `あとで/` は**片方だけ在っても**それぞれ読む(移行の途中でも「あとで」に移した分を消さない)。
+ * 移動の可否は `検討中` と `あとで` の**両方**が在るか(単一ライター側が作る)。
+ */
+export function resolveConceptPlan(vaultDir: string): ConceptReadPlan {
+  const place = conceptPlace(vaultDir);
+  // **読む側は symlink を辿る**(`stat`)。ここで `lstat` にすると、置き場が symlink のときに
+  // 中のノートが警告なく全部消える(構想タブ出口レビュー round3 指摘4)。読めてしまう代わりに
+  // 「移せる ⋯」を出さないことで、押すと必ず失敗する導線だけを塞ぐ(`canMovePlace` を見る)。
+  const isDir = (p: string) => {
+    try {
+      return fs.statSync(p).isDirectory();
+    } catch {
+      return false;
+    }
+  };
+  if (!isDir(place.root)) return { active: null, later: null };
+  return {
+    active: isDir(place.activeDir) ? place.activeDir : null,
+    later: isDir(place.laterDir) ? place.laterDir : null,
+  };
+}
+
+/**
+ * 行を移せる置き場か。**両方の置き場が symlink でない通常のディレクトリ**であること
+ * (`moveConceptNote` のガードと揃える。読む側は symlink を辿るので、ここで揃えないと
+ * 「移せる ⋯」を押すたびに必ず失敗する ⋯ が出る。構想タブ出口レビュー round2 指摘4)。
+ */
+export function canMovePlace(plan: ConceptReadPlan): boolean {
+  if (plan.active === null || plan.later === null) return false;
+  const realDir = (p: string) => {
+    try {
+      return fs.lstatSync(p).isDirectory(); // symlink なら false(lstat はリンク自身を見る)
+    } catch {
+      return false;
+    }
+  };
+  return realDir(plan.active) && realDir(plan.later);
 }
 
 /** Vault のバックアップ(一方向同期先)。読まない・書かない。APFS は大小文字を区別しないので `i` 付き。 */
@@ -237,7 +286,7 @@ function threadIdCandidates(
  *
  * インライン形式と同じ規則(8〜200字の英数・ハイフン)で全件を並べ、UUID 形を先にする。
  * 短縮形(`c389e3e`)も候補に残す: 落とすと、同じ内容をインライン形式で書いたときと
- * 「未作成/未解決」の表示が変わる(出口レビュー round2 指摘2)。
+ * 「未作成/未解決」の表示が変わる(構想タブ出口レビュー round1 指摘2)。
  */
 export function threadIdFromBlockList(text: string): string[] {
   const ids: string[] = [];
@@ -297,9 +346,22 @@ export function readSidebarNotes(
     limit?: number;
     now?: () => number;
     knownAgentIds?: ReadonlySet<string>;
+    /**
+     * 構想の置き場(`resolveConceptPlan`)。省略時は Vault から決める。
+     * `active`/`later` が null の区分は読まない(旧置き場だけ=`05_Projects` の走査)。
+     */
+    concept?: ConceptReadPlan;
+    /** 区分の判定に使う Vault の根(`concept` を省略したときだけ使う)。 */
+    vaultDir?: string;
   } = {},
-): { notes: SidebarNote[]; roots: string[]; scanned: number; truncated: boolean } {
-  const roots = opts.roots ?? resolveNoteRoots();
+): {
+  notes: SidebarNote[];
+  roots: string[];
+  scanned: number;
+  truncated: boolean;
+  place: SidebarPlace;
+  zones: ZoneCounts;
+} {
   const limit = opts.limit ?? NOTE_SCAN_LIMIT;
   const now = (opts.now ?? Date.now)();
   const seen = new Set<string>();
@@ -308,6 +370,11 @@ export function readSidebarNotes(
   let scanned = 0;
   let truncated = false;
 
+  const vaultDir = opts.vaultDir ?? resolveVaultDir();
+  const plan = opts.concept ?? resolveConceptPlan(vaultDir);
+  const placeDir = conceptPlace(vaultDir);
+  const canMove = canMovePlace(plan);
+  const roots = withConceptRoots(opts.roots ?? resolveNoteRoots(), plan);
   // 走査中に上限へ当たったら truncated を立て、呼び出し側のループを止める。
   const visit = (file: string): boolean => {
     if (scanned >= limit) {
@@ -319,21 +386,24 @@ export function readSidebarNotes(
     if (!note || seen.has(note.path)) return false;
     seen.add(note.path);
     if (note.kind === "implementation") upper.push(note);
-    else lower.push(note);
+    else {
+      // 区分はパスだけで決まる(新置き場の外=旧置き場は「検討中」)。移せるのは置き場の直下だけ
+      // (`moveConceptNote` のガード2と同じ条件。ここで揃えないと押すと必ず失敗する ⋯ が出る)。
+      const zone = zoneOfPath(note.path, placeDir);
+      let dir: string | null = null;
+      if (zone === "later") dir = placeDir.laterDir;
+      else if (zone === "active") dir = placeDir.activeDir;
+      const direct = dir !== null && isDirectChild(note.path, dir);
+      lower.push({
+        ...note,
+        zone: zone ?? "active",
+        movable: direct && canMove,
+      });
+    }
     return false;
   };
 
-  // 走査先が無いのを「ノートが0件」と見分けられないと、画面は正常な空表示になる。
-  // 設定ミスは握りつぶさず throw し、呼び出し側(index.server.ts)の catch 経路で error にする。
-  for (const root of roots) {
-    try {
-      // ファイルでも stat は通る。ディレクトリでなければ readdir が失敗して 0件に見えるので、
-      // 「ノートが無い」と取り違えないよう設定ミスとして止める(出口レビュー round2 指摘6)。
-      if (!fs.statSync(root).isDirectory()) throw new Error("not a directory");
-    } catch {
-      throw new Error(`走査先がありません: ${root}`);
-    }
-  }
+  assertRootsExist(roots);
 
   outer: for (const root of roots) {
     const stack = [root];
@@ -354,7 +424,51 @@ export function readSidebarNotes(
       }
     }
   }
-  return { notes: [...sortNotes(upper), ...sortNotes(lower)], roots, scanned, truncated };
+  // 読めていない区分は走査していない=そこから来たノートは無い。旧置き場の構想ノートは
+  // 区分のパスに居ないので `active` と数える(新置き場が無くても「検討中」に出る)。
+  const concepts = sortNotes(lower);
+  return {
+    notes: [...sortNotes(upper), ...concepts],
+    roots,
+    scanned,
+    truncated,
+    place: placeName(plan),
+    zones: {
+      active: concepts.filter((n) => n.zone === "active").length,
+      later: concepts.filter((n) => n.zone === "later").length,
+      laterAvailable: plan.active !== null && plan.later !== null,
+    },
+  };
+}
+
+/**
+ * 構想の新置き場(`検討中`/`あとで`)を走査先へ足す。案件ノートの走査先とは独立に読む
+ * (走査先の設定を変えても構想は消えない)。無い区分は足さない(`走査先がありません` で
+ * 一覧ごと失敗させない)。
+ */
+function withConceptRoots(roots: readonly string[], plan: ConceptReadPlan): string[] {
+  // 呼び出し側が渡した配列を書き換えない(再走査で同じ配列を使い回されても増えない)。
+  const out = [...roots];
+  for (const dir of [plan.active, plan.later]) {
+    if (dir && !out.includes(dir)) out.push(dir);
+  }
+  return out;
+}
+
+/**
+ * 走査先が無いのを「ノートが0件」と見分けられないと、画面は正常な空表示になる。
+ * 設定ミスは握りつぶさず throw し、呼び出し側(index.server.ts)の catch 経路で error にする。
+ */
+function assertRootsExist(roots: readonly string[]): void {
+  for (const root of roots) {
+    try {
+      // ファイルでも stat は通る。ディレクトリでなければ readdir が失敗して 0件に見えるので、
+      // 「ノートが無い」と取り違えないよう設定ミスとして止める(構想タブ出口レビュー round1 指摘6)。
+      if (!fs.statSync(root).isDirectory()) throw new Error("not a directory");
+    } catch {
+      throw new Error(`走査先がありません: ${root}`);
+    }
+  }
 }
 
 /** 潜ってよいディレクトリか(隠しディレクトリ・既知の除外は除く)。 */
@@ -394,10 +508,14 @@ function scanFile(file: string, now: number, opts?: ScanFileContext): SidebarNot
   if (!head) return null;
   const fm = parseFrontmatter(head);
   if (!fm) return null;
-  const fallback = path
-    .basename(file, ".md")
-    .replace(/^[ij]-\d{8}-/, "")
-    .replace(/-/g, " ");
+  // `title:` が無いノートはファイル名を使う。新置き場のファイル名は `要約__長い題名` 形なので、
+  // 綴りが同じなら片方へ畳む(一覧の行と同じ規則。スレの題名も二重にならない)。
+  const fallback = collapseRepeatedTitle(
+    path
+      .basename(file, ".md")
+      .replace(/^[ij]-\d{8}-/, "")
+      .replace(/-/g, " "),
+  );
   const parsed = frontmatterToNote(fm, fallback);
   if (!parsed) return null;
   // インラインの候補 → ブロック形式 `threads:` の候補、の順に並べる(先頭が優先)。
@@ -411,6 +529,9 @@ function scanFile(file: string, now: number, opts?: ScanFileContext): SidebarNot
   return {
     path: file,
     updatedAt,
+    // 区分と移動可否は走査側(`visit`)がパスから決めて上書きする。ここでは既定値だけ置く。
+    zone: "active",
+    movable: false,
     ...parsed,
     threadId: resolveThreadId(threadIds, opts?.knownAgentIds),
     threadCandidates: threadIds,

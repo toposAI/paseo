@@ -16,7 +16,7 @@ import type { StateDotKind } from "./state-dot.js";
  * 子スレ一覧側の status。登録簿の行は `shared/child-threads.ts` の3語彙、登録簿に載らない
  * (Paseo から直接建てた)スレは機械状態から導く2語彙(`server/unregistered-threads.ts`)を使う。
  * `待機中`/`承認待ち` も上段に出す(消すと「出ない」症状と見分けが付かない。動いていないことは
- * 状態の帯の色で示す。出口レビュー round1 指摘2)。
+ * 状態の帯の色で示す(構想タブより前の版のレビュー round1 指摘2)。
  */
 export type ThreadStatusHint = "実装中" | "ユーザー判断待ち" | "完了" | "承認待ち" | "待機中";
 
@@ -196,7 +196,7 @@ export function buildUpperRows<T extends RowThread>(
  * ノートは1スレに1枚(検収単位と1対1)なので、解決済みの threadId だけを張る。
  * 解決できない候補しか無いノートは、そのスレの行に重ねない。同じスレに複数枚あれば
  * **先頭(新しい順の最初)勝ち**。テストの写しと本番で結果がずれないよう、クライアントは
- * これだけを使う(出口レビュー round2 指摘1)。
+ * これだけを使う(構想タブ出口レビュー round1 指摘3)。
  */
 export function indexImplementationNotes(
   notes: readonly SidebarNote[],

@@ -13,6 +13,7 @@
  */
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
+import type { ConceptZone, SidebarPlace, ZoneCounts } from "./concept-places.js";
 
 /** ノートの status 語彙(標準_スレは検収単位)。 */
 export const NOTE_STATUSES = [
@@ -68,8 +69,25 @@ export const SidebarNoteSchema = z.object({
   /** 実装ノートが参照する構想ノート(wikilink の生文字列)。 */
   conceptLinks: z.array(z.string()).default([]),
   updatedAt: z.number(),
+  /**
+   * 構想ノートの区分(`Paseo/構想/検討中` = active / `あとで` = later)。
+   * 実装ノートと、旧置き場の構想ノートは `active`(旧置き場に区分は無い)。
+   */
+  zone: z.enum(["active", "later"]).default("active"),
+  /**
+   * この行を「あとで」/「検討中」へ移せるか(構想の置き場の**直下**にあり、両方の置き場が在る)。
+   * 一覧全体で決めない: 旧置き場(`05_Projects`)の構想ノートは区分の外なので、押すと必ず失敗する
+   * ⋯ を出さない(構想タブ出口レビュー round1 指摘4)。
+   */
+  movable: z.boolean().default(false),
 });
-export type SidebarNote = z.infer<typeof SidebarNoteSchema>;
+/**
+ * 読み手の型。`movable` だけ省略可にする(サーバーは常に付けるが、無関係な単体テストの
+ * ノート組み立てにまで必須を強いる意味が無い。省略=移せない)。RPC の契約は上のスキーマ。
+ */
+export type SidebarNote = Omit<z.infer<typeof SidebarNoteSchema>, "movable"> & {
+  movable?: boolean;
+};
 
 export const notesSidebarRpc = defineRpc({
   name: "topos.notes.sidebar",
@@ -85,6 +103,19 @@ export const notesSidebarRpc = defineRpc({
     scanned: z.number().default(0),
     /** 読めなかった理由(設定誤りなど)。正常時は無い。 */
     error: z.string().optional(),
+    /** 構想の置き場(`paseo` = `Paseo/構想/…` を読んでいる / `legacy` = 旧置き場だけ)。 */
+    place: z.enum(["paseo", "legacy"]).default("legacy"),
+    /**
+     * 構想の件数(検討中/あとで)。`laterAvailable=false` のときは「あとで」の区分を作れない
+     * (新置き場がまだ無い=別スレの移行前)ので、画面は切替の入口を出さない。
+     */
+    zones: z
+      .object({
+        active: z.number(),
+        later: z.number(),
+        laterAvailable: z.boolean(),
+      })
+      .default({ active: 0, later: 0, laterAvailable: false }),
   }),
 });
 export type NotesSidebarOutput = z.infer<typeof notesSidebarRpc.output>;
@@ -122,6 +153,31 @@ export const openConceptThreadRpc = defineRpc({
   }),
 });
 export type OpenConceptThreadOutput = z.infer<typeof openConceptThreadRpc.output>;
+
+/**
+ * 構想ノートを「検討中」と「あとで」の間で移す(2026-10-24 ユーザー指示: ずっと寝かせる構想を
+ * あとでフォルダへ)。移動先は `<Vault>/Paseo/構想/{検討中,あとで}`(新置き場が無ければ不可)。
+ *
+ * **書き込み側のガード**(`server/note-thread.ts` の `moveConceptNote`): live Vault の構想ノートだけ・
+ * 置き場の直下だけ・同名があれば上書きしない・排他と原子的 rename。置き場の単一ライター
+ * (`impl_note_writer.py`)が移行の関数を持つようになったら、その関数へ差し替える。
+ */
+export const moveConceptNoteRpc = defineRpc({
+  name: "topos.notes.move-concept",
+  input: z.object({
+    /** 一覧(`notesSidebarRpc`)が返したノートの絶対パス。サーバー側で区分と場所を確かめ直す。 */
+    path: z.string().min(1).max(4096),
+    to: z.enum(["active", "later"]),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    /** 移した後のパス(ok のときだけ)。 */
+    path: z.string().nullable().default(null),
+    message: z.string().default(""),
+  }),
+});
+export type MoveConceptNoteOutput = z.infer<typeof moveConceptNoteRpc.output>;
+export type { ConceptZone, SidebarPlace, ZoneCounts };
 
 /**
  * 深掘りスレの既定(2026-10-23 の実装判断。ユーザー指示「不明ならTopos既定=DeepSeek V4.1 flash low」)。
