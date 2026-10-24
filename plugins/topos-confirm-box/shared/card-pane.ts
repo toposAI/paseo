@@ -87,3 +87,36 @@ export function threadUnavailableReason(
     return "投函元が閉じています(ワークスペースがアーカイブ済み)";
   return "投函元が閉じています";
 }
+
+// ---------------------------------------------------------------- 投函元が無い/閉じているカードの送信先
+
+/** 総司令塔スレの agent ID。投函元が閉じている/参照が無いカードの質問の受け皿。 */
+export const COORDINATOR_AGENT_ID = "1800e2f7-63a5-40b7-9f5f-52e0ba24bb49";
+
+/** 送信先を総司令塔へ切り替えた時に入力欄の下へ出す説明。 */
+export const COORDINATOR_FALLBACK_NOTICE =
+  "元スレが無いので総司令塔に送ります。カードの題名と本文を付けて送信されます";
+
+/**
+ * 総司令塔へ振り替えるか。**カードの時だけ**(スレ直接=優先順位の行は対象外)。
+ * 投函元の参照が無い(`agentId` 無し)か、閉じていると分かった(`closedText` あり)時。
+ * 不明(生死が引けない)は振り替えない(不明を「閉じている」と言い換えない)。
+ */
+export function shouldFallbackToCoordinator(opts: {
+  hasCard: boolean;
+  agentId: string | null;
+  closedText: string | null;
+}): boolean {
+  if (!opts.hasCard) return false;
+  return !opts.agentId || opts.closedText !== null;
+}
+
+/** 総司令塔へ送る発言の先頭にカード題名とIDを付ける(本文はそのまま後ろに残す)。 */
+export function withCardHeader(
+  text: string,
+  card: { id: string; subject: string; background?: string | null },
+): string {
+  const head = `【確認箱カード】${card.subject}(ID: ${card.id})`;
+  const body = card.background ? `\n[カード本文]\n${card.background}` : "";
+  return `${head}${body}\n\n${text}`;
+}

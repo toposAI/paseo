@@ -40,7 +40,13 @@ import { getPaseoClient, useHosts } from "@getpaseo/plugin/client";
 import type { PluginHostProps } from "@getpaseo/plugin/client";
 import { KIND_LABEL, PRIORITY_LABEL } from "../shared/contract.js";
 import type { ConfirmBoxItem } from "../shared/contract.js";
-import { threadUnavailableReason } from "../shared/card-pane.js";
+import {
+  COORDINATOR_AGENT_ID,
+  COORDINATOR_FALLBACK_NOTICE,
+  shouldFallbackToCoordinator,
+  threadUnavailableReason,
+  withCardHeader,
+} from "../shared/card-pane.js";
 import type { ThreadAccess } from "../shared/child-threads.js";
 
 // Paseo のモバイルパネルと同じ 220ms / 同じイージング
@@ -185,7 +191,11 @@ export function CardChatPane({
 
   const access = toAccess(liveness);
   const closedText = threadUnavailableReason(access, item ? "card" : "thread");
+  // 投函元が無い/閉じているカードは総司令塔へ振り替える(スレ直接=item無しは対象外)。
+  const fallback = shouldFallbackToCoordinator({ hasCard: item !== null, agentId, closedText });
+  const sendAgentId = fallback ? COORDINATOR_AGENT_ID : agentId;
   const reason = useMemo(() => {
+    if (fallback) return serverId ? null : "ホストに接続できません";
     // スレ直接(優先順位の行)はカードが無いのが正常なので、カードの有無を先に問わない。
     if (!agentId) {
       if (!item) return "このカードは一覧にありません(決定済みか、URLのカードIDが違います)";
@@ -193,7 +203,7 @@ export function CardChatPane({
     }
     if (!serverId) return "ホストに接続できません";
     return closedText;
-  }, [item, agentId, serverId, closedText]);
+  }, [fallback, item, agentId, serverId, closedText]);
 
   // 元スレの履歴 + 購読。カードを切り替えると前のスレの応答が後から届くので、
   // 生きている間だけ反映する(alive フラグ)うえで、履歴は読み直す。
@@ -233,6 +243,26 @@ export function CardChatPane({
       sub();
     };
   }, [agentId, serverId]);
+
+  // 総司令塔へ振り替えている間は、その返事だけを購読して流す(履歴は読まない=総司令塔の会話が混ざらない)。
+  useEffect(() => {
+    if (!fallback || !serverId) return undefined;
+    let alive = true;
+    const off = getPaseoClient(serverId)
+      .agents.ref(COORDINATOR_AGENT_ID)
+      .timeline.subscribe((evt) => {
+        if (!alive) return;
+        const ev = (evt as { event?: { type?: string; item?: TimelineItemLike } }).event;
+        if (ev?.type !== "timeline" || ev.item?.type !== "assistant_message") return;
+        seq.current += 1;
+        const line = lineFromItem(ev.item, `f${seq.current}`);
+        if (line) setLines((cur) => appendLine(cur, line));
+      });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [fallback, serverId]);
 
   // 生死。引けなかった時は印を付けない(不明を「閉じています」と言い換えない)。
   useEffect(() => {
@@ -291,14 +321,15 @@ export function CardChatPane({
 
   const send = useCallback(async () => {
     const t = text.trim();
-    if (!t || !agentId || !serverId || sendingRef.current) return;
+    if (!t || !sendAgentId || !serverId || sendingRef.current) return;
     sendingRef.current = true;
     setSending(true);
     setText("");
     seq.current += 1;
     setLines((cur) => [...cur, { id: `u${seq.current}`, role: "user", text: t }]);
     try {
-      await getPaseoClient(serverId).agents.ref(agentId).send(t);
+      const outgoing = fallback && item ? withCardHeader(t, item) : t;
+      await getPaseoClient(serverId).agents.ref(sendAgentId).send(outgoing);
       setNotice("");
     } catch (e) {
       setNotice(`送れません: ${e instanceof Error ? e.message : String(e)}`);
@@ -306,7 +337,7 @@ export function CardChatPane({
       sendingRef.current = false;
       setSending(false);
     }
-  }, [text, agentId, serverId]);
+  }, [text, sendAgentId, serverId, fallback, item]);
   const sendPress = useCallback(() => void send(), [send]);
 
   // --- 全画面スライド(狭い幅のみ) ---
@@ -512,7 +543,7 @@ export function CardChatPane({
     [st.overlay, translateX],
   );
 
-  const sendable = canSend(text, agentId, serverId, sending, reason !== null);
+  const sendable = canSend(text, sendAgentId, serverId, sending, reason !== null);
   // lint(jsx-no-new-array-as-prop)対策: 相手が居ない時の淡色は同じ配列を作り直さない。
   const inputStyle = useMemo(
     () => (reason ? [st.input, st.inputOff] : st.input),
@@ -553,7 +584,7 @@ export function CardChatPane({
       <ScrollView ref={scrollRef} style={st.scroll} contentContainerStyle={st.scrollBody}>
         <CardContext item={item} title={title} styles={st} />
         {reason ? <Text style={st.notice}>{reason}</Text> : null}
-        {lines.length === 0 && !reason ? (
+        {lines.length === 0 && !reason && !fallback ? (
           <Text style={st.empty}>
             まだ会話はありません。ここで送ると投函元スレに届き、そのスレの返事がここに出ます。
           </Text>
@@ -575,7 +606,7 @@ export function CardChatPane({
           value={text}
           onChangeText={setText}
           editable={!reason}
-          placeholder={reason ?? "投函元スレへ送る"}
+          placeholder={reason ?? (fallback ? "総司令塔へ送る" : "投函元スレへ送る")}
           placeholderTextColor={colors.foregroundMuted}
           multiline
           maxLength={TEXT_MAX}
@@ -591,7 +622,9 @@ export function CardChatPane({
         </Pressable>
       </View>
       <Text style={st.hint}>
-        {`${text.length}/${TEXT_MAX}字 · 送信先=投函元スレ(この画面の外のスレにも同じ発言が残ります)`}
+        {fallback
+          ? `${COORDINATOR_FALLBACK_NOTICE}(${text.length}/${TEXT_MAX}字)`
+          : `${text.length}/${TEXT_MAX}字 · 送信先=投函元スレ(この画面の外のスレにも同じ発言が残ります)`}
       </Text>
     </View>
   );
