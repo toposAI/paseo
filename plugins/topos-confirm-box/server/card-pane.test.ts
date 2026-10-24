@@ -1,12 +1,15 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import {
+  COORDINATOR_AGENT_ID,
   cardIdFromSearch,
   paneTargetFromSearch,
   searchWithCard,
   searchWithPane,
+  shouldFallbackToCoordinator,
   threadIdFromSearch,
   threadUnavailableReason,
+  withCardHeader,
 } from "../shared/card-pane.js";
 
 test("card パラメータを読み出す(先頭の?の有無どちらも)", () => {
@@ -71,4 +74,23 @@ test("閉じている時の文言。不明(null)は「閉じています」と�
     /^投函元が閉じています/,
   );
   assert.equal(threadUnavailableReason("workspace-archived", "thread"), "担当スレが閉じています");
+});
+
+test("総司令塔への振り替え: カードで参照無し/閉じている時だけ。不明・生きている・スレ直接は振り替えない", () => {
+  const f = shouldFallbackToCoordinator;
+  assert.equal(f({ hasCard: true, agentId: null, closedText: null }), true);
+  assert.equal(f({ hasCard: true, agentId: "a1", closedText: "投函元が閉じています" }), true);
+  assert.equal(f({ hasCard: true, agentId: "a1", closedText: null }), false);
+  assert.equal(f({ hasCard: false, agentId: "a1", closedText: "担当スレが閉じています" }), false);
+  assert.equal(f({ hasCard: false, agentId: null, closedText: null }), false);
+  assert.match(COORDINATOR_AGENT_ID, /^1800e2f7-/);
+});
+
+test("withCardHeader: 先頭に題名とID、本文があれば続けて、利用者の文は最後", () => {
+  const out = withCardHeader("どういう意味?", { id: "c9", subject: "題名X", background: "背景Y" });
+  assert.equal(out, "【確認箱カード】題名X(ID: c9)\n[カード本文]\n背景Y\n\nどういう意味?");
+  assert.equal(
+    withCardHeader("q", { id: "c9", subject: "題名X" }),
+    "【確認箱カード】題名X(ID: c9)\n\nq",
+  );
 });
