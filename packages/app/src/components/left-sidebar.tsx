@@ -632,8 +632,9 @@ const styles = StyleSheet.create((theme) => ({
     gap: 2,
   },
   footerIconButton: (isCompact: boolean) => ({
-    // 32 rather than 36: the six 32px items need every pixel the line has at the default width.
-    width: isCompact ? 36 : 32,
+    // 28 rather than matching the 32px items: at the default sidebar width the line has 194px for
+    // the six items (192px), and 2px of that shortfall has to come out of the gear's own width.
+    width: isCompact ? 36 : 28,
     height: 36,
     alignItems: "center",
     justifyContent: "center",
