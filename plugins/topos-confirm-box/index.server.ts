@@ -73,13 +73,23 @@ import { mergeUnregisteredThreads } from "./server/unregistered-threads.js";
 import type { ListedAgentLike } from "./server/unregistered-threads.js";
 import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
 import type { WorkspaceArchiveDecision } from "./server/workspace-membership.js";
-import { chooseConceptModel, notesSidebarRpc, openConceptThreadRpc } from "./shared/notes.js";
-import type { ConceptModelOption, OpenConceptThreadOutput } from "./shared/notes.js";
+import {
+  chooseConceptModel,
+  moveConceptNoteRpc,
+  notesSidebarRpc,
+  openConceptThreadRpc,
+} from "./shared/notes.js";
+import type {
+  ConceptModelOption,
+  MoveConceptNoteOutput,
+  OpenConceptThreadOutput,
+} from "./shared/notes.js";
 import {
   frontmatterToNote,
   parseFrontmatter,
   readNoteHead,
   readSidebarNotes,
+  resolveConceptPlan,
   resolveThreadId,
   resolveVaultDir,
   threadIdFromBlockList,
@@ -88,6 +98,7 @@ import {
   assertWritableConceptNote,
   canRecordThread,
   conflictRedirect,
+  moveConceptNote,
   readHead,
   readThreadKey,
   recordConceptThread,
@@ -632,7 +643,14 @@ export default function contribute(server: PluginServerContext) {
     try {
       // 存在するスレだけをタップ先にする(走査のたびに1回だけ読む)。
       const knownAgentIds = await knownAgentIdsFor(ctx.paseo);
-      const r = readSidebarNotes({ knownAgentIds });
+      // 構想の新置き場(`<Vault>/Paseo/構想/{検討中,あとで}`)が在ればそこも読む(無ければ旧置き場だけ)。
+      // 置き場のパスは走査先と同じ Vault から決める(明示設定のときも揃う)。
+      const vaultDir = resolveVaultDir();
+      const r = readSidebarNotes({
+        knownAgentIds,
+        vaultDir,
+        concept: resolveConceptPlan(vaultDir),
+      });
       return { ...r, generatedAt };
     } catch (error) {
       // 走査先の設定誤り(バックアップ指定など)は握りつぶさず、空の一覧と理由を返す。
@@ -644,6 +662,24 @@ export default function contribute(server: PluginServerContext) {
         scanned: 0,
         error: `ノートを読めません: ${(error as Error).message}`.slice(0, 200),
       };
+    }
+  });
+
+  // ------------------------------------------------- 構想の「あとで」(2026-10-24 ユーザー指示)
+
+  server.handle(moveConceptNoteRpc, async (input): Promise<MoveConceptNoteOutput> => {
+    try {
+      const r = await moveConceptNote(path.resolve(input.path), input.to, {
+        vaultDir: resolveVaultDir(),
+      });
+      const label = input.to === "later" ? "あとで" : "検討中";
+      return {
+        ok: true,
+        path: r.notePath,
+        message: r.result === "already" ? `既に${label}にあります` : `${label}に移しました`,
+      };
+    } catch (error) {
+      return { ok: false, path: null, message: `移せません: ${(error as Error).message}` };
     }
   });
 

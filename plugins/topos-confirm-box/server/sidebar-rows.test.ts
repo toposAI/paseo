@@ -36,6 +36,7 @@ const note = (over: Partial<SidebarNote>): SidebarNote => ({
   threadId: null,
   threadCandidates: [],
   conceptLinks: [],
+  zone: "active",
   updatedAt: 1,
   ...over,
 });
@@ -146,7 +147,12 @@ function scanAndIndex(dir: string): {
   notes: SidebarNote[];
   implByThread: ReadonlyMap<string, SidebarNote>;
 } {
-  const { notes } = readSidebarNotes({ roots: [dir] });
+  // 実 Vault の構想の置き場を混ぜない(このテストは渡した dir だけを見る)
+  const { notes } = readSidebarNotes({
+    roots: [dir],
+    vaultDir: dir,
+    concept: { active: null, later: null },
+  });
   return { notes, implByThread: indexImplementationNotes(notes) };
 }
 

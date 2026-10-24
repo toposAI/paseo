@@ -108,7 +108,12 @@ test("走査: typeで実装/構想を返し、statusでは絞らない(振り分
   write(dir, "e-standard.md", note("type: project-note\nstatus: decided\ntitle: 標準"));
   write(dir, "f-nofm.md", "# frontmatter無し\n");
   write(dir, ".hidden/g.md", note("type: concept-note\nstatus: 構想\ntitle: 隠し"));
-  const r = readSidebarNotes({ roots: [dir] });
+  // 実 Vault の構想の置き場を混ぜない(このテストは渡した dir だけを見る)
+  const r = readSidebarNotes({
+    roots: [dir],
+    vaultDir: dir,
+    concept: { active: null, later: null },
+  });
   // `完了` の実装ノートも返す。ここで落とすと、クライアントの「完了は畳む」判定に届かず
   // スレ側の古い status(実装中)で上段に戻る(出口レビュー指摘1)。
   // 並びは更新時刻順(同時刻ならパス順)なので、集合として比べる
@@ -161,6 +166,7 @@ test("sortNotesは新しい順・同時刻はパス順", () => {
       threadId: null,
       threadCandidates: [],
       conceptLinks: [],
+      zone: "active",
       updatedAt: 5,
     },
     {
@@ -172,6 +178,7 @@ test("sortNotesは新しい順・同時刻はパス順", () => {
       threadId: null,
       threadCandidates: [],
       conceptLinks: [],
+      zone: "active",
       updatedAt: 5,
     },
   ]);
@@ -241,6 +248,7 @@ test("indexImplementationNotes: 実装ノートだけを解決済みIDで引き�
     conclusion: "",
     threadCandidates: [],
     conceptLinks: [],
+    zone: "active" as const,
     updatedAt: 0,
   };
   const map = indexImplementationNotes([
