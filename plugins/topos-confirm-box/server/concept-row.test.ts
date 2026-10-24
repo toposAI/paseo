@@ -65,6 +65,13 @@ test("conceptSections: 旧置き場では見出しを出さない", () => {
   });
 });
 
+test("conceptSections: 旧置き場でも「あとで」にノートがあれば見出しは出す(見えなくしない)", () => {
+  assert.deepEqual(conceptSections("legacy", { later: 2, laterAvailable: false }), {
+    showLater: true,
+    laterToggle: false,
+  });
+});
+
 test("conceptSections: 新置き場では件数0でも見出しを出す(片方だけの移行中も消さない)", () => {
   assert.deepEqual(conceptSections("paseo", { later: 0, laterAvailable: true }), {
     showLater: true,

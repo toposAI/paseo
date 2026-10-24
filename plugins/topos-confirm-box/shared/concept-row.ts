@@ -35,7 +35,8 @@ export function conceptRowFullLabel(note: Pick<SidebarNote, "title" | "conclusio
 /**
  * 構想タブの区分(見出しを出すか・畳めるか)。
  *
- * 旧置き場(`place: "legacy"`)には「あとで」が無いので見出しは出さない(今までどおり平らに並べる)。
+ * 旧置き場(`place: "legacy"`)は普段は平らに並べるが、「あとで」にノートが在れば見出しだけは出す
+ * (消した区分に残ったノートを見えなくしない)。
  * 新置き場では「検討中」の一覧の下に「あとで」の畳んだフォルダ風の見出しを1行だけ置く。
  * 見出しは**片方の置き場だけでも出す**(移行の途中で「あとで」に移した分が消えて見えない)。
  */
@@ -50,7 +51,9 @@ export function conceptSections(
   place: "paseo" | "legacy",
   zones: { later: number; laterAvailable: boolean },
 ): ConceptSections {
-  if (place === "legacy") return { showLater: false, laterToggle: false };
+  // 旧置き場でも「あとで」にノートがあれば見出しを出す(`検討中/` を消した等の移行の途中で、
+  // 「あとで」のノートがどの区分にも出ずに見えなくなるのを避ける)。移せないので畳みもできない。
+  if (place === "legacy") return { showLater: zones.later > 0, laterToggle: false };
   // 見出しは「あとで」に1件でも入っているか、区分が在るときだけ出す
   // (旧置き場から移行して0件のときに、空のフォルダだけが残らないように)。
   return { showLater: zones.laterAvailable || zones.later > 0, laterToggle: zones.laterAvailable };

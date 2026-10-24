@@ -409,11 +409,13 @@ export function readSidebarNotes(
  * (走査先の設定を変えても構想は消えない)。無い区分は足さない(`走査先がありません` で
  * 一覧ごと失敗させない)。
  */
-function withConceptRoots(roots: string[], plan: ConceptReadPlan): string[] {
+function withConceptRoots(roots: readonly string[], plan: ConceptReadPlan): string[] {
+  // 呼び出し側が渡した配列を書き換えない(再走査で同じ配列を使い回されても増えない)。
+  const out = [...roots];
   for (const dir of [plan.active, plan.later]) {
-    if (dir && !roots.includes(dir)) roots.push(dir);
+    if (dir && !out.includes(dir)) out.push(dir);
   }
-  return roots;
+  return out;
 }
 
 /**
