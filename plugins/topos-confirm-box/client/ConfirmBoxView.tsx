@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
+import type { PluginTheme } from "@getpaseo/plugin";
 import {
   KIND_LABEL,
   PRIORITY_LABEL,
@@ -18,6 +19,7 @@ import {
   confirmBoxPermitRpc,
   judgmentTabRows,
 } from "../shared/contract.js";
+import { confirmBoxTabs, isWideLayout } from "../shared/footer-tabs.js";
 import { onBoxChanged, notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
 import { BugReportsView } from "./BugReportsView.js";
@@ -43,10 +45,16 @@ export function ConfirmBoxView({
   theme,
   navigation,
   containerWidth,
+  mode = "box",
 }: Pick<PluginHostProps, "theme"> & {
   navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
   /** 描画先の箱の幅。省略時は窓幅。ポップオーバーは窓が広くても箱が狭いので実測値を渡す。 */
   containerWidth?: number;
+  /**
+   * 開き方。`box`=確認箱そのもの(PC幅では下部バーへ移した2枚を外す)、
+   * `items`/`childdone`=下部バーの「ユーザー判断」「子スレ完了」から開いた画面(そのタブだけ)。
+   */
+  mode?: "box" | "items" | "childdone";
 }) {
   const list = useRpc(confirmBoxListRpc);
   const decide = useRpc(confirmBoxDecideRpc);
@@ -56,7 +64,6 @@ export function ConfirmBoxView({
   const [openId, setOpenId] = useState<string | null>(null);
   const [depth, setDepth] = useState<ConfirmBoxDepth>("list");
   const [notice, setNotice] = useState<string>("");
-  const [tab, setTab] = useState<TabId>("items");
   const counts = useBadgeCounts();
   const [prio, setPrio] = useState<string>("all");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -89,6 +96,9 @@ export function ConfirmBoxView({
   const touch = width < 600;
   // 一覧とチャットの並べ方。Paseo の compact 境界(720px)に合わせる。
   const compact = width < 720;
+  // PC幅の確認箱は「ユーザー判断」「子スレ完了」を下部バーへ出したので、中には残るタブだけを出す
+  // (二重に出さない)。狭い幅(iPhone)は従来どおり5枚。下部バーから開いた画面はそのタブだけ。
+  const { shownTab, tabs, selectTab } = useBoxTabs(mode, isWideLayout(containerWidth, windowWidth));
   // カードチャットは画面を問わずこのペインに一本化した(旧・自由記述欄は廃止=2026-10-22ユーザー決定)。
   // ヘッダのポップオーバーも幅<720なので、ペインは全画面スライドとして重なる。
   // ペインの相手は2種: カードの投函元スレ(💬)と、優先順位の行の担当スレ(行タップ)。
@@ -328,18 +338,18 @@ export function ConfirmBoxView({
 
   // タブごとの中身。入れ子の三項を JSX へ書かないよう if 連鎖で組み立てる。
   let content: ReactNode;
-  if (tab === "priority") {
+  if (shownTab === "priority") {
     content = (
       <>
         {threadNotice ? <Text style={s.muted}>{threadNotice}</Text> : null}
         <PriorityView styles={s} colors={c} onOpenThread={openThread} />
       </>
     );
-  } else if (tab === "bugs") {
+  } else if (shownTab === "bugs") {
     content = <BugReportsView theme={theme} />;
-  } else if (tab === "childdone") {
+  } else if (shownTab === "childdone") {
     content = <ChildDoneView theme={theme} navigation={navigation} />;
-  } else if (tab === "notify") {
+  } else if (shownTab === "notify") {
     content = <NotificationsView theme={theme} />;
   } else {
     content = (
@@ -394,28 +404,17 @@ export function ConfirmBoxView({
         <ScrollView style={s.flex} contentContainerStyle={s.body}>
           {content}
         </ScrollView>
-        {tab === "priority" ? <ChatDock colors={c} agentId={PRIORITY_CHAT_AGENT_ID} /> : null}
-        <View style={s.bottomBar}>
-          {/* `flexGrow:1` で5枚を等分。狭い幅では等分を保ったまま横スクロールへ落ちる。 */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.tabStrip}
-          >
-            {TABS.map((tb) => (
-              <TabButton
-                key={tb.id}
-                tab={tb}
-                on={tab === tb.id}
-                styles={s}
-                accent={c.accent}
-                muted={c.foregroundMuted}
-                count={counts[tb.id] ?? 0}
-                onSelect={setTab}
-              />
-            ))}
-          </ScrollView>
-        </View>
+        {shownTab === "priority" ? <ChatDock colors={c} agentId={PRIORITY_CHAT_AGENT_ID} /> : null}
+        {/* 下部バーから開いた画面(`mode` が box 以外)はタブ1枚だけなので、並びは出さない。 */}
+        <TabStrip
+          mode={mode}
+          tabs={tabs}
+          shownTab={shownTab}
+          counts={counts}
+          selectTab={selectTab}
+          styles={s}
+          colors={c}
+        />
       </View>
     </SplitLayout>
   );
@@ -453,6 +452,70 @@ function layoutWidth(containerWidth: number | undefined, windowWidth: number): n
 }
 
 type TabId = "items" | "bugs" | "childdone" | "notify" | "priority";
+
+/**
+ * 出すタブの並びと現在のタブ。
+ * - `box`: 確認箱そのもの。PC幅は下部バーへ移した2枚(ユーザー判断/子スレ完了)を外し、狭い幅は従来の5枚
+ * - `items`/`childdone`: 下部バーから開いた画面。そのタブだけを出す(並びは出さない)
+ * 初期タブは、開いた画面ならそのタブ、確認箱なら出ているタブの先頭(PC幅=バグ報告、狭い幅=判断待ち)。
+ */
+function useBoxTabs(
+  mode: "box" | "items" | "childdone",
+  wide: boolean,
+): { shownTab: TabId; tabs: readonly (typeof TABS)[number][]; selectTab: (id: TabId) => void } {
+  const [picked, setPicked] = useState<TabId | null>(null);
+  const forcedTab: TabId | null = mode === "box" ? null : mode;
+  const shownTab: TabId = picked ?? forcedTab ?? (wide ? "bugs" : "items");
+  const tabs =
+    mode === "box" ? confirmBoxTabs(TABS, wide) : TABS.filter((tb) => tb.id === forcedTab);
+  const selectTab = useCallback((id: TabId) => setPicked(id), []);
+  return { shownTab, tabs, selectTab };
+}
+
+/** 下の並び。確認箱そのもののときだけ出す(下部バーから開いた画面はタブ1枚だけなので出さない)。 */
+function TabStrip({
+  mode,
+  tabs,
+  shownTab,
+  counts,
+  selectTab,
+  styles: s,
+  colors: c,
+}: {
+  mode: "box" | "items" | "childdone";
+  tabs: readonly (typeof TABS)[number][];
+  shownTab: TabId;
+  counts: Partial<Record<TabId, number>>;
+  selectTab: (id: TabId) => void;
+  styles: Styles;
+  colors: Pick<PluginTheme["colors"], "accent" | "foregroundMuted">;
+}) {
+  if (mode !== "box") return null;
+  return (
+    <View style={s.bottomBar}>
+      {/* `flexGrow:1` で等分(狭い幅は5枚、PC幅は下部バーへ移した2枚を除く3枚)。
+          狭い幅では等分を保ったまま横スクロールへ落ちる。 */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={s.tabStrip}
+      >
+        {tabs.map((tb) => (
+          <TabButton
+            key={tb.id}
+            tab={tb}
+            on={shownTab === tb.id}
+            styles={s}
+            accent={c.accent}
+            muted={c.foregroundMuted}
+            count={counts[tb.id] ?? 0}
+            onSelect={selectTab}
+          />
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
 
 const TABS: { id: TabId; label: string; Icon: typeof InboxIcon }[] = [
   { id: "items", label: "判断待ち", Icon: InboxIcon },
