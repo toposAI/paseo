@@ -41,6 +41,17 @@ test("行の部品はメニューを受け取らない(行の高さが開閉で�
   assert.doesNotMatch(head, /children\??:/, "ThreadRow は children を受け取らない");
 });
 
+test("メニューの一番上に操作対象のスレ名を出す(スマホのシートで行が見えなくても分かる)", () => {
+  // 2026-10-24 ユーザー指摘「下にだすポップアップの一番上にスレ名を出して」。
+  const menuSource = readFileSync(join(clientDir, "ThreadMenu.tsx"), "utf8");
+  const body = menuSource.slice(menuSource.indexOf("return (\n    <View testID={`child-thread-menu-"));
+  const firstItem = body.search(/<MenuItem\b/);
+  const title = body.indexOf("child-thread-menu-title-");
+  assert.ok(title >= 0, "スレ名の見出しがある");
+  assert.ok(firstItem >= 0 && title < firstItem, "見出しが項目より上にある");
+  assert.match(body.slice(0, firstItem), /\{title\}/, "行に出ている題名を使う");
+});
+
 test("ポップアップの部品は開き直しても同じ関数(ホストが毎回作り直さない)", () => {
   // `openPopover` に渡す部品を押すたびに作ると、開いている最中の再描画で開き直しになる。
   assert.match(sidebarSource, /useMemo<ComponentType<object>>/, "部品は useMemo で固定する");

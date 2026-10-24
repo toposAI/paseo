@@ -117,6 +117,15 @@ export function ThreadMenu({
   const mutedStyle = useMemo(() => ({ color: colors.foregroundMuted }), [colors]);
   const textStyle = useMemo(() => [styles.itemText, labelStyle], [labelStyle]);
   const noteStyle = useMemo(() => [styles.noteText, mutedStyle], [mutedStyle]);
+  // 見出しは本文より少し強く。スマホでは読みやすいよう1段大きくする。
+  const titleStyle = useMemo(
+    () => [
+      styles.titleText,
+      { color: colors.foreground },
+      compact ? styles.titleTextCompact : null,
+    ],
+    [colors, compact],
+  );
   const pinTextStyle = useMemo(
     () => (thread.pinned ? [styles.itemText, labelStyle, styles.itemStrong] : textStyle),
     [labelStyle, textStyle, thread.pinned],
@@ -128,6 +137,18 @@ export function ThreadMenu({
 
   return (
     <View testID={`child-thread-menu-${thread.agentId}`} style={styles.menu}>
+      {/* どのスレへの操作かを見出しで示す。スマホはボトムシートの一番上に来るので、
+          行が見えていない状態でも対象を取り違えない(2026-10-24 ユーザー指示)。 */}
+      <View style={styles.header}>
+        <Text
+          testID={`child-thread-menu-title-${thread.agentId}`}
+          style={titleStyle}
+          numberOfLines={2}
+          accessibilityRole="header"
+        >
+          {title}
+        </Text>
+      </View>
       <MenuItem
         testID={`child-thread-menu-pin-${thread.agentId}`}
         label={pinMenuLabel(thread.pinned)}
@@ -208,6 +229,18 @@ const styles = StyleSheet.create({
   // 背景・枠・影はホストのポップアップ面が持つ。ここは項目を縦に並べるだけ。
   menu: {
     minWidth: 180,
+  },
+  header: {
+    paddingHorizontal: 8,
+    paddingTop: 2,
+    paddingBottom: 8,
+  },
+  titleText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  titleTextCompact: {
+    fontSize: 15,
   },
   item: {
     justifyContent: "center",
