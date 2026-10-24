@@ -217,6 +217,7 @@ function SidebarFooter({
   onBeforeNavigate?: () => void;
 }) {
   const settingsKeys = useShortcutKeys("toggle-settings");
+  const isCompact = useIsCompactFormFactor();
   const { items: footerItems } = useSidebarNavItems("footer");
   const barRef = useRef<View | null>(null);
   const barItems = footerItems.filter(isBarItem);
@@ -239,7 +240,10 @@ function SidebarFooter({
     <UsageSidebarRoot>
       <View style={styles.footerContainer} testID="sidebar-footer">
         <SidebarFooterRows onBeforeNavigate={onBeforeNavigate} />
-        <View style={styles.sidebarFooter} testID="sidebar-footer-bottom-line">
+        <View
+          style={[styles.sidebarFooter, isCompact && styles.sidebarFooterCompact]}
+          testID="sidebar-footer-bottom-line"
+        >
           <ScrollView
             testID="sidebar-footer-bar-scroll"
             horizontal
@@ -607,6 +611,11 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     paddingHorizontal: theme.spacing[1.5],
     paddingVertical: theme.spacing[1.5],
+  },
+  // On compact screens (the phone drawer) the app's 24px edge-swipe strip overlays the left edge,
+  // and it swallows taps on whatever sits under it. Start the first item past it.
+  sidebarFooterCompact: {
+    paddingLeft: theme.spacing[6],
   },
   // The item row scrolls sideways (7 buttons can exceed a narrow sidebar) instead of clipping
   // Settings. Grows into spare room so Settings trails the items when the sidebar is wide enough.
