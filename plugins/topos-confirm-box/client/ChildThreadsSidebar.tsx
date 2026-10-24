@@ -143,6 +143,7 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
   const [orderIsManual, setOrderIsManual] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(readCollapsed);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [pendingTitle, setPendingTitle] = useState("");
   const [notice, setNotice] = useState("");
   const colors = theme.colors;
   const noticeStyle = useMemo(
@@ -303,27 +304,35 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
     setThreads((prev) => prev.filter((x) => x.agentId !== agentId));
   }, []);
 
-  // アーカイブは取り消しにくいので、同じ行をもう一度押したときだけ実行する(押した直後は「もう一度押す」に変わる)。
+  // アーカイブは取り消しにくいので、1回目は**その場に確認の枠を出すだけ**(その枠の「アーカイブする」を押すと実行)。
+  // 同じ行のボタンをもう一度押す形は、連打や誤タップで2回目が当たってしまうためやめた(2026-10-24)。
+  // 1回目は確認の枠を出すだけ。同じ行のボタンをもう一度押しても実行しない(連打・誤タップ対策)。
   const onArchive = useCallback(
     (t: ChildThread) => {
-      if (pendingId !== t.agentId) {
-        setPendingId(t.agentId);
-        setNotice(`「もう一度」でアーカイブ: ${t.title}`);
-        return;
-      }
-      setPendingId(null);
-      setNotice("アーカイブしています…");
-      gatePoll(30_000);
-      void archive({ agentId: t.agentId })
-        .then((r) => {
-          setNotice(r.message ?? (r.ok ? "アーカイブしました" : "アーカイブできませんでした"));
-          if (r.ok) dropThread(t.agentId);
-          return null;
-        })
-        .catch((error: unknown) => setNotice(`アーカイブできません: ${(error as Error).message}`));
+      if (pendingId === t.agentId) return;
+      setPendingId(t.agentId);
+      setPendingTitle(t.title);
     },
-    [archive, dropThread, gatePoll, pendingId],
+    [pendingId],
   );
+
+  const cancelArchive = useCallback(() => setPendingId(null), []);
+
+  const confirmArchive = useCallback(() => {
+    if (!pendingId) return;
+    const agentId = pendingId;
+    setPendingId(null);
+    setNotice("アーカイブしています…");
+    gatePoll(30_000);
+    void archive({ agentId })
+      .then((r) => {
+        setNotice(r.message ?? (r.ok ? "アーカイブしました" : "アーカイブできませんでした"));
+        // サーバが司令塔等の理由で断った(ok:false)場合は行を消さない
+        if (r.ok) dropThread(agentId);
+        return null;
+      })
+      .catch((error: unknown) => setNotice(`アーカイブできません: ${(error as Error).message}`));
+  }, [archive, dropThread, gatePoll, pendingId]);
 
   // ピン止めは一覧に `pinned` が返るので、保存後は次の取得(またはここでの楽観更新)で並びに反映される。
   const onTogglePin = useCallback(
@@ -395,6 +404,33 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
           statusColor={statusColor}
         />
       ))}
+      {pendingId ? (
+        <View style={styles.notice}>
+          <Text style={noticeStyle} numberOfLines={2}>
+            「{pendingTitle}」をアーカイブしますか?
+          </Text>
+          <View style={styles.confirmRow}>
+            <Pressable
+              onPress={confirmArchive}
+              testID="child-thread-archive-confirm"
+              accessibilityRole="button"
+              accessibilityLabel={`${pendingTitle}をアーカイブする`}
+              style={styles.confirmButton}
+            >
+              <Text style={styles.confirmText}>アーカイブする</Text>
+            </Pressable>
+            <Pressable
+              onPress={cancelArchive}
+              testID="child-thread-archive-cancel"
+              accessibilityRole="button"
+              accessibilityLabel="アーカイブをやめる"
+              style={styles.cancelButton}
+            >
+              <Text style={noticeStyle}>やめる</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
       {notice ? (
         <View style={styles.notice}>
           <Text style={noticeStyle}>{notice}</Text>
@@ -613,7 +649,7 @@ function ThreadRow({
   const pinColor = t.pinned ? colors.foreground : colors.foregroundMuted;
   const archiveColor = confirmingArchive ? "#b91c1c" : colors.foregroundMuted;
   // 行末: ピン止め → アーカイブ(確認待ち) → 状態の帯。幅は状態の帯の分で固定され、題名がここへ重ならない。
-  // 司令塔の行も状態の帯は出さない(開けない印だけは出す)。アーカイブのボタンは残す。
+  // 司令塔の行も状態の帯は出さない(開けない印だけは出す)。アーカイブのボタンは出さず、押せない印だけ置く。
   const trailing = useMemo(
     () => (
       <View style={styles.trailing}>
@@ -627,16 +663,24 @@ function ThreadRow({
         >
           <PinGlyph filled={t.pinned} color={pinColor} />
         </Pressable>
-        <Pressable
-          onPress={pressArchive}
-          testID={`child-thread-archive-${agentId}`}
-          accessibilityRole="button"
-          accessibilityLabel={archiveLabel}
-          hitSlop={6}
-          style={archiveStyle}
-        >
-          <ArchiveGlyph color={archiveColor} />
-        </Pressable>
+        {t.coordinator ? (
+          // 司令塔の行はアーカイブのボタンを出さない(2026-10-23 24:22 に司令塔 6f957aa9 がこのボタンから
+          // 畳まれ、その領域の起こし通知が止まった)。サーバ側も同じ判定で断る。
+          <View style={styles.iconHit}>
+            <ArchiveGlyph color={colors.foregroundMuted} />
+          </View>
+        ) : (
+          <Pressable
+            onPress={pressArchive}
+            testID={`child-thread-archive-${agentId}`}
+            accessibilityRole="button"
+            accessibilityLabel={archiveLabel}
+            hitSlop={6}
+            style={archiveStyle}
+          >
+            <ArchiveGlyph color={archiveColor} />
+          </Pressable>
+        )}
         {t.coordinator && t.access !== "workspace-archived" ? null : (
           <StatusBadge text={status.text} kind={status.kind} testID={testID} />
         )}
@@ -647,6 +691,7 @@ function ThreadRow({
       archiveColor,
       archiveLabel,
       archiveStyle,
+      colors.foregroundMuted,
       pinColor,
       pinLabel,
       pressArchive,
@@ -739,6 +784,28 @@ const styles = StyleSheet.create({
   },
   notice: {
     paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  confirmRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 4,
+  },
+  confirmButton: {
+    backgroundColor: "#b91c1c",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  confirmText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  cancelButton: {
+    borderRadius: 6,
+    paddingHorizontal: 10,
     paddingVertical: 4,
   },
   noticeText: {
