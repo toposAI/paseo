@@ -84,12 +84,12 @@ export function resolveVaultDir(env: NodeJS.ProcessEnv = process.env): string {
  */
 export function resolveConceptPlan(vaultDir: string): ConceptReadPlan {
   const place = conceptPlace(vaultDir);
-  // **symlink は置き場として扱わない**(`lstat`)。read 側だけ `stat` で辿ると、移動は
-  // ガードで拒むのに画面には移せる ⋯ が出て、押すと必ず失敗する(構想タブ出口レビュー round2 指摘4)。
-  // 置き場は単一ライターが通常のディレクトリとして作る前提で、symlink のときは読まない。
+  // **読む側は symlink を辿る**(`stat`)。ここで `lstat` にすると、置き場が symlink のときに
+  // 中のノートが警告なく全部消える(構想タブ出口レビュー round3 指摘4)。読めてしまう代わりに
+  // 「移せる ⋯」を出さないことで、押すと必ず失敗する導線だけを塞ぐ(`canMovePlace` を見る)。
   const isDir = (p: string) => {
     try {
-      return fs.lstatSync(p).isDirectory();
+      return fs.statSync(p).isDirectory();
     } catch {
       return false;
     }
@@ -99,6 +99,23 @@ export function resolveConceptPlan(vaultDir: string): ConceptReadPlan {
     active: isDir(place.activeDir) ? place.activeDir : null,
     later: isDir(place.laterDir) ? place.laterDir : null,
   };
+}
+
+/**
+ * 行を移せる置き場か。**両方の置き場が symlink でない通常のディレクトリ**であること
+ * (`moveConceptNote` のガードと揃える。読む側は symlink を辿るので、ここで揃えないと
+ * 「移せる ⋯」を押すたびに必ず失敗する ⋯ が出る。構想タブ出口レビュー round2 指摘4)。
+ */
+export function canMovePlace(plan: ConceptReadPlan): boolean {
+  if (plan.active === null || plan.later === null) return false;
+  const realDir = (p: string) => {
+    try {
+      return fs.lstatSync(p).isDirectory(); // symlink なら false(lstat はリンク自身を見る)
+    } catch {
+      return false;
+    }
+  };
+  return realDir(plan.active) && realDir(plan.later);
 }
 
 /** Vault のバックアップ(一方向同期先)。読まない・書かない。APFS は大小文字を区別しないので `i` 付き。 */
@@ -356,6 +373,7 @@ export function readSidebarNotes(
   const vaultDir = opts.vaultDir ?? resolveVaultDir();
   const plan = opts.concept ?? resolveConceptPlan(vaultDir);
   const placeDir = conceptPlace(vaultDir);
+  const canMove = canMovePlace(plan);
   const roots = withConceptRoots(opts.roots ?? resolveNoteRoots(), plan);
   // 走査中に上限へ当たったら truncated を立て、呼び出し側のループを止める。
   const visit = (file: string): boolean => {
@@ -379,7 +397,7 @@ export function readSidebarNotes(
       lower.push({
         ...note,
         zone: zone ?? "active",
-        movable: direct && plan.active !== null && plan.later !== null,
+        movable: direct && canMove,
       });
     }
     return false;

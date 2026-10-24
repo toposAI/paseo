@@ -162,14 +162,21 @@ test("isDirectChild: NFD のファイルパスでも置き場の直下と判定�
   assert.equal(isDirectChild(path.join(place.activeDir, "a.md"), place.laterDir), false);
 });
 
-test("resolveConceptPlan: 置き場が symlink なら読まない(押すと必ず失敗する ⋯ を出さない)", () => {
+test("置き場が symlink: ノートは読むが、移動の ⋯ は出さない(黙って消さない・押して必ず失敗させない)", () => {
   const v = vault();
   const place = conceptPlace(v);
   fs.mkdirSync(place.root, { recursive: true });
   const real = fs.mkdtempSync(path.join(os.tmpdir(), "topos-real-"));
   fs.symlinkSync(real, place.activeDir);
   fs.mkdirSync(place.laterDir, { recursive: true });
-  assert.deepEqual(resolveConceptPlan(v), { active: null, later: place.laterDir });
+  const note = writeNote(path.join(real, "a.md"), CONCEPT);
+  // 読む側は symlink を辿る(ノートが一覧から消えない)
+  assert.deepEqual(resolveConceptPlan(v), { active: place.activeDir, later: place.laterDir });
+  const r = readSidebarNotes({ roots: [], vaultDir: v });
+  const row = r.notes.find((n) => n.path === path.join(place.activeDir, "a.md"));
+  assert.equal(row?.zone, "active");
+  assert.equal(row?.movable, false); // 移せない(移動側のガードと一致)
+  assert.equal(fs.existsSync(note), true);
 });
 
 test("moveConceptNote: 前回の link の後で止まった残り(同名・同じ実体)は移せて、2か所に残らない", async () => {
@@ -186,4 +193,19 @@ test("moveConceptNote: 前回の link の後で止まった残り(同名・同�
   assert.equal(r.notePath, half);
   assert.equal(fs.existsSync(a), false);
   assert.equal(fs.existsSync(half), true);
+});
+
+test("moveConceptNote: 移動先が移動元を指す symlink なら、実体を消さずに移さない", async () => {
+  const v = vault();
+  const place = conceptPlace(v);
+  fs.mkdirSync(place.activeDir, { recursive: true });
+  fs.mkdirSync(place.laterDir, { recursive: true });
+  const a = writeNote(path.join(place.activeDir, "a.md"), CONCEPT);
+  const before = fs.readFileSync(a, "utf8");
+  const link = path.join(place.laterDir, "a.md");
+  fs.symlinkSync(a, link); // あとで/a.md → 検討中/a.md
+  await assert.rejects(moveConceptNote(a, "later", { vaultDir: v }), /同じ名前/);
+  // 実体は残り、symlink もそのまま(壊さない)
+  assert.equal(fs.readFileSync(a, "utf8"), before);
+  assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
 });

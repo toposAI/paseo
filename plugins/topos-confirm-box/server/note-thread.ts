@@ -296,6 +296,17 @@ function atomicWrite(file: string, body: string): void {
   }
 }
 
+/** 前回の `link` の後で止まった移動を完成させる(移動元のリンクを外すだけ)。失敗は隠さず投げる。 */
+function finishHalfMove(now: string, target: string): void {
+  try {
+    fs.unlinkSync(now);
+  } catch (error) {
+    throw new NoteThreadError(
+      `移動できず、同じノートが2か所に残っています(手で片方を消してください): ${now} / ${target}: ${(error as Error).message}`,
+    );
+  }
+}
+
 /** 置き場のディレクトリが実在する通常のディレクトリか(symlink は Vault の外を指しうるので拒む)。 */
 function assertPlaceDirs(...dirs: readonly string[]): void {
   for (const dir of dirs) {
@@ -313,12 +324,16 @@ function assertPlaceDirs(...dirs: readonly string[]): void {
   }
 }
 
-/** 2つのパスが同じ実体(同じデバイス・同じ inode)を指すか。どちらか読めなければ false。 */
+/**
+ * 2つのパスが**同じ通常ファイルの実体**か(同じデバイス・同じ inode)。
+ * `statSync` は symlink を辿るので使わない: 移動先が移動元を指す symlink のとき「同じ実体」と
+ * 誤認して、移動元の実体を消してしまう(構想タブ出口レビュー round3 指摘5)。どちらか読めなければ false。
+ */
 function sameFile(a: string, b: string): boolean {
   try {
-    const x = fs.statSync(a);
-    const y = fs.statSync(b);
-    return x.dev === y.dev && x.ino === y.ino;
+    const x = fs.lstatSync(a);
+    const y = fs.lstatSync(b);
+    return x.isFile() && y.isFile() && x.dev === y.dev && x.ino === y.ino;
   } catch {
     return false;
   }
@@ -381,7 +396,7 @@ export async function moveConceptNote(
         // 前回の移動が link の直後・unlink の直前で止まった場合、移動先は**同じ実体**への
         // 2本目のリンク。それを「別のノート」と取り違えると移せないまま残るので、実体で見分ける。
         if (sameFile(now, target)) {
-          fs.unlinkSync(now);
+          finishHalfMove(now, target);
           return { result: "moved", notePath: target };
         }
         throw new NoteThreadError(`移動先に同じ名前のノートがあります: ${target}`);
@@ -395,7 +410,7 @@ export async function moveConceptNote(
         } catch {
           // 戻せなかった: 同じノートが2か所に残っていることを隠さずに言う(元のエラーより重い)。
           throw new NoteThreadError(
-            `移動できず、同じノートが2か所に残っています(手で片方を消してください): ${now} / ${target}`,
+            `移動できず、同じノートが2か所に残っています(手で片方を消してください): ${now} / ${target}: ${(error as Error).message}`,
           );
         }
         throw error;
