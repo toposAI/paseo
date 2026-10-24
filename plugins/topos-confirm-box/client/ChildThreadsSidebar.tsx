@@ -20,16 +20,13 @@
  * 押すと深掘りスレを開く(メニューは状態の帯の無いスレ行だけ)。
  */
 import type React from "react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentType,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useRpc, type PluginSidebarItemProps } from "@getpaseo/plugin/client";
+import {
+  useRpc,
+  type PluginPopoverProps,
+  type PluginSidebarItemProps,
+} from "@getpaseo/plugin/client";
 import { SidebarReorderableList, SidebarRow } from "@getpaseo/plugin/client/ui";
 import {
   childThreadsArchiveRpc,
@@ -70,6 +67,16 @@ const COLLAPSED_KEY = "topos-child-groups-collapsed";
 const OTHER_LABEL = "その他";
 /** ドラッグ中は取得結果で一覧を差し替えない(キャンセル時に固まらないよう期限付き)。 */
 const DRAG_POLL_GATE_MS = 60_000;
+/** PC 幅で自分で描くメニューの幅の上限(サイドバーが広くても間延びさせない)。 */
+const MENU_MAX_WIDTH = 240;
+/** メニューと外枠の端・押した行との間隔(px)。 */
+const EDGE_PADDING = 8;
+const GAP = 4;
+/** 対象が無いときのプレースホルダ(JSX に毎回新しい空オブジェクトを渡さないため)。 */
+const EMPTY_MENU_ACTION: {
+  target?: { thread: ChildThread; title: string; canArchive: boolean };
+  onAction?: (intent: ThreadMenuIntent) => void;
+} = {};
 export const CHILD_THREADS_SCREEN_ID = "child-threads";
 
 /**
@@ -90,8 +97,29 @@ interface AgentNavigation {
   navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
 }
 
-/** SDK の `PluginPopoverProps` のうち、メニュー本体が使う分だけ(`close`/`openScreen` は使わない)。 */
-type OpenPopover = (Content: ComponentType<object>) => void;
+/** SDK の `openPopover`(古いホストには無いことがあるので任意で受ける)。 */
+type OpenPopover = (Content: ComponentType<PluginPopoverProps>) => void;
+
+/**
+ * PC 幅で自分で描くメニューの置き場所。押した行(状態の帯)の左右端と上下端を、**外枠(root)の内側**の
+ * 座標で持つ。ホストの浮きパネルは行の右端に付いてサイドバーの外へ出るので、位置はこちらで決める。
+ */
+interface MenuAnchor {
+  /** 帯の左端(root 基準)。 */
+  left: number;
+  /** 帯の右端(root 基準)。 */
+  right: number;
+  /** 帯の上端(root 基準)。メニューの天をここに合わせる。 */
+  top: number;
+  /** 帯の下端(root 基準)。 */
+  bottom: number;
+  /** 外枠の幅(メニューをはみ出させない上限)。 */
+  width: number;
+  /** 外枠の高さ。 */
+  height: number;
+  /** 外枠の天から画面下端までの距離。ここを越えるならメニューを帯の上へ回す。 */
+  windowBottom: number;
+}
 
 /**
  * グループ見出しの題名。「司令塔」グループは呼び出し元が固定の `coordinatorGroup` を使うので
@@ -403,25 +431,40 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   /**
    * 状態の帯を押した: その行のメニューを**小さなポップアップ**で開く。
    *
-   * 開閉はホストの `openPopover` が正(2026-10-24 実機確認: 押した行に固定され、PC では行の右横に
-   * 浮く。一覧のレイアウトには参加しないので**他の行は動かない**。スマホ幅ではホスト標準の
-   * ボトムシートになる)。外側タップ/Esc/戻るでの閉じもホストが付けてくれる。
-   * 行の `children` に差し込む形(旧実装)は行を押し下げてサイドバーに割り込むので使わない。
+   * 置き場所は幅で分ける(2026-10-24 ユーザー指示:「メイン画面の方じゃなくて、サイドバーの方に
+   * 出して」)。
+   * - **PC 幅**: 押した行の位置を測り、サイドバーの内側に**自分で**絶対配置で描く(`InlineMenu`)。
+   *   ホストの `openPopover` は行の右端に付いてサイドバーの外(メイン画面)にはみ出すので使わない。
+   * - **スマホ幅**: ホスト標準のボトムシート(`openPopover`)。ユーザーが「押しやすい」と確認済み。
+   *   外側タップ/戻るでの閉じはホストが付ける。PC 幅の自分で描く方は Esc・外側タップをこちらで付ける。
+   * どちらも一覧のレイアウトには参加しない(行の位置・高さは開いても変わらない)。
    */
-  const openPopover = (props as Partial<PluginSidebarItemProps> & {
-    openPopover?: OpenPopover;
-  }).openPopover;
-  // 開いている行(タブ切替や一覧からの消滅でポップアップを閉じるためだけに持つ)。
+  const openPopover = (
+    props as Partial<PluginSidebarItemProps> & {
+      openPopover?: OpenPopover;
+    }
+  ).openPopover;
+  // スマホ幅かはホストの `layout.compact` に合わせる(ホストのボトムシートへ切り替わる境目と同じ)。
+  const compact = props.layout.compact;
   const [menuAgentId, setMenuAgentId] = useState<string | null>(null);
-  // ポップアップを閉じる手段はホストが本体へ渡す `close` だけ。本体から登録してもらう。
-  const menuCloseRef = useRef<(() => void) | null>(null);
-  const registerMenuClose = useCallback((close: (() => void) | null) => {
-    menuCloseRef.current = close;
-  }, []);
   // メニューを出した時点の対象(押した行の題名・アーカイブ可否・スレ)。開いた瞬間に確定させる。
   const menuTargetRef = useRef<{ thread: ChildThread; title: string; canArchive: boolean } | null>(
     null,
   );
+  // 押した行の位置(root 基準。PC 幅でメニューをその帯の直下/直上に置くために測る)。
+  const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null);
+  // メニュー(絶対配置)の置き場所。行の位置を測る基準でもある。
+  const rootRef = useRef<View | null>(null);
+  const closeMenu = useCallback(() => {
+    setMenuAgentId(null);
+    setMenuAnchor(null);
+  }, []);
+  // スマホ幅はホスト標準のボトムシートをそのまま使う(ユーザーが「押しやすい」と確認済み)。
+  // 閉じる手段はホストが本体へ渡す `close` だけ。本体から登録してもらう。
+  const menuCloseRef = useRef<(() => void) | null>(null);
+  const registerMenuClose = useCallback((close: (() => void) | null) => {
+    menuCloseRef.current = close;
+  }, []);
   const applyMenuIntent = useCallback(
     (t: ChildThread, canArchiveNow: boolean, intent: ThreadMenuIntent) => {
       if (intent === "toggle-pin") onTogglePin(t);
@@ -433,11 +476,21 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     },
     [onArchive, onTogglePin, openThread],
   );
+  // 本体へ渡す操作ハンドラ(毎回新しい関数を JSX に渡さない。react-perf)。
+  const menuActionProps = useMemo(() => {
+    const target = menuTargetRef.current;
+    if (!target) return null;
+    // 対象は ref から取るので依存は applyMenuIntent だけ(呼び出す側では useMemo の値)。
+    const menuAction = (intent: ThreadMenuIntent) =>
+      applyMenuIntent(target.thread, target.canArchive, intent);
+    return { target, onAction: menuAction };
+    // 対象は開き直すたびに `menuAgentId` と一緒に差し替わるので、id も依存に入れて作り直す。
+  }, [applyMenuIntent, menuAgentId]); // oxlint-disable-line react-hooks/exhaustive-deps
   // 本体の描画。状態(確認待ち)は `ThreadMenu` の中に持つので、ここは開いた時点の対象を渡すだけ。
   const renderMenuPopover = useCallback(
-    (popover: { theme: { colors: typeof colors }; layout: { compact: boolean }; close: () => void }) => {
-      const target = menuTargetRef.current;
-      if (!target) return null;
+    (popover: PluginPopoverProps) => {
+      const { target, onAction } = menuActionProps ?? EMPTY_MENU_ACTION;
+      if (!target || !onAction) return null;
       return (
         <ThreadMenu
           // 行が変わったら確認待ちを引き継がない(別の行のアーカイブが2回目で走らない)
@@ -449,33 +502,37 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
           canArchive={target.canArchive}
           colors={popover.theme.colors}
           compact={popover.layout.compact}
-          onAction={(intent) => applyMenuIntent(target.thread, target.canArchive, intent)}
+          onAction={onAction}
           onClose={popover.close}
           registerClose={registerMenuClose}
         />
       );
     },
-    [applyMenuIntent, registerMenuClose],
+    [menuActionProps, registerMenuClose],
   );
   // ホストは「渡された部品」を state に持つので、毎回新しい部品にすると開き直しが効かない。
   // 中身は ref 経由で最新にする(古い props を掴んだまま表示しない)。
   const renderMenuPopoverRef = useRef(renderMenuPopover);
   renderMenuPopoverRef.current = renderMenuPopover;
-  const menuPopoverComponent = useMemo<ComponentType<object>>(() => {
-    function ThreadMenuPopover(popover: object) {
-      return renderMenuPopoverRef.current(popover as Parameters<typeof renderMenuPopover>[0]);
+  const menuPopoverComponent = useMemo<ComponentType<PluginPopoverProps>>(() => {
+    function ThreadMenuPopover(popover: PluginPopoverProps) {
+      return renderMenuPopoverRef.current(popover);
     }
     return ThreadMenuPopover;
   }, []);
 
   const onMenuOpen = useCallback(
-    (row: SidebarRowView<ChildThread>) => {
-      if (!openPopover) {
+    (row: SidebarRowView<ChildThread>, anchorNode: unknown) => {
+      // PC 幅は押した行の位置を測って自分で描く。測れない・狭い幅ではホストの浮きパネル
+      // (狭い幅ではボトムシート)に任せる。どちらも無ければ理由を出す。
+      const anchor = compact ? null : measureMenuAnchor(anchorNode, rootRef.current);
+      if (!anchor && !openPopover) {
         // 古いホストには無い。押しても黙って何も起きないより理由を出す。
         setNotice("この版の Paseo では行メニューを開けません");
         return;
       }
       const t = row.thread;
+      setMenuAnchor(anchor);
       // 他の行の親になっている id はアーカイブさせない(司令塔の印が無い親の行も畳ませない)。
       const parentIds = new Set(
         threads.map((x) => x.parentAgentId).filter((id): id is string => id !== null),
@@ -487,16 +544,50 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
         canArchive: menuCanArchive(t, parentIds),
       };
       setMenuAgentId(t.agentId);
-      openPopover(menuPopoverComponent);
+      // 自分で描ける行はホストへ渡さない(サイドバーの外にはみ出さない)。
+      if (!anchor) openPopover?.(menuPopoverComponent);
     },
-    [menuPopoverComponent, openPopover, threads],
+    [compact, menuPopoverComponent, openPopover, threads],
   );
+  const onMenuOpenAnchor = useCallback(
+    (row: SidebarRowView<ChildThread>, anchor: unknown) => {
+      // 開いている行の帯をもう一度押したら閉じる(トグル。開き直すと2段階確認もやり直しになる)。
+      if (menuAgentId === row.thread.agentId) {
+        closeMenu();
+        return;
+      }
+      onMenuOpen(row, anchor);
+    },
+    [closeMenu, menuAgentId, onMenuOpen],
+  );
+  // 自分で描くメニュー。開いている行が無ければ何も描かない(絶対配置なので一覧の高さは変わらない)。
+  // 幅の判定はここでやり直す: 狭くなったらシートへ、広くなったらシートを閉じて自分で描く。
+  const inlineMenu = useMemo(() => {
+    if (!menuAgentId || !menuActionProps || compact || !menuAnchor) return null;
+    const { target, onAction } = menuActionProps;
+    return (
+      <ThreadMenu
+        // 行が変わったら確認待ちを引き継がない(別の行のアーカイブが2回目で走らない)
+        key={target.thread.agentId}
+        thread={target.thread}
+        title={target.title}
+        canArchive={target.canArchive}
+        colors={colors}
+        onAction={onAction}
+        onClose={closeMenu}
+        registerClose={registerMenuClose}
+      />
+    );
+  }, [closeMenu, colors, compact, menuActionProps, menuAgentId, menuAnchor, registerMenuClose]);
 
-  // タブを切り替えたら開いているポップアップは閉じる(隠れた一覧の行のメニューが残らない)。
+  // タブを切り替えたら開いているメニューは閉じる(隠れた一覧の行のメニューが残らない)。
+  // 幅の種別(PC↔スマホ)が変わったときも閉じる: 描き手が自分→ホストのシート(またはその逆)に
+  // 変わり、開いたままの状態が画面に出ないまま残るのを避ける。
   useEffect(() => {
     menuCloseRef.current?.();
     setMenuAgentId(null);
-  }, [section]);
+    setMenuAnchor(null);
+  }, [compact, section]);
   // アーカイブ等で対象が一覧から消えたら閉じる(同じ id が戻ってきたときに勝手に開かない。
   // 出口レビュー round1 指摘6)。
   useEffect(() => {
@@ -519,42 +610,171 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
         active={onScreen && focusId === row.thread.agentId}
         dotIcons={dotIcons}
         onOpen={openThread}
-        onOpenMenu={onMenuOpen}
+        onOpenMenu={onMenuOpenAnchor}
       />
     ),
-    [dotIcons, failed, focusId, onMenuOpen, onScreen, openThread],
+    [dotIcons, failed, focusId, onMenuOpenAnchor, onScreen, openThread],
   );
 
   return (
-    <SidebarContents
-      section={section}
-      rows={rows}
-      coordinatorIds={coordinatorIds}
-      collapsed={collapsed}
-      statusNotice={statusNotice}
-      notice={notice}
-      noticeColor={colors.foregroundMuted}
-      statusColor={statusColor}
-      orderIsManual={orderIsManual}
-      failed={failed}
-      onOpenList={openList}
-      onToggleGroup={toggleGroup}
-      onOpenGroup={openGroup}
-      onDragBegin={onDragBegin}
-      onReorderGroup={onReorderGroup}
-      renderThread={renderThread}
-      onResetOrder={resetOrder}
-      notes={notes}
-      notesError={notesError}
-      notesPlace={place}
-      notesZones={zones}
-      colors={colors}
-      openAgent={navigation?.openAgent}
-      serverId={props.host.id}
-      openScreen={openScreen}
-      onNotesCreated={reloadNotes}
-    />
+    // 相対配置の外枠: メニュー(絶対配置)の置き場所であり、行の位置を測る基準になる。
+    <View ref={rootRef} style={styles.root}>
+      <SidebarContents
+        section={section}
+        rows={rows}
+        coordinatorIds={coordinatorIds}
+        collapsed={collapsed}
+        statusNotice={statusNotice}
+        notice={notice}
+        noticeColor={colors.foregroundMuted}
+        statusColor={statusColor}
+        orderIsManual={orderIsManual}
+        failed={failed}
+        onOpenList={openList}
+        onToggleGroup={toggleGroup}
+        onOpenGroup={openGroup}
+        onDragBegin={onDragBegin}
+        onReorderGroup={onReorderGroup}
+        renderThread={renderThread}
+        onResetOrder={resetOrder}
+        notes={notes}
+        notesError={notesError}
+        notesPlace={place}
+        notesZones={zones}
+        colors={colors}
+        openAgent={navigation?.openAgent}
+        serverId={props.host.id}
+        openScreen={openScreen}
+        onNotesCreated={reloadNotes}
+      />
+      {inlineMenu && menuAnchor ? (
+        <InlineMenu anchor={menuAnchor} colors={colors} close={closeMenu}>
+          {inlineMenu}
+        </InlineMenu>
+      ) : null}
+    </View>
   );
+}
+
+/**
+ * PC 幅の行メニュー。**サイドバー(外枠)の内側**に絶対配置で重ねる。
+ *
+ * ホストの浮きパネルは行の右端に付いてサイドバーの外(メイン画面側)にはみ出すので使わない
+ * (2026-10-24 ユーザー指示「メイン画面の方じゃなくて、サイドバーの方に出して」)。置き方は
+ * **押した行のすぐ下**、下に入りきらなければ**行の上**。左右は外枠の右端に寄せ、幅は外枠から
+ * はみ出さない値に丸める。絶対配置なので、開いても他の行の位置・高さは変わらない。
+ *
+ * 閉じる手段はこちらで付ける(外枠全体を覆う透明な幕のタップ / Esc / メニューの外のタップ)。
+ */
+function InlineMenu({
+  anchor,
+  colors,
+  close,
+  children,
+}: {
+  anchor: MenuAnchor;
+  colors: PluginSidebarItemProps["theme"]["colors"];
+  close: () => void;
+  children: React.ReactNode;
+}) {
+  // 高さは描いてみるまで分からない(題名が2行になる等)。測れるまでは透明にしておく
+  // (見えた瞬間に位置が飛ばない)。
+  const [height, setHeight] = useState<number | null>(null);
+  const panelRef = useRef<View | null>(null);
+  const onLayout = useCallback((event: { nativeEvent: { layout: { height: number } } }) => {
+    const next = Math.round(event.nativeEvent.layout.height);
+    setHeight((prev) => (prev === next ? prev : next));
+  }, []);
+  // Esc で閉じる(ホストの浮きパネル・シートと同じ扱い)。
+  useEffect(() => {
+    if (!isWeb()) return undefined;
+    const onKey = (event: { key?: string }) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [close]);
+  // サイドバーの外(メイン画面)を押しても閉じる。外枠の中は下の幕が受ける。
+  useEffect(() => {
+    if (!isWeb()) return undefined;
+    const onDown = (event: { target?: EventTarget | null }) => {
+      const panel = panelRef.current as unknown as HTMLElement | null;
+      if (panel && event.target instanceof Node && panel.contains(event.target)) return;
+      close();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [close]);
+  const layout = useMemo(() => {
+    // 外枠の内側に収まる幅(左右の余白を空ける)。狭いサイドバーでも外へ出さない。
+    const width = Math.max(
+      Math.min(MENU_MAX_WIDTH, Math.round(anchor.width - EDGE_PADDING * 2)),
+      0,
+    );
+    const left = Math.max(Math.round(anchor.width - EDGE_PADDING - width), 0);
+    const below = anchor.bottom + GAP;
+    // 外枠の見えている範囲(ウィンドウ下端と外枠の下端の近い方)を越えない。
+    const limit = Math.min(anchor.height, anchor.windowBottom) - EDGE_PADDING;
+    const panelHeight = height ?? 0;
+    const fitsBelow = below + panelHeight <= limit;
+    const above = anchor.top - GAP - panelHeight;
+    const top = fitsBelow || above < EDGE_PADDING ? below : above;
+    return { top: Math.max(Math.round(top), 0), left, width };
+  }, [anchor, height]);
+  const positionStyle = useMemo(
+    () => ({ ...layout, opacity: height === null ? 0 : 1 }),
+    [height, layout],
+  );
+  const panelStyle = useMemo(
+    () => [
+      styles.inlineMenu,
+      positionStyle,
+      { backgroundColor: colors.surface1 ?? colors.surface0, borderColor: colors.border },
+    ],
+    [colors.border, colors.surface0, colors.surface1, positionStyle],
+  );
+  return (
+    <View style={styles.inlineMenuLayer}>
+      {/* 外枠全体を覆う幕。開いている間に他の行を押すと、その行を開かずにメニューだけ閉じる。 */}
+      <Pressable
+        onPress={close}
+        accessibilityRole="button"
+        accessibilityLabel="メニューを閉じる"
+        testID="child-thread-menu-inline-backdrop"
+        style={StyleSheet.absoluteFill}
+      />
+      <View ref={panelRef} style={panelStyle} onLayout={onLayout} testID="child-thread-menu-inline">
+        {children}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * 押した行(状態の帯)の位置を、外枠(root)の内側の座標で測る。Web では DOM の矩形を直接使う。
+ * 測れなければ null(呼び出し元はホストの浮きパネルへ退避)。
+ */
+function measureMenuAnchor(node: unknown, rootNode: unknown): MenuAnchor | null {
+  const el = node as Partial<HTMLElement> | null | undefined;
+  const root = rootNode as Partial<HTMLElement> | null | undefined;
+  if (!el || typeof el.getBoundingClientRect !== "function") return null;
+  if (!root || typeof root.getBoundingClientRect !== "function") return null;
+  const rect = el.getBoundingClientRect();
+  const base = root.getBoundingClientRect();
+  if (rect.width <= 0 || base.width <= 0) return null;
+  return {
+    left: rect.left - base.left,
+    right: rect.right - base.left,
+    top: rect.top - base.top,
+    bottom: rect.bottom - base.top,
+    width: base.width,
+    height: base.height,
+    windowBottom: typeof window === "undefined" ? base.height : window.innerHeight - base.top,
+  };
+}
+
+function isWeb(): boolean {
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 /**
@@ -853,8 +1073,11 @@ function ThreadRow({
   dotIcons: Record<StateDotKind, StateDotIcon>;
   /** 押したらそのスレを開く(開けない行の判定・ドロワーを閉じる処理は呼び出し側 `openThread`)。 */
   onOpen: (agentId: string, access: ChildThread["access"]) => void;
-  /** 状態の帯を押した: その行のメニューをポップアップで開く(題名・アーカイブ可否は行から作る)。 */
-  onOpenMenu: (row: SidebarRowView<ChildThread>) => void;
+  /**
+   * 状態の帯を押した: その行のメニューをポップアップで開く(題名・アーカイブ可否は行から作る)。
+   * 第2引数は帯の要素(PC 幅でメニューをその直下に置くために測る。RN のネイティブでは null)。
+   */
+  onOpenMenu: (row: SidebarRowView<ChildThread>, badgeNode?: unknown) => void;
 }) {
   const t = row.thread;
   const onPress = useCallback(() => onOpen(t.agentId, t.access), [onOpen, t.agentId, t.access]);
@@ -872,10 +1095,13 @@ function ThreadRow({
   // (出口レビュー round1 指摘5)。文字は「司令塔」にして他の行の状態と混ぜない。
   const badgeText = t.coordinator ? "司令塔" : status.text;
   const badgeKind: StatusKind = t.coordinator ? "running" : status.kind;
-  const pressBadge = useCallback(() => onOpenMenu(row), [onOpenMenu, row]);
+  // 帯の位置を渡す(PC 幅はメニューをこの帯のすぐ下/上に置く)。ref は帯を含む行末の容器に付ける
+  // (帯そのものに ref を渡すには `StatusBadge` の props を増やす必要がある)。
+  const badgeRef = useRef<View | null>(null);
+  const pressBadge = useCallback(() => onOpenMenu(row, badgeRef.current), [onOpenMenu, row]);
   const trailing = useMemo(
     () => (
-      <View style={styles.trailing}>
+      <View ref={badgeRef} style={styles.trailing}>
         <StatusBadge text={badgeText} kind={badgeKind} testID={testID} onPress={pressBadge} />
       </View>
     ),
@@ -897,6 +1123,32 @@ function ThreadRow({
 }
 
 const styles = StyleSheet.create({
+  // 外枠: 絶対配置のメニューの基準。中身の大きさはこれまでどおり(自身は高さを取らない)。
+  root: {
+    position: "relative",
+  },
+  // メニューの層。外枠いっぱいを覆い、幕(タップで閉じる)とパネルを置く。中身は押し通さない。
+  inlineMenuLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 10,
+  },
+  // パネル本体。ホストの浮きパネルに近い見た目(角丸・枠・影)を自前で持つ。
+  inlineMenu: {
+    position: "absolute",
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 4,
+    overflow: "hidden",
+    ...(isWeb()
+      ? { boxShadow: "0 4px 16px rgba(0,0,0,0.18)" }
+      : {
+          shadowColor: "#000",
+          shadowOpacity: 0.18,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: 4 },
+          elevation: 8,
+        }),
+  },
   trailing: {
     flexDirection: "row",
     alignItems: "center",
