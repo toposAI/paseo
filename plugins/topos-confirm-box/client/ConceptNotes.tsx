@@ -119,6 +119,9 @@ function writeCollapsed(v: boolean): void {
   }
 }
 
+/** 押しても何もしない行(タブ表示の空行)。`SidebarRow` は `onPress` 必須なので定数を渡す。 */
+function noop(): void {}
+
 function oneLine(s: string, max = 56): string {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
@@ -255,6 +258,13 @@ export function ConceptNotesList({
   const headerLabel =
     error && concepts.length === 0 ? "進行中の構想(取得失敗)" : `進行中の構想 ${concepts.length}件`;
 
+  /**
+   * 行を出すか。**見出しの無いタブ表示では保存された開閉状態を無視する**(出口レビュー round1 指摘1)。
+   * 以前は畳んだ状態が `localStorage` に残っていると、見出しもシェブロンも無いタブで
+   * 構想が1件も出ず、開き直す手段が無かった。
+   */
+  const visible = header ? open : true;
+
   const headerTrailing = useMemo(
     () => (
       <ConceptHeaderTrailing
@@ -278,7 +288,16 @@ export function ConceptNotesList({
           trailing={headerTrailing}
         />
       ) : null}
-      {open
+      {/* 取得失敗は、見出しの無いタブでも黙って出さない(空と見分けが付かない) */}
+      {visible && error && concepts.length === 0 ? (
+        <SidebarRow
+          id="concept-notes-error"
+          icon="CircleAlert"
+          label={oneLine(error, 80)}
+          onPress={noop}
+        />
+      ) : null}
+      {visible
         ? concepts.map((n) => (
             <ConceptRow
               key={n.path}
@@ -289,7 +308,7 @@ export function ConceptNotesList({
             />
           ))
         : null}
-      {open && notice ? (
+      {visible && notice ? (
         <SidebarRow
           id="concept-notes-notice"
           icon="CircleAlert"
@@ -297,12 +316,14 @@ export function ConceptNotesList({
           onPress={dismissNotice}
         />
       ) : null}
-      {open && concepts.length === 0 ? (
+      {/* 空行は見出しの開閉を兼ねる。見出しの無いタブで押すと畳んで空になるので、押下を付けない
+          (出口レビュー round1 指摘1) */}
+      {visible && concepts.length === 0 ? (
         <SidebarRow
           id="concept-notes-empty"
           icon="Lightbulb"
           label={emptySectionLabel("concepts")}
-          onPress={toggle}
+          onPress={header ? toggle : noop}
         />
       ) : null}
     </>

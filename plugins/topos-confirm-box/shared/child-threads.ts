@@ -12,10 +12,17 @@ import { defineRpc } from "@getpaseo/plugin";
 export const CHILD_THREAD_STATUSES = ["実装中", "ユーザー判断待ち", "完了"] as const;
 export type ChildThreadStatus = (typeof CHILD_THREAD_STATUSES)[number];
 
+/**
+ * 行の status に載せてよい語彙。登録簿の3語彙に、登録簿に載らないスレ(= Paseo から直接建てた
+ * スレ)の機械状態から導く `待機中` を足したもの(2026-10-24、出口レビュー round1 指摘2)。
+ * 登録簿の書き込み語彙(`CHILD_THREAD_STATUSES`)は変えない = ノートや Python 側へ漏らさない。
+ */
+export const CHILD_THREAD_ROW_STATUSES = [...CHILD_THREAD_STATUSES, "待機中"] as const;
+
 export const ChildThreadSchema = z.object({
   agentId: z.string(),
   title: z.string(),
-  status: z.enum(CHILD_THREAD_STATUSES),
+  status: z.enum(CHILD_THREAD_ROW_STATUSES),
   /** Paseo の機械状態(busy/idle/承認待ち)。意味のある状態(status)とは混ぜない。 */
   machineState: z.string().nullable(),
   request: z.string(),
@@ -86,6 +93,11 @@ export const childThreadsListRpc = defineRpc({
      * このとき見出しは開閉だけになるので、理由を通知行に出す(黙って挙動が変わらないように)。
      */
     parentsUnknown: z.boolean().default(false),
+    /**
+     * 登録簿に載らないスレ(Paseo から直接建てたスレ)の取り込みを、途中で切れた・取れなかった。
+     * このとき一部のスレが一覧に出ない(=元の「出ない」症状と見分けが付かない)ので通知行に出す。
+     */
+    threadsIncomplete: z.boolean().default(false),
   }),
 });
 export type ChildThreadsListOutput = z.infer<typeof childThreadsListRpc.output>;
@@ -145,10 +157,15 @@ export const childThreadsPinRpc = defineRpc({
 });
 export type ChildThreadsPinOutput = z.infer<typeof childThreadsPinRpc.output>;
 
-export const STATUS_RANK: Record<ChildThreadStatus, number> = {
+/**
+ * 並びの優先度(小さいほど上)。`待機中` は「動いていない」なので実装中の後・完了の前に置く
+ * (上段の `buildUpperRows` は `待機中` も行として残すので、並びの位置が要る)。
+ */
+export const STATUS_RANK: Record<(typeof CHILD_THREAD_ROW_STATUSES)[number], number> = {
   ユーザー判断待ち: 0,
   実装中: 1,
-  完了: 2,
+  待機中: 2,
+  完了: 3,
 };
 
 /**

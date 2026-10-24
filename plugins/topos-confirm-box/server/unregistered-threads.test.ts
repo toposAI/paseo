@@ -35,7 +35,8 @@ test("登録簿に無いスレを後ろに足す(登録簿の行の順は変え�
     ["a", "b", "c"],
   );
   assert.equal(result.rows[2]?.title, "新しいワークスペースのスレ");
-  assert.equal(result.rows[2]?.status, "実装中");
+  // idle は「実装中」でなく「待機中」(動いていないスレを動いて見せない。出口レビュー round1 指摘2)
+  assert.equal(result.rows[2]?.status, "待機中");
   assert.equal(result.rows[2]?.machineState, "idle");
   assert.equal(result.rows[2]?.pinned, false);
   assert.equal(result.rows[2]?.coordinator, false);
@@ -99,6 +100,47 @@ test("同じスレが一覧に2回出てきても1行だけ", () => {
   assert.equal(result.rows.length, 1);
   assert.equal(result.rows[0]?.title, "1回目");
   assert.equal(result.skipped.duplicate, 1);
+});
+
+test("状態文字は機械状態から導く(動いているものだけ実装中)", () => {
+  const result = mergeUnregisteredThreads(
+    [],
+    [
+      { id: "run", title: "実行中", status: "running" },
+      { id: "init", title: "初期化中", status: "initializing" },
+      { id: "idle", title: "待機", status: "idle" },
+      { id: "closed", title: "終了", status: "closed" },
+      { id: "none", title: "状態なし" },
+      // 現在の lifecycle enum には無いが、上流が承認待ちを status に載せたときの受け皿
+      { id: "approval", title: "承認待ち", status: "waiting_approval" },
+    ],
+  );
+  const byId = new Map(result.rows.map((t) => [t.agentId, t]));
+  assert.equal(byId.get("run")?.status, "実装中");
+  assert.equal(byId.get("init")?.status, "実装中");
+  // idle/closed/不明を「実装中」にすると、動いていないスレが動いて見える(出口レビュー round1 指摘2)
+  assert.equal(byId.get("idle")?.status, "待機中");
+  assert.equal(byId.get("closed")?.status, "待機中");
+  assert.equal(byId.get("none")?.status, "待機中");
+  assert.equal(byId.get("approval")?.status, "ユーザー判断待ち");
+  // 機械状態そのものは行に残す(表示の色分けは `statusKindOfMachine` が同じ値を見る)
+  assert.equal(byId.get("idle")?.machineState, "idle");
+  assert.equal(byId.get("none")?.machineState, null);
+});
+
+test("ピン止めは保存値を反映する(メニューで付けたピンが次の取得で外れて見えない)", () => {
+  const result = mergeUnregisteredThreads(
+    [],
+    [
+      { id: "pinned", title: "ピン", updatedAt: 1 },
+      { id: "plain", title: "普通", updatedAt: 2 },
+    ],
+    [],
+    new Set(["pinned"]),
+  );
+  const byId = new Map(result.rows.map((t) => [t.agentId, t]));
+  assert.equal(byId.get("pinned")?.pinned, true);
+  assert.equal(byId.get("plain")?.pinned, false);
 });
 
 test("id の無い要素は無視する(壊れた要素で落ちない)", () => {

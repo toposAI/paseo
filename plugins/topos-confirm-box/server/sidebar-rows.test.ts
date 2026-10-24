@@ -77,6 +77,26 @@ test("上段: ノートの無いスレは移行期間として従来どおり出
   );
 });
 
+test("上段: 登録簿に載らないスレの語彙(待機中/承認待ち)は状態文字へ写す", () => {
+  const rows = buildUpperRows(
+    [
+      { agentId: "run", status: "実装中", title: "実行中" },
+      { agentId: "wait", status: "承認待ち", title: "承認待ち" },
+      { agentId: "idle", status: "待機中", title: "待機" },
+    ],
+    new Map(),
+  );
+  // 待機中の行も残す(「出ない」症状の原因そのもの。色だけ動いていないと分かるようにする)
+  assert.deepEqual(
+    rows.map((r) => [r.thread.agentId, r.statusLabel]),
+    [
+      ["run", "実装中"],
+      ["wait", "判断待ち"],
+      ["idle", "待機中"],
+    ],
+  );
+});
+
 test("上段: 並びは入力順を保つ(ドラッグ並びを壊さない)", () => {
   const rows = buildUpperRows(
     [thread("3", "実装中"), thread("1", "実装中"), thread("2", "実装中")],

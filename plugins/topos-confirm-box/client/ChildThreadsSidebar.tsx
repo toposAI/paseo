@@ -44,7 +44,7 @@ import type { SidebarRowView } from "../shared/sidebar-rows.js";
 import type { NoteStatus, SidebarNote } from "../shared/notes.js";
 import { emptySectionLabel } from "../shared/sidebar-section-mode.js";
 import type { SidebarSectionKey } from "../shared/sidebar-section-mode.js";
-import { displayStatus, type StatusKind } from "../shared/thread-status-label.js";
+import { type StatusKind } from "../shared/thread-status-label.js";
 import { pickReadableText } from "../shared/contrast.js";
 import { CLOSED_MENU, nextMenu } from "../shared/thread-menu.js";
 import type { ThreadMenuAction, ThreadMenuState } from "../shared/thread-menu.js";
@@ -71,6 +71,7 @@ const ICON: Record<StatusKind, string> = {
   running: "Loader",
   done: "CircleCheck",
   closed: "Archive",
+  idle: "Circle",
 };
 
 interface AgentNavigation {
@@ -155,6 +156,8 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   const [failed, setFailed] = useState(false);
   // サーバーが Paseo の一覧を取れず、見出しの親を「開ける親」に判定できなかったか(理由を通知行で出す)。
   const [parentsUnknown, setParentsUnknown] = useState(false);
+  // 登録簿に載らないスレの取り込みが途中で切れた・取れなかったか(一部のスレが出ない。通知行で出す)。
+  const [threadsIncomplete, setThreadsIncomplete] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [orderIsManual, setOrderIsManual] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(readCollapsed);
@@ -181,6 +184,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
           setOrderIsManual(r.orderIsManual);
           setFailed(false);
           setParentsUnknown(r.parentsUnknown === true);
+          setThreadsIncomplete(r.threadsIncomplete === true);
           if (r.pinReadError) console.warn(`[child-threads] ${r.pinReadError}`);
           return null;
         })
@@ -312,8 +316,11 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     if (saveFailed) return "並び順を保存できません(次の取得で戻ります)";
     if (notesError) return `ノート未取得: ${notesError}`;
     if (parentsUnknown) return "スレの一覧を取れず、見出しからは開けません(開閉のみ)";
+    // 取り込みが途中で切れた: 一部のスレが出ない。元の「出ない」症状と同じ見え方になるので必ず出す。
+    if (threadsIncomplete)
+      return "一部のスレを取得できていません(Paseo から建てたスレの一部が欠けます)";
     return "";
-  }, [failed, notesError, parentsUnknown, saveFailed]);
+  }, [failed, notesError, parentsUnknown, saveFailed, threadsIncomplete]);
 
   const dropThread = useCallback((agentId: string) => {
     setThreads((prev) => prev.filter((x) => x.agentId !== agentId));
@@ -325,13 +332,21 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     (t: ChildThread) => {
       setNotice("アーカイブしています…");
       gatePoll(30_000);
+      // 失敗したら取得の抑止を解く(実行中のスレを断られたときなど、30秒も古い一覧のまま待たせない)。
+      const ungated = () => {
+        dragGateUntilRef.current = 0;
+      };
       void archive({ agentId: t.agentId })
         .then((r) => {
           setNotice(r.message ?? (r.ok ? "アーカイブしました" : "アーカイブできませんでした"));
           if (r.ok) dropThread(t.agentId);
+          else ungated();
           return null;
         })
-        .catch((error: unknown) => setNotice(`アーカイブできません: ${(error as Error).message}`));
+        .catch((error: unknown) => {
+          ungated();
+          setNotice(`アーカイブできません: ${(error as Error).message}`);
+        });
     },
     [archive, dropThread, gatePoll],
   );
@@ -346,9 +361,17 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
           prev.map((x) => (x.agentId === t.agentId ? { ...x, pinned: on } : x)),
           coordinatorIds,
         );
-      setThreads(flip(pinned));
+      // 失敗したときに**操作前の並びへ戻す**(`flip` で戻すと、ピンを外した行が元の位置に戻らない)。
+      let before: ChildThread[] | null = null;
+      setThreads((prev) => {
+        before ??= prev;
+        return flip(pinned)(prev);
+      });
       setNotice(pinned ? "ピン止めしました" : "ピン止めを外しました");
-      const revert = () => setThreads(flip(!pinned));
+      const revert = () => {
+        const original = before;
+        if (original) setThreads(original);
+      };
       void pin({ agentId: t.agentId, pinned })
         .then((r) => {
           if (!r.ok) {
@@ -402,6 +425,13 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
 
   // メニューの対象は取得結果から引き直す(ピン状態がポーリング後も最新になる)。
   const menuThread = menu ? threads.find((t) => t.agentId === menu.agentId) : undefined;
+  // 閉じた/アーカイブされた等で対象が一覧から消えたら、メニューも閉じる(同じ id が戻ってきたときに
+  // 勝手に開かない。出口レビュー round1 指摘6)。
+  useEffect(() => {
+    if (menu && !menuThread) setMenu(null);
+  }, [menu, menuThread]);
+  // 題名は**行に出ている題名**(ノートがあればノートの題名)を渡す。スレ側の題名は古いことがある。
+  const menuTitle = menu ? rows.find((r) => r.thread.agentId === menu.agentId)?.title : undefined;
   const onMenuAction = useCallback(
     (action: ThreadMenuAction) => {
       if (menuThread) applyMenuAction(menuThread, action);
@@ -439,6 +469,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
       {menuThread && menu ? (
         <ThreadMenu
           thread={menuThread}
+          title={menuTitle ?? menuThread.title}
           state={menu.state}
           colors={colors}
           onAction={onMenuAction}
@@ -695,14 +726,18 @@ function pinFirstPerGroup(
 function rowIcon(row: SidebarRowView<ChildThread>, t: ChildThread): string {
   if (t.coordinator) return "Command";
   if (t.access === "workspace-archived") return ICON.closed;
+  // 止まったスレは帯の語彙に関わらず「終了」の見た目にする(従来どおり)。
+  if (t.machineState === "closed") return ICON.closed;
   if (row.note?.status === "確認待ち") return "CircleCheck";
   if (row.statusLabel === "判断待ち") return "CircleHelp";
   if (row.statusLabel === "実装中" && t.status === "完了") return "Loader";
-  return ICON[displayStatus(t.status, t.machineState).kind];
+  // 帯と同じ判断で選ぶ(登録簿に載らないスレは「待機中」= idle のアイコンになる)。
+  return ICON[kindOfStatusLabel(row.statusLabel)];
 }
 
 /** 状態の帯の色(上段は実装ノートの status が正なので、その語彙で色を選ぶ)。 */
-function kindOfStatusLabel(label: NoteStatus): StatusKind {
+function kindOfStatusLabel(label: NoteStatus | "待機中"): StatusKind {
+  if (label === "待機中") return "idle";
   if (label === "完了") return "done";
   if (label === "判断待ち" || label === "構想") return "waiting";
   if (label === "確認待ち") return "done";
@@ -735,18 +770,19 @@ function ThreadRow({
           kind: kindOfStatusLabel(row.statusLabel),
         };
   const testID = `child-thread-status-${t.agentId}`;
-  const showsBadge = !(t.coordinator && t.access !== "workspace-archived");
+  // 状態の帯を押すとメニュー(ピン止め/アーカイブ/スレを開く)が開く。司令塔の行も例外にしない:
+  // 旧実装では司令塔の行にもピン/アーカイブのボタンがあったので、外すと機能の退行になる
+  // (出口レビュー round1 指摘5)。文字は「司令塔」にして他の行の状態と混ぜない。
+  const badgeText = t.coordinator ? "司令塔" : status.text;
+  const badgeKind: StatusKind = t.coordinator ? "running" : status.kind;
   const pressBadge = useCallback(() => onOpenMenu(t.agentId), [onOpenMenu, t.agentId]);
-  // 行末は状態の帯だけ。帯を押すとメニュー(ピン止め/アーカイブ/スレを開く/閉じる)が開く。
-  // 司令塔の行は帯を出さないので、メニューの入口も持たない(司令塔の一覧側で操作する)。
   const trailing = useMemo(
-    () =>
-      showsBadge ? (
-        <View style={styles.trailing}>
-          <StatusBadge text={status.text} kind={status.kind} testID={testID} onPress={pressBadge} />
-        </View>
-      ) : null,
-    [pressBadge, showsBadge, status.kind, status.text, testID],
+    () => (
+      <View style={styles.trailing}>
+        <StatusBadge text={badgeText} kind={badgeKind} testID={testID} onPress={pressBadge} />
+      </View>
+    ),
+    [badgeKind, badgeText, pressBadge, testID],
   );
   return (
     <SidebarRow

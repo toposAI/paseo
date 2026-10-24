@@ -11,8 +11,12 @@
 import { LOWER_TIER_STATUSES, UPPER_TIER_STATUSES } from "./notes.js";
 import type { NoteStatus, SidebarNote } from "./notes.js";
 
-/** 子スレ一覧側の status(shared/child-threads.ts と同値。循環 import を避けここで受け取る)。 */
-export type ThreadStatusHint = "実装中" | "ユーザー判断待ち" | "完了";
+/**
+ * 子スレ一覧側の status。登録簿の行は `shared/child-threads.ts` の3語彙、登録簿に載らない
+ * (Paseo から直接建てた)スレは機械状態から導く2語彙(`server/unregistered-threads.ts`)を使う。
+ * `待機中`/`承認待ち` は上段に出さない(動いているスレだけを上段に並べる。出口レビュー round1 指摘2)。
+ */
+export type ThreadStatusHint = "実装中" | "ユーザー判断待ち" | "完了" | "承認待ち" | "待機中";
 
 export interface RowThread {
   agentId: string;
@@ -24,13 +28,36 @@ export interface SidebarRowView<T> {
   thread: T;
   /** 行の題名(ノートがあればノートの題名)。 */
   title: string;
-  /** 行右端の状態文字。 */
-  statusLabel: NoteStatus;
+  /**
+   * 行右端の状態文字。`待機中` はノート語彙の外にある(登録簿に載らないスレの機械状態から導く。
+   * ノート語彙を増やすと、ノートの frontmatter 側にまで語彙が漏れるため別扱いにする)。
+   */
+  statusLabel: NoteStatus | "待機中";
   /** この行に対応する実装ノート(無ければ null)。 */
   note: SidebarNote | null;
 }
 
 const isUpperStatus = (s: NoteStatus) => UPPER_TIER_STATUSES.includes(s);
+
+/** ノートの無い行の状態文字(スレ側の語彙をノート語彙へ寄せる)。 */
+function labelOfThreadStatus(status: ThreadStatusHint): NoteStatus | "待機中" {
+  switch (status) {
+    case "実装中":
+      return "実装中";
+    case "ユーザー判断待ち":
+    case "承認待ち":
+      return "判断待ち";
+    case "待機中":
+      return "待機中";
+    default:
+      return "完了";
+  }
+}
+
+/** ノートが無い行を上段に出すか(`完了` だけ外す。待機中も一覧には残す)。 */
+function keepsWithoutNote(status: ThreadStatusHint): boolean {
+  return status !== "完了";
+}
 
 /**
  * 司令塔スレと、司令塔の子スレを寄せる「司令塔」グループの id 集合。
@@ -116,11 +143,11 @@ export function buildUpperRows<T extends RowThread>(
       rows.push({ thread: t, title: note.title || t.title, statusLabel: note.status, note });
       continue;
     }
-    if (t.status === "完了") continue;
+    if (!keepsWithoutNote(t.status)) continue;
     rows.push({
       thread: t,
       title: t.title,
-      statusLabel: t.status === "ユーザー判断待ち" ? "判断待ち" : "実装中",
+      statusLabel: labelOfThreadStatus(t.status),
       note: null,
     });
   }

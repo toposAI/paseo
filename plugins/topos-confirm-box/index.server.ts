@@ -46,8 +46,10 @@ import {
 } from "./shared/child-threads.js";
 import type { ThreadAccess } from "./shared/child-threads.js";
 import {
+  applyChildThreadOrder,
   childThreadPinsReadError,
   readChildThreadOrder,
+  readChildThreadPins,
   readChildThreads,
   writeChildThreadOrder,
   writeChildThreadPin,
@@ -147,20 +149,22 @@ export default function contribute(server: PluginServerContext) {
     let threads = adoptOrphans(markCoordinators(rows, ids));
     // 一覧を取れなかったとき、見出しからは開けなくなる(開閉のみ)。黙って挙動を変えず画面へ理由を返す。
     let parentsUnknown = false;
+    // 登録簿に載らないスレの取り込みが途中で切れた・取れなかった(一部のスレが出ない)。
+    let threadsIncomplete = false;
     try {
-      // 既定の一覧(1ページ)。印付け(`thread-archived`)に使う。
-      const listed = await ctx.paseo.agents.list();
-      // 印付けにはアーカイブ済みのスレが要る(既定の一覧は返さない)。ここは1ページだけ見る既存の作り
-      // なので、200件より古いアーカイブ済みスレは印が付かない(既存の残差。出口レビュー round3 指摘1で
-      // 「親の判定用とは分ける」判断)。取れなければ既定の一覧で代用する(印は付かない)。
-      let forAccess: { entries: { agent: ListedAgentLike }[] } = listed;
+      // 印付け(`thread-archived`)に使う一覧。アーカイブ済みを含む1ページだけ見る既存の作りなので、
+      // 200件より古いアーカイブ済みスレは印が付かない(既存の残差。出口レビュー round3 指摘1で
+      // 「親の判定用とは分ける」判断)。取れなければ空で代用する(印なし=押せるまま)。
+      // 既定の一覧を先に1回引く必要はない(取れないときの代わりに使っていたが、空と同じ扱いで足りる。
+      // 出口レビュー round1 指摘7a)。
+      let forAccess: { entries: { agent: ListedAgentLike }[] } = { entries: [] };
       try {
         const withArchived = await ctx.paseo.agents.list({
           filter: { includeArchived: true, includeBackground: true },
         });
         forAccess = { entries: withArchived.entries };
       } catch {
-        // アーカイブ込みを引けない: 既定の1ページで代用する(閉じたスレは印なし=押せるまま)。
+        // アーカイブ込みを引けない: 印は付かない(閉じたスレは押せるまま)。
       }
       // 開けるかの判定と行の取り込みに使う一覧は**全ページ**辿る。アーカイブ済みは含めない
       // (親の判定は `archivedAt` で落とすので要らない。含めると増え続ける履歴で頁数の上限に当たり、
@@ -192,24 +196,50 @@ export default function contribute(server: PluginServerContext) {
       // 内部用途で建てた背景ワークスペースのスレ(通常の一覧には出ない)まで行として出てしまう。
       // アーカイブ済みを明示的に含めるのは `mergeUnregisteredThreads` の `archived` の弾きを効かせる
       // ため(既定の一覧は返さないが、ホストの既定が変わっても閉じたスレが行にならないように)。
+      // ピン止めは保存値を反映する(反映しないと、ピン止めした未登録スレが次の取得で黙って外れる。
+      // 出口レビュー round1 指摘3)。
+      let unregisteredAgents: ListedAgentLike[] = [];
       try {
         const unregistered = await listAllAgents(ctx.paseo.agents, { includeArchived: true });
+        unregisteredAgents = unregistered.agents;
+        // 頁数の上限・途中の頁の失敗: 一部のスレが出ない(=元の「出ない」症状と見分けが付かないので通知)。
+        if (unregistered.truncated) threadsIncomplete = true;
         if (unregistered.agents.length > 0) {
-          threads = mergeUnregisteredThreads(threads, unregistered.agents, ids).rows;
+          threads = mergeUnregisteredThreads(
+            threads,
+            unregistered.agents,
+            ids,
+            new Set(readChildThreadPins(dir)),
+          ).rows;
         }
       } catch {
-        // 一覧が引けない: 登録簿の行だけで続ける。
+        // 一覧が引けない: 登録簿の行だけで続ける(通知行で理由を出す)。
+        threadsIncomplete = true;
       }
+      // 並びは既存行と同じく保存された手動順を最後に適用する(足した未登録スレを後ろに置く)。
+      // 足した行のピン止めは `mergeUnregisteredThreads` が状態の帯に出すだけに留め、**並びは動かさない**:
+      // 登録簿の行のピン止めはグループ内の先頭へ寄せるが、そのグループの `parentAgentId` は
+      // クライアントで欠ける(`buildUpperRows`)。ここで寄せると上の段の先頭へ跳ぶので、規則を揃えない
+      // (出口レビュー round1 指摘3。先頭へ寄せたい場合は未登録行にも親 id を渡す設計変更が要る)。
+      threads = applyChildThreadOrder(threads, readChildThreadOrder(dir));
       // 押して開けるか。いまの判定は**スレのアーカイブと `closed`**だけを止める
       // (`thread-liveness.ts` のコメント参照)。ワークスペースがアーカイブ済みの場合は
       // ここへ生きている id しか渡していないため `workspace-archived` が付かない
       // (出口レビュー round2 指摘2。既存の欠陥として残差に記録。挙動は変えない)。
       // 引けなければ空の印を付ける(=行は今まで通り押せる)。
+      // 入力は1ページ目のアーカイブ込み一覧と**全ページの取り込み一覧**を合わせる(200件より古い
+      // 未登録スレにもアーカイブ済みの印を付ける。出口レビュー round1 指摘4)。
       let access: Map<string, ThreadAccess> = new Map();
       try {
         const live = await listLiveWorkspaceIds(ctx);
+        const byId = new Map(
+          [...forAccess.entries, ...unregisteredAgents.map((agent) => ({ agent }))].map((e) => [
+            String(e.agent.id ?? ""),
+            e.agent,
+          ]),
+        );
         access = threadAccessById(
-          forAccess.entries.map((e) => e.agent),
+          [...byId.values()],
           live.ids.map((workspaceId) => ({ workspaceId })),
         );
       } catch {
@@ -225,6 +255,7 @@ export default function contribute(server: PluginServerContext) {
     } catch {
       threads = adoptOrphans(markCoordinators(rows, ids));
       parentsUnknown = true;
+      threadsIncomplete = true;
     }
     return {
       threads,
@@ -234,6 +265,7 @@ export default function contribute(server: PluginServerContext) {
       // ピンのファイルが壊れていても一覧は出すが、黙って「ピン無し」に見せない(画面は console.warn)。
       pinReadError: childThreadPinsReadError(dir),
       parentsUnknown,
+      threadsIncomplete,
     };
   });
 

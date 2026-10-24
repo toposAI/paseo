@@ -11,9 +11,13 @@
  * - Paseo の**内部スレ**(タイトル生成など `internal: true` の使い捨て、一覧から隠す `hidden`)は足さない。
  * - **アーカイブ済みのスレは足さない**(終えたスレが溜まらないように。既定の一覧はアーカイブ済みを
  *   返さないが、念のためここでも弾く)。
- * - 題名の無いスレは足さない(行が `id.slice(0,8)` だけになる)。
- * - 状態文字は実装ノートの無いスレと同じ扱い(`buildUpperRows` に流す)にするため、`status` は
- *   「実装中」で置き、機械状態は `machineState` に入れる。
+ * - 題名の無いスレは足さない(行が `id.slice(0,8)` だけになる)。Paseo は最初のメッセージで
+ *   仮題名を付ける(`session.ts` の `prepareAgentMessage`)ので、実用上は数秒で埋まる。
+ * - 状態文字は**機械状態から導く**(`machineState` だけを持つ登録簿の行と違い、正になる自己申告が無い)。
+ *   一律「実装中」にすると、アイドルや承認待ちのスレまで「実装中」の帯で並び、動いているように
+ *   見える(出口レビュー round1 指摘2)。`status` は上段の絞り込みにだけ効く語彙へ写す。
+ * - **ピン止めは保存値を反映する**(`pinnedIds`)。反映しないと、メニューでピン止めしても次の取得で
+ *   黙って外れて見える(保存自体は成功しているので巻き戻しの通知も出ない。出口レビュー round1 指摘3)。
  * - 並びは既定順の後ろ(`applyChildThreadOrder` が保存に無いIDを後ろに置く既存挙動)。
  *   登録簿へは**書き戻さない**(この経路は読むだけ)。
  * - 開けるか(`access`)はここでは付けない(未判定の null)。呼び出し元が `threadAccessById` で
@@ -34,6 +38,28 @@ export interface ListedAgentLike {
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
+
+/**
+ * 機械状態 → 上段の語彙。**動いているものだけ `実装中`**にし、承認待ちは `ユーザー判断待ち`
+ * (表示は「判断待ち」)、それ以外(idle 等)は `待機中`。表示の色分けは
+ * `shared/thread-status-label.ts` の `statusKindOfMachine` が同じ規則で行う。
+ */
+function statusHintOfMachine(machineState: string | null): ChildThread["status"] | "待機中" {
+  switch (machineState) {
+    case "running":
+    case "initializing":
+      return "実装中";
+    // 承認待ちは現在の lifecycle enum(`packages/protocol/src/agent-lifecycle.ts` の
+    // initializing|idle|running|error|closed)には無く、`pendingPermissions` 側で表される。
+    // 上流が status に載せる形へ変えたときのために受けておく(呼ばれない分岐)。
+    case "waiting_approval":
+    case "approval":
+    case "permission":
+      return "ユーザー判断待ち";
+    default:
+      return "待機中";
+  }
+}
 
 /** 一覧に足さなかったスレの理由(テストと報告のための語彙)。 */
 export type SkippedReason =
@@ -59,6 +85,8 @@ export function mergeUnregisteredThreads(
   rows: readonly ChildThread[],
   agents: readonly ListedAgentLike[],
   coordinatorIds: Iterable<string> = [],
+  /** ピン止め済みの agent id(保存値。`readChildThreadPins` の結果)。 */
+  pinnedIds: ReadonlySet<string> = new Set(),
 ): UnregisteredThreads {
   const listed = new Set(rows.map((t) => t.agentId));
   const coordinators = new Set(coordinatorIds);
@@ -101,12 +129,14 @@ export function mergeUnregisteredThreads(
       continue;
     }
     seen.add(agentId);
+    const machineState = str(a.status).slice(0, 40) || null;
     added.push({
       agentId,
       title: title.slice(0, 120),
-      // 実装ノートの無いスレと同じ扱い(状態はノート側で上書きされなければこれが出る)。
-      status: "実装中",
-      machineState: str(a.status).slice(0, 40) || null,
+      // 登録簿の行と違い、正になる自己申告が無い。機械状態を語彙へ写して上段の絞り込みに渡す
+      // (`buildUpperRows` が `待機中` を「動いていない」として扱う)。
+      status: statusHintOfMachine(machineState),
+      machineState,
       request: "",
       summaryItemId: null,
       summary: null,
@@ -115,7 +145,7 @@ export function mergeUnregisteredThreads(
       updatedAt: typeof a.updatedAt === "number" ? a.updatedAt : 0,
       parentAgentId: null,
       parentTitle: null,
-      pinned: false,
+      pinned: pinnedIds.has(agentId),
       coordinator: false,
       parentOpenable: false,
       // 開けるかは `thread-liveness.ts` が後で付ける(ここでは未判定)。

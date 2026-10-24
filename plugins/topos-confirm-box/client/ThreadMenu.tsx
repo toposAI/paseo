@@ -23,6 +23,8 @@ type SidebarColors = PluginSidebarItemProps["theme"]["colors"];
 
 export interface ThreadMenuProps {
   thread: ChildThread;
+  /** 行に出ている題名(ノートがあればノートの題名)。メニューの題名はこれを使う。 */
+  title: string;
   state: ThreadMenuState;
   colors: SidebarColors;
   /** 状態遷移を親へ返す(親が `nextMenu` で次状態を決め、実行すべき副作用を走らせる)。 */
@@ -33,7 +35,7 @@ export interface ThreadMenuProps {
  * メニュー本体。開いていない間は何も出さない。題名はアクセシビリティ用にだけ持たせ、
  * 画面側でどれのメニューか分かるようにする。
  */
-export function ThreadMenu({ thread, state, colors, onAction }: ThreadMenuProps) {
+export function ThreadMenu({ thread, title, state, colors, onAction }: ThreadMenuProps) {
   const onOpenChange = useCallback(
     (open: boolean) => {
       // 背景タップ・戻る・×で閉じたときも「閉じる」と同じ意味(確認は捨てる)
@@ -73,20 +75,13 @@ export function ThreadMenu({ thread, state, colors, onAction }: ThreadMenuProps)
   );
 
   return (
-    <Modal
-      title={thread.title}
-      open={state.open}
-      onOpenChange={onOpenChange}
-      // 題名にスレ側の古い値を混ぜない: ノートの題名は呼び出し元が決める(ここはスレの題名)
-    >
+    <Modal title={title} open={state.open} onOpenChange={onOpenChange}>
       <Modal.Content style={bodyStyle} contentContainerStyle={styles.content} scrollable={false}>
         <View testID={`child-thread-menu-${thread.agentId}`} style={styles.items}>
           <MenuItem
             testID={`child-thread-menu-pin-${thread.agentId}`}
             label={pinMenuLabel(thread.pinned)}
-            accessibilityLabel={
-              thread.pinned ? `${thread.title}のピン止めを外す` : `${thread.title}をピン止め`
-            }
+            accessibilityLabel={thread.pinned ? `${title}のピン止めを外す` : `${title}をピン止め`}
             style={itemStyle}
             textStyle={pinTextStyle}
             onPress={togglePin}
@@ -96,8 +91,8 @@ export function ThreadMenu({ thread, state, colors, onAction }: ThreadMenuProps)
             label={archiveMenuLabel(state.confirmingArchive)}
             accessibilityLabel={
               state.confirmingArchive
-                ? `${thread.title}をアーカイブする(もう一度押す)`
-                : `${thread.title}をアーカイブ`
+                ? `${title}をアーカイブする(もう一度押す)`
+                : `${title}をアーカイブ`
             }
             style={archiveStyle}
             textStyle={archiveTextStyle}
@@ -106,7 +101,7 @@ export function ThreadMenu({ thread, state, colors, onAction }: ThreadMenuProps)
           <MenuItem
             testID={`child-thread-menu-open-${thread.agentId}`}
             label="スレを開く"
-            accessibilityLabel={`${thread.title}を開く`}
+            accessibilityLabel={`${title}を開く`}
             style={itemStyle}
             textStyle={openTextStyle}
             onPress={openThread}

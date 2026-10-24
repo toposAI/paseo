@@ -17,13 +17,15 @@ export const STATUS_STYLE: Record<StatusKind, { background: string; text: string
   running: { background: "#1d4ed8", text: "#ffffff" }, // blue-700
   done: { background: "#15803d", text: "#ffffff" }, // green-700
   closed: { background: "#52525b", text: "#ffffff" }, // zinc-600
+  // 動いていないが終わってもいないスレ(登録簿に載らないスレの待機)。実装中(青)と混ざらない灰色。
+  idle: { background: "#e4e4e7", text: "#3f3f46" }, // zinc-200 / zinc-700(比 8.0)
 };
 
 type StatusLabelProps = StatusLabel & {
   testID?: string;
   /**
    * 押したときの動作。渡すと帯そのものがボタンになる(ピン/アーカイブの操作メニューの入口、
-   * 2026-10-24 ユーザー指示)。渡さない行の帯は従来どおり表示だけ(支配人は押すと行が開く)。
+   * 2026-10-24 ユーザー指示)。渡さない行の帯は従来どおり表示だけ(行の押下は行本体が担う)。
    */
   onPress?: () => void;
 };
