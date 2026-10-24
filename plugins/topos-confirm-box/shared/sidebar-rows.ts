@@ -134,6 +134,22 @@ export function visibleGroupKeyOf(
   return underCoordinator ? coordinatorGroup : (t.parentAgentId ?? "");
 }
 
+/**
+ * 画面と並べ替えの両方が使う**グループの割り方の唯一の定義**。ピン止めした子スレは、所属する
+ * グループ(司令塔を含む)から外して「ピン止め」グループへ寄せる(2026-10-25 ユーザー指示。
+ * 司令塔の外に出す)。司令塔の行は元々司令塔グループに出るのでピン止めの対象外にする。
+ * `groupRows`(描画)・`onReorderGroup`・挿入時の整列がすべてこれを通す。
+ */
+export function rowGroupKeyOf(
+  t: { agentId: string; parentAgentId: string | null; coordinator?: boolean; pinned?: boolean },
+  coordinatorIds: ReadonlySet<string>,
+  coordinatorGroup: string,
+  pinnedGroup: string,
+): string {
+  if (t.pinned === true && t.coordinator !== true) return pinnedGroup;
+  return visibleGroupKeyOf(t, coordinatorIds, coordinatorGroup);
+}
+
 /** グループ見出しを押したときの動作。 */
 export type GroupPress = "open" | "toggle";
 

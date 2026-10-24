@@ -79,6 +79,16 @@ export function saveStoredSection(
  */
 export const COORDINATOR_GROUP = "__coordinators";
 
+/**
+ * 画面のグループ「ピン止め」(ピン止めした子スレを「司令塔」の外へ出し、その上に並べる。
+ * 2026-10-25 ユーザー指示「ピン止めしたら、司令塔スレの外にだして、上部の司令塔の下において」)。
+ * 司令塔の行はピン止めの対象外(`server/coordinator-threads.ts` が `pinned: false` 固定)。
+ */
+export const PINNED_GROUP = "__pinned";
+
+/** グループ見出しの題名(ピン止めグループは開閉できないので、ここで固定する)。 */
+export const PINNED_GROUP_LABEL = "ピン止め";
+
 /** 一覧が空のときの行の文言(タブごと)。 */
 export function emptySectionLabel(section: SidebarSectionKey): string {
   return section === "concepts" ? "進行中の構想はありません" : "実装中のスレはありません";

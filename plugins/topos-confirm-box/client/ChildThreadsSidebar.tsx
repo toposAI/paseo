@@ -43,10 +43,14 @@ import {
   countStatusLabels,
   groupPressAction,
   openableParentIds,
-  visibleGroupKeyOf,
+  rowGroupKeyOf,
 } from "../shared/sidebar-rows.js";
 import { BOX_TAB_MODE_PARAM, BOX_TAB_SCREEN_ID } from "../shared/footer-tabs.js";
-import { COORDINATOR_GROUP } from "../shared/sidebar-section-mode.js";
+import {
+  COORDINATOR_GROUP,
+  PINNED_GROUP,
+  PINNED_GROUP_LABEL,
+} from "../shared/sidebar-section-mode.js";
 import type { SidebarRowView } from "../shared/sidebar-rows.js";
 import type { NoteStatus, SidebarNote } from "../shared/notes.js";
 import type { SidebarPlace, ZoneCounts } from "../shared/concept-places.js";
@@ -159,27 +163,32 @@ interface ThreadGroup {
 
 /**
  * サーバーの並び(グループ単位でまとまっている)を出現順のままグループへ割る。
- * 上段の絞り込み(実装ノートの status)を通した後の行で割る。司令塔の行と司令塔の子スレは
- * 1つの「司令塔」グループへ寄せ、先頭に出す(キーの規則は `visibleGroupKeyOf`)。
+ * 上段の絞り込み(実装ノートの status)を通した後の行で割る。ピン止めした行は「ピン止め」グループへ
+ * 先に集め、司令塔の行と司令塔の子スレは1つの「司令塔」グループへ寄せる。並びは
+ * ピン止め → 司令塔 → その他(ピン止めが空なら司令塔が先頭)。キーの規則は `rowGroupKeyOf`。
  */
 function groupRows(
   rows: readonly SidebarRowView<ChildThread>[],
   coordinatorIds: ReadonlySet<string>,
 ): ThreadGroup[] {
   const groups = new Map<string, ThreadGroup>();
-  const coordinatorGroup: ThreadGroup = { key: COORDINATOR_GROUP, title: "司令塔", rows: [] };
+  const fixed: Record<string, ThreadGroup> = {
+    [PINNED_GROUP]: { key: PINNED_GROUP, title: PINNED_GROUP_LABEL, rows: [] },
+    [COORDINATOR_GROUP]: { key: COORDINATOR_GROUP, title: "司令塔", rows: [] },
+  };
   for (const r of rows) {
-    const key = visibleGroupKeyOf(r.thread, coordinatorIds, COORDINATOR_GROUP);
+    const key = rowGroupKeyOf(r.thread, coordinatorIds, COORDINATOR_GROUP, PINNED_GROUP);
     let g = groups.get(key);
     if (!g) {
-      g = key === COORDINATOR_GROUP ? coordinatorGroup : { key, title: groupTitleOf(r), rows: [] };
+      g = fixed[key] ?? { key, title: groupTitleOf(r), rows: [] };
       groups.set(key, g);
     }
     g.rows.push(r);
   }
-  return coordinatorGroup.rows.length > 0
-    ? [coordinatorGroup, ...[...groups.values()].filter((g) => g !== coordinatorGroup)]
-    : [...groups.values()];
+  // ピン止め → 司令塔 → その他(出現順)。空のグループは出さない。
+  return [fixed[PINNED_GROUP], fixed[COORDINATOR_GROUP], ...groups.values()].filter(
+    (g) => g.rows.length > 0,
+  );
 }
 
 export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
@@ -286,12 +295,13 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
 
   // グループ内のドラッグ結果を全体の並びへ戻す(他グループ・上段に出ていない行の並びはそのまま)。
   // 絞り込みで隠れている行を詰めて並べ替えると、隠れた行の順序まで動いてしまうため、
-  // 画面に出ている行だけを keys で置き換える。グループの割り方は画面と同じ `visibleGroupKeyOf`。
+  // 画面に出ている行だけを keys で置き換える。グループの割り方は画面と同じ `rowGroupKeyOf`。
+  // ピン止めグループの並べ替えも全体順への書き戻しなので、変わるのはピン同士の順だけ。
   const onReorderGroup = useCallback(
     (groupKey: string, keys: string[]) => {
       const queue = [...keys];
       const flat = threads.map((t) =>
-        visibleGroupKeyOf(t, coordinatorIds, COORDINATOR_GROUP) === groupKey &&
+        rowGroupKeyOf(t, coordinatorIds, COORDINATOR_GROUP, PINNED_GROUP) === groupKey &&
         visibleIds.has(t.agentId)
           ? (queue.shift() ?? t.agentId)
           : t.agentId,
@@ -405,38 +415,35 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   );
 
   // ピン止めは一覧に `pinned` が返るので、保存後は次の取得(またはここでの楽観更新)で並びに反映される。
+  // ピン止めした行は「ピン止め」グループへ移るので、切り替えは並びの入れ替え(下の `pinFirstGrouped`)ごと行う。
   const onTogglePin = useCallback(
     (t: ChildThread) => {
       const pinned = !t.pinned;
       gatePoll(5_000);
       const flip = (on: boolean) => (prev: ChildThread[]) =>
-        pinFirstPerGroup(
+        pinFirstGrouped(
           prev.map((x) => (x.agentId === t.agentId ? { ...x, pinned: on } : x)),
           coordinatorIds,
         );
       setThreads((prev) => flip(pinned)(prev));
-      setNotice(pinned ? "ピン止めしました" : "ピン止めを外しました");
+      // 成否の知らせは応答を待ってから出す(楽観更新の時点で出すと、失敗して印を戻したあとに
+      // 「ピン止めしました」だけが残る)。待っている間は進行中の文言を出す。
+      setNotice("保存しています…");
       // 失敗したら**この行のピンの印だけ**戻し、ゲートを解除する。操作前の一覧を丸ごと書き戻すと、
       // その間に届いた他の行の操作(アーカイブ等)まで巻き戻る(出口レビュー round2 指摘6)。
-      // 並びは次のポーリングでサーバーの値に戻る。
+      // 印を戻すだけでグループも元へ戻る(並びの整列は `pinned` から作る。戻しても並び直す)。
       const revert = () => {
-        setThreads((prev) =>
-          prev.map((x) => (x.agentId === t.agentId ? { ...x, pinned: t.pinned } : x)),
-        );
+        setThreads((prev) => flip(t.pinned)(prev));
         dragGateUntilRef.current = 0;
+        setNotice("ピン止めを保存できませんでした");
       };
       void pin({ agentId: t.agentId, pinned })
         .then((r) => {
-          if (!r.ok) {
-            revert();
-            setNotice(r.message ?? "ピン止めを保存できません");
-          }
+          if (r.ok) setNotice(pinned ? "ピン止めしました" : "ピン止めを外しました");
+          else revert();
           return null;
         })
-        .catch((error: unknown) => {
-          revert();
-          setNotice(`ピン止めを保存できません: ${(error as Error).message}`);
-        });
+        .catch(() => revert());
     },
     [coordinatorIds, gatePoll, pin],
   );
@@ -964,25 +971,30 @@ function ThreadGroupSection({
   const textStyle = useMemo(() => ({ color: statusColor }), [statusColor]);
   const chevronStyle = useMemo(() => [styles.chevron, { color: statusColor }], [statusColor]);
   const count = group.rows.length;
+  // ピン止めグループは開閉しない(出した行を畳む意味が無く、畳むと「ピン止めしたのに見えない」に戻る)。
+  // 件数とシェブロンは出さず、常に開いたまま並べる。
+  const pinned = group.key === PINNED_GROUP;
   // 件数とシェブロンは同じ行末に並べる(シェブロンは開閉専用の当たり判定)。
   const trailing = useMemo(
-    () => (
-      <View style={styles.trailing}>
-        <Text style={textStyle}>{count}</Text>
-        <Pressable
-          onPress={toggle}
-          testID={`child-group-toggle-${group.key || "other"}`}
-          accessibilityRole="button"
-          accessibilityLabel={open ? `${group.title}をたたむ` : `${group.title}を開く`}
-          hitSlop={8}
-          style={styles.toggleHit}
-        >
-          <Text style={chevronStyle}>{open ? "▾" : "▸"}</Text>
-        </Pressable>
-      </View>
-    ),
-    [chevronStyle, count, group.key, group.title, open, textStyle, toggle],
+    () =>
+      pinned ? undefined : (
+        <View style={styles.trailing}>
+          <Text style={textStyle}>{count}</Text>
+          <Pressable
+            onPress={toggle}
+            testID={`child-group-toggle-${group.key || "other"}`}
+            accessibilityRole="button"
+            accessibilityLabel={open ? `${group.title}をたたむ` : `${group.title}を開く`}
+            hitSlop={8}
+            style={styles.toggleHit}
+          >
+            <Text style={chevronStyle}>{open ? "▾" : "▸"}</Text>
+          </Pressable>
+        </View>
+      ),
+    [chevronStyle, count, group.key, group.title, open, pinned, textStyle, toggle],
   );
+  const shown = pinned || open;
   return (
     <>
       <SidebarRow
@@ -992,7 +1004,7 @@ function ThreadGroupSection({
         onPress={openCoordinator}
         trailing={trailing}
       />
-      {open ? (
+      {shown ? (
         <SidebarReorderableList
           testID={`child-threads-list-${group.key || "other"}`}
           data={group.rows}
@@ -1010,7 +1022,8 @@ const keyOfRow = (r: SidebarRowView<ChildThread>) => r.thread.agentId;
 
 /**
  * 画面の並び(keys)を先に、keysに無い行(取得の隙間に入った新規)を既定順のまま後ろに。
- * ピン止めした行はそのグループの先頭に寄せる(保存順のまま。グループ内の相対順は崩さない)。
+ * ピン止めした行は「ピン止め」グループへ移るので、**出現順のまま先頭へ集め**、それ以外の行は
+ * グループ単位の出現順を保つ(`pinFirstGrouped`。サーバーの規則と同じ)。
  */
 function applyOrder(threads: readonly ChildThread[], keys: readonly string[]): ChildThread[] {
   const byId = new Map(threads.map((t) => [t.agentId, t]));
@@ -1022,27 +1035,28 @@ function applyOrder(threads: readonly ChildThread[], keys: readonly string[]): C
     byId.delete(key);
   }
   for (const thread of threads) if (byId.has(thread.agentId)) out.push(thread);
-  return pinFirstPerGroup(out, new Set(out.filter((t) => t.coordinator).map((t) => t.agentId)));
+  return pinFirstGrouped(out, new Set(out.filter((t) => t.coordinator).map((t) => t.agentId)));
 }
 
-/** グループの並び(出現順)は変えず、グループ内だけピン止めを先頭へ(サーバーの並びと同じ規則)。 */
-function pinFirstPerGroup(
+/**
+ * ピン止めした行を先頭グループへ、出現順のまま集める(サーバーの並びと同じ規則)。
+ * ピン行は「ピン止め」グループとして独立して出るので、グループ内の先頭へ寄せる処理は要らない。
+ * それ以外の行はグループ単位の出現順を保つ(グループ内の相対順もそのまま)。
+ */
+function pinFirstGrouped(
   threads: readonly ChildThread[],
   coordinatorIds: ReadonlySet<string>,
 ): ChildThread[] {
   const groups = new Map<string, ChildThread[]>();
   for (const t of threads) {
-    const key = visibleGroupKeyOf(t, coordinatorIds, COORDINATOR_GROUP);
+    const key = rowGroupKeyOf(t, coordinatorIds, COORDINATOR_GROUP, PINNED_GROUP);
     const g = groups.get(key);
     if (g) g.push(t);
     else groups.set(key, [t]);
   }
-  const out: ChildThread[] = [];
-  for (const g of groups.values()) {
-    for (const t of g) if (t.pinned) out.push(t);
-    for (const t of g) if (!t.pinned) out.push(t);
-  }
-  return out;
+  const pinned = groups.get(PINNED_GROUP) ?? [];
+  const rest = [...groups.entries()].filter(([key]) => key !== PINNED_GROUP).map(([, g]) => g);
+  return [...pinned, ...rest].flat();
 }
 
 /** 印(アイコン)はノート由来の status で選ぶ。ノートの無い行はスレ側の status。開けない行は箱。 */

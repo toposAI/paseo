@@ -13,6 +13,9 @@ import {
   writeChildThreadOrder,
   writeChildThreadPin,
 } from "./child-threads.js";
+import type { ChildThread } from "../shared/child-threads.js";
+import { buildUpperRows, coordinatorIdSet, visibleGroupKeyOf } from "../shared/sidebar-rows.js";
+import { COORDINATOR_GROUP } from "../shared/sidebar-section-mode.js";
 
 const row = (o: Record<string, unknown>) => ({
   agent_id: "a",
@@ -215,7 +218,7 @@ test("events ファイルが無ければ誰も確認済みにならない", () =
   assert.equal(t.summaryAcked, false);
 });
 
-test("ピン止めは同じグループの先頭に寄せ、グループの相対順は保つ", () => {
+test("ピン止めは先頭に集め(出現順)、残りはグループ単位の出現順を保つ", () => {
   const raw = {
     threads: [
       row({ agent_id: "a1", parent_agent_id: "p1", updated_at: 30 }),
@@ -227,8 +230,61 @@ test("ピン止めは同じグループの先頭に寄せ、グループの相�
   const ids = normalizeChildThreads(raw, [], new Set(), new Set(["a3", "b1"])).map(
     (t) => t.agentId,
   );
-  assert.deepEqual(ids, ["a3", "a1", "a2", "b1"]);
+  // 並べ替え前(既定順)の出現順は a1,a2,a3,b1。ピン行はその出現順で先頭へ、非ピンは元の順のまま。
+  assert.deepEqual(ids, ["a3", "b1", "a1", "a2"]);
 });
+
+// 統合(2026-10-25): 司令塔の行は呼び出し元(`index.server.ts`)が先頭に置き、手動順は最後に全体へ掛かる。
+// 手動順で司令塔を末尾へ動かしても、再読み込み後は同じ並び(手動順)で戻ることを確かめる。
+// 注意: この手順は司令塔を「司令塔グループ」の先頭には戻さない(司令塔の子は司令塔グループ、
+// 司令塔本人は自分の題名のグループになるため)。グループ先頭への固定はしない(2026-10-25 司令塔の判断)。
+test("司令塔の行が手動順の末尾にあっても、司令塔グループ内の並びは手動順どおり", () => {
+  const raw = {
+    threads: [
+      row({ agent_id: "kid2", parent_agent_id: "chief", updated_at: 30 }),
+      row({ agent_id: "kid1", parent_agent_id: "chief", updated_at: 20 }),
+      row({ agent_id: "x1", parent_agent_id: null, updated_at: 10 }),
+    ],
+  };
+  const chief: ChildThread = {
+    agentId: "chief",
+    title: "総司令",
+    status: "実装中",
+    machineState: null,
+    request: "",
+    summaryItemId: null,
+    summary: null,
+    summaryState: null,
+    summaryAcked: false,
+    updatedAt: 0,
+    parentAgentId: null,
+    parentTitle: null,
+    pinned: false,
+    coordinator: true,
+    parentOpenable: false,
+    access: null,
+  };
+  // index.server.ts と同じ組み方: 司令塔を先頭に置いてから手動順を最後に適用する。
+  const threads = applyChildThreadOrder(
+    [chief, ...normalizeChildThreads(raw)],
+    ["x1", "kid1", "kid2", "chief"],
+  );
+  const { coordinatorIds, rows } = upperRowsLikeClient(threads);
+  const grouped = rows
+    .filter(
+      (r) => visibleGroupKeyOf(r.thread, coordinatorIds, COORDINATOR_GROUP) === COORDINATOR_GROUP,
+    )
+    .map((r) => r.thread.agentId);
+  assert.deepEqual(grouped, ["kid1", "kid2", "chief"]);
+});
+
+/** 画面と同じ作り方: 全スレから司令塔の集合を作り、上段の行へ絞る(`buildUpperRows`)。 */
+function upperRowsLikeClient(threads: ChildThread[]) {
+  return {
+    coordinatorIds: coordinatorIdSet(threads),
+    rows: buildUpperRows(threads, new Map()),
+  };
+}
 
 test("ピン止めの往復(切り替え・外す。壊れた/無いファイルは空)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pins-"));

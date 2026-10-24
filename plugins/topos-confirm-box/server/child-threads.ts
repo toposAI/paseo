@@ -72,20 +72,18 @@ export function normalizeChildThreads(
   // 子を持つ行(司令塔)はグループ見出しになるので行としては出さない(固定済みと二重に出ない)。
   const parents = new Set(out.map((t) => t.parentAgentId).filter((id) => id !== null));
   const rows = sortChildThreadsGrouped(out.filter((t) => !parents.has(t.agentId)));
-  // ピン止めはそのグループの先頭へ(グループ内の相対順は保つ)。クライアントの挿入処理と同義。
-  const grouped = new Map<string, ChildThread[]>();
-  for (const t of rows) {
+  // ピン止めした行は先頭に集める(出現順のまま。画面では「ピン止め」グループとして司令塔の外に出る)。
+  // 残りは親(グループ)単位の出現順を保つ。クライアントの挿入処理(`pinFirstGrouped`)と同義。
+  const pinned = rows.filter((t) => t.pinned);
+  const rest = rows.filter((t) => !t.pinned);
+  const byParent = new Map<string, ChildThread[]>();
+  for (const t of rest) {
     const key = t.parentAgentId ?? "";
-    const g = grouped.get(key);
+    const g = byParent.get(key);
     if (g) g.push(t);
-    else grouped.set(key, [t]);
+    else byParent.set(key, [t]);
   }
-  const ordered: ChildThread[] = [];
-  for (const g of grouped.values()) {
-    for (const t of g) if (t.pinned) ordered.push(t);
-    for (const t of g) if (!t.pinned) ordered.push(t);
-  }
-  return ordered;
+  return [...pinned, ...[...byParent.values()].flat()];
 }
 
 /** ピン止めの保存(壊れた/無いファイルは空)。 */

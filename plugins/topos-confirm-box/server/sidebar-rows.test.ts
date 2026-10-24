@@ -13,9 +13,10 @@ import {
   indexImplementationNotes,
   lowerTierNotes,
   openableParentIds,
+  rowGroupKeyOf,
   visibleGroupKeyOf,
 } from "../shared/sidebar-rows.js";
-import { COORDINATOR_GROUP } from "../shared/sidebar-section-mode.js";
+import { COORDINATOR_GROUP, PINNED_GROUP } from "../shared/sidebar-section-mode.js";
 import type { RowThread } from "../shared/sidebar-rows.js";
 
 const thread = (
@@ -338,4 +339,41 @@ test("countStatusLabels は判断待ちと完了待ちを別々に数える", ()
     new Map(),
   );
   assert.deepEqual(countStatusLabels(rows), { judgment: 2, doneWait: 1 });
+});
+
+// ---- ピン止めを「司令塔」の外へ出す(2026-10-25 ユーザー指示) ----
+
+const groupOf = (
+  t: { agentId: string; parentAgentId: string | null; coordinator?: boolean; pinned?: boolean },
+  coordinatorIds: ReadonlySet<string> = new Set(),
+) => rowGroupKeyOf(t, coordinatorIds, COORDINATOR_GROUP, PINNED_GROUP);
+
+test("ピン止めした行は所属グループ(司令塔を含む)から外れて「ピン止め」グループへ", () => {
+  const chiefKid = { agentId: "kid2", parentAgentId: "chief", pinned: true };
+  assert.equal(groupOf(chiefKid, new Set(["chief"])), PINNED_GROUP);
+  // 親を持つ行も同じ(見出しの下に残さない)
+  assert.equal(groupOf({ agentId: "a1", parentAgentId: "p1", pinned: true }), PINNED_GROUP);
+  assert.equal(groupOf({ agentId: "x1", parentAgentId: null, pinned: true }), PINNED_GROUP);
+  // ピンでない行は従来どおり(司令塔の子は司令塔へ、子司令塔は本人の見出しへ)
+  assert.equal(groupOf({ ...chiefKid, pinned: false }, new Set(["chief"])), COORDINATOR_GROUP);
+  assert.equal(groupOf({ agentId: "kid", parentAgentId: "child-coord" }), "child-coord");
+  // `pinned` 未指定・false は今までどおり(既定の一覧を変えない)
+  assert.equal(groupOf({ agentId: "tail", parentAgentId: null }), "");
+});
+
+test("司令塔の行はピンの印が付いていても「司令塔」グループのまま(外に出さない)", () => {
+  // 司令塔は元々「司令塔」グループに居るので「外に出す」対象ではない(サーバーは pinned: false 固定)。
+  assert.equal(
+    groupOf({ agentId: "chief", parentAgentId: null, coordinator: true, pinned: true }),
+    COORDINATOR_GROUP,
+  );
+  // 司令塔判定専用の `visibleGroupKeyOf` は変えない(ピンの振り分けは `rowGroupKeyOf` だけが持つ)
+  assert.equal(
+    visibleGroupKeyOf(
+      { agentId: "kid2", parentAgentId: "chief" },
+      new Set(["chief"]),
+      COORDINATOR_GROUP,
+    ),
+    COORDINATOR_GROUP,
+  );
 });
