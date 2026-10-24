@@ -107,7 +107,9 @@ export function useSidebarNotes(gate?: { current: number }): SidebarNotesState {
   // (ノートの `thread:` に記録したIDを、次の60秒を待たずに反映する)。
   const fetchRef = useRef<(force?: boolean) => void>(() => {});
 
-  // 最後に投げた取得と、最後に反映した取得の発番(返ってきた順と投げた順が違っても新しい方だけ)
+  // 最後に投げた取得と、最後に反映した取得の発番(返ってきた順と投げた順が違っても新しい方だけ)。
+  // 捨てる判定は appliedRef だけで行う: sentRef と比べると、ゲート中に投げた取得が遅く返ったとき、
+  // その後ろに並んだ force の結果を最新として通せなくなる。
   const sentRef = useRef(0);
   const appliedRef = useRef(0);
 
@@ -119,7 +121,7 @@ export function useSidebarNotes(gate?: { current: number }): SidebarNotesState {
         .then((r) => {
           if (!alive) return null;
           // 自分より後に投げた取得が既にある/反映済みなら捨てる(古い区分へ戻さない)。
-          if (seq < sentRef.current || seq < appliedRef.current) return null;
+          if (seq < appliedRef.current) return null;
           if (!force && gate && Date.now() < gate.current) return null;
           appliedRef.current = seq;
           // 内容が同じなら配列を差し替えない(60秒ごとに一覧を丸ごと再描画しない。
@@ -152,7 +154,7 @@ export function useSidebarNotes(gate?: { current: number }): SidebarNotesState {
   return { notes, error, place, zones, implByThread, reload };
 }
 
-/** 2つのノート一覧が表示上同じか(パス・種類・status・題名・結論・スレ・更新時刻)。 */
+/** 2つのノート一覧が表示上同じか(パス・種類・区分・移せるか・status・題名・結論・スレ・更新時刻)。 */
 function sameNotes(a: readonly SidebarNote[], b: readonly SidebarNote[]): boolean {
   if (a === b) return true;
   if (a.length !== b.length) return false;
@@ -162,6 +164,7 @@ function sameNotes(a: readonly SidebarNote[], b: readonly SidebarNote[]): boolea
       x.path === y.path &&
       x.kind === y.kind &&
       x.zone === y.zone &&
+      (x.movable ?? false) === (y.movable ?? false) &&
       x.status === y.status &&
       x.title === y.title &&
       x.conclusion === y.conclusion &&
@@ -488,9 +491,8 @@ export function ConceptNotesList({
         />
       ) : null}
       {/* 空行は見出しの開閉を兼ねる。見出しの無いタブで押すと畳んで空になるので、押下を付けない
-          (出口レビュー round1 指摘1) */}
-      {/* 取得失敗のときは空行を出さない(「取得失敗」と「何もない」を同時に言わない。
-          出口レビュー round2 指摘5) */}
+          (構想タブ出口レビュー round1 指摘1)。取得失敗のときは空行を出さない(「取得失敗」と
+          「何もない」を同時に言わない。同 round2 指摘5)。 */}
       {showEmpty ? (
         <SidebarRow
           id="concept-notes-empty"

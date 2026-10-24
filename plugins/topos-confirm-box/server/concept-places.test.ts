@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { conceptPlace, placeName, zoneOfPath } from "../shared/concept-places.js";
+import { conceptPlace, isDirectChild, placeName, zoneOfPath } from "../shared/concept-places.js";
 import { readSidebarNotes, resolveConceptPlan } from "./notes.js";
 import { moveConceptNote } from "./note-thread.js";
 
@@ -152,4 +152,38 @@ test("zoneOfPath: ファイル名の正規化(NFD)が違っても同じ区分と
   // macOS では「検討中」が NFD(結合文字)で返ることがある。
   const nfd = path.join("/v/Paseo/構想/検討中".normalize("NFD"), "a.md");
   assert.equal(zoneOfPath(nfd, place), "active");
+});
+
+test("isDirectChild: NFD のファイルパスでも置き場の直下と判定する", () => {
+  const place = conceptPlace("/v");
+  const nfd = path.join(place.activeDir.normalize("NFD"), "a.md");
+  assert.equal(isDirectChild(nfd, place.activeDir), true);
+  assert.equal(isDirectChild(path.join(place.activeDir, "sub", "a.md"), place.activeDir), false);
+  assert.equal(isDirectChild(path.join(place.activeDir, "a.md"), place.laterDir), false);
+});
+
+test("resolveConceptPlan: 置き場が symlink なら読まない(押すと必ず失敗する ⋯ を出さない)", () => {
+  const v = vault();
+  const place = conceptPlace(v);
+  fs.mkdirSync(place.root, { recursive: true });
+  const real = fs.mkdtempSync(path.join(os.tmpdir(), "topos-real-"));
+  fs.symlinkSync(real, place.activeDir);
+  fs.mkdirSync(place.laterDir, { recursive: true });
+  assert.deepEqual(resolveConceptPlan(v), { active: null, later: place.laterDir });
+});
+
+test("moveConceptNote: 前回の link の後で止まった残り(同名・同じ実体)は移せて、2か所に残らない", async () => {
+  const v = vault();
+  const place = conceptPlace(v);
+  fs.mkdirSync(place.activeDir, { recursive: true });
+  fs.mkdirSync(place.laterDir, { recursive: true });
+  const a = writeNote(path.join(place.activeDir, "a.md"), CONCEPT);
+  // link だけ済んで unlink 前に落ちた状態を作る(同じ実体への2本目のリンク)
+  const half = path.join(place.laterDir, "a.md");
+  fs.linkSync(a, half);
+  const r = await moveConceptNote(a, "later", { vaultDir: v });
+  assert.equal(r.result, "moved");
+  assert.equal(r.notePath, half);
+  assert.equal(fs.existsSync(a), false);
+  assert.equal(fs.existsSync(half), true);
 });

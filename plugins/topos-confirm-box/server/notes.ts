@@ -18,7 +18,8 @@ import os from "node:os";
 import path from "node:path";
 import { normalizeNoteStatus } from "../shared/notes.js";
 import type { NoteKind, NoteStatus, SidebarNote } from "../shared/notes.js";
-import { conceptPlace, placeName, zoneOfPath } from "../shared/concept-places.js";
+import { conceptPlace, isDirectChild, placeName, zoneOfPath } from "../shared/concept-places.js";
+import { collapseRepeatedTitle } from "../shared/concept-row.js";
 import type { ConceptReadPlan, SidebarPlace, ZoneCounts } from "../shared/concept-places.js";
 
 /** 走査するファイル数の上限(壊れた/巨大な Vault でサイドバーを止めない)。 */
@@ -65,7 +66,7 @@ export function resolveNoteRoots(env: NodeJS.ProcessEnv = process.env): string[]
  * の親でも、ただのディレクトリでもよい(そのときはその親を根として扱う)。
  *
  * **ロックの鍵はこの戻り値の realpath で取る**(記録も移動も)。以前は移動だけ
- * `Paseo/構想` を単位にしていて、記録と噛み合っていなかった(出口レビュー round2 指摘1)。
+ * `Paseo/構想` を単位にしていて、記録と噛み合っていなかった(構想タブ出口レビュー round1 指摘1)。
  */
 export function resolveVaultDir(env: NodeJS.ProcessEnv = process.env): string {
   const vault =
@@ -83,9 +84,12 @@ export function resolveVaultDir(env: NodeJS.ProcessEnv = process.env): string {
  */
 export function resolveConceptPlan(vaultDir: string): ConceptReadPlan {
   const place = conceptPlace(vaultDir);
+  // **symlink は置き場として扱わない**(`lstat`)。read 側だけ `stat` で辿ると、移動は
+  // ガードで拒むのに画面には移せる ⋯ が出て、押すと必ず失敗する(構想タブ出口レビュー round2 指摘4)。
+  // 置き場は単一ライターが通常のディレクトリとして作る前提で、symlink のときは読まない。
   const isDir = (p: string) => {
     try {
-      return fs.statSync(p).isDirectory();
+      return fs.lstatSync(p).isDirectory();
     } catch {
       return false;
     }
@@ -265,7 +269,7 @@ function threadIdCandidates(
  *
  * インライン形式と同じ規則(8〜200字の英数・ハイフン)で全件を並べ、UUID 形を先にする。
  * 短縮形(`c389e3e`)も候補に残す: 落とすと、同じ内容をインライン形式で書いたときと
- * 「未作成/未解決」の表示が変わる(出口レビュー round2 指摘2)。
+ * 「未作成/未解決」の表示が変わる(構想タブ出口レビュー round1 指摘2)。
  */
 export function threadIdFromBlockList(text: string): string[] {
   const ids: string[] = [];
@@ -371,7 +375,7 @@ export function readSidebarNotes(
       let dir: string | null = null;
       if (zone === "later") dir = placeDir.laterDir;
       else if (zone === "active") dir = placeDir.activeDir;
-      const direct = dir !== null && path.dirname(note.path) === dir;
+      const direct = dir !== null && isDirectChild(note.path, dir);
       lower.push({
         ...note,
         zone: zone ?? "active",
@@ -441,7 +445,7 @@ function assertRootsExist(roots: readonly string[]): void {
   for (const root of roots) {
     try {
       // ファイルでも stat は通る。ディレクトリでなければ readdir が失敗して 0件に見えるので、
-      // 「ノートが無い」と取り違えないよう設定ミスとして止める(出口レビュー round2 指摘6)。
+      // 「ノートが無い」と取り違えないよう設定ミスとして止める(構想タブ出口レビュー round1 指摘6)。
       if (!fs.statSync(root).isDirectory()) throw new Error("not a directory");
     } catch {
       throw new Error(`走査先がありません: ${root}`);
@@ -486,10 +490,14 @@ function scanFile(file: string, now: number, opts?: ScanFileContext): SidebarNot
   if (!head) return null;
   const fm = parseFrontmatter(head);
   if (!fm) return null;
-  const fallback = path
-    .basename(file, ".md")
-    .replace(/^[ij]-\d{8}-/, "")
-    .replace(/-/g, " ");
+  // `title:` が無いノートはファイル名を使う。新置き場のファイル名は `要約__長い題名` 形なので、
+  // 綴りが同じなら片方へ畳む(一覧の行と同じ規則。スレの題名も二重にならない)。
+  const fallback = collapseRepeatedTitle(
+    path
+      .basename(file, ".md")
+      .replace(/^[ij]-\d{8}-/, "")
+      .replace(/-/g, " "),
+  );
   const parsed = frontmatterToNote(fm, fallback);
   if (!parsed) return null;
   // インラインの候補 → ブロック形式 `threads:` の候補、の順に並べる(先頭が優先)。

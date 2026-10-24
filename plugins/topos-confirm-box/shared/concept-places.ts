@@ -57,6 +57,14 @@ export function zoneOfPath(file: string, place: ConceptPlace): ConceptZone | nul
 }
 
 /**
+ * ファイルが `dir` の**直下**にあるか(区切りの区別で、NFC に正規化して比べる)。
+ * `path.dirname(file) === dir` は NFD のパスで false になりうるので、判定をここに閉じる。
+ */
+export function isDirectChild(file: string, dir: string): boolean {
+  return path.dirname(file.normalize("NFC")) === dir.normalize("NFC");
+}
+
+/**
  * 読み出しの向き(サーバーが `fs.existsSync` で作る)。`null` の区分は読まない・移動しない。
  * 新置き場が無い(`active === null`)= 旧置き場だけで動いている(移行前)。
  */

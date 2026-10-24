@@ -77,7 +77,7 @@ export const SidebarNoteSchema = z.object({
   /**
    * この行を「あとで」/「検討中」へ移せるか(構想の置き場の**直下**にあり、両方の置き場が在る)。
    * 一覧全体で決めない: 旧置き場(`05_Projects`)の構想ノートは区分の外なので、押すと必ず失敗する
-   * ⋯ を出さない(出口レビュー round2 指摘2)。
+   * ⋯ を出さない(構想タブ出口レビュー round1 指摘4)。
    */
   movable: z.boolean().default(false),
 });

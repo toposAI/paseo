@@ -99,6 +99,24 @@ test("タイトルが無ければファイル名から作る", () => {
   assert.equal(frontmatterToNote(fm ?? {}, "二段サイドバー")?.title, "二段サイドバー");
 });
 
+test("タイトルが無いノートの題名: `要約__長い題名` の綴りが同じなら片方へ畳む(スレの題名も二重にしない)", () => {
+  const dir = tmpDir();
+  write(dir, "サイドバー改善__サイドバー改善.md", note("type: concept-note\nstatus: 構想"));
+  write(
+    dir,
+    "paseoforkのtoposuiをgithub公開__Paseo forkのTopos UIをGitHub公開.md",
+    note("type: concept-note\nstatus: 構想"),
+  );
+  const r = readSidebarNotes({ roots: [dir], concept: { active: null, later: null } });
+  const titles = new Map(r.notes.map((n) => [path.basename(n.path), n.title]));
+  assert.equal(titles.get("サイドバー改善__サイドバー改善.md"), "サイドバー改善");
+  // 綴りが違う(長い題名を持つ)方は、ファイル名のまま(畳まない)
+  assert.equal(
+    titles.get("paseoforkのtoposuiをgithub公開__Paseo forkのTopos UIをGitHub公開.md"),
+    "paseoforkのtoposuiをgithub公開__Paseo forkのTopos UIをGitHub公開",
+  );
+});
+
 test("走査: typeで実装/構想を返し、statusでは絞らない(振り分けはクライアントの正)", () => {
   const dir = tmpDir();
   write(dir, "a-impl.md", note("type: implementation-note\nstatus: 実装中\ntitle: 実装A"));
