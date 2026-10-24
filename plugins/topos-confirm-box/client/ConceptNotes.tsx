@@ -1,12 +1,14 @@
 /**
- * サイドバー二段の**下段**(進行中の構想)と、**上段の実装ノートの重ね合わせ**。
+ * サイドバーの「構想一覧」タブの中身(`ConceptNotesList`)と、**スレ一覧の実装ノートの重ね合わせ**。
+ *
+ * 2026-10-24 のタブ化で、構想はスレ一覧の下に積まずタブで出す(`client/ChildThreadsSidebar.tsx`)。
  *
  * - status の正は Vault ノートの frontmatter(標準_サイドバーの表示ルール)。この画面は書かない。
- * - 下段: 構想/壁打ち中の構想ノート。行は「題名 — 1行の結論」。押すとその構想の**深掘りスレ**を開く。
+ * - 構想一覧: 構想/壁打ち中の構想ノート。行は「題名 — 1行の結論」。押すとその構想の**深掘りスレ**を開く。
  *   スレが無ければサーバー側が1本作り、IDをノートの `thread:` へ記録する(2026-10-23 決定)。
  *   **連打対策はサーバー**: 同じノートの作成は1本に畳まれるので、ここでは画面側のフラグ
  *   (`creating`)でサーバーを叩く回数も1回に絞るだけ。
- * - 上段: 実装ノート(status=実装中/判断待ち/確認待ち)。子スレ一覧の行に status と題名を重ねる。
+ * - スレ一覧: 実装ノート(status=実装中/判断待ち/確認待ち)を子スレの行に重ねる(`useSidebarNotes`)。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
@@ -15,6 +17,7 @@ import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { notesSidebarRpc, openConceptThreadRpc } from "../shared/notes.js";
 import type { NoteStatus, SidebarNote } from "../shared/notes.js";
 import { indexImplementationNotes, lowerTierNotes } from "../shared/sidebar-rows.js";
+import { emptySectionLabel } from "../shared/sidebar-section-mode.js";
 
 const POLL_MS = 60_000;
 /** 作成に失敗した理由の表示時間。消えないと、直した後も残って見える。 */
@@ -59,7 +62,7 @@ export function useSidebarNotes(gate?: { current: number }): SidebarNotesState {
         .then((r) => {
           if (!alive) return null;
           if (!force && gate && Date.now() < gate.current) return null;
-          // 内容が同じなら配列を差し替えない(60秒ごとに上段・下段を丸ごと再描画しない。
+          // 内容が同じなら配列を差し替えない(60秒ごとに一覧を丸ごと再描画しない。
           // ドラッグ中に行が飛ぶのも、この再描画が原因になりうる)。
           setNotes((prev) => (sameNotes(prev, r.notes) ? prev : r.notes));
           setError(r.error ?? (r.truncated ? "ノートの走査が途中で打ち切られました" : null));
@@ -116,6 +119,9 @@ function writeCollapsed(v: boolean): void {
   }
 }
 
+/** 押しても何もしない行(タブ表示の空行)。`SidebarRow` は `onPress` 必須なので定数を渡す。 */
+function noop(): void {}
+
 function oneLine(s: string, max = 56): string {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
@@ -131,15 +137,7 @@ function conceptStatus(n: SidebarNote): string {
   return n.threadCandidates.length > 0 ? `${n.status}(スレ未解決)` : `${n.status}(スレ未作成)`;
 }
 
-export function ConceptNotesSection({
-  notes,
-  error,
-  openAgent,
-  serverId,
-  openScreen,
-  statusColor,
-  onCreated,
-}: {
+export interface ConceptNotesListProps {
   notes: readonly SidebarNote[];
   error: string | null;
   openAgent?: (input: { agentId: string; serverId?: string }) => void;
@@ -149,7 +147,23 @@ export function ConceptNotesSection({
   statusColor: string;
   /** スレを作ってノートへ記録した直後に呼ぶ(一覧をすぐ取り直す)。 */
   onCreated?: () => void;
-}) {
+  /**
+   * 見出し(件数+開閉)を出すか。タブの「構想一覧」では出さない(タブ自体が入口。
+   * 2026-10-24 指示: 見出しを積まない)。既定は出さない。
+   */
+  header?: boolean;
+}
+
+export function ConceptNotesList({
+  notes,
+  error,
+  openAgent,
+  serverId,
+  openScreen,
+  statusColor,
+  onCreated,
+  header = false,
+}: ConceptNotesListProps) {
   const [open, setOpen] = useState(() => !readCollapsed());
   const openThread = useRpc(openConceptThreadRpc);
   // 作成中のノート(サーバーが1本に畳むが、画面からも連打で2回叩かない)。
@@ -244,6 +258,13 @@ export function ConceptNotesSection({
   const headerLabel =
     error && concepts.length === 0 ? "進行中の構想(取得失敗)" : `進行中の構想 ${concepts.length}件`;
 
+  /**
+   * 行を出すか。**見出しの無いタブ表示では保存された開閉状態を無視する**(出口レビュー round1 指摘1)。
+   * 以前は畳んだ状態が `localStorage` に残っていると、見出しもシェブロンも無いタブで
+   * 構想が1件も出ず、開き直す手段が無かった。
+   */
+  const visible = header ? open : true;
+
   const headerTrailing = useMemo(
     () => (
       <ConceptHeaderTrailing
@@ -258,14 +279,25 @@ export function ConceptNotesSection({
 
   return (
     <>
-      <SidebarRow
-        id="concept-notes-header"
-        icon="Lightbulb"
-        label={headerLabel}
-        onPress={toggle}
-        trailing={headerTrailing}
-      />
-      {open
+      {header ? (
+        <SidebarRow
+          id="concept-notes-header"
+          icon="Lightbulb"
+          label={headerLabel}
+          onPress={toggle}
+          trailing={headerTrailing}
+        />
+      ) : null}
+      {/* 取得失敗は、見出しの無いタブでも黙って出さない(空と見分けが付かない) */}
+      {visible && error && concepts.length === 0 ? (
+        <SidebarRow
+          id="concept-notes-error"
+          icon="CircleAlert"
+          label={oneLine(error, 80)}
+          onPress={noop}
+        />
+      ) : null}
+      {visible
         ? concepts.map((n) => (
             <ConceptRow
               key={n.path}
@@ -276,7 +308,7 @@ export function ConceptNotesSection({
             />
           ))
         : null}
-      {open && notice ? (
+      {visible && notice ? (
         <SidebarRow
           id="concept-notes-notice"
           icon="CircleAlert"
@@ -284,12 +316,16 @@ export function ConceptNotesSection({
           onPress={dismissNotice}
         />
       ) : null}
-      {open && concepts.length === 0 ? (
+      {/* 空行は見出しの開閉を兼ねる。見出しの無いタブで押すと畳んで空になるので、押下を付けない
+          (出口レビュー round1 指摘1) */}
+      {/* 取得失敗のときは空行を出さない(「取得失敗」と「何もない」を同時に言わない。
+          出口レビュー round2 指摘5) */}
+      {visible && !error && concepts.length === 0 ? (
         <SidebarRow
           id="concept-notes-empty"
           icon="Lightbulb"
-          label="進行中の構想はありません"
-          onPress={toggle}
+          label={emptySectionLabel("concepts")}
+          onPress={header ? toggle : noop}
         />
       ) : null}
     </>
@@ -343,7 +379,7 @@ function ConceptRow({
   const trailing = useMemo(
     () => (
       <View style={styles.trailing}>
-        {/* 下段の行に操作ボタンは無い。空の置き場は題名を削るだけなので置かない。 */}
+        {/* 構想の行に操作ボタンは無い。空の置き場は題名を削るだけなので置かない。 */}
         {busy ? <ActivityIndicator size="small" /> : <Text style={textStyle}>{status}</Text>}
       </View>
     ),

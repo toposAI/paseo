@@ -46,8 +46,10 @@ import {
 } from "./shared/child-threads.js";
 import type { ThreadAccess } from "./shared/child-threads.js";
 import {
+  applyChildThreadOrder,
   childThreadPinsReadError,
   readChildThreadOrder,
+  readChildThreadPins,
   readChildThreads,
   writeChildThreadOrder,
   writeChildThreadPin,
@@ -57,6 +59,7 @@ import {
   coordinatorRows,
   dropDeadCoordinators,
   markCoordinators,
+  markOpenableParents,
   readCoordinatorIds,
 } from "./server/coordinator-threads.js";
 import {
@@ -64,6 +67,9 @@ import {
   listLiveWorkspaceIds,
   threadAccessById,
 } from "./server/thread-liveness.js";
+import { listAllAgents } from "./server/agent-pages.js";
+import { mergeUnregisteredThreads } from "./server/unregistered-threads.js";
+import type { ListedAgentLike } from "./server/unregistered-threads.js";
 import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
 import type { WorkspaceArchiveDecision } from "./server/workspace-membership.js";
 import { chooseConceptModel, notesSidebarRpc, openConceptThreadRpc } from "./shared/notes.js";
@@ -141,47 +147,117 @@ export default function contribute(server: PluginServerContext) {
     // 生きている司令塔を先頭の行として足す。取れなければ登録簿の並びのまま出す。
     const ids = readCoordinatorIds();
     let threads = adoptOrphans(markCoordinators(rows, ids));
+    // 一覧を取れなかったとき、見出しからは開けなくなる(開閉のみ)。黙って挙動を変えず画面へ理由を返す。
+    let parentsUnknown = false;
+    // 登録簿に載らないスレの取り込みが途中で切れた・取れなかった(一部のスレが出ない)。
+    let threadsIncomplete = false;
     try {
-      const listed = await ctx.paseo.agents.list();
-      // 印付けにはアーカイブ済みのスレも要る(既定の一覧はアーカイブ済みを返さない)。
-      // 取れなければ既定の一覧で代用する(閉じたスレは単に「一覧に居ない」=印なしのまま)。
-      let forAccess = listed;
+      // 印付け(`thread-archived`)に使う一覧。アーカイブ済みを含む1ページだけ見る既存の作りなので、
+      // 200件より古いアーカイブ済みスレは印が付かない(既存の残差。出口レビュー round3 指摘1で
+      // 「親の判定用とは分ける」判断)。取れなければ空で代用する(印なし=押せるまま)。
+      // 既定の一覧を先に1回引く必要はない(取れないときの代わりに使っていたが、空と同じ扱いで足りる。
+      // 出口レビュー round1 指摘7a)。
+      let forAccess: { entries: { agent: ListedAgentLike }[] } = { entries: [] };
       try {
-        forAccess = await ctx.paseo.agents.list({
+        const withArchived = await ctx.paseo.agents.list({
           filter: { includeArchived: true, includeBackground: true },
         });
+        forAccess = { entries: withArchived.entries };
       } catch {
-        forAccess = listed;
+        // アーカイブ込みを引けない: 印は付かない(閉じたスレは押せるまま)。
       }
+      // 開けるかの判定と行の取り込みに使う一覧は**全ページ**辿る。アーカイブ済みは含めない
+      // (親の判定は `archivedAt` で落とすので要らない。含めると増え続ける履歴で頁数の上限に当たり、
+      // 「後から建てた子司令塔ほど開けない親」という元の症状が戻る。出口レビュー round3 指摘1)。
+      let pagedAgents: ListedAgentLike[] | null = null;
+      try {
+        const paged = await listAllAgents(ctx.paseo.agents, { includeBackground: true });
+        pagedAgents = paged.agents;
+        // 辿り切れなかった: 後ろのページに居る親は「開けない親」に見えるので、画面に理由を出す。
+        // 背景込みを断られた場合(`backgroundDropped`)も背景のスレが親なら同じことが起きるが、
+        // 生きている通常のスレは全部見えているので、通知行は出さない(コメントで残す)。
+        if (paged.truncated) parentsUnknown = true;
+      } catch {
+        pagedAgents = null;
+        // 1ページ分で代用する。後ろのページに居る親は「開けない親」に見えるので、画面に理由を出す。
+        parentsUnknown = true;
+      }
+      const finalAgents: ListedAgentLike[] = pagedAgents ?? forAccess.entries.map((e) => e.agent);
       // ファイルの `coordinator_id` は古い id を指し続けることがあるので、閉じた司令塔は落とす。
-      const alive = dropDeadCoordinators(
-        markCoordinators(rows, ids),
-        forAccess.entries.map((e) => e.agent),
-      );
-      const coordinators = coordinatorRows(
-        ids,
-        listed.entries.map((e) => e.agent),
-        alive,
-      );
+      const alive = dropDeadCoordinators(markCoordinators(rows, ids), finalAgents);
+      // 司令塔の行も全ページの一覧から作る(1ページ目だけだと、総司令が2ページ目に落ちたとき
+      // 行が出ず、その子が総司令の見出しになって押しても開閉だけになる。既存の欠陥)。
+      const coordinators = coordinatorRows(ids, finalAgents, alive);
       // 親の行(司令塔)が出ているなら、その子スレも同じグループへ寄せる。
       threads = adoptOrphans([...coordinators, ...alive]);
-      // 押して開けるか(ワークスペースがアーカイブ済みだと会話に着かない)。
-      // 一覧は**生きている**ワークスペースしか返さない(アーカイブ済みは含まれない)ので
-      // 「在る=開ける、無い=閉じた」で判定する(`listLiveWorkspaceIds` が続きのページも辿る)。
+      // 登録簿に載っていないスレ(= Paseo の「新しいワークスペース」から人が直接始めたスレ)も行にする
+      // (2026-10-24 ユーザー報告)。取れなければ従来どおり登録簿の行だけを出す(行が消えるより出す)。
+      // 取り込みは**背景もアーカイブ済みも含めず**引く。背景を含めると、Paseo が内部用途で建てた
+      // 背景ワークスペースのスレ(通常の一覧には出ない)まで行として出てしまう。アーカイブ済みを
+      // 含めると、増え続ける履歴で頁数の上限に当たり、`truncated` が**平常時にも立つ**
+      // (= 縮退通知の狼少年化。出口レビュー round2 指摘1)。`mergeUnregisteredThreads` の
+      // `archivedAt` の弾きは保険として残す(ホストの既定が変わっても閉じたスレを行にしない)。
+      // ピン止めは保存値を反映する(反映しないと、ピン止めした未登録スレが次の取得で黙って外れる。
+      // 出口レビュー round1 指摘3)。
+      let unregisteredAgents: ListedAgentLike[] = [];
+      try {
+        const unregistered = await listAllAgents(ctx.paseo.agents);
+        unregisteredAgents = unregistered.agents;
+        // 頁数の上限・途中の頁の失敗: 一部のスレが出ない(=元の「出ない」症状と見分けが付かないので通知)。
+        if (unregistered.truncated) threadsIncomplete = true;
+        if (unregistered.agents.length > 0) {
+          threads = mergeUnregisteredThreads(
+            threads,
+            unregistered.agents,
+            ids,
+            new Set(readChildThreadPins(dir)),
+          ).rows;
+        }
+      } catch {
+        // 一覧が引けない: 登録簿の行だけで続ける(通知行で理由を出す)。
+        threadsIncomplete = true;
+      }
+      // 並びは既存行と同じく保存された手動順を最後に適用する(足した未登録スレを後ろに置く)。
+      // 足した行のピン止めは `mergeUnregisteredThreads` が状態の帯に出すだけに留め、**並びは動かさない**:
+      // 登録簿の行のピン止めはグループ内の先頭へ寄せるが、そのグループの `parentAgentId` は
+      // クライアントで欠ける(`buildUpperRows`)。ここで寄せると上の段の先頭へ跳ぶので、規則を揃えない
+      // (出口レビュー round1 指摘3。先頭へ寄せたい場合は未登録行にも親 id を渡す設計変更が要る)。
+      threads = applyChildThreadOrder(threads, readChildThreadOrder(dir));
+      // 押して開けるか。いまの判定は**スレのアーカイブと `closed`**だけを止める
+      // (`thread-liveness.ts` のコメント参照)。ワークスペースがアーカイブ済みの場合は
+      // ここへ生きている id しか渡していないため `workspace-archived` が付かない
+      // (出口レビュー round2 指摘2。既存の欠陥として残差に記録。挙動は変えない)。
       // 引けなければ空の印を付ける(=行は今まで通り押せる)。
+      // 入力は1ページ目のアーカイブ込み一覧と**全ページの取り込み一覧**を合わせる(200件より古い
+      // 未登録スレも「開ける」と判定する。アーカイブ済みの印は1ページ目の一覧が担う。
+      // 出口レビュー round1 指摘4)。
       let access: Map<string, ThreadAccess> = new Map();
       try {
         const live = await listLiveWorkspaceIds(ctx);
+        const byId = new Map(
+          [...forAccess.entries, ...unregisteredAgents.map((agent) => ({ agent }))].map((e) => [
+            String(e.agent.id ?? ""),
+            e.agent,
+          ]),
+        );
         access = threadAccessById(
-          forAccess.entries.map((e) => e.agent),
-          live.map((workspaceId) => ({ workspaceId })),
+          [...byId.values()],
+          live.ids.map((workspaceId) => ({ workspaceId })),
         );
       } catch {
         access = new Map();
       }
       threads = applyThreadAccess(threads, access);
+      // 子を持つ親(=グループ見出し)のうち、一覧に生きていて開けるものを「開ける親」にする。
+      // 子司令塔はデーモンの `coordinator_id` に載らないため、これが無いと見出しを押しても開けない
+      // (2026-10-24 ユーザー報告)。行は増やさない(親の行は見出しが既に担う)。
+      // 親の判定は**全ページ**の一覧で行う(1ページ目だけだと、後から建てた子司令塔ほど
+      // 「開けない親」に落ちて見出しが開閉だけになる。出口レビュー round2 指摘1)。
+      threads = markOpenableParents(threads, finalAgents, access);
     } catch {
       threads = adoptOrphans(markCoordinators(rows, ids));
+      parentsUnknown = true;
+      threadsIncomplete = true;
     }
     return {
       threads,
@@ -190,6 +266,8 @@ export default function contribute(server: PluginServerContext) {
       orderIsManual: readChildThreadOrder(dir).length > 0,
       // ピンのファイルが壊れていても一覧は出すが、黙って「ピン無し」に見せない(画面は console.warn)。
       pinReadError: childThreadPinsReadError(dir),
+      parentsUnknown,
+      threadsIncomplete,
     };
   });
 
@@ -205,6 +283,8 @@ export default function contribute(server: PluginServerContext) {
     // その領域の起こし通知が「司令塔が見つからない」で全滅した)。判定材料は起こしデーモンが持つ実行時の
     // 正本(`domains/<領域>/coordinator_id`)で、サイドバーの行と同じ出所。**refresh より前**に断る
     // (refresh はアーカイブ状態を解いてしまうため、断るだけの操作で状態を動かさない)。
+    // 本スレッドの作業ブランチは `00e3f5082` から切っており、この行は後から本番ブランチ
+    // `topos-customizations` にだけ入った(マージ時に本番の防御を外さないため戻す。2026-10-24)。
     if (readCoordinatorIds().includes(input.agentId)) {
       return {
         ok: false,

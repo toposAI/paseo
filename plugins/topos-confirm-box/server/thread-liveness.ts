@@ -55,8 +55,9 @@ export function threadAccessById(
     if (!id) continue;
     const archived = a.archivedAt != null;
     const workspaceId = str(a.workspaceId);
-    // ワークスペースの記録が無い(=解決できない)なら、遷移側は深リンクへ落ちて同じワークスペースを
-    // 引き直す。生きていると分からないので印は付けない。
+    // 背景のスレ(`workspaceId` が背景ワークスペースを指す)は、背景の一覧を引けていないと `all` に
+    // 入らないため `"open"` になる(既知の残差。`workspace-archived` を付けるには、背景の
+    // ワークスペースも「全 id」に足して判定する必要がある)。
     if (archived) out.set(id, "thread-archived");
     else if (workspaceId && all.has(workspaceId) && !live.has(workspaceId))
       out.set(id, "workspace-archived");
@@ -82,7 +83,7 @@ interface WorkspacePage {
  */
 export async function listLiveWorkspaceIds(ctx: {
   paseo: { workspaces: { list(o?: unknown): Promise<unknown> } };
-}): Promise<string[]> {
+}): Promise<{ ids: string[] }> {
   type List = (o: {
     includeBackground?: boolean;
     page?: { limit: number; cursor: string };
@@ -108,7 +109,10 @@ export async function listLiveWorkspaceIds(ctx: {
     cursor = res.pageInfo?.nextCursor ?? undefined;
   }
   if (cursor) throw new Error("ワークスペースの一覧を辿り切れませんでした");
-  return ids;
+  // 背景の一覧を引けたか(`background`)は、以前は呼び出し元が「`workspaceId` の無いスレを不明に
+  // する」ために使っていたが、そのスレは元から `open` で表示は変わっていなかった(出口レビュー
+  // round3 指摘4)。いまは戻り値に含めない(引けなくても通常のワークスペースは判定できる)。
+  return { ids };
 }
 
 /** 行へ印を付ける(判定に無い行は null=不明)。 */

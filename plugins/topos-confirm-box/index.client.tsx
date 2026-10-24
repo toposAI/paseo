@@ -14,6 +14,8 @@ import { ChildThreadsSidebar, CHILD_THREADS_SCREEN_ID } from "./client/ChildThre
 import { ChildThreadsView } from "./client/ChildThreadsView";
 import { ConfirmBoxView } from "./client/ConfirmBoxView";
 import { onBoxChanged } from "./client/events";
+import { setSidebarMode, useSidebarMode } from "./client/sidebar-mode";
+import { SIDEBAR_SECTION_LABELS } from "./shared/sidebar-section-mode";
 import { confirmBoxCountRpc } from "./shared/contract";
 
 const COUNT_MS = 30_000;
@@ -27,6 +29,38 @@ function openMailUi() {
 
 function MailLink() {
   return <SidebarRow icon="Mail" label="メール" onPress={openMailUi} />;
+}
+
+/**
+ * サイドバー下部のタブ: スレ一覧 / 構想一覧(2026-10-24 ユーザー指示)。
+ * 押すと `sidebar-mode.ts` の現在値を変えるだけで、サイドバー本体(`ChildThreadsSidebar`)が
+ * 同じ値を購読して出し分ける。画面は開かない。バーの項目はアイコンだけが出るので、
+ * `label` は読み上げ用(と設定画面の項目名)になる。
+ */
+function SidebarThreadsLink() {
+  const mode = useSidebarMode();
+  const press = useCallback(() => setSidebarMode("threads"), []);
+  return (
+    <SidebarRow
+      icon="ListTree"
+      label={SIDEBAR_SECTION_LABELS.threads}
+      active={mode === "threads"}
+      onPress={press}
+    />
+  );
+}
+
+function SidebarConceptsLink() {
+  const mode = useSidebarMode();
+  const press = useCallback(() => setSidebarMode("concepts"), []);
+  return (
+    <SidebarRow
+      icon="Lightbulb"
+      label={SIDEBAR_SECTION_LABELS.concepts}
+      active={mode === "concepts"}
+      onPress={press}
+    />
+  );
 }
 
 function useOpenCount(): number | null {
@@ -158,6 +192,17 @@ export default function contribute(client: PluginClientContext) {
   client.addScreen({ id: SCREEN_ID, title: "確認箱", Component: Screen });
   client.addSidebarFooterItem({ id: "box", title: "確認箱", Component: Sidebar });
   client.addSidebarFooterItem({ id: "mail", title: "メール", Component: MailLink });
+  // 並びは「スレ一覧 → 構想一覧」(行の表示順をそのまま使う)。
+  client.addSidebarFooterItem({
+    id: "sidebar-threads",
+    title: SIDEBAR_SECTION_LABELS.threads,
+    Component: SidebarThreadsLink,
+  });
+  client.addSidebarFooterItem({
+    id: "sidebar-concepts",
+    title: SIDEBAR_SECTION_LABELS.concepts,
+    Component: SidebarConceptsLink,
+  });
   return () => {
     for (const r of registered.values()) r.remove();
     registered.clear();

@@ -5,13 +5,19 @@
  * 並び順はドラッグで変更でき、`child_threads_order.json` に保存される
  * (既存の `child_threads.json` は触らない)。保存が無ければサーバーの既定順。
  *
- * **二段**: 上段は実装ノートの status(実装中/判断待ち/確認待ち)で絞った子スレ行、
- * 下段は進行中の構想ノート(`ConceptNotesSection`)。司令塔の行とその子スレは先頭の
- * 「司令塔」グループへ寄せる。
+ * **タブ**: 下のタブバー(`addSidebarFooterItem` の「スレ一覧」「構想一覧」)で出し分ける。
+ * スレ一覧=実装ノートの status(実装中/判断待ち/確認待ち)で絞ったスレ行、構想一覧=進行中の構想ノート
+ * (`ConceptNotesList`)。**両方を積まない**(2026-10-24 ユーザー指示)。現在のタブは
+ * `client/sidebar-mode.ts` を購読する。司令塔の行とその子スレは先頭の「司令塔」グループへ寄せる。
  *
  * 行末の状態ラベルは**必ずテーマ色を自分で与える**(与えないとホスト既定の黒になり、
  * ダークテーマで背景に溶ける)。ピン止め(`child_threads_pins.json`)とアーカイブ
- * (スレ + ワークスペース)は行内のボタン。アーカイブは誤爆しないよう2度押しで実行する。
+ * (スレ + ワークスペース)は**状態の帯を押すと開くメニュー**(`ThreadMenu`)から行う
+ * (2026-10-24 ユーザー指示: 行末のピン/アーカイブのアイコンを廃止)。アーカイブは誤爆しないよう
+ * メニュー内で2度押しで実行する(状態遷移は `shared/thread-menu.ts`)。
+ *
+ * 行の形(状態の帯・メニュー)はスレ一覧でも構想一覧でも同じ。構想の行は従来どおり
+ * 押すと深掘りスレを開く(メニューは状態の帯の無いスレ行だけ)。
  */
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -26,49 +32,59 @@ import {
 } from "../shared/child-threads.js";
 import type { ChildThread } from "../shared/child-threads.js";
 import { blockedMessage } from "../shared/child-threads.js";
-import { buildUpperRows } from "../shared/sidebar-rows.js";
+import {
+  buildUpperRows,
+  coordinatorIdSet,
+  groupPressAction,
+  openableParentIds,
+  visibleGroupKeyOf,
+} from "../shared/sidebar-rows.js";
+import { COORDINATOR_GROUP } from "../shared/sidebar-section-mode.js";
 import type { SidebarRowView } from "../shared/sidebar-rows.js";
-import type { NoteStatus } from "../shared/notes.js";
-import { displayStatus, type StatusKind } from "../shared/thread-status-label.js";
+import type { NoteStatus, SidebarNote } from "../shared/notes.js";
+import { emptySectionLabel } from "../shared/sidebar-section-mode.js";
+import type { SidebarSectionKey } from "../shared/sidebar-section-mode.js";
+import { type StatusKind, statusKindOfMachine } from "../shared/thread-status-label.js";
 import { pickReadableText } from "../shared/contrast.js";
-import { ConceptNotesSection, useSidebarNotes } from "./ConceptNotes.js";
+import { CLOSED_MENU, menuCanArchive, nextMenu } from "../shared/thread-menu.js";
+import type { ThreadMenuAction, ThreadMenuState } from "../shared/thread-menu.js";
+import { ConceptNotesList, useSidebarNotes } from "./ConceptNotes.js";
 import { StatusBadge } from "./sidebar-badge.js";
+import { useSidebarMode } from "./sidebar-mode.js";
+import { ThreadMenu } from "./ThreadMenu.js";
 
 const POLL_MS = 30_000;
 const COLLAPSED_KEY = "topos-child-groups-collapsed";
-const OTHER_GROUP = "";
 const OTHER_LABEL = "その他";
-/**
- * 司令塔スレのグループのキー(登録簿の parent id と衝突しない値)。純正の固定一覧を外した後、
- * 司令塔を開く入口をここが担う。生きている司令塔はサーバーが行として返し(`coordinator: true`)、
- * 司令塔の子スレはすべてこのグループに並べる(司令塔ごとに見出しが分かれない)。
- */
-const COORDINATOR_GROUP = "__coordinators";
 /** ドラッグ中は取得結果で一覧を差し替えない(キャンセル時に固まらないよう期限付き)。 */
 const DRAG_POLL_GATE_MS = 60_000;
 export const CHILD_THREADS_SCREEN_ID = "child-threads";
+
+/**
+ * サイドバーのカスタム内容(`addSidebarHeaderItem` の Component)が受ける props。
+ * 出し分けはタブ(`client/sidebar-mode.ts`)から購読する(行は実装ノートで絞ったスレ一覧)。
+ */
+export type ChildThreadsSidebarProps = PluginSidebarItemProps;
 
 const ICON: Record<StatusKind, string> = {
   waiting: "CircleHelp",
   running: "Loader",
   done: "CircleCheck",
   closed: "Archive",
+  idle: "Circle",
 };
 
 interface AgentNavigation {
   navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
 }
 
-const groupKeyOf = (t: ChildThread) => t.parentAgentId ?? OTHER_GROUP;
-
 /**
- * 画面上のグループのキー。司令塔の行そのものと、司令塔の子スレは1つの「司令塔」グループへ寄せる
- * (司令塔ごとに見出しを分けない)。並べ替えの当たり判定もこの関数を使い、グループの割り方と揃える。
+ * グループ見出しの題名。「司令塔」グループは呼び出し元が固定の `coordinatorGroup` を使うので
+ * ここへは来ない。それ以外は親の題名(サーバーが Paseo の一覧の題名で上書きする)を使い、
+ * 無ければ「その他」。
  */
-function visibleGroupKeyOf(t: ChildThread, coordinatorIds: ReadonlySet<string>): string {
-  const underCoordinator =
-    t.coordinator === true || (t.parentAgentId !== null && coordinatorIds.has(t.parentAgentId));
-  return underCoordinator ? COORDINATOR_GROUP : groupKeyOf(t);
+function groupTitleOf(r: SidebarRowView<ChildThread>): string {
+  return r.thread.parentTitle || OTHER_LABEL;
 }
 
 function readCollapsed(): ReadonlySet<string> {
@@ -106,13 +122,10 @@ function groupRows(
   const groups = new Map<string, ThreadGroup>();
   const coordinatorGroup: ThreadGroup = { key: COORDINATOR_GROUP, title: "司令塔", rows: [] };
   for (const r of rows) {
-    const key = visibleGroupKeyOf(r.thread, coordinatorIds);
+    const key = visibleGroupKeyOf(r.thread, coordinatorIds, COORDINATOR_GROUP);
     let g = groups.get(key);
     if (!g) {
-      g =
-        key === COORDINATOR_GROUP
-          ? coordinatorGroup
-          : { key, title: r.thread.parentTitle || OTHER_LABEL, rows: [] };
+      g = key === COORDINATOR_GROUP ? coordinatorGroup : { key, title: groupTitleOf(r), rows: [] };
       groups.set(key, g);
     }
     g.rows.push(r);
@@ -122,8 +135,10 @@ function groupRows(
     : [...groups.values()];
 }
 
-export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
+export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
+  const props = input as ChildThreadsSidebarProps;
   const { currentScreen, openScreen, theme } = props;
+  const section = useSidebarMode();
   const navigation = (props as PluginSidebarItemProps & AgentNavigation).navigation;
   const list = useRpc(childThreadsListRpc);
   const setOrder = useRpc(childThreadsSetOrderRpc);
@@ -139,17 +154,17 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
   } = useSidebarNotes(dragGateUntilRef);
   const [threads, setThreads] = useState<ChildThread[]>([]);
   const [failed, setFailed] = useState(false);
+  // サーバーが Paseo の一覧を取れず、見出しの親を「開ける親」に判定できなかったか(理由を通知行で出す)。
+  const [parentsUnknown, setParentsUnknown] = useState(false);
+  // 登録簿に載らないスレの取り込みが途中で切れた・取れなかったか(一部のスレが出ない。通知行で出す)。
+  const [threadsIncomplete, setThreadsIncomplete] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [orderIsManual, setOrderIsManual] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(readCollapsed);
-  const [pendingId, setPendingId] = useState<string | null>(null);
-  const [pendingTitle, setPendingTitle] = useState("");
+  // 開いている操作メニュー(1つだけ)。確認待ち(アーカイブの1回目)もここに持つ。
+  const [menu, setMenu] = useState<{ agentId: string; state: ThreadMenuState } | null>(null);
   const [notice, setNotice] = useState("");
   const colors = theme.colors;
-  const noticeStyle = useMemo(
-    () => [styles.noticeText, { color: colors.foregroundMuted }],
-    [colors],
-  );
   // 状態文字は行の背景に対して WCAG AA(4.5:1)を満たす色を選ぶ(グループ見出しの件数・ケアット用)。
   const statusColor = pickReadableText(colors.foregroundMuted, colors.foreground, [
     colors.surface0,
@@ -168,6 +183,8 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
           setThreads(r.threads);
           setOrderIsManual(r.orderIsManual);
           setFailed(false);
+          setParentsUnknown(r.parentsUnknown === true);
+          setThreadsIncomplete(r.threadsIncomplete === true);
           if (r.pinReadError) console.warn(`[child-threads] ${r.pinReadError}`);
           return null;
         })
@@ -207,10 +224,8 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
   // 上段の行(ノートの status で絞り込んだ後)。司令塔の行(サーバーが先頭に置く)は
   // ノートが無ければ実装中として通る。子スレの親 id がこれに当たれば同じグループへ寄せる。
   const rows = useMemo(() => buildUpperRows(threads, implByThread), [threads, implByThread]);
-  const coordinatorIds = useMemo(
-    () => new Set(threads.filter((t) => t.coordinator === true).map((t) => t.agentId)),
-    [threads],
-  );
+  // 描画(SidebarContents)と並べ替えで同じ集合を使う(全スレから作る。common のコメント参照)。
+  const coordinatorIds = useMemo(() => coordinatorIdSet(threads), [threads]);
   const visibleIds = useMemo(() => new Set(rows.map((r) => r.thread.agentId)), [rows]);
 
   // グループ内のドラッグ結果を全体の並びへ戻す(他グループ・上段に出ていない行の並びはそのまま)。
@@ -220,7 +235,8 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
     (groupKey: string, keys: string[]) => {
       const queue = [...keys];
       const flat = threads.map((t) =>
-        visibleGroupKeyOf(t, coordinatorIds) === groupKey && visibleIds.has(t.agentId)
+        visibleGroupKeyOf(t, coordinatorIds, COORDINATOR_GROUP) === groupKey &&
+        visibleIds.has(t.agentId)
           ? (queue.shift() ?? t.agentId)
           : t.agentId,
       );
@@ -237,8 +253,6 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
       return next;
     });
   }, []);
-  const groups = useMemo(() => groupRows(rows, coordinatorIds), [rows, coordinatorIds]);
-
   const openAgent = navigation?.openAgent;
   /**
    * スレを開く。**コンパクト(スマホ)ではホストのサイドバーがドロワーのまま残る**ため、
@@ -266,73 +280,76 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
     [openAgent, openScreen, props.host.id, props.layout.compact],
   );
 
-  // グループ見出し: 生きている司令塔の行が在るときだけ、その司令塔スレを開く。
-  // 行が無い(閉じた/一覧に居ない)親の見出しを押して開きに行くと、開けない画面へ落ちるだけなので開閉にする。
-  // 「司令塔」グループの見出しは開閉だけ(行が複数あるため、どの司令塔を開くか決められない)。
-  const openableParents = useMemo(
-    () => new Set(threads.filter((t) => t.coordinator === true).map((t) => t.agentId)),
-    [threads],
-  );
+  // グループ見出し: 生きた親だけ、その親スレを開く。判定はサーバーが行に付けた `parentOpenable`
+  // (子司令塔はデーモンの `coordinator_id` に載らないため、`coordinator` の印だけでは足りない。
+  // 2026-10-24 ユーザー報告)。開閉は見出しのシェブロンが別に担う(開けない親でも開閉できる)。
+  const openableParents = useMemo(() => openableParentIds(threads), [threads]);
   const openGroup = useCallback(
     (key: string) => {
-      if (!key || key === COORDINATOR_GROUP || !openableParents.has(key)) {
+      if (groupPressAction(key, openableParents, COORDINATOR_GROUP) === "toggle") {
         toggleGroup(key);
         return;
       }
-      openThread(key, threads.find((t) => t.agentId === key)?.access ?? null);
+      // 開くかは一覧の印が決めた。行に付く `access` は子の印なので使わない(出口レビュー round1 指摘2)。
+      // 親がアーカイブ済み/閉じていればサーバーが `parentOpenable` を立てないので、開けない対象へは
+      // 行かない。ワークスペースだけがアーカイブ済みの親は、いまの判定では止められない(既知の残差)。
+      openThread(key, null);
     },
-    [openThread, openableParents, threads, toggleGroup],
+    [openThread, openableParents, toggleGroup],
   );
 
   const focusId = (currentScreen?.params as { focusId?: string } | undefined)?.focusId;
   const onScreen = currentScreen?.screenId === CHILD_THREADS_SCREEN_ID;
+
+  // タブを切り替えたら開いているメニューは閉じる(隠れた一覧の行のメニューが残らない)。
+  useEffect(() => setMenu(null), [section]);
 
   const openList = useCallback(
     () => openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: {} }),
     [openScreen],
   );
 
-  // 件数は画面に出ている行数(上段から外したものは数えない)。ノートを取れないときは、
-  // 上段がスレ側の古い status で崩れていることが分かるよう見出しに出す。
-  let headerLabel: string;
-  if (failed) headerLabel = `子スレ ${rows.length}件(取得失敗)`;
-  else if (saveFailed) headerLabel = `子スレ ${rows.length}件(並び順を保存できません)`;
-  else if (notesError) headerLabel = `子スレ ${rows.length}件(ノート未取得)`;
-  else headerLabel = `子スレ ${rows.length}件`;
+  // 欠けている情報は**見出しではなく通知行**で出す(タブ化で一覧の見出しは積まない)。
+  // ノートを取れないと行の status がスレ側の古い値のままになるので、その旨を必ず出す。
+  const statusNotice = useMemo(() => {
+    if (failed) return "スレ一覧を取得できません(表示は古い内容です)";
+    if (saveFailed) return "並び順を保存できません(次の取得で戻ります)";
+    if (notesError) return `ノート未取得: ${notesError}`;
+    if (parentsUnknown) return "スレの一覧を取れず、見出しからは開けません(開閉のみ)";
+    // 取り込みが途中で切れた: 一部のスレが出ない。元の「出ない」症状と同じ見え方になるので必ず出す。
+    if (threadsIncomplete)
+      return "一部のスレを取得できていません(Paseo から建てたスレの一部が欠けます)";
+    return "";
+  }, [failed, notesError, parentsUnknown, saveFailed, threadsIncomplete]);
 
   const dropThread = useCallback((agentId: string) => {
     setThreads((prev) => prev.filter((x) => x.agentId !== agentId));
   }, []);
 
-  // アーカイブは取り消しにくいので、1回目は**その場に確認の枠を出すだけ**(その枠の「アーカイブする」を押すと実行)。
-  // 同じ行のボタンをもう一度押す形は、連打や誤タップで2回目が当たってしまうためやめた(2026-10-24)。
-  // 1回目は確認の枠を出すだけ。同じ行のボタンをもう一度押しても実行しない(連打・誤タップ対策)。
+  // アーカイブは取り消しにくいので、メニューを開いたあと2回目の押下で実行する
+  // (1回目は `shared/thread-menu.ts` の `nextMenu` が確認待ちにするだけで、ここは実行しない)。
   const onArchive = useCallback(
     (t: ChildThread) => {
-      if (pendingId === t.agentId) return;
-      setPendingId(t.agentId);
-      setPendingTitle(t.title);
+      setNotice("アーカイブしています…");
+      gatePoll(30_000);
+      // 失敗したら取得の抑止を解く(実行中のスレを断られたときなど、30秒も古い一覧のまま待たせない)。
+      const ungated = () => {
+        dragGateUntilRef.current = 0;
+      };
+      void archive({ agentId: t.agentId })
+        .then((r) => {
+          setNotice(r.message ?? (r.ok ? "アーカイブしました" : "アーカイブできませんでした"));
+          if (r.ok) dropThread(t.agentId);
+          else ungated();
+          return null;
+        })
+        .catch((error: unknown) => {
+          ungated();
+          setNotice(`アーカイブできません: ${(error as Error).message}`);
+        });
     },
-    [pendingId],
+    [archive, dropThread, gatePoll],
   );
-
-  const cancelArchive = useCallback(() => setPendingId(null), []);
-
-  const confirmArchive = useCallback(() => {
-    if (!pendingId) return;
-    const agentId = pendingId;
-    setPendingId(null);
-    setNotice("アーカイブしています…");
-    gatePoll(30_000);
-    void archive({ agentId })
-      .then((r) => {
-        setNotice(r.message ?? (r.ok ? "アーカイブしました" : "アーカイブできませんでした"));
-        // サーバが司令塔等の理由で断った(ok:false)場合は行を消さない
-        if (r.ok) dropThread(agentId);
-        return null;
-      })
-      .catch((error: unknown) => setNotice(`アーカイブできません: ${(error as Error).message}`));
-  }, [archive, dropThread, gatePoll, pendingId]);
 
   // ピン止めは一覧に `pinned` が返るので、保存後は次の取得(またはここでの楽観更新)で並びに反映される。
   const onTogglePin = useCallback(
@@ -344,9 +361,17 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
           prev.map((x) => (x.agentId === t.agentId ? { ...x, pinned: on } : x)),
           coordinatorIds,
         );
-      setThreads(flip(pinned));
+      setThreads((prev) => flip(pinned)(prev));
       setNotice(pinned ? "ピン止めしました" : "ピン止めを外しました");
-      const revert = () => setThreads(flip(!pinned));
+      // 失敗したら**この行のピンの印だけ**戻し、ゲートを解除する。操作前の一覧を丸ごと書き戻すと、
+      // その間に届いた他の行の操作(アーカイブ等)まで巻き戻る(出口レビュー round2 指摘6)。
+      // 並びは次のポーリングでサーバーの値に戻る。
+      const revert = () => {
+        setThreads((prev) =>
+          prev.map((x) => (x.agentId === t.agentId ? { ...x, pinned: t.pinned } : x)),
+        );
+        dragGateUntilRef.current = 0;
+      };
       void pin({ agentId: t.agentId, pinned })
         .then((r) => {
           if (!r.ok) {
@@ -363,6 +388,11 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
     [coordinatorIds, gatePoll, pin],
   );
 
+  /** 状態の帯を押した: その行のメニューを開く(既に別の行のが開いていれば閉じて開き直す)。 */
+  const onMenuOpen = useCallback((agentId: string) => {
+    setMenu({ agentId, state: nextMenu(CLOSED_MENU, "open").state });
+  }, []);
+
   const renderThread = useCallback(
     (row: SidebarRowView<ChildThread>) => {
       const t = row.thread;
@@ -372,65 +402,195 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
           failed={failed}
           active={onScreen && focusId === t.agentId}
           onOpen={openThread}
-          colors={colors}
-          confirmingArchive={pendingId === t.agentId}
-          onArchive={onArchive}
-          onTogglePin={onTogglePin}
+          onOpenMenu={onMenuOpen}
         />
       );
     },
-    [colors, failed, focusId, onArchive, onScreen, onTogglePin, openThread, pendingId],
+    [failed, focusId, onMenuOpen, onScreen, openThread],
+  );
+
+  // メニューの対象は取得結果から引き直す(ピン状態がポーリング後も最新になる)。
+  const menuThread = menu ? threads.find((t) => t.agentId === menu.agentId) : undefined;
+  // 閉じた/アーカイブされた等で対象が一覧から消えたら、メニューも閉じる(同じ id が戻ってきたときに
+  // 勝手に開かない。出口レビュー round1 指摘6)。
+  useEffect(() => {
+    if (menu && !menuThread) setMenu(null);
+  }, [menu, menuThread]);
+  // 題名は**行に出ている題名**(ノートがあればノートの題名)を渡す。スレ側の題名は古いことがある。
+  const menuTitle = menu ? rows.find((r) => r.thread.agentId === menu.agentId)?.title : undefined;
+  // 他の行の親になっている id(司令塔の印が付いていなくても、親の行は畳ませない)。
+  const menuCanArchiveNow = useMemo(() => {
+    if (!menuThread) return false;
+    const parentIds = new Set(
+      threads.map((t) => t.parentAgentId).filter((id): id is string => id !== null),
+    );
+    return menuCanArchive(menuThread, parentIds);
+  }, [menuThread, threads]);
+  const applyMenuAction = useCallback(
+    (t: ChildThread, action: ThreadMenuAction) => {
+      if (!menu || menu.agentId !== t.agentId) return;
+      // 状態遷移は純粋関数が正(アーカイブの1回目では実行しない)。
+      const step = nextMenu(menu.state, action);
+      // 副作用は updater の外で走らせる(StrictMode で 2 回呼ばれてもアーカイブを二重に撃たない)。
+      setMenu(step.state.open ? { agentId: t.agentId, state: step.state } : null);
+      if (step.intent === "toggle-pin") onTogglePin(t);
+      // 司令塔はアーカイブしない。メニューから項目を消すだけだと、他の入口(将来のショートカット等)が
+      // 増えたときに破られるので、実行側でも止める(出口レビュー round2 指摘3)。
+      else if (step.intent === "archive") {
+        if (menuCanArchiveNow) onArchive(t);
+      } else if (step.intent === "open-thread") openThread(t.agentId, t.access);
+    },
+    [menu, menuCanArchiveNow, onArchive, onTogglePin, openThread],
+  );
+  const onMenuAction = useCallback(
+    (action: ThreadMenuAction) => {
+      if (menuThread) applyMenuAction(menuThread, action);
+    },
+    [applyMenuAction, menuThread],
   );
 
   return (
     <>
-      <SidebarRow
-        id="child-threads-header"
-        icon="ListTodo"
-        label={headerLabel}
-        active={onScreen && !focusId}
-        onPress={openList}
+      <SidebarContents
+        section={section}
+        rows={rows}
+        coordinatorIds={coordinatorIds}
+        collapsed={collapsed}
+        statusNotice={statusNotice}
+        notice={notice}
+        noticeColor={colors.foregroundMuted}
+        statusColor={statusColor}
+        orderIsManual={orderIsManual}
+        failed={failed}
+        onOpenList={openList}
+        onToggleGroup={toggleGroup}
+        onOpenGroup={openGroup}
+        onDragBegin={onDragBegin}
+        onReorderGroup={onReorderGroup}
+        renderThread={renderThread}
+        onResetOrder={resetOrder}
+        notes={notes}
+        notesError={notesError}
+        openAgent={navigation?.openAgent}
+        serverId={props.host.id}
+        openScreen={openScreen}
+        onNotesCreated={reloadNotes}
       />
+      {menuThread && menu ? (
+        <ThreadMenu
+          thread={menuThread}
+          title={menuTitle ?? menuThread.title}
+          state={menu.state}
+          // 司令塔(子を持つ行)はアーカイブさせない(誤って親を畳まない安全側。2026-10-24 子司令塔決定)。
+          // ピンは残す。規則は純粋関数が正。
+          canArchive={menuCanArchiveNow}
+          colors={colors}
+          onAction={onMenuAction}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * サイドバーの本体。`section`(タブの現在値)で**どちらか一方だけ**を描く
+ * (スレ一覧と構想一覧を積まない。2026-10-24 指示)。
+ */
+function SidebarContents({
+  section,
+  rows,
+  coordinatorIds,
+  collapsed,
+  statusNotice,
+  notice,
+  noticeColor,
+  statusColor,
+  orderIsManual,
+  failed,
+  onOpenList,
+  onToggleGroup,
+  onOpenGroup,
+  onDragBegin,
+  onReorderGroup,
+  renderThread,
+  onResetOrder,
+  notes,
+  notesError,
+  openAgent,
+  serverId,
+  openScreen,
+  onNotesCreated,
+}: {
+  section: SidebarSectionKey;
+  rows: readonly SidebarRowView<ChildThread>[];
+  /** 司令塔の id 集合(全スレから作ったもの。呼び出し元の並べ替えと同じ集合)。 */
+  coordinatorIds: ReadonlySet<string>;
+  collapsed: ReadonlySet<string>;
+  /** 取得の失敗など、一覧が欠けていることの通知(空なら出さない)。 */
+  statusNotice: string;
+  notice: string;
+  noticeColor: string;
+  statusColor: string;
+  orderIsManual: boolean;
+  failed: boolean;
+  onOpenList: () => void;
+  onToggleGroup: (key: string) => void;
+  onOpenGroup: (key: string) => void;
+  onDragBegin: () => void;
+  onReorderGroup: (key: string, keys: string[]) => void;
+  renderThread: (row: SidebarRowView<ChildThread>) => React.ReactElement;
+  onResetOrder: () => void;
+  /** 構想一覧の材料(`ConceptNotesList` へ渡す)。 */
+  notes: readonly SidebarNote[];
+  notesError: string | null;
+  openAgent?: (input: { agentId: string; serverId?: string }) => void;
+  serverId: string;
+  openScreen: (input: { screenId: string; params?: Record<string, string> }) => void;
+  onNotesCreated: () => void;
+}) {
+  // `coordinatorIds` は呼び出し元から受ける(上段に出ている行だけで作ると、上段から外れた司令塔の
+  // 子スレが「司令塔」から漏れ、並べ替え側のキーとずれる。出口レビュー round3 指摘3)。
+  const groups = useMemo(() => groupRows(rows, coordinatorIds), [rows, coordinatorIds]);
+  const noticeStyle = useMemo(() => [styles.noticeText, { color: noticeColor }], [noticeColor]);
+  const statusNoticeStyle = useMemo(
+    () => [styles.noticeText, { color: statusColor }],
+    [statusColor],
+  );
+  const emptyLabel = emptySectionLabel(section);
+  if (section === "concepts") {
+    // 構想一覧: 見出しはタブ自体が担うので積まない。押すと深掘りスレを開く(無ければ作ってノートに記録)。
+    return (
+      <ConceptNotesList
+        notes={notes}
+        error={notesError}
+        openAgent={openAgent}
+        serverId={serverId}
+        openScreen={openScreen}
+        statusColor={statusColor}
+        onCreated={onNotesCreated}
+      />
+    );
+  }
+  return (
+    <>
+      {statusNotice ? (
+        <View style={styles.notice}>
+          <Text style={statusNoticeStyle}>{statusNotice}</Text>
+        </View>
+      ) : null}
       {groups.map((g) => (
         <ThreadGroupSection
           key={g.key}
           group={g}
           open={!collapsed.has(g.key)}
-          onToggle={toggleGroup}
-          onOpenCoordinator={openGroup}
+          onToggle={onToggleGroup}
+          onOpenCoordinator={onOpenGroup}
           onDragBegin={onDragBegin}
           onReorderGroup={onReorderGroup}
           renderThread={renderThread}
           statusColor={statusColor}
         />
       ))}
-      {pendingId ? (
-        <View style={styles.notice}>
-          <Text style={noticeStyle} numberOfLines={2}>
-            「{pendingTitle}」をアーカイブしますか?
-          </Text>
-          <View style={styles.confirmRow}>
-            <Pressable
-              onPress={confirmArchive}
-              testID="child-thread-archive-confirm"
-              accessibilityRole="button"
-              accessibilityLabel={`${pendingTitle}をアーカイブする`}
-              style={styles.confirmButton}
-            >
-              <Text style={styles.confirmText}>アーカイブする</Text>
-            </Pressable>
-            <Pressable
-              onPress={cancelArchive}
-              testID="child-thread-archive-cancel"
-              accessibilityRole="button"
-              accessibilityLabel="アーカイブをやめる"
-              style={styles.cancelButton}
-            >
-              <Text style={noticeStyle}>やめる</Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
       {notice ? (
         <View style={styles.notice}>
           <Text style={noticeStyle}>{notice}</Text>
@@ -440,26 +600,16 @@ export function ChildThreadsSidebar(props: PluginSidebarItemProps) {
         <SidebarRow
           id="child-threads-empty"
           icon="ListTodo"
-          label="実装中のスレはありません"
-          onPress={openList}
+          label={emptyLabel}
+          onPress={onOpenList}
         />
       ) : null}
-      {/* 下段: 進行中の構想(折りたたみ可)。押すと深掘りスレを開く(無ければ作ってノートに記録)。 */}
-      <ConceptNotesSection
-        notes={notes}
-        error={notesError}
-        openAgent={navigation?.openAgent}
-        serverId={props.host.id}
-        openScreen={openScreen}
-        statusColor={statusColor}
-        onCreated={reloadNotes}
-      />
       {orderIsManual ? (
         <SidebarRow
           id="child-threads-reset-order"
           icon="RotateCcw"
           label="並び順を自動に戻す"
-          onPress={resetOrder}
+          onPress={onResetOrder}
         />
       ) : null}
     </>
@@ -491,8 +641,8 @@ function ThreadGroupSection({
     (keys: string[]) => onReorderGroup(group.key, keys),
     [group.key, onReorderGroup],
   );
-  // 純正の固定済み一覧を外したので、司令塔(親)行そのものが司令塔スレへの入口になる。
-  // 開閉は行末のケアットだけが担う(行の押下と開閉を分ける)。
+  // 見出しの押下 = 生きた親のスレを開く(開けるかは `onOpenCoordinator` が親の一覧の印で決める)。
+  // 開閉は行末のシェブロンだけが担う(行の押下と開閉を分ける。開けない親でも開閉はできる)。
   const openCoordinator = useCallback(() => {
     if (!onOpenCoordinator) {
       onToggle(group.key);
@@ -504,6 +654,7 @@ function ThreadGroupSection({
   const textStyle = useMemo(() => ({ color: statusColor }), [statusColor]);
   const chevronStyle = useMemo(() => [styles.chevron, { color: statusColor }], [statusColor]);
   const count = group.rows.length;
+  // 件数とシェブロンは同じ行末に並べる(シェブロンは開閉専用の当たり判定)。
   const trailing = useMemo(
     () => (
       <View style={styles.trailing}>
@@ -571,7 +722,7 @@ function pinFirstPerGroup(
 ): ChildThread[] {
   const groups = new Map<string, ChildThread[]>();
   for (const t of threads) {
-    const key = visibleGroupKeyOf(t, coordinatorIds);
+    const key = visibleGroupKeyOf(t, coordinatorIds, COORDINATOR_GROUP);
     const g = groups.get(key);
     if (g) g.push(t);
     else groups.set(key, [t]);
@@ -588,41 +739,43 @@ function pinFirstPerGroup(
 function rowIcon(row: SidebarRowView<ChildThread>, t: ChildThread): string {
   if (t.coordinator) return "Command";
   if (t.access === "workspace-archived") return ICON.closed;
+  // 止まったスレは帯の語彙に関わらず「終了」の見た目にする(従来どおり)。
+  if (t.machineState === "closed") return ICON.closed;
   if (row.note?.status === "確認待ち") return "CircleCheck";
   if (row.statusLabel === "判断待ち") return "CircleHelp";
   if (row.statusLabel === "実装中" && t.status === "完了") return "Loader";
-  return ICON[displayStatus(t.status, t.machineState).kind];
+  // 帯と同じ判断で選ぶ(登録簿に載らないスレは「待機中」= idle のアイコンになる)。
+  return ICON[kindOfStatusLabel(row.statusLabel, t.machineState)];
 }
 
-/** 状態の帯の色(上段は実装ノートの status が正なので、その語彙で色を選ぶ)。 */
-function kindOfStatusLabel(label: NoteStatus): StatusKind {
+/**
+ * 状態の帯の色(上段は実装ノートの status が正なので、その語彙で色を選ぶ)。
+ * `closed` は行末の印(箱)と揃える(`shared/thread-status-label` の `displayStatus` と同じ規則。
+ * 出口レビュー round3 指摘1)。
+ */
+function kindOfStatusLabel(label: NoteStatus | "待機中", machineState: string | null): StatusKind {
+  if (statusKindOfMachine(machineState) === "closed") return "closed";
+  if (label === "待機中") return "idle";
   if (label === "完了") return "done";
   if (label === "判断待ち" || label === "構想") return "waiting";
   if (label === "確認待ち") return "done";
   return "running";
 }
 
-type SidebarColors = PluginSidebarItemProps["theme"]["colors"];
-
 function ThreadRow({
   row,
   failed,
   active,
   onOpen,
-  colors,
-  confirmingArchive,
-  onArchive,
-  onTogglePin,
+  onOpenMenu,
 }: {
   row: SidebarRowView<ChildThread>;
   failed: boolean;
   active: boolean;
   /** 押したらそのスレを開く(開けない行の判定・ドロワーを閉じる処理は呼び出し側 `openThread`)。 */
   onOpen: (agentId: string, access: ChildThread["access"]) => void;
-  colors: SidebarColors;
-  confirmingArchive: boolean;
-  onArchive: (t: ChildThread) => void;
-  onTogglePin: (t: ChildThread) => void;
+  /** 状態の帯を押した: ピン/アーカイブのメニューを開く。 */
+  onOpenMenu: (agentId: string) => void;
 }) {
   const t = row.thread;
   const onPress = useCallback(() => onOpen(t.agentId, t.access), [onOpen, t.agentId, t.access]);
@@ -632,77 +785,22 @@ function ThreadRow({
       ? { text: "要復元", kind: "closed" }
       : {
           text: failed ? `${row.statusLabel}(古い表示)` : row.statusLabel,
-          kind: kindOfStatusLabel(row.statusLabel),
+          kind: kindOfStatusLabel(row.statusLabel, t.machineState),
         };
   const testID = `child-thread-status-${t.agentId}`;
-  const pressArchive = useCallback(() => onArchive(t), [onArchive, t]);
-  const pressPin = useCallback(() => onTogglePin(t), [onTogglePin, t]);
-  const pinLabel = t.pinned ? `${t.title}のピン止めを外す` : `${t.title}をピン止め`;
-  const archiveLabel = confirmingArchive
-    ? `${t.title}をアーカイブする(もう一度押す)`
-    : `${t.title}をアーカイブ`;
-  const { agentId } = t;
-  const archiveStyle = useMemo(
-    () => [styles.iconHit, confirmingArchive && styles.iconHitConfirm],
-    [confirmingArchive],
-  );
-  const pinColor = t.pinned ? colors.foreground : colors.foregroundMuted;
-  const archiveColor = confirmingArchive ? "#b91c1c" : colors.foregroundMuted;
-  // 行末: ピン止め → アーカイブ(確認待ち) → 状態の帯。幅は状態の帯の分で固定され、題名がここへ重ならない。
-  // 司令塔の行も状態の帯は出さない(開けない印だけは出す)。アーカイブのボタンは出さず、押せない印だけ置く。
+  // 状態の帯を押すとメニュー(ピン止め/アーカイブ/スレを開く)が開く。司令塔の行も例外にしない:
+  // 旧実装では司令塔の行にもピン/アーカイブのボタンがあったので、外すと機能の退行になる
+  // (出口レビュー round1 指摘5)。文字は「司令塔」にして他の行の状態と混ぜない。
+  const badgeText = t.coordinator ? "司令塔" : status.text;
+  const badgeKind: StatusKind = t.coordinator ? "running" : status.kind;
+  const pressBadge = useCallback(() => onOpenMenu(t.agentId), [onOpenMenu, t.agentId]);
   const trailing = useMemo(
     () => (
       <View style={styles.trailing}>
-        <Pressable
-          onPress={pressPin}
-          testID={`child-thread-pin-${agentId}`}
-          accessibilityRole="button"
-          accessibilityLabel={pinLabel}
-          hitSlop={6}
-          style={styles.iconHit}
-        >
-          <PinGlyph filled={t.pinned} color={pinColor} />
-        </Pressable>
-        {t.coordinator ? (
-          // 司令塔の行はアーカイブのボタンを出さない(2026-10-23 24:22 に司令塔 6f957aa9 がこのボタンから
-          // 畳まれ、その領域の起こし通知が止まった)。サーバ側も同じ判定で断る。
-          <View style={styles.iconHit}>
-            <ArchiveGlyph color={colors.foregroundMuted} />
-          </View>
-        ) : (
-          <Pressable
-            onPress={pressArchive}
-            testID={`child-thread-archive-${agentId}`}
-            accessibilityRole="button"
-            accessibilityLabel={archiveLabel}
-            hitSlop={6}
-            style={archiveStyle}
-          >
-            <ArchiveGlyph color={archiveColor} />
-          </Pressable>
-        )}
-        {t.coordinator && t.access !== "workspace-archived" ? null : (
-          <StatusBadge text={status.text} kind={status.kind} testID={testID} />
-        )}
+        <StatusBadge text={badgeText} kind={badgeKind} testID={testID} onPress={pressBadge} />
       </View>
     ),
-    [
-      agentId,
-      archiveColor,
-      archiveLabel,
-      archiveStyle,
-      colors.foregroundMuted,
-      pinColor,
-      pinLabel,
-      pressArchive,
-      pressPin,
-      status.kind,
-      status.text,
-      t.access,
-      t.coordinator,
-      t.pinned,
-      testID,
-    ],
+    [badgeKind, badgeText, pressBadge, testID],
   );
   return (
     <SidebarRow
@@ -716,96 +814,14 @@ function ThreadRow({
   );
 }
 
-/** ピン止めのアイコン(プラグインAPIにアイコン一覧が無いため View で描く)。 */
-function PinGlyph({ filled, color }: { filled: boolean; color: string }) {
-  const headStyle = useMemo(
-    () => [styles.pinHead, { borderColor: color, backgroundColor: filled ? color : "transparent" }],
-    [color, filled],
-  );
-  const stemStyle = useMemo(() => [styles.pinStem, { backgroundColor: color }], [color]);
-  return (
-    <View style={styles.pinGlyph}>
-      <View style={headStyle} />
-      <View style={stemStyle} />
-    </View>
-  );
-}
-
-/** アーカイブのアイコン(箱)。 */
-function ArchiveGlyph({ color }: { color: string }) {
-  const boxStyle = useMemo(() => [styles.archiveBox, { borderColor: color }], [color]);
-  const lidStyle = useMemo(() => [styles.archiveLid, { backgroundColor: color }], [color]);
-  return (
-    <View style={boxStyle}>
-      <View style={lidStyle} />
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   trailing: {
     flexDirection: "row",
     alignItems: "center",
     gap: 2,
   },
-  iconHit: {
-    width: 24,
-    height: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 6,
-  },
-  iconHitConfirm: {
-    backgroundColor: "#fee2e2",
-  },
-  pinGlyph: {
-    alignItems: "center",
-  },
-  pinHead: {
-    width: 9,
-    height: 7,
-    borderWidth: 1.5,
-    borderRadius: 2,
-  },
-  pinStem: {
-    width: 1.5,
-    height: 4,
-  },
-  archiveBox: {
-    width: 12,
-    height: 9,
-    borderWidth: 1.5,
-    borderRadius: 1.5,
-    justifyContent: "flex-start",
-  },
-  archiveLid: {
-    height: 1.5,
-    marginTop: 2,
-  },
   notice: {
     paddingHorizontal: 12,
-    paddingVertical: 4,
-  },
-  confirmRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 4,
-  },
-  confirmButton: {
-    backgroundColor: "#b91c1c",
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  confirmText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  cancelButton: {
-    borderRadius: 6,
-    paddingHorizontal: 10,
     paddingVertical: 4,
   },
   noticeText: {
