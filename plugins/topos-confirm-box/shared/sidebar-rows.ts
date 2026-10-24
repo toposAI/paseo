@@ -31,6 +31,11 @@ export interface RowThread {
    * 無い/分からない行は null(点を出さない)。意味は status と別の軸(いまどう見えているか)。
    */
   stateDot?: StateDotKind | null;
+  /**
+   * 完了まとめを個別に確認済みか(`ChildThread.summaryAcked`)。`false` で status が `完了` なら
+   * 「完了待ち」(ユーザーの確認を待っている)。未指定は「分からない」として完了待ちにしない。
+   */
+  summaryAcked?: boolean;
 }
 
 export interface SidebarRowView<T> {
@@ -41,7 +46,7 @@ export interface SidebarRowView<T> {
    * 行右端の状態文字。`待機中` はノート語彙の外にある(登録簿に載らないスレの機械状態から導く。
    * ノート語彙を増やすと、ノートの frontmatter 側にまで語彙が漏れるため別扱いにする)。
    */
-  statusLabel: NoteStatus | "待機中";
+  statusLabel: NoteStatus | "待機中" | "完了待ち";
   /** この行に対応する実装ノート(無ければ null)。 */
   note: SidebarNote | null;
   /**
@@ -70,6 +75,14 @@ export function shouldShowDot(thread: RowThread): boolean {
 /** 行の左端に出す点の種類(出さない行は null)。 */
 export function dotOf(thread: RowThread): StateDotKind | null {
   return shouldShowDot(thread) ? (thread.stateDot ?? null) : null;
+}
+
+/**
+ * 完了報告済みでユーザーの確認を待っている行か(司令塔は除く)。「判断待ち」(ユーザーの選択・返事が
+ * 要る)とは別の状態で、確認→アーカイブの流れに乗る(子スレ完了タブの「確認待ち」と同じ集合)。
+ */
+function isAwaitingConfirm(t: RowThread): boolean {
+  return t.status === "完了" && t.summaryAcked === false && t.coordinator !== true;
 }
 
 const isUpperStatus = (s: NoteStatus) => UPPER_TIER_STATUSES.includes(s);
@@ -174,6 +187,12 @@ export function buildUpperRows<T extends RowThread>(
   for (const t of threads) {
     const note = implByThread.get(t.agentId) ?? null;
     const dot = dotOf(t);
+    // 完了待ちはノートの status が古く「実装中」「確認待ち」のままでも優先する(実装中の青に埋もれさせない)。
+    // ノートが「判断待ち」ならユーザーの判断が残っているのでそのまま、「完了」「構想」等は従来どおり。
+    if (isAwaitingConfirm(t) && (!note || note.status === "実装中" || note.status === "確認待ち")) {
+      rows.push({ thread: t, title: note?.title || t.title, statusLabel: "完了待ち", note, dot });
+      continue;
+    }
     if (note) {
       if (!isUpperStatus(note.status)) continue;
       rows.push({ thread: t, title: note.title || t.title, statusLabel: note.status, note, dot });
@@ -189,6 +208,20 @@ export function buildUpperRows<T extends RowThread>(
     });
   }
   return rows;
+}
+
+/** 上段の行を「判断待ち」「完了待ち」で数える(一覧の上の件数チップ用。下部バーの件数とは別集計)。 */
+export function countStatusLabels(rows: readonly { statusLabel: string }[]): {
+  judgment: number;
+  doneWait: number;
+} {
+  let judgment = 0;
+  let doneWait = 0;
+  for (const r of rows) {
+    if (r.statusLabel === "判断待ち") judgment += 1;
+    else if (r.statusLabel === "完了待ち") doneWait += 1;
+  }
+  return { judgment, doneWait };
 }
 
 /**

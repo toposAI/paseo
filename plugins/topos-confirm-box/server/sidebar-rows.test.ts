@@ -8,6 +8,7 @@ import { readSidebarNotes } from "./notes.js";
 import {
   buildUpperRows,
   coordinatorIdSet,
+  countStatusLabels,
   groupPressAction,
   indexImplementationNotes,
   lowerTierNotes,
@@ -267,4 +268,74 @@ test("通し(画面と同じ集合): 司令塔が上段から外れていても�
   // 並べ替え側(全スレ)のキーと揃う
   const reorderKey = visibleGroupKeyOf(allThreads[1], coordinatorIds, COORDINATOR_GROUP);
   assert.equal(reorderKey, keyOf("kid2"));
+});
+
+// ---- 判断待ちと完了待ちの分離(2026-10-25 ユーザー指示) ----
+
+const doneUnconfirmed = (agentId: string, over: Record<string, unknown> = {}) => ({
+  agentId,
+  status: "完了" as const,
+  title: agentId,
+  summaryAcked: false,
+  ...over,
+});
+
+test("完了報告済みで未確認のスレは『完了待ち』の行になり、判断待ちとは別ラベル", () => {
+  const impl = new Map([
+    ["b", note({ path: "/v/b.md", status: "実装中", title: "ノートB" })],
+    ["c", note({ path: "/v/c.md", status: "確認待ち", title: "ノートC" })],
+  ]);
+  const rows = buildUpperRows(
+    [
+      doneUnconfirmed("a"), // ノート無し
+      doneUnconfirmed("b"), // ノートは古く実装中のまま
+      doneUnconfirmed("c"), // ノートは確認待ち
+      thread("d", "ユーザー判断待ち"),
+    ],
+    impl,
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.thread.agentId, r.statusLabel]),
+    [
+      ["a", "完了待ち"],
+      ["b", "完了待ち"],
+      ["c", "完了待ち"],
+      ["d", "判断待ち"],
+    ],
+  );
+  assert.equal(rows[1].title, "ノートB"); // 題名はノート優先のまま
+});
+
+test("完了待ちにならないもの: 確認済み・ノートが判断待ち/完了・司令塔・summaryAcked不明", () => {
+  const impl = new Map([
+    ["judge", note({ path: "/v/j.md", status: "判断待ち" })],
+    ["fin", note({ path: "/v/f.md", status: "完了" })],
+  ]);
+  const rows = buildUpperRows(
+    [
+      doneUnconfirmed("acked", { summaryAcked: true }),
+      doneUnconfirmed("judge"), // ユーザー判断が残っているノートは判断待ちのまま
+      doneUnconfirmed("fin"), // ノートが完了 = 上段から外す(従来どおり)
+      doneUnconfirmed("coord", { coordinator: true }),
+      { agentId: "unknown", status: "完了" as const, title: "unknown" }, // summaryAcked 未指定
+    ],
+    impl,
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.thread.agentId, r.statusLabel]),
+    [["judge", "判断待ち"]], // 他は従来どおり上段に出ない(完了はノート無しなら外す)
+  );
+});
+
+test("countStatusLabels は判断待ちと完了待ちを別々に数える", () => {
+  const rows = buildUpperRows(
+    [
+      thread("a", "ユーザー判断待ち"),
+      thread("b", "ユーザー判断待ち"),
+      doneUnconfirmed("c"),
+      thread("d", "実装中"),
+    ],
+    new Map(),
+  );
+  assert.deepEqual(countStatusLabels(rows), { judgment: 2, doneWait: 1 });
 });
