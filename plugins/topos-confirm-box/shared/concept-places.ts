@@ -10,8 +10,11 @@
  *    あとでは空(旧置き場に区分は無い)。
  *
  * どちらの置き場が使われたかは一覧の `place` で画面へ返す(「あとで」への移動を出せるかの判断材料)。
+ *
+ * **`node:path` は読まない**(プラグインの共有バンドルに Node のモジュールは組み込めない。
+ * 2026-10-24 実測)。パス操作は `concept-paths.ts` の純関数を使う。
  */
-import path from "node:path";
+import { dirnameOf, isAbsoluteOf, relativeOf } from "./concept-paths.js";
 
 export const PASEO_DIR = "Paseo";
 export const CONCEPT_DIR = "構想";
@@ -28,13 +31,18 @@ export interface ConceptPlace {
   laterDir: string;
 }
 
+/** パスを `/` でつなぐ(空の要素は落とす)。 */
+function join(...parts: string[]): string {
+  return parts.filter((p) => p.length > 0).join("/");
+}
+
 /** Vault の根から新置き場のパスを組む(`Paseo/構想/{検討中,あとで}`)。 */
 export function conceptPlace(vaultDir: string): ConceptPlace {
-  const root = path.join(vaultDir, PASEO_DIR, CONCEPT_DIR);
+  const root = join(vaultDir.replace(/\/+$/, "") || "/", PASEO_DIR, CONCEPT_DIR);
   return {
     root,
-    activeDir: path.join(root, CONCEPT_ACTIVE_DIR),
-    laterDir: path.join(root, CONCEPT_LATER_DIR),
+    activeDir: join(root, CONCEPT_ACTIVE_DIR),
+    laterDir: join(root, CONCEPT_LATER_DIR),
   };
 }
 
@@ -48,20 +56,25 @@ export function zoneOfPath(file: string, place: ConceptPlace): ConceptZone | nul
   // 正規化しないと、同じディレクトリのノートを「置き場の外」と誤判定して移動できなくなる。
   const norm = (p: string) => p.normalize("NFC");
   const under = (dir: string) => {
-    const rel = path.relative(norm(dir), norm(file));
-    return rel.length > 0 && !rel.startsWith("..") && !path.isAbsolute(rel);
+    const rel = relativeOf(norm(dir), norm(file));
+    return rel.length > 0 && !isOutside(rel);
   };
   if (under(place.laterDir)) return "later";
   if (under(place.activeDir)) return "active";
   return null;
 }
 
+/** `path.relative` の結果が外を指すか(`..` で始まる / 絶対パス)。 */
+function isOutside(rel: string): boolean {
+  return rel === ".." || rel.startsWith("../") || isAbsoluteOf(rel);
+}
+
 /**
  * ファイルが `dir` の**直下**にあるか(区切りの区別で、NFC に正規化して比べる)。
- * `path.dirname(file) === dir` は NFD のパスで false になりうるので、判定をここに閉じる。
+ * `dirname(file) === dir` は NFD のパスで false になりうるので、判定をここに閉じる。
  */
 export function isDirectChild(file: string, dir: string): boolean {
-  return path.dirname(file.normalize("NFC")) === dir.normalize("NFC");
+  return dirnameOf(file.normalize("NFC")) === dir.normalize("NFC");
 }
 
 /**

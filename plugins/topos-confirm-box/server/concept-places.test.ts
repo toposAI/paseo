@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { conceptPlace, isDirectChild, placeName, zoneOfPath } from "../shared/concept-places.js";
+import { dirnameOf, normalizeOf, relativeOf } from "../shared/concept-paths.js";
 import { readSidebarNotes, resolveConceptPlan } from "./notes.js";
 import { moveConceptNote } from "./note-thread.js";
 
@@ -152,6 +153,26 @@ test("zoneOfPath: ファイル名の正規化(NFD)が違っても同じ区分と
   // macOS では「検討中」が NFD(結合文字)で返ることがある。
   const nfd = path.join("/v/Paseo/構想/検討中".normalize("NFD"), "a.md");
   assert.equal(zoneOfPath(nfd, place), "active");
+});
+
+test("concept-paths: 純関数が node:path と同じ結果になる(共有バンドルに Node を入れないため)", () => {
+  const P = path.posix;
+  // 連続 `/` の扱いは意図的に path と違う(置き場のパスは正規形で組むので、正規化して畳む)。
+  const cases = ["/v/a/b/c.md", "/v/a/", "/a.md", "a/b", "b"];
+  for (const file of cases) {
+    assert.equal(dirnameOf(file), P.dirname(file), `dirname(${file})`);
+    assert.equal(normalizeOf(file), P.normalize(file), `normalize(${file})`);
+  }
+  const rels: [string, string][] = [
+    ["/v/Paseo/構想/検討中", "/v/Paseo/構想/検討中/a.md"],
+    ["/v/Paseo/構想/検討中", "/v/Paseo/構想/あとで/a.md"],
+    ["/v/Paseo/構想/検討中/a.md", "/v/Paseo/構想/検討中/a.md"],
+    ["/v/構想/検討中", "/v/構想/検討中メモ/a.md"],
+    ["/v/構想/検討中/", "/v/構想/検討中/sub/a.md"],
+  ];
+  for (const [base, to] of rels) {
+    assert.equal(relativeOf(base, to), P.relative(base, to), `relative(${base}, ${to})`);
+  }
 });
 
 test("isDirectChild: NFD のファイルパスでも置き場の直下と判定する", () => {
