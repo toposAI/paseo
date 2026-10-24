@@ -139,6 +139,26 @@ export interface VaultDecisionRead {
   dir: string;
   /** 読めずに出せなかったノート(件数だけ画面の状態表示に出す。無言で欠落させない)。 */
   skipped: { name: string; reason: string }[];
+  /**
+   * `waiting_materials`(AI側が材料を集めている最中)のノート数。ユーザーが答える項目ではないので
+   * 判断タブには出さず、件数だけ状態表示に出す(2026-10-24: 画面18件のうち材料待ち3件はユーザー判断でなかった)。
+   */
+  waiting: number;
+  /**
+   * どの状態のノートでも、frontmatter の `legacy_keys` に入っている箱側の key。箱へ投函された判断は
+   * Vault ノート化(deposit→ノート)されると、箱側の行を画面に出さない(併存をやめて一本化)。
+   */
+  claimedKeys: string[];
+}
+
+/** `legacy_keys: [a, b]`(インライン)を key の配列へ。空・未指定・読めない形は []。 */
+export function parseLegacyKeys(raw: string | undefined): string[] {
+  const m = /^\[(.*)\]$/.exec((raw ?? "").trim());
+  if (!m) return [];
+  return m[1]
+    .split(",")
+    .map((k) => k.trim().replace(/^(["'])(.*)\1$/, "$2"))
+    .filter(Boolean);
 }
 
 /** 判断ノートを読む。**例外を投げない**(読めない時は error に理由を入れる)。 */
@@ -154,6 +174,8 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
     const items: ConfirmBoxItem[] = [];
     const skipped: { name: string; reason: string }[] = [];
     const seen = new Set<string>();
+    const claimed = new Set<string>();
+    let waiting = 0;
     for (const name of names) {
       try {
         const full = path.join(dir, name);
@@ -162,7 +184,10 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
           skipped.push({ name, reason: "ファイルでない/大きすぎる" });
           continue;
         }
-        const item = parseDecisionNote(fs.readFileSync(full, "utf8"), st.mtimeMs);
+        const text = fs.readFileSync(full, "utf8");
+        // 状態を問わず legacy_keys を集める(answered/superseded でも箱側の行は復活させない)
+        for (const k of parseLegacyKeys(splitFrontmatter(text)?.front.legacy_keys)) claimed.add(k);
+        const item = parseDecisionNote(text, st.mtimeMs);
         if (!item) continue; // open/waiting_materials 以外・frontmatter なしは対象外(欠落ではない)
         // ファイル名と id が違うノートは、回答の書き先が別ノートになるので出さない
         if (
@@ -173,14 +198,25 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
           continue;
         }
         seen.add(item.key ?? "");
+        if (/^waiting_materials$/i.test(splitFrontmatter(text)?.front.state ?? "")) {
+          waiting += 1;
+          continue;
+        }
         items.push(item);
       } catch {
         skipped.push({ name, reason: "読めない" });
       }
     }
-    return { items, error: null, dir, skipped };
+    return { items, error: null, dir, skipped, waiting, claimedKeys: [...claimed] };
   } catch (error) {
-    return { items: [], error: (error as Error).message, dir, skipped: [] };
+    return {
+      items: [],
+      error: (error as Error).message,
+      dir,
+      skipped: [],
+      waiting: 0,
+      claimedKeys: [],
+    };
   }
 }
 
@@ -205,11 +241,16 @@ export function applyVaultSource(
   boxItems: readonly ConfirmBoxItem[],
   vaultItems: readonly ConfirmBoxItem[],
   vaultFailed = false,
+  claimedKeys: readonly string[] = [],
 ): { items: ConfirmBoxItem[]; hidden: ConfirmBoxItem[] } {
   const hidden: ConfirmBoxItem[] = [];
   const kept: ConfirmBoxItem[] = [];
+  const claimed = new Set(claimedKeys);
   for (const item of boxItems) {
-    if (!vaultFailed && isHiddenLegacyJudgment(item)) hidden.push(item);
+    // Vault にノートがある(legacy_keys)判断は箱側の行を出さない。permit は対象外
+    const claimedByNote =
+      item.kind !== "permit" && item.judgment === true && !!item.key && claimed.has(item.key);
+    if (!vaultFailed && (claimedByNote || isHiddenLegacyJudgment(item))) hidden.push(item);
     else kept.push(item);
   }
   return { items: [...kept, ...vaultItems], hidden };

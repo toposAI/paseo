@@ -84,7 +84,7 @@ test("parseOptions: 推奨の印を外して id と推奨を取る / 2つ未満�
   assert.deepEqual(parseOptions("自由記述").options, []);
 });
 
-test("open と waiting_materials だけ読み、answered/superseded は出さない", () => {
+test("open だけ画面に出し、waiting_materials は件数だけ・answered/superseded は出さない", () => {
   const dir = tmpDir();
   fs.writeFileSync(path.join(dir, "j-1.md"), NOTE("j-1", "open"));
   fs.writeFileSync(path.join(dir, "j-2.md"), NOTE("j-2", "waiting_materials"));
@@ -93,9 +93,8 @@ test("open と waiting_materials だけ読み、answered/superseded は出さな
   fs.writeFileSync(path.join(dir, "_発言ログ.md"), "x");
   const r = readVaultDecisions({ TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir });
   assert.equal(r.error, null);
-  assert.deepEqual(r.items.map((i) => i.key).sort(), ["vault:j-1", "vault:j-2"]);
-  const w = r.items.find((i) => i.key === "vault:j-2");
-  assert.match(w?.summary ?? "", /材料待ち/);
+  assert.deepEqual(r.items.map((i) => i.key).sort(), ["vault:j-1"]);
+  assert.equal(r.waiting, 1);
   const o = r.items.find((i) => i.key === "vault:j-1");
   assert.equal(o?.judgment, true);
   assert.equal(o?.recommended, "a");
@@ -205,6 +204,34 @@ test("切替後に投函された judgment 行と、Vault 読取失敗時の旧�
     applyVaultSource([old, fresh], [], true).items.map((i) => i.id),
     ["old", "fresh"],
   );
+});
+
+test("legacy_keys を持つノートは(answered でも)箱側の判断行を隠す。permit と無関係な行は残す", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(
+    path.join(dir, "j-1.md"),
+    NOTE("j-1", "answered").replace("legacy_keys: []", 'legacy_keys: [box-a, "box-b"]'),
+  );
+  const r = readVaultDecisions({ TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir });
+  assert.deepEqual(r.claimedKeys.sort(), ["box-a", "box-b"]);
+  const fresh = (id: string, key: string) =>
+    item({ id, key, judgment: true, ts: LEGACY_CUTOVER_MS + 1 });
+  const out = applyVaultSource(
+    [fresh("x", "box-a"), fresh("y", "box-z"), item({ id: "p", kind: "permit", key: "box-a" })],
+    [],
+    false,
+    r.claimedKeys,
+  );
+  assert.deepEqual(
+    out.items.map((i) => i.id),
+    ["y", "p"],
+  );
+  assert.deepEqual(
+    out.hidden.map((i) => i.id),
+    ["x"],
+  );
+  // Vault を読めなかった時は隠さない
+  assert.equal(applyVaultSource([fresh("x", "box-a")], [], true, ["box-a"]).items.length, 1);
 });
 
 test("BOM・クォート付き state は読み、id とファイル名が違うノートは skipped に数える", () => {
