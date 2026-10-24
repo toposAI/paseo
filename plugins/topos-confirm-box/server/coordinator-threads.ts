@@ -29,6 +29,15 @@ export function coordinatorStateDir(env: NodeJS.ProcessEnv = process.env): strin
  * 生きている司令塔の agent id(領域ごとに1本。重複は畳む)。
  * ファイルが無い/読めない領域は黙って飛ばす(一覧そのものは止めない)。
  */
+export function readGeneralCoordinatorId(stateDir: string = coordinatorStateDir()): string | null {
+  try {
+    const id = fs.readFileSync(path.join(stateDir, "domains", "general", "coordinator_id"), "utf8").trim();
+    return /^[A-Za-z0-9-]{8,64}$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 export function readCoordinatorIds(stateDir: string = coordinatorStateDir()): string[] {
   const base = path.join(stateDir, "domains");
   let names: string[];

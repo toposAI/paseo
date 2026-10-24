@@ -90,8 +90,8 @@ export function threadUnavailableReason(
 
 // ---------------------------------------------------------------- 投函元が無い/閉じているカードの送信先
 
-/** 総司令塔スレの agent ID。投函元が閉じている/参照が無いカードの質問の受け皿。 */
-export const COORDINATOR_AGENT_ID = "1800e2f7-63a5-40b7-9f5f-52e0ba24bb49";
+// 総司令塔スレの agent ID は直書きしない。起こしデーモンの実行時の正本
+// (`domains/general/coordinator_id`)をサーバが読み、RPC `topos.confirmbox.coordinator` で渡す。
 
 /** 送信先を総司令塔へ切り替えた時に入力欄の下へ出す説明。 */
 export const COORDINATOR_FALLBACK_NOTICE =
