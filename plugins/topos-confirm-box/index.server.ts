@@ -279,6 +279,18 @@ export default function contribute(server: PluginServerContext) {
    * 生きている(closed 以外の)スレが1本でも居れば閉じない。数えられないときも閉じない。
    */
   server.handle(childThreadsArchiveRpc, async (input, ctx) => {
+    // 司令塔自身は畳まない(2026-10-23 24:22 に paseo_ui の司令塔 6f957aa9 がこの経路でアーカイブされ、
+    // その領域の起こし通知が「司令塔が見つからない」で全滅した)。判定材料は起こしデーモンが持つ実行時の
+    // 正本(`domains/<領域>/coordinator_id`)で、サイドバーの行と同じ出所。**refresh より前**に断る
+    // (refresh はアーカイブ状態を解いてしまうため、断るだけの操作で状態を動かさない)。
+    // 本スレッドの作業ブランチは `00e3f5082` から切っており、この行は後から本番ブランチ
+    // `topos-customizations` にだけ入った(マージ時に本番の防御を外さないため戻す。2026-10-24)。
+    if (readCoordinatorIds().includes(input.agentId)) {
+      return {
+        ok: false,
+        message: "司令塔のスレはアーカイブできません(畳むとその領域の起こし通知が止まります)",
+      };
+    }
     const ref = ctx.paseo.agents.ref(input.agentId);
     try {
       await ref.refresh();
