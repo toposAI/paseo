@@ -511,6 +511,9 @@ function ConceptLaterSection({
   rowProps: ConceptRowProps;
 }) {
   if (!sections.showLater) return null;
+  // 畳めない状態(置き場が片方だけ)では中身を開いたまま出す。畳んだままだと開く手段が無く、
+  // 「あとで」のノートがどの区分にも出ず見えなくなる。
+  const expand = sections.laterToggle ? open : true;
   return (
     <>
       <SidebarRow
@@ -520,7 +523,7 @@ function ConceptLaterSection({
         onPress={sections.laterToggle ? onToggle : noop}
         trailing={sections.laterToggle ? trailing : undefined}
       />
-      {open ? notes.map((n) => <ConceptRow key={n.path} note={n} {...rowProps} />) : null}
+      {expand ? notes.map((n) => <ConceptRow key={n.path} note={n} {...rowProps} />) : null}
     </>
   );
 }
