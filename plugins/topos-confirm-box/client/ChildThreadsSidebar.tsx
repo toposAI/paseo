@@ -388,26 +388,17 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     [coordinatorIds, gatePoll, pin],
   );
 
-  /** 状態の帯を押した: その行のメニューを開く(既に別の行のが開いていれば閉じて開き直す)。 */
+  /**
+   * 状態の帯を押した: その行のメニューを開く(別の行のが開いていれば閉じて開き直す)。
+   * 開いている行の帯をもう一度押したら閉じる(純正のドロップダウンと同じ)。
+   */
   const onMenuOpen = useCallback((agentId: string) => {
-    setMenu({ agentId, state: nextMenu(CLOSED_MENU, "open").state });
+    setMenu((cur) =>
+      cur && cur.agentId === agentId
+        ? null
+        : { agentId, state: nextMenu(CLOSED_MENU, "open").state },
+    );
   }, []);
-
-  const renderThread = useCallback(
-    (row: SidebarRowView<ChildThread>) => {
-      const t = row.thread;
-      return (
-        <ThreadRow
-          row={row}
-          failed={failed}
-          active={onScreen && focusId === t.agentId}
-          onOpen={openThread}
-          onOpenMenu={onMenuOpen}
-        />
-      );
-    },
-    [failed, focusId, onMenuOpen, onScreen, openThread],
-  );
 
   // メニューの対象は取得結果から引き直す(ピン状態がポーリング後も最新になる)。
   const menuThread = menu ? threads.find((t) => t.agentId === menu.agentId) : undefined;
@@ -449,46 +440,75 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     [applyMenuAction, menuThread],
   );
 
+  // メニューは開いた行の直下に差し込む(帯のすぐ下に出る。全画面にしない)。
+  const renderThread = useCallback(
+    (row: SidebarRowView<ChildThread>) => {
+      const t = row.thread;
+      const menuHere = menuThread && menu && menu.agentId === t.agentId;
+      return (
+        <ThreadRow
+          row={row}
+          failed={failed}
+          active={onScreen && focusId === t.agentId}
+          onOpen={openThread}
+          onOpenMenu={onMenuOpen}
+        >
+          {menuHere ? (
+            <ThreadMenu
+              thread={menuThread}
+              title={menuTitle ?? menuThread.title}
+              state={menu.state}
+              // 司令塔(子を持つ行)はアーカイブさせない(誤って親を畳まない安全側。2026-10-24 子司令塔決定)。
+              // ピンは残す。規則は純粋関数が正。
+              canArchive={menuCanArchiveNow}
+              colors={colors}
+              onAction={onMenuAction}
+            />
+          ) : null}
+        </ThreadRow>
+      );
+    },
+    [
+      colors,
+      failed,
+      focusId,
+      menu,
+      menuCanArchiveNow,
+      menuThread,
+      menuTitle,
+      onMenuAction,
+      onMenuOpen,
+      onScreen,
+      openThread,
+    ],
+  );
+
   return (
-    <>
-      <SidebarContents
-        section={section}
-        rows={rows}
-        coordinatorIds={coordinatorIds}
-        collapsed={collapsed}
-        statusNotice={statusNotice}
-        notice={notice}
-        noticeColor={colors.foregroundMuted}
-        statusColor={statusColor}
-        orderIsManual={orderIsManual}
-        failed={failed}
-        onOpenList={openList}
-        onToggleGroup={toggleGroup}
-        onOpenGroup={openGroup}
-        onDragBegin={onDragBegin}
-        onReorderGroup={onReorderGroup}
-        renderThread={renderThread}
-        onResetOrder={resetOrder}
-        notes={notes}
-        notesError={notesError}
-        openAgent={navigation?.openAgent}
-        serverId={props.host.id}
-        openScreen={openScreen}
-        onNotesCreated={reloadNotes}
-      />
-      {menuThread && menu ? (
-        <ThreadMenu
-          thread={menuThread}
-          title={menuTitle ?? menuThread.title}
-          state={menu.state}
-          // 司令塔(子を持つ行)はアーカイブさせない(誤って親を畳まない安全側。2026-10-24 子司令塔決定)。
-          // ピンは残す。規則は純粋関数が正。
-          canArchive={menuCanArchiveNow}
-          colors={colors}
-          onAction={onMenuAction}
-        />
-      ) : null}
-    </>
+    <SidebarContents
+      section={section}
+      rows={rows}
+      coordinatorIds={coordinatorIds}
+      collapsed={collapsed}
+      statusNotice={statusNotice}
+      notice={notice}
+      noticeColor={colors.foregroundMuted}
+      statusColor={statusColor}
+      orderIsManual={orderIsManual}
+      failed={failed}
+      onOpenList={openList}
+      onToggleGroup={toggleGroup}
+      onOpenGroup={openGroup}
+      onDragBegin={onDragBegin}
+      onReorderGroup={onReorderGroup}
+      renderThread={renderThread}
+      onResetOrder={resetOrder}
+      notes={notes}
+      notesError={notesError}
+      openAgent={navigation?.openAgent}
+      serverId={props.host.id}
+      openScreen={openScreen}
+      onNotesCreated={reloadNotes}
+    />
   );
 }
 
@@ -768,8 +788,11 @@ function ThreadRow({
   active,
   onOpen,
   onOpenMenu,
+  children,
 }: {
   row: SidebarRowView<ChildThread>;
+  /** この行が開いているメニュー(行の直下に出す)。閉じていれば null。 */
+  children?: React.ReactNode;
   failed: boolean;
   active: boolean;
   /** 押したらそのスレを開く(開けない行の判定・ドロワーを閉じる処理は呼び出し側 `openThread`)。 */
@@ -803,14 +826,17 @@ function ThreadRow({
     [badgeKind, badgeText, pressBadge, testID],
   );
   return (
-    <SidebarRow
-      id={t.agentId}
-      icon={rowIcon(row, t)}
-      label={row.title}
-      active={active}
-      onPress={onPress}
-      trailing={trailing}
-    />
+    <View>
+      <SidebarRow
+        id={t.agentId}
+        icon={rowIcon(row, t)}
+        label={row.title}
+        active={active}
+        onPress={onPress}
+        trailing={trailing}
+      />
+      {children}
+    </View>
   );
 }
 
