@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   ROW_TITLE_MAX,
+  conceptRowFullLabel,
   conceptRowTitle,
+  conceptSections,
   conceptThreadBadge,
   conceptThreadBadgeLabel,
   deferMenuLabel,
@@ -54,4 +56,28 @@ test("あとでの見出しは件数だけを出す(0件も文言で分かる)",
 test("行メニューの文言は区分の向きで変わる", () => {
   assert.equal(deferMenuLabel("active"), "あとで(今は見ない)");
   assert.equal(deferMenuLabel("later"), "検討中に戻す");
+});
+
+test("conceptSections: 旧置き場では見出しを出さない", () => {
+  assert.deepEqual(conceptSections("legacy", { later: 0, laterAvailable: false }), {
+    showLater: false,
+    laterToggle: false,
+  });
+});
+
+test("conceptSections: 新置き場では件数0でも見出しを出す(片方だけの移行中も消さない)", () => {
+  assert.deepEqual(conceptSections("paseo", { later: 0, laterAvailable: true }), {
+    showLater: true,
+    laterToggle: true,
+  });
+  // 「あとで」だけ在る(移行の途中): 見出しは出すが、押して開けるのは両方あるときだけ
+  assert.deepEqual(conceptSections("paseo", { later: 2, laterAvailable: false }), {
+    showLater: true,
+    laterToggle: false,
+  });
+});
+
+test("conceptRowFullLabel: 長押し/読み上げ用の全文(題名は切らない)", () => {
+  const long = "1ノート1機能のtoposツール構想__1ノート1機能のToposツール構想";
+  assert.equal(conceptRowFullLabel({ title: long, conclusion: "作りたい" }), `${long} — 作りたい`);
 });

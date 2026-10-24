@@ -27,6 +27,35 @@ export function conceptRowTitle(note: Pick<SidebarNote, "title">): string {
   return shorten(note.title, ROW_TITLE_MAX);
 }
 
+/** 長押しで見せる全文(`Row` の長押し表示。題名を切っても元の題名を確かめられる)。 */
+export function conceptRowFullLabel(note: Pick<SidebarNote, "title" | "conclusion">): string {
+  return note.conclusion ? `${note.title} — ${shorten(note.conclusion, 80)}` : note.title;
+}
+
+/**
+ * 構想タブの区分(見出しを出すか・畳めるか)。
+ *
+ * 旧置き場(`place: "legacy"`)には「あとで」が無いので見出しは出さない(今までどおり平らに並べる)。
+ * 新置き場では「検討中」の一覧の下に「あとで」の畳んだフォルダ風の見出しを1行だけ置く。
+ * 見出しは**片方の置き場だけでも出す**(移行の途中で「あとで」に移した分が消えて見えない)。
+ */
+export interface ConceptSections {
+  /** 「あとで」の見出しを出すか(新置き場のとき)。 */
+  showLater: boolean;
+  /** 見出しを押して中身を開けるか(両方の置き場が在って移動もできるとき)。 */
+  laterToggle: boolean;
+}
+
+export function conceptSections(
+  place: "paseo" | "legacy",
+  zones: { later: number; laterAvailable: boolean },
+): ConceptSections {
+  if (place === "legacy") return { showLater: false, laterToggle: false };
+  // 見出しは「あとで」に1件でも入っているか、区分が在るときだけ出す
+  // (旧置き場から移行して0件のときに、空のフォルダだけが残らないように)。
+  return { showLater: zones.laterAvailable || zones.later > 0, laterToggle: zones.laterAvailable };
+}
+
 /**
  * スレとの結び付き(行右端の小さなアイコンで示す。文字は出さない)。
  * - `thread`: 開けるスレがある(アイコンを出さない = 既定の見た目)。
@@ -42,7 +71,11 @@ export function conceptThreadBadge(
   return note.threadCandidates.length > 0 ? "unresolved" : "none";
 }
 
-/** アイコンの説明(マウスを乗せたときの吹き出しと、読み上げのラベル)。 */
+/**
+ * アイコンの説明(吹き出しと読み上げのラベル)。
+ * SDK に Tooltip が無いので、画面は色の違い+**押した後に出る1行の説明**で示す
+ * (`client/ConceptNotes.tsx` の `ConceptRow`。どこか1つでも説明が出れば全体の意味が分かる)。
+ */
 export function conceptThreadBadgeLabel(badge: ConceptThreadBadge): string {
   switch (badge) {
     case "thread":

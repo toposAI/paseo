@@ -42,6 +42,7 @@ import {
 import { COORDINATOR_GROUP } from "../shared/sidebar-section-mode.js";
 import type { SidebarRowView } from "../shared/sidebar-rows.js";
 import type { NoteStatus, SidebarNote } from "../shared/notes.js";
+import type { SidebarPlace, ZoneCounts } from "../shared/concept-places.js";
 import { emptySectionLabel } from "../shared/sidebar-section-mode.js";
 import type { SidebarSectionKey } from "../shared/sidebar-section-mode.js";
 import { type StatusKind, statusKindOfMachine } from "../shared/thread-status-label.js";
@@ -153,6 +154,8 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   const {
     notes,
     error: notesError,
+    place,
+    zones,
     implByThread,
     reload: reloadNotes,
   } = useSidebarNotes(dragGateUntilRef);
@@ -515,6 +518,9 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
       onResetOrder={resetOrder}
       notes={notes}
       notesError={notesError}
+      notesPlace={place}
+      notesZones={zones}
+      colors={colors}
       openAgent={navigation?.openAgent}
       serverId={props.host.id}
       openScreen={openScreen}
@@ -547,6 +553,9 @@ function SidebarContents({
   onResetOrder,
   notes,
   notesError,
+  notesPlace,
+  notesZones,
+  colors,
   openAgent,
   serverId,
   openScreen,
@@ -574,6 +583,11 @@ function SidebarContents({
   /** 構想一覧の材料(`ConceptNotesList` へ渡す)。 */
   notes: readonly SidebarNote[];
   notesError: string | null;
+  /** 構想の置き場と件数(`ConceptNotesList` へ渡す)。 */
+  notesPlace: SidebarPlace;
+  notesZones: ZoneCounts;
+  /** 行メニューの配色。 */
+  colors: PluginSidebarItemProps["theme"]["colors"];
   openAgent?: (input: { agentId: string; serverId?: string }) => void;
   serverId: string;
   openScreen: (input: { screenId: string; params?: Record<string, string> }) => void;
@@ -598,6 +612,9 @@ function SidebarContents({
         serverId={serverId}
         openScreen={openScreen}
         statusColor={statusColor}
+        place={notesPlace}
+        zones={notesZones}
+        colors={colors}
         onCreated={onNotesCreated}
       />
     );
