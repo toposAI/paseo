@@ -157,7 +157,7 @@ function BoxTabFooterItem({
  * 下部バーの「確認箱」のバッジ。PC幅は中に残る項目(バグ報告+通知)の合計、狭い幅は従来どおり判断待ちの数
  * (狭い幅では「ユーザー判断」をバーに出さないので、二重にならず1か所で数える)。
  */
-function useBoxBadge(compact: boolean): number | undefined {
+function useBoxBadge(narrow: boolean): number | undefined {
   const count = useRpc(confirmBoxCountRpc);
   const [n, setN] = useState<number | null>(null);
   useEffect(() => {
@@ -167,9 +167,7 @@ function useBoxBadge(compact: boolean): number | undefined {
         .then(
           (r) =>
             alive &&
-            setN(
-              compact ? r.open : confirmBoxBadgeCount({ bugs: r.bugs, notify: r.notifications }),
-            ),
+            setN(narrow ? r.open : confirmBoxBadgeCount({ bugs: r.bugs, notify: r.notifications })),
         )
         // 一時的な失敗では前回の件数を残す(`BoxTabLink` と同じ)。
         .catch(() => {});
@@ -181,12 +179,15 @@ function useBoxBadge(compact: boolean): number | undefined {
       clearInterval(timer);
       off();
     };
-  }, [count, compact]);
+  }, [count, narrow]);
   return n ?? undefined;
 }
 
 function Sidebar({ currentScreen, openScreen, layout }: PluginSidebarItemProps) {
-  const n = useBoxBadge(layout.compact);
+  const { width, height } = useWindowDimensions();
+  // 判定は下部バーの2項目と同じ1本(`showsMovedFooterTabs`)。バッジだけ高さを見ないと、
+  // 横倒しの iPhone(932×430)で「ユーザー判断」がバーに出ないのにバッジも判断待ちを数えなくなる。
+  const n = useBoxBadge(!showsMovedFooterTabs(layout.compact, width, height));
   return <SidebarWithHeaderButton currentScreen={currentScreen} openScreen={openScreen} n={n} />;
 }
 
@@ -201,10 +202,10 @@ function SidebarWithHeaderButton({
 }: Pick<PluginSidebarItemProps, "currentScreen" | "openScreen"> & { n: number | undefined }) {
   const hosts = useHosts();
   const open = useCallback(() => openScreen({ screenId: SCREEN_ID }), [openScreen]);
-  const registered = useRegisteredHeaderButtons();
+  const { registered, tick } = useRegisteredHeaderButtons();
 
-  // 効果の本体は `hosts`・`registered` だけを読む。列挙し直しの tick を依存に入れる必要はない
-  // (`registered` はモジュール側の Map で中身はその場で書き換わり、古い参照でも最新の登録を見る)。
+  // `useHosts()` は同じ配列を返し続ける(ホスト一覧が変わった時だけ差し替わる)ので、後から増えた
+  // ワークスペースを取りに行くには tick を依存に入れる必要がある(30秒毎。1ホストにつき `workspaces.list` 1回)。
   useEffect(() => {
     let alive = true;
     for (const host of hosts) {
@@ -236,7 +237,7 @@ function SidebarWithHeaderButton({
     return () => {
       alive = false;
     };
-  }, [hosts, registered]);
+  }, [hosts, registered, tick]);
 
   const trailing = CountBadge({ n });
   return (
@@ -250,18 +251,21 @@ function SidebarWithHeaderButton({
   );
 }
 
-/** ヘッダボタンの登録簿。ワークスペースは後から増えるので、一定間隔で列挙し直す。 */
-function useRegisteredHeaderButtons() {
-  const [, setTick] = useState(0);
+/**
+ * ヘッダボタンの登録簿。ワークスペースは後から増えるので、一定間隔で列挙し直す
+ * (`tick` を効果の依存に入れて再実行させる。`registered` は Map なので、古い参照でも中身は最新)。
+ */
+function useRegisteredHeaderButtons(): { registered: typeof headerButtons; tick: number } {
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setTick((v) => v + 1), COUNT_MS);
     return () => clearInterval(timer);
   }, []);
-  return headerButtons;
+  return { registered: headerButtons, tick };
 }
 
-function Screen({ theme, navigation }: PluginScreenProps) {
-  return <ConfirmBoxView theme={theme} navigation={navigation} />;
+function Screen({ theme, navigation, layout }: PluginScreenProps) {
+  return <ConfirmBoxView theme={theme} navigation={navigation} layout={layout} />;
 }
 
 /**
@@ -269,9 +273,11 @@ function Screen({ theme, navigation }: PluginScreenProps) {
  * 画面は寄与 id でしか分かれないので、同じ画面のまま `?mode=` だけ変わっても同じ部品が使い回される。
  * タブごとに状態(絞り込み・並び)を持ち越さないよう `key` で作り直す。
  */
-function BoxTabScreen({ theme, navigation, params }: PluginScreenProps) {
+function BoxTabScreen({ theme, navigation, layout, params }: PluginScreenProps) {
   const mode = boxTabMode(params[BOX_TAB_MODE_PARAM]);
-  return <ConfirmBoxView key={mode} theme={theme} navigation={navigation} mode={mode} />;
+  return (
+    <ConfirmBoxView key={mode} theme={theme} navigation={navigation} layout={layout} mode={mode} />
+  );
 }
 
 function ChildThreadsScreen({ theme, params }: PluginScreenProps) {

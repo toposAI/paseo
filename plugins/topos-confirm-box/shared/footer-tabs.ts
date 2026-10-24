@@ -61,8 +61,13 @@ export const WIDE_MIN_WIDTH = 720;
  */
 export const WIDE_MIN_HEIGHT = 480;
 
-/** 描画先が PC 幅か。高さが取れない呼び出しでは幅だけで判定する。 */
-export function isWideLayout(width: number, height: number | undefined): boolean {
+/**
+ * 描画先が PC 幅か。高さが取れない呼び出しでは幅だけで判定する。
+ * `compact` はホストの `layout.compact`(幅<720)。幅の判定と重なるが、ホスト側の境界が変わっても
+ * 下部バーと確認箱が食い違わないよう、判定を1か所に寄せるために受ける。
+ */
+export function isWideLayout(width: number, height: number | undefined, compact = false): boolean {
+  if (compact) return false;
   return width >= WIDE_MIN_WIDTH && (height === undefined || height >= WIDE_MIN_HEIGHT);
 }
 
@@ -77,7 +82,7 @@ export function showsMovedFooterTabs(
   width: number,
   height: number | undefined,
 ): boolean {
-  return !compact && isWideLayout(width, height);
+  return isWideLayout(width, height, compact);
 }
 
 /** 下部バーから開いた画面のタブ。不正な値は「ユーザー判断」に倒す。 */

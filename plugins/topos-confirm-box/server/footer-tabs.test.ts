@@ -58,6 +58,9 @@ test("下部バーの2項目: iPhone縦・横倒しは出さない、iPadとPC�
   assert.equal(showsMovedFooterTabs(false, 1440, 900), true);
   // ホストが compact と言ったら出さない(ホスト側の境界が変わっても従来どおりへ倒れる)。
   assert.equal(showsMovedFooterTabs(true, 1440, 900), false);
+  // 確認箱の中の判定(`isWideLayout`)も同じ compact を受ける(バーと箱で食い違わない)。
+  assert.equal(isWideLayout(1440, 900, true), false);
+  assert.equal(isWideLayout(1440, 900, false), true);
 });
 
 test("下部バーから開く画面のタブは ?mode= で決まる(不正値はユーザー判断)", () => {

@@ -19,7 +19,7 @@ import {
   confirmBoxPermitRpc,
   judgmentTabRows,
 } from "../shared/contract.js";
-import { confirmBoxTabs, isWideLayout } from "../shared/footer-tabs.js";
+import { confirmBoxTabs, showsMovedFooterTabs } from "../shared/footer-tabs.js";
 import { onBoxChanged, notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
 import { BugReportsView } from "./BugReportsView.js";
@@ -46,7 +46,10 @@ export function ConfirmBoxView({
   navigation,
   containerWidth,
   mode = "box",
+  layout,
 }: Pick<PluginHostProps, "theme"> & {
+  /** ホストの `layout`。省略時(ポップオーバー)は幅・高さだけで判定する。 */
+  layout?: PluginHostProps["layout"];
   navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
   /** 描画先の箱の幅。省略時は窓幅。ポップオーバーは窓が広くても箱が狭いので実測値を渡す。 */
   containerWidth?: number;
@@ -89,16 +92,16 @@ export function ConfirmBoxView({
 
   const c = theme.colors;
   // タッチ幅(iPhone等)ではタップ領域を44pt以上・間隔8pxに広げる。PC幅は従来の大きさ。
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const windowSize = useWindowDimensions();
   // 幅の判定は「描画されている箱」基準。ポップオーバーは窓が広くても箱は最大420pxなので、
   // 窓幅で判定すると一覧とチャットペインが同じ狭い箱に横並びで押し込まれる。
-  const width = layoutWidth(containerWidth, windowWidth);
+  const width = layoutWidth(containerWidth, windowSize.width);
   const touch = width < 600;
   // PC幅の確認箱は「ユーザー判断」「子スレ完了」を下部バーへ出したので、中には残るタブだけを出す
   // (二重に出さない)。狭い幅(iPhone)は従来どおり5枚。下部バーから開いた画面はそのタブだけ。
-  // 判定は下部バーと同じ1本(箱の幅・高さで見る。横倒しの iPhone は狭い扱い)。
-  const wide = isWideLayout(width, layoutHeight(containerWidth, windowHeight));
-  // 一覧とチャットの並べ方。PC幅なら横並び、狭い幅は全画面で重ねる。
+  // 判定は下部バーと同じ1本(ホストの compact も見る。ホスト側の境界が変わってもバーと箱が食い違わない)。
+  // 一覧とチャットの並べ方も同じ判定(PC幅なら横並び、狭い幅は全画面で重ねる)。
+  const wide = isBoxWide(containerWidth, windowSize, layout);
   const compact = !wide;
   const { shownTab, tabs, selectTab } = useBoxTabs(mode, wide);
   // カードチャットは画面を問わずこのペインに一本化した(旧・自由記述欄は廃止=2026-10-22ユーザー決定)。
@@ -457,11 +460,25 @@ function layoutWidth(containerWidth: number | undefined, windowWidth: number): n
  * 高さの判定に使う値。箱幅を渡された(ポップオーバー)ときは**箱の幅だけで決める**ので高さは見ない
  * (窓は高くても箱は狭いため。横倒しの iPhone 判定は画面全体を描くときにだけ効かせる)。
  */
-function layoutHeight(
-  containerWidth: number | undefined,
-  windowHeight: number,
-): number | undefined {
+function boxHeight(containerWidth: number | undefined, windowHeight: number): number | undefined {
   return containerWidth === undefined ? windowHeight : undefined;
+}
+
+/**
+ * 確認箱を PC 幅で出すか(下部バーの「ユーザー判断」「子スレ完了」と二重に出さない側)。
+ * 箱幅を渡された(ポップオーバー)ときは高さを見ず、箱の幅だけで決める。
+ */
+function isBoxWide(
+  containerWidth: number | undefined,
+  windowSize: { width: number; height: number },
+  layout: PluginHostProps["layout"] | undefined,
+): boolean {
+  const width = layoutWidth(containerWidth, windowSize.width);
+  return showsMovedFooterTabs(
+    layout?.compact ?? false,
+    width,
+    boxHeight(containerWidth, windowSize.height),
+  );
 }
 
 type TabId = "items" | "bugs" | "childdone" | "notify" | "priority";
@@ -559,8 +576,8 @@ function useBadgeCounts(): Partial<Record<TabId, number>> {
           });
         }
       } catch {
-        // 件数が取れない時はバッジを出さない(一覧そのものは各タブが別途読む)
-        if (alive) setN({});
+        // 一時的な失敗では前回の件数を残す(バッジが消えると「未確認が無くなった」と読めるため。
+        // 一覧そのものは各タブが別途読む)。
       }
     };
     void tick();
