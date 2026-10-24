@@ -20,7 +20,14 @@
  * 押すと深掘りスレを開く(メニューは状態の帯の無いスレ行だけ)。
  */
 import type React from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+} from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useRpc, type PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { SidebarReorderableList, SidebarRow } from "@getpaseo/plugin/client/ui";
@@ -46,8 +53,8 @@ import { emptySectionLabel } from "../shared/sidebar-section-mode.js";
 import type { SidebarSectionKey } from "../shared/sidebar-section-mode.js";
 import { type StatusKind, statusKindOfMachine } from "../shared/thread-status-label.js";
 import { pickReadableText } from "../shared/contrast.js";
-import { CLOSED_MENU, menuCanArchive, nextMenu } from "../shared/thread-menu.js";
-import type { ThreadMenuAction, ThreadMenuState } from "../shared/thread-menu.js";
+import { menuCanArchive } from "../shared/thread-menu.js";
+import type { ThreadMenuIntent } from "../shared/thread-menu.js";
 import { ConceptNotesList, useSidebarNotes } from "./ConceptNotes.js";
 import { StatusBadge } from "./sidebar-badge.js";
 import { stateDotIcons } from "./StateDot.js";
@@ -81,6 +88,9 @@ const ICON: Record<StatusKind, string> = {
 interface AgentNavigation {
   navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
 }
+
+/** SDK の `PluginPopoverProps` のうち、メニュー本体が使う分だけ(`close`/`openScreen` は使わない)。 */
+type OpenPopover = (Content: ComponentType<object>) => void;
 
 /**
  * グループ見出しの題名。「司令塔」グループは呼び出し元が固定の `coordinatorGroup` を使うので
@@ -165,8 +175,6 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   const [saveFailed, setSaveFailed] = useState(false);
   const [orderIsManual, setOrderIsManual] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(readCollapsed);
-  // 開いている操作メニュー(1つだけ)。確認待ち(アーカイブの1回目)もここに持つ。
-  const [menu, setMenu] = useState<{ agentId: string; state: ThreadMenuState } | null>(null);
   const [notice, setNotice] = useState("");
   const colors = theme.colors;
   // 状態文字は行の背景に対して WCAG AA(4.5:1)を満たす色を選ぶ(グループ見出しの件数・ケアット用)。
@@ -305,9 +313,6 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   const focusId = (currentScreen?.params as { focusId?: string } | undefined)?.focusId;
   const onScreen = currentScreen?.screenId === CHILD_THREADS_SCREEN_ID;
 
-  // タブを切り替えたら開いているメニューは閉じる(隠れた一覧の行のメニューが残らない)。
-  useEffect(() => setMenu(null), [section]);
-
   const openList = useCallback(
     () => openScreen({ screenId: CHILD_THREADS_SCREEN_ID, params: {} }),
     [openScreen],
@@ -393,105 +398,128 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   );
 
   /**
-   * 状態の帯を押した: その行のメニューを開く(別の行のが開いていれば閉じて開き直す)。
-   * 開いている行の帯をもう一度押したら閉じる(純正のドロップダウンと同じ)。
+   * 状態の帯を押した: その行のメニューを**小さなポップアップ**で開く。
+   *
+   * 開閉はホストの `openPopover` が正(2026-10-24 実機確認: 押した行に固定され、PC では行の右横に
+   * 浮く。一覧のレイアウトには参加しないので**他の行は動かない**。スマホ幅ではホスト標準の
+   * ボトムシートになる)。外側タップ/Esc/戻るでの閉じもホストが付けてくれる。
+   * 行の `children` に差し込む形(旧実装)は行を押し下げてサイドバーに割り込むので使わない。
    */
-  const onMenuOpen = useCallback((agentId: string) => {
-    setMenu((cur) =>
-      cur && cur.agentId === agentId
-        ? null
-        : { agentId, state: nextMenu(CLOSED_MENU, "open").state },
-    );
+  const openPopover = (props as Partial<PluginSidebarItemProps> & {
+    openPopover?: OpenPopover;
+  }).openPopover;
+  // 開いている行(タブ切替や一覧からの消滅でポップアップを閉じるためだけに持つ)。
+  const [menuAgentId, setMenuAgentId] = useState<string | null>(null);
+  // ポップアップを閉じる手段はホストが本体へ渡す `close` だけ。本体から登録してもらう。
+  const menuCloseRef = useRef<(() => void) | null>(null);
+  const registerMenuClose = useCallback((close: (() => void) | null) => {
+    menuCloseRef.current = close;
   }, []);
-
-  // メニューの対象は取得結果から引き直す(ピン状態がポーリング後も最新になる)。
-  const menuThread = menu ? threads.find((t) => t.agentId === menu.agentId) : undefined;
-  // 閉じた/アーカイブされた等で対象が一覧から消えたら、メニューも閉じる(同じ id が戻ってきたときに
-  // 勝手に開かない。出口レビュー round1 指摘6)。
-  useEffect(() => {
-    if (menu && !menuThread) setMenu(null);
-  }, [menu, menuThread]);
-  // 題名は**行に出ている題名**(ノートがあればノートの題名)を渡す。スレ側の題名は古いことがある。
-  const menuTitle = menu ? rows.find((r) => r.thread.agentId === menu.agentId)?.title : undefined;
-  // 他の行の親になっている id(司令塔の印が付いていなくても、親の行は畳ませない)。
-  const menuCanArchiveNow = useMemo(() => {
-    if (!menuThread) return false;
-    const parentIds = new Set(
-      threads.map((t) => t.parentAgentId).filter((id): id is string => id !== null),
-    );
-    return menuCanArchive(menuThread, parentIds);
-  }, [menuThread, threads]);
-  const applyMenuAction = useCallback(
-    (t: ChildThread, action: ThreadMenuAction) => {
-      if (!menu || menu.agentId !== t.agentId) return;
-      // 状態遷移は純粋関数が正(アーカイブの1回目では実行しない)。
-      const step = nextMenu(menu.state, action);
-      // 副作用は updater の外で走らせる(StrictMode で 2 回呼ばれてもアーカイブを二重に撃たない)。
-      setMenu(step.state.open ? { agentId: t.agentId, state: step.state } : null);
-      if (step.intent === "toggle-pin") onTogglePin(t);
+  // メニューを出した時点の対象(押した行の題名・アーカイブ可否・スレ)。開いた瞬間に確定させる。
+  const menuTargetRef = useRef<{ thread: ChildThread; title: string; canArchive: boolean } | null>(
+    null,
+  );
+  const applyMenuIntent = useCallback(
+    (t: ChildThread, canArchiveNow: boolean, intent: ThreadMenuIntent) => {
+      if (intent === "toggle-pin") onTogglePin(t);
       // 司令塔はアーカイブしない。メニューから項目を消すだけだと、他の入口(将来のショートカット等)が
       // 増えたときに破られるので、実行側でも止める(出口レビュー round2 指摘3)。
-      else if (step.intent === "archive") {
-        if (menuCanArchiveNow) onArchive(t);
-      } else if (step.intent === "open-thread") openThread(t.agentId, t.access);
+      else if (intent === "archive") {
+        if (canArchiveNow) onArchive(t);
+      } else if (intent === "open-thread") openThread(t.agentId, t.access);
     },
-    [menu, menuCanArchiveNow, onArchive, onTogglePin, openThread],
+    [onArchive, onTogglePin, openThread],
   );
-  const onMenuAction = useCallback(
-    (action: ThreadMenuAction) => {
-      if (menuThread) applyMenuAction(menuThread, action);
+  // 本体の描画。状態(確認待ち)は `ThreadMenu` の中に持つので、ここは開いた時点の対象を渡すだけ。
+  const renderMenuPopover = useCallback(
+    (popover: { theme: { colors: typeof colors }; layout: { compact: boolean }; close: () => void }) => {
+      const target = menuTargetRef.current;
+      if (!target) return null;
+      return (
+        <ThreadMenu
+          // 行が変わったら確認待ちを引き継がない(別の行のアーカイブが2回目で走らない)
+          key={target.thread.agentId}
+          thread={target.thread}
+          title={target.title}
+          // 司令塔(子を持つ行)はアーカイブさせない(誤って親を畳まない安全側。2026-10-24 子司令塔決定)。
+          // ピンは残す。規則は純粋関数が正。
+          canArchive={target.canArchive}
+          colors={popover.theme.colors}
+          compact={popover.layout.compact}
+          onAction={(intent) => applyMenuIntent(target.thread, target.canArchive, intent)}
+          onClose={popover.close}
+          registerClose={registerMenuClose}
+        />
+      );
     },
-    [applyMenuAction, menuThread],
+    [applyMenuIntent, registerMenuClose],
   );
+  // ホストは「渡された部品」を state に持つので、毎回新しい部品にすると開き直しが効かない。
+  // 中身は ref 経由で最新にする(古い props を掴んだまま表示しない)。
+  const renderMenuPopoverRef = useRef(renderMenuPopover);
+  renderMenuPopoverRef.current = renderMenuPopover;
+  const menuPopoverComponent = useMemo<ComponentType<object>>(() => {
+    function ThreadMenuPopover(popover: object) {
+      return renderMenuPopoverRef.current(popover as Parameters<typeof renderMenuPopover>[0]);
+    }
+    return ThreadMenuPopover;
+  }, []);
+
+  const onMenuOpen = useCallback(
+    (row: SidebarRowView<ChildThread>) => {
+      if (!openPopover) {
+        // 古いホストには無い。押しても黙って何も起きないより理由を出す。
+        setNotice("この版の Paseo では行メニューを開けません");
+        return;
+      }
+      const t = row.thread;
+      // 他の行の親になっている id はアーカイブさせない(司令塔の印が無い親の行も畳ませない)。
+      const parentIds = new Set(
+        threads.map((x) => x.parentAgentId).filter((id): id is string => id !== null),
+      );
+      menuTargetRef.current = {
+        thread: t,
+        // 題名は**行に出ている題名**(ノートがあればノートの題名)。スレ側の題名は古いことがある。
+        title: row.title,
+        canArchive: menuCanArchive(t, parentIds),
+      };
+      setMenuAgentId(t.agentId);
+      openPopover(menuPopoverComponent);
+    },
+    [menuPopoverComponent, openPopover, threads],
+  );
+
+  // タブを切り替えたら開いているポップアップは閉じる(隠れた一覧の行のメニューが残らない)。
+  useEffect(() => {
+    menuCloseRef.current?.();
+    setMenuAgentId(null);
+  }, [section]);
+  // アーカイブ等で対象が一覧から消えたら閉じる(同じ id が戻ってきたときに勝手に開かない。
+  // 出口レビュー round1 指摘6)。
+  useEffect(() => {
+    if (menuAgentId && !threads.some((t) => t.agentId === menuAgentId)) {
+      menuCloseRef.current?.();
+      setMenuAgentId(null);
+    }
+  }, [menuAgentId, threads]);
 
   // 点の色は純正のパレットを明暗で選ぶ(プラグインには appearance が渡らないので背景の輝度で判定)。
   const dotIcons = useMemo(
     () => stateDotIcons(appearanceOf(colors.surface2 ?? colors.surface1 ?? colors.surface0)),
     [colors.surface0, colors.surface1, colors.surface2],
   );
-  // メニューは開いた行の直下に差し込む(帯のすぐ下に出る。全画面にしない)。
   const renderThread = useCallback(
-    (row: SidebarRowView<ChildThread>) => {
-      const t = row.thread;
-      const menuHere = menuThread && menu && menu.agentId === t.agentId;
-      return (
-        <ThreadRow
-          row={row}
-          failed={failed}
-          active={onScreen && focusId === t.agentId}
-          dotIcons={dotIcons}
-          onOpen={openThread}
-          onOpenMenu={onMenuOpen}
-        >
-          {menuHere ? (
-            <ThreadMenu
-              thread={menuThread}
-              title={menuTitle ?? menuThread.title}
-              state={menu.state}
-              // 司令塔(子を持つ行)はアーカイブさせない(誤って親を畳まない安全側。2026-10-24 子司令塔決定)。
-              // ピンは残す。規則は純粋関数が正。
-              canArchive={menuCanArchiveNow}
-              colors={colors}
-              onAction={onMenuAction}
-            />
-          ) : null}
-        </ThreadRow>
-      );
-    },
-    [
-      colors,
-      dotIcons,
-      failed,
-      focusId,
-      menu,
-      menuCanArchiveNow,
-      menuThread,
-      menuTitle,
-      onMenuAction,
-      onMenuOpen,
-      onScreen,
-      openThread,
-    ],
+    (row: SidebarRowView<ChildThread>) => (
+      <ThreadRow
+        row={row}
+        failed={failed}
+        active={onScreen && focusId === row.thread.agentId}
+        dotIcons={dotIcons}
+        onOpen={openThread}
+        onOpenMenu={onMenuOpen}
+      />
+    ),
+    [dotIcons, failed, focusId, onMenuOpen, onScreen, openThread],
   );
 
   return (
@@ -800,19 +828,16 @@ function ThreadRow({
   dotIcons,
   onOpen,
   onOpenMenu,
-  children,
 }: {
   row: SidebarRowView<ChildThread>;
-  /** この行が開いているメニュー(行の直下に出す)。閉じていれば null。 */
-  children?: React.ReactNode;
   failed: boolean;
   active: boolean;
   /** 状態の点(左端のアイコンの位置に出す。明暗は呼び出し元が選ぶ)。 */
   dotIcons: Record<StateDotKind, StateDotIcon>;
   /** 押したらそのスレを開く(開けない行の判定・ドロワーを閉じる処理は呼び出し側 `openThread`)。 */
   onOpen: (agentId: string, access: ChildThread["access"]) => void;
-  /** 状態の帯を押した: ピン/アーカイブのメニューを開く。 */
-  onOpenMenu: (agentId: string) => void;
+  /** 状態の帯を押した: その行のメニューをポップアップで開く(題名・アーカイブ可否は行から作る)。 */
+  onOpenMenu: (row: SidebarRowView<ChildThread>) => void;
 }) {
   const t = row.thread;
   const onPress = useCallback(() => onOpen(t.agentId, t.access), [onOpen, t.agentId, t.access]);
@@ -830,7 +855,7 @@ function ThreadRow({
   // (出口レビュー round1 指摘5)。文字は「司令塔」にして他の行の状態と混ぜない。
   const badgeText = t.coordinator ? "司令塔" : status.text;
   const badgeKind: StatusKind = t.coordinator ? "running" : status.kind;
-  const pressBadge = useCallback(() => onOpenMenu(t.agentId), [onOpenMenu, t.agentId]);
+  const pressBadge = useCallback(() => onOpenMenu(row), [onOpenMenu, row]);
   const trailing = useMemo(
     () => (
       <View style={styles.trailing}>
@@ -839,20 +864,18 @@ function ThreadRow({
     ),
     [badgeKind, badgeText, pressBadge, testID],
   );
+  // メニューは行の中に差し込まない(ホストのポップアップに出す)。行の高さは開いても変わらない。
   return (
-    <View>
-      <SidebarRow
-        id={t.agentId}
-        // 点が出せる行は先頭のアイコンを点に置き換える(純正と同じ意味・色)。点の材料が無い行
-        // (一覧に居ない等)だけ従来のアイコンを残す。
-        icon={row.dot ? dotIcons[row.dot] : rowIcon(row, t)}
-        label={row.title}
-        active={active}
-        onPress={onPress}
-        trailing={trailing}
-      />
-      {children}
-    </View>
+    <SidebarRow
+      id={t.agentId}
+      // 点が出せる行は先頭のアイコンを点に置き換える(純正と同じ意味・色)。点の材料が無い行
+      // (一覧に居ない等)だけ従来のアイコンを残す。
+      icon={row.dot ? dotIcons[row.dot] : rowIcon(row, t)}
+      label={row.title}
+      active={active}
+      onPress={onPress}
+      trailing={trailing}
+    />
   );
 }
 
