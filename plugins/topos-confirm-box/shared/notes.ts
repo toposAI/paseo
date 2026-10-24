@@ -74,8 +74,20 @@ export const SidebarNoteSchema = z.object({
    * 実装ノートと、旧置き場の構想ノートは `active`(旧置き場に区分は無い)。
    */
   zone: z.enum(["active", "later"]).default("active"),
+  /**
+   * この行を「あとで」/「検討中」へ移せるか(構想の置き場の**直下**にあり、両方の置き場が在る)。
+   * 一覧全体で決めない: 旧置き場(`05_Projects`)の構想ノートは区分の外なので、押すと必ず失敗する
+   * ⋯ を出さない(出口レビュー round2 指摘2)。
+   */
+  movable: z.boolean().default(false),
 });
-export type SidebarNote = z.infer<typeof SidebarNoteSchema>;
+/**
+ * 読み手の型。`movable` だけ省略可にする(サーバーは常に付けるが、無関係な単体テストの
+ * ノート組み立てにまで必須を強いる意味が無い。省略=移せない)。RPC の契約は上のスキーマ。
+ */
+export type SidebarNote = Omit<z.infer<typeof SidebarNoteSchema>, "movable"> & {
+  movable?: boolean;
+};
 
 export const notesSidebarRpc = defineRpc({
   name: "topos.notes.sidebar",

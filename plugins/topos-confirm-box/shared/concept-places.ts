@@ -44,8 +44,11 @@ export function conceptPlace(vaultDir: string): ConceptPlace {
  * どちらでもなければ null(新置き場の外=旧置き場のノート)。
  */
 export function zoneOfPath(file: string, place: ConceptPlace): ConceptZone | null {
+  // macOS のファイル名は NFD で返ることがあり、こちらが組んだ定数(検討中/あとで)は NFC。
+  // 正規化しないと、同じディレクトリのノートを「置き場の外」と誤判定して移動できなくなる。
+  const norm = (p: string) => p.normalize("NFC");
   const under = (dir: string) => {
-    const rel = path.relative(dir, file);
+    const rel = path.relative(norm(dir), norm(file));
     return rel.length > 0 && !rel.startsWith("..") && !path.isAbsolute(rel);
   };
   if (under(place.laterDir)) return "later";

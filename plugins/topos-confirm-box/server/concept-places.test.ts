@@ -66,6 +66,10 @@ test("readSidebarNotes: 新置き場の区分を付け、件数を返す(実装�
   assert.equal(byPath.get(active)?.zone, "active");
   assert.equal(byPath.get(later)?.zone, "later");
   assert.equal(byPath.get(path.join(project, "impl.md"))?.zone, "active");
+  // 移せるのは置き場の直下の構想ノートだけ(旧置き場のノートに ⋯ を出さない)
+  assert.equal(byPath.get(active)?.movable, true);
+  assert.equal(byPath.get(later)?.movable, true);
+  assert.equal(byPath.get(path.join(project, "impl.md"))?.movable, false);
   assert.equal(byPath.size, 3);
   assert.equal(r.place, "paseo");
   assert.deepEqual(r.zones, { active: 1, later: 1, laterAvailable: true });
@@ -78,6 +82,7 @@ test("readSidebarNotes: 旧置き場の構想ノートは検討中として数�
   const r = readSidebarNotes({ roots: [project], vaultDir: v, knownAgentIds: new Set() });
   assert.equal(r.notes.length, 1);
   assert.equal(r.notes[0].zone, "active");
+  assert.equal(r.notes[0].movable, false);
   assert.equal(r.place, "legacy");
   assert.deepEqual(r.zones, { active: 1, later: 0, laterAvailable: false });
 });
@@ -106,11 +111,11 @@ test("moveConceptNote: 置き場の外・実装ノート・置き場が無い・
   const v = vault();
   const place = conceptPlace(v);
   const outside = writeNote(path.join(v, "05_Projects", "c.md"), CONCEPT);
-  // 置き場が無い
-  await assert.rejects(moveConceptNote(outside, "later", { vaultDir: v }), /置き場の直下/);
+  // 置き場が無い(根も無い)
+  await assert.rejects(moveConceptNote(outside, "later", { vaultDir: v }), /置き場がありません/);
   fs.mkdirSync(place.activeDir, { recursive: true });
   // あとでだけ無い(移行の途中)
-  await assert.rejects(moveConceptNote(outside, "later", { vaultDir: v }), /置き場の直下/);
+  await assert.rejects(moveConceptNote(outside, "later", { vaultDir: v }), /置き場がありません/);
   fs.mkdirSync(place.laterDir, { recursive: true });
   await assert.rejects(moveConceptNote(outside, "later", { vaultDir: v }), /置き場の直下/);
   const impl = writeNote(path.join(place.activeDir, "impl.md"), IMPL);
@@ -128,4 +133,23 @@ test("moveConceptNote: あとでのサブディレクトリのノートは移さ
   fs.mkdirSync(place.laterDir, { recursive: true });
   const deep = writeNote(path.join(place.laterDir, "sub", "x.md"), CONCEPT);
   await assert.rejects(moveConceptNote(deep, "active", { vaultDir: v }), /置き場の直下/);
+});
+
+test("moveConceptNote: 置き場のディレクトリが symlink なら移さない(Vault の外へ出さない)", async () => {
+  const v = vault();
+  const place = conceptPlace(v);
+  fs.mkdirSync(place.activeDir, { recursive: true });
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "topos-outside-"));
+  fs.symlinkSync(outside, place.laterDir); // あとで → Vault の外
+  const a = writeNote(path.join(place.activeDir, "a.md"), CONCEPT);
+  await assert.rejects(moveConceptNote(a, "later", { vaultDir: v }), /通常のディレクトリで/);
+  assert.equal(fs.existsSync(path.join(outside, "a.md")), false);
+  assert.equal(fs.existsSync(a), true);
+});
+
+test("zoneOfPath: ファイル名の正規化(NFD)が違っても同じ区分と判定する", () => {
+  const place = conceptPlace("/v");
+  // macOS では「検討中」が NFD(結合文字)で返ることがある。
+  const nfd = path.join("/v/Paseo/構想/検討中".normalize("NFD"), "a.md");
+  assert.equal(zoneOfPath(nfd, place), "active");
 });

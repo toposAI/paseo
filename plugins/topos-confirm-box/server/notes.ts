@@ -63,6 +63,9 @@ export function resolveNoteRoots(env: NodeJS.ProcessEnv = process.env): string[]
  * 走査先を決めるのと同じ Vault の根(`05_Projects` の親)。構想ノートへの記録で、Vault 外を
  * 拒否する境界とロックの単位に使う。明示設定(`TOPOS_CONFIRM_BOX_NOTE_DIR`)は `05_Projects`
  * の親でも、ただのディレクトリでもよい(そのときはその親を根として扱う)。
+ *
+ * **ロックの鍵はこの戻り値の realpath で取る**(記録も移動も)。以前は移動だけ
+ * `Paseo/構想` を単位にしていて、記録と噛み合っていなかった(出口レビュー round2 指摘1)。
  */
 export function resolveVaultDir(env: NodeJS.ProcessEnv = process.env): string {
   const vault =
@@ -361,8 +364,20 @@ export function readSidebarNotes(
     if (!note || seen.has(note.path)) return false;
     seen.add(note.path);
     if (note.kind === "implementation") upper.push(note);
-    // 区分はパスだけで決まる(新置き場の外=旧置き場は「検討中」)。
-    else lower.push({ ...note, zone: zoneOfPath(note.path, placeDir) ?? "active" });
+    else {
+      // 区分はパスだけで決まる(新置き場の外=旧置き場は「検討中」)。移せるのは置き場の直下だけ
+      // (`moveConceptNote` のガード2と同じ条件。ここで揃えないと押すと必ず失敗する ⋯ が出る)。
+      const zone = zoneOfPath(note.path, placeDir);
+      let dir: string | null = null;
+      if (zone === "later") dir = placeDir.laterDir;
+      else if (zone === "active") dir = placeDir.activeDir;
+      const direct = dir !== null && path.dirname(note.path) === dir;
+      lower.push({
+        ...note,
+        zone: zone ?? "active",
+        movable: direct && plan.active !== null && plan.later !== null,
+      });
+    }
     return false;
   };
 
@@ -488,8 +503,9 @@ function scanFile(file: string, now: number, opts?: ScanFileContext): SidebarNot
   return {
     path: file,
     updatedAt,
-    // 区分は走査側(`visit`)がパスから決めて上書きする。ここでは既定値だけ置く。
+    // 区分と移動可否は走査側(`visit`)がパスから決めて上書きする。ここでは既定値だけ置く。
     zone: "active",
+    movable: false,
     ...parsed,
     threadId: resolveThreadId(threadIds, opts?.knownAgentIds),
     threadCandidates: threadIds,

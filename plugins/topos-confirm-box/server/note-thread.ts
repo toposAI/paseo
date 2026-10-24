@@ -302,11 +302,16 @@ function atomicWrite(file: string, body: string): void {
  * ガード(すべて満たさなければ移さない):
  * 1. live Vault の `type: concept-note`(symlink のノート・バックアップ・Vault 外は不可)。
  * 2. **置き場の直下だけ**(サブディレクトリのノートは移さない。移すと木ごと動かすことになる)。
- * 3. 移動先に同名のファイルがあれば**上書きしない**(Obsidian の添付も含め、名前が衝突する物すべて)。
- * 4. 排他は `thread:` の記録と同じ Vault ロック。移動は同一ディスク上の `rename`(原子的)。
+ *    置き場のディレクトリ自身が symlink のときも移さない(外を指していると Vault の外へ出る)。
+ * 3. 移動先に同名のファイルがあれば**上書きしない**。`link` + `unlink` で行う
+ *    (`rename` は既存を黙って置き換えるため、確認と実行の間に作られたファイルを壊す)。
+ * 4. 排他は `thread:` の記録と**同じ鍵・同じ順序**(`vault:<Vault の realpath>` → `note:<realpath>`)。
+ *    以前は `vault:<Vault>/Paseo/構想` という別の鍵で、記録と噛み合っていなかった。
  *
- * **移行先**: 置き場と移動の実装は単一ライター(`impl_note_writer.py`)へ寄せる。移行後はこの関数を
- * その CLI(移動サブコマンド)の呼び出しへ差し替え、呼び出し側は変えない。
+ * **単一ライター規律の例外(記録済み)**: この移動は TypeScript から書く。`server/note-thread.ts` の
+ * `recordConceptThread` と同じく、ノートの `thread:` を書く経路がまだこちら側にあり、Python 側の
+ * `impl_note_writer.py` に移動サブコマンドが無いため。**移行先**は同スクリプトの移動サブコマンドで、
+ * 実装されたらこの関数をその CLI 呼び出しへ差し替える(呼び出し側は変えない)。
  */
 export async function moveConceptNote(
   file: string,
@@ -314,7 +319,22 @@ export async function moveConceptNote(
   opts: { vaultDir: string },
 ): Promise<{ result: "moved" | "already"; notePath: string }> {
   const resolved = assertWritableConceptNote(file, opts.vaultDir);
-  const place = conceptPlace(fs.realpathSync(path.resolve(opts.vaultDir)));
+  const vault = fs.realpathSync(path.resolve(opts.vaultDir));
+  const place = conceptPlace(vault);
+  // 置き場のディレクトリが symlink でないこと(realpath した Vault の下でも、置き場だけ外を指せる)。
+  for (const dir of [place.root, place.activeDir, place.laterDir]) {
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(dir);
+    } catch {
+      throw new NoteThreadError(`構想の置き場がありません(先に移行が必要です): ${dir}`);
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new NoteThreadError(
+        `構想の置き場が通常のディレクトリではありません(移しません): ${dir}`,
+      );
+    }
+  }
   const from = zoneOfPath(resolved, place);
   // 置き場の**直下**だけ(サブディレクトリにあるノートは、その木をまとめて動かす話になるので移さない)。
   const dirOf = (zone: ConceptZone) => (zone === "later" ? place.laterDir : place.activeDir);
@@ -323,32 +343,43 @@ export async function moveConceptNote(
   }
   if (from === to) return { result: "already", notePath: resolved };
   const targetDir = dirOf(to);
-  // 両方の置き場が在ること(片方だけの途中の状態では移さない)。
-  for (const dir of [place.activeDir, place.laterDir]) {
-    try {
-      if (!fs.statSync(dir).isDirectory()) throw new Error("not a directory");
-    } catch {
-      throw new NoteThreadError(`構想の置き場がありません(先に移行が必要です): ${dir}`);
-    }
-  }
   const target = path.join(targetDir, path.basename(resolved));
-  const releaseVault = await acquireLock(vaultLockKey(place.root));
+  // 記録(`recordConceptThread`)と同じ鍵・同じ順序で取る(同じ Vault を触る操作を直列化する)。
+  const releaseVault = await acquireLock(vaultLockKey(vault));
   try {
-    // ロックの中で読み直す(検査と移動の間にノートが別物に変わりうる)。
-    assertConceptNote(resolved);
-    if (zoneOfPath(fs.realpathSync(resolved), place) !== from) {
-      throw new NoteThreadError(`ノートの置き場が変わりました(移しません): ${resolved}`);
-    }
-    let taken = false;
+    const releaseNote = await acquireLock(`note:${resolved}`);
     try {
-      fs.lstatSync(target);
-      taken = true;
-    } catch {
-      taken = false;
+      // ロックの中で読み直す(検査と移動の間にノートが別物に変わりうる)。
+      assertConceptNote(resolved);
+      const now = fs.realpathSync(resolved);
+      if (zoneOfPath(now, place) !== from) {
+        throw new NoteThreadError(`ノートの置き場が変わりました(移しません): ${resolved}`);
+      }
+      // `link` は移動先が在れば EEXIST で失敗する(確認と実行の間に作られても壊さない)。
+      try {
+        fs.linkSync(now, target);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "EEXIST") {
+          throw new NoteThreadError(`移動先に同じ名前のノートがあります: ${target}`);
+        }
+        throw error;
+      }
+      try {
+        fs.unlinkSync(now);
+      } catch (error) {
+        // 元を消せなかったら、作ったリンクを戻す(2か所に同じノートを残さない)。
+        try {
+          fs.unlinkSync(target);
+        } catch {
+          // 後始末の失敗で元のエラーを隠さない
+        }
+        throw error;
+      }
+      return { result: "moved", notePath: target };
+    } finally {
+      releaseNote();
     }
-    if (taken) throw new NoteThreadError(`移動先に同じ名前のノートがあります: ${target}`);
-    fs.renameSync(resolved, target);
-    return { result: "moved", notePath: target };
   } finally {
     releaseVault();
   }

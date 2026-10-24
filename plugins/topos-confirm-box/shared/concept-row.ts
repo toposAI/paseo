@@ -22,9 +22,21 @@ export function shorten(s: string, max: number): string {
   return chars.length > max ? `${chars.slice(0, max - 1).join("")}…` : t;
 }
 
+/**
+ * 題名の中で**同じ句が `__` で二重に連結されている**場合に片方へ畳む
+ * (例: `A__A` / `A__a`。ノートを複製したときの題名に多い)。畳むのは前後が同じときだけ。
+ */
+export function collapseRepeatedTitle(title: string): string {
+  const parts = title.split("__");
+  if (parts.length !== 2) return title;
+  const [a, b] = parts.map((p) => p.trim());
+  if (a.length === 0) return title;
+  return a.toLowerCase() === b.toLowerCase() ? a : title;
+}
+
 /** 構想ノートの題名を1行用に短縮する(frontmatter の題名だけを使う。本文は読まない)。 */
 export function conceptRowTitle(note: Pick<SidebarNote, "title">): string {
-  return shorten(note.title, ROW_TITLE_MAX);
+  return shorten(collapseRepeatedTitle(note.title), ROW_TITLE_MAX);
 }
 
 /** 長押しで見せる全文(`Row` の長押し表示。題名を切っても元の題名を確かめられる)。 */
@@ -75,19 +87,36 @@ export function conceptThreadBadge(
 }
 
 /**
- * アイコンの説明(吹き出しと読み上げのラベル)。
- * SDK に Tooltip が無いので、画面は色の違い+**押した後に出る1行の説明**で示す
+ * アイコンの説明(読み上げラベル)。
+ * SDK に Tooltip が無いので、画面は色の違い+**印を押した後に出る1行の説明**で示す
  * (`client/ConceptNotes.tsx` の `ConceptRow`。どこか1つでも説明が出れば全体の意味が分かる)。
+ * **役割は `button`**(印を押すと説明が出る)。ラベルは印を押したときの結果だけを言い、
+ * 行をタップしたときに起きること(`conceptRowActionLabel`)とは分ける(読み上げで混ざらない)。
  */
-export function conceptThreadBadgeLabel(badge: ConceptThreadBadge): string {
-  switch (badge) {
-    case "thread":
-      return "スレ作成済み(タップで開く)";
-    case "unresolved":
-      return "スレ未解決(書かれたスレIDが見つからない。タップで作り直し)";
-    default:
-      return "スレ未作成(タップで深掘りのスレを作る)";
+export type BadgeLabelContext = "press" | "notice";
+
+export function conceptThreadBadgeLabel(
+  badge: ConceptThreadBadge,
+  context: BadgeLabelContext = "notice",
+): string {
+  // 押した後に出る説明(notice)は**行を押すと何が起きるか**まで言う(印は行の動作を作らない)。
+  if (context === "notice") {
+    switch (badge) {
+      case "thread":
+        return "スレ作成済み(行をタップで開く)";
+      case "unresolved":
+        return "スレ未解決(書かれたスレIDが見つからない。行をタップで作り直し)";
+      default:
+        return "スレ未作成(行をタップで深掘りのスレを作る)";
+    }
   }
+  // 読み上げ側は印の役割だけを言う(押した結果と、行を押した結果を混ぜない)。
+  const meaning = {
+    thread: "スレ作成済み",
+    unresolved: "スレ未解決(書かれたスレIDが見つからない)",
+    none: "スレ未作成",
+  }[badge];
+  return `印を押すと説明が出ます(${meaning})`;
 }
 
 /** 「あとで」の見出し(畳んだ小さなフォルダ風)。件数だけ出す。 */

@@ -89,6 +89,8 @@ export interface SidebarNotesState {
 /**
  * ノート一覧を取得する(サイドバー項目ごとに1回)。
  * `gate` を渡すと、その時刻までは取得結果を反映しない(ドラッグ中に行が飛ばないように)。
+ * 取得は**発番**し、後から投げた取得の結果だけを反映する(`seq`)。移動・スレ作成の直後に
+ * 古い一覧が遅れて届き、行が元の区分へ戻って見えるのを防ぐ。
  */
 export function useSidebarNotes(gate?: { current: number }): SidebarNotesState {
   const list = useRpc(notesSidebarRpc);
@@ -105,13 +107,21 @@ export function useSidebarNotes(gate?: { current: number }): SidebarNotesState {
   // (ノートの `thread:` に記録したIDを、次の60秒を待たずに反映する)。
   const fetchRef = useRef<(force?: boolean) => void>(() => {});
 
+  // 最後に投げた取得と、最後に反映した取得の発番(返ってきた順と投げた順が違っても新しい方だけ)
+  const sentRef = useRef(0);
+  const appliedRef = useRef(0);
+
   useEffect(() => {
     let alive = true;
-    const tick = (force = false) =>
-      list({})
+    const tick = (force = false) => {
+      const seq = ++sentRef.current;
+      return list({})
         .then((r) => {
           if (!alive) return null;
+          // 自分より後に投げた取得が既にある/反映済みなら捨てる(古い区分へ戻さない)。
+          if (seq < sentRef.current || seq < appliedRef.current) return null;
           if (!force && gate && Date.now() < gate.current) return null;
+          appliedRef.current = seq;
           // 内容が同じなら配列を差し替えない(60秒ごとに一覧を丸ごと再描画しない。
           // ドラッグ中に行が飛ぶのも、この再描画が原因になりうる)。
           setNotes((prev) => (sameNotes(prev, r.notes) ? prev : r.notes));
@@ -120,7 +130,12 @@ export function useSidebarNotes(gate?: { current: number }): SidebarNotesState {
           setZones(r.zones);
           return null;
         })
-        .catch(() => alive && setError("ノートを取得できません"));
+        .catch(() => {
+          // 失敗した古い取得で、新しい取得の結果を上書きしない
+          if (alive && seq === sentRef.current) setError("ノートを取得できません");
+          return null;
+        });
+    };
     fetchRef.current = tick;
     void tick();
     const timer = setInterval(() => void tick(), POLL_MS);
@@ -417,7 +432,6 @@ export function ConceptNotesList({
       creating,
       moving,
       menuPath,
-      moveAvailable: zones.laterAvailable,
       onPress: press,
       onToggleMenu: toggleMenu,
       onMove: move,
@@ -425,7 +439,7 @@ export function ConceptNotesList({
       color: statusColor,
       colors,
     }),
-    [colors, creating, explainBadge, menuPath, move, moving, press, statusColor, toggleMenu, zones],
+    [colors, creating, explainBadge, menuPath, move, moving, press, statusColor, toggleMenu],
   );
   const renderRow = useCallback(
     (n: SidebarNote) => <ConceptRow key={n.path} note={n} {...rowProps} />,
@@ -568,12 +582,6 @@ function SectionChevron({ open, color, label }: { open: boolean; color: string; 
   );
 }
 
-/**
- * 構想1行。題名は短縮して1行に収め、**状態の文字は出さない**(2026-10-24 ユーザー指示)。
- * - 右端: スレ未作成/未解決の印(小さなアイコン)と、行メニューの入口(⋯)。
- * - 印を押すと、その意味を1行の通知で出す(SDK に Tooltip が無いため。`conceptThreadBadgeLabel`)。
- * - 移動(あとで/検討中)できるのは置き場が両方あるときだけ(それ以外は ⋯ を出さない)。
- */
 /** 一覧側で1回作って行へ配る props(行ごとの `busy`/`menuOpen` は一覧の集合とパスで決まる)。 */
 interface ConceptRowProps {
   /** 作成中のノート。 */
@@ -582,8 +590,6 @@ interface ConceptRowProps {
   moving: ReadonlySet<string>;
   /** メニューを開いているノート(1件だけ)。 */
   menuPath: string | null;
-  /** 行メニュー(あとで/検討中)を出すか。 */
-  moveAvailable: boolean;
   colors: SidebarColors;
   onPress: (n: SidebarNote) => void;
   onToggleMenu: (path: string) => void;
@@ -592,8 +598,14 @@ interface ConceptRowProps {
   color: string;
 }
 
+/**
+ * 構想1行。題名は短縮して1行に収め、**状態の文字は出さない**(2026-10-24 ユーザー指示)。
+ * - 右端: スレ未作成/未解決の印(小さなアイコン)と、行メニューの入口(⋯)。
+ * - 印を押すと、その意味を1行の通知で出す(SDK に Tooltip が無いため。`conceptThreadBadgeLabel`)。
+ * - 移動(あとで/検討中)の ⋯ は、その行が移せる(`movable`: 置き場の直下・両方の置き場が在る)ときだけ。
+ */
 function ConceptRow({ note: n, ...p }: ConceptRowProps & { note: SidebarNote }) {
-  const { creating, moving: movingSet, menuPath, moveAvailable, colors, color } = p;
+  const { creating, moving: movingSet, menuPath, colors, color } = p;
   const { onPress, onToggleMenu, onMove, onBadge } = p;
   const busy = creating.has(n.path);
   const moving = movingSet.has(n.path);
@@ -611,7 +623,7 @@ function ConceptRow({ note: n, ...p }: ConceptRowProps & { note: SidebarNote }) 
     return (
       <View style={styles.trailing}>
         {badge === "thread" ? null : <ThreadBadge kind={badge} title={full} onPress={explain} />}
-        {moveAvailable ? (
+        {n.movable ? (
           <ConceptMenuButton
             title={full}
             open={menuOpen}
@@ -622,7 +634,7 @@ function ConceptRow({ note: n, ...p }: ConceptRowProps & { note: SidebarNote }) 
         ) : null}
       </View>
     );
-  }, [badge, busy, color, explain, full, menuOpen, moving, moveAvailable, toggleMenu]);
+  }, [badge, busy, color, explain, full, menuOpen, moving, n.movable, toggleMenu]);
 
   return (
     <>
@@ -640,7 +652,10 @@ function ConceptRow({ note: n, ...p }: ConceptRowProps & { note: SidebarNote }) 
   );
 }
 
-/** スレ未作成/未解決の小さな印。押すと説明が出る(`ConceptRow` の `trailing` 内。親へ通知を渡す)。 */
+/**
+ * スレ未作成/未解決の小さな印。押すと説明が出る(`ConceptRow` の `trailing` 内。親へ通知を渡す)。
+ * 役割は `button`(押すと動作がある)。`image` だと読み上げで「操作できない」と扱われる。
+ */
 function ThreadBadge({
   kind,
   title,
@@ -653,8 +668,8 @@ function ThreadBadge({
   return (
     <Pressable
       testID={`concept-thread-badge-${kind}`}
-      accessibilityRole="image"
-      accessibilityLabel={`${title}: ${conceptThreadBadgeLabel(kind)}`}
+      accessibilityRole="button"
+      accessibilityLabel={`${title}: ${conceptThreadBadgeLabel(kind, "press")}`}
       hitSlop={6}
       onPress={onPress}
       style={styles.badgeHit}
