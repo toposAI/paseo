@@ -57,7 +57,11 @@ export function displayStatus(
   failed = false,
 ): StatusLabel {
   const stale = failed ? "(古い表示)" : "";
-  if (machineState === "closed") return { text: `終了${stale}`, kind: "closed" };
+  // 止まった/閉じたスレは status に関わらず「終了」。`待機中` の行(登録簿に載らないスレ)は
+  // status だけ見ると idle に見えるので、ここで closed を先に見ないと帯と行末の箱が食い違う
+  // (出口レビュー round3 指摘1)。
+  if (statusKindOfMachine(machineState) === "closed")
+    return { text: `終了${stale}`, kind: "closed" };
   if (status === "完了") return { text: `完了${stale}`, kind: "done" };
   // 登録簿に載らないスレの語彙(機械状態から導く)。ここを落とすと「実装中」に化ける
   // (出口レビュー round2 指摘2)。

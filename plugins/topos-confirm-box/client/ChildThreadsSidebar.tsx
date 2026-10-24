@@ -44,7 +44,7 @@ import type { SidebarRowView } from "../shared/sidebar-rows.js";
 import type { NoteStatus, SidebarNote } from "../shared/notes.js";
 import { emptySectionLabel } from "../shared/sidebar-section-mode.js";
 import type { SidebarSectionKey } from "../shared/sidebar-section-mode.js";
-import { type StatusKind } from "../shared/thread-status-label.js";
+import { type StatusKind, statusKindOfMachine } from "../shared/thread-status-label.js";
 import { pickReadableText } from "../shared/contrast.js";
 import { CLOSED_MENU, menuCanArchive, nextMenu } from "../shared/thread-menu.js";
 import type { ThreadMenuAction, ThreadMenuState } from "../shared/thread-menu.js";
@@ -745,11 +745,16 @@ function rowIcon(row: SidebarRowView<ChildThread>, t: ChildThread): string {
   if (row.statusLabel === "判断待ち") return "CircleHelp";
   if (row.statusLabel === "実装中" && t.status === "完了") return "Loader";
   // 帯と同じ判断で選ぶ(登録簿に載らないスレは「待機中」= idle のアイコンになる)。
-  return ICON[kindOfStatusLabel(row.statusLabel)];
+  return ICON[kindOfStatusLabel(row.statusLabel, t.machineState)];
 }
 
-/** 状態の帯の色(上段は実装ノートの status が正なので、その語彙で色を選ぶ)。 */
-function kindOfStatusLabel(label: NoteStatus | "待機中"): StatusKind {
+/**
+ * 状態の帯の色(上段は実装ノートの status が正なので、その語彙で色を選ぶ)。
+ * `closed` は行末の印(箱)と揃える(`shared/thread-status-label` の `displayStatus` と同じ規則。
+ * 出口レビュー round3 指摘1)。
+ */
+function kindOfStatusLabel(label: NoteStatus | "待機中", machineState: string | null): StatusKind {
+  if (statusKindOfMachine(machineState) === "closed") return "closed";
   if (label === "待機中") return "idle";
   if (label === "完了") return "done";
   if (label === "判断待ち" || label === "構想") return "waiting";
@@ -780,7 +785,7 @@ function ThreadRow({
       ? { text: "要復元", kind: "closed" }
       : {
           text: failed ? `${row.statusLabel}(古い表示)` : row.statusLabel,
-          kind: kindOfStatusLabel(row.statusLabel),
+          kind: kindOfStatusLabel(row.statusLabel, t.machineState),
         };
   const testID = `child-thread-status-${t.agentId}`;
   // 状態の帯を押すとメニュー(ピン止め/アーカイブ/スレを開く)が開く。司令塔の行も例外にしない:
