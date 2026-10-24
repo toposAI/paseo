@@ -87,6 +87,24 @@ test("司令塔の行は一覧に居るものだけ・登録簿に既に居る�
   );
 });
 
+test("閉じた/アーカイブ済みの司令塔は行にしない(縮退時のアーカイブ込み一覧でも出さない)", () => {
+  // round2 指摘7: 全ページの一覧が取れないと finalAgents がアーカイブ込みになるため、
+  // 古い coordinator_id を指す終わったスレが司令塔として先頭に出ていた。
+  const rows = coordinatorRows(
+    ["dead", "arch", "live"],
+    [
+      { id: "dead", title: "終わった司令塔", status: "closed" },
+      { id: "arch", title: "アーカイブ済み", status: "idle", archivedAt: "2026-10-01T00:00:00Z" },
+      { id: "live", title: "生きている", status: "idle" },
+    ],
+    [],
+  );
+  assert.deepEqual(
+    rows.map((r) => r.agentId),
+    ["live"],
+  );
+});
+
 test("登録簿に載っている司令塔にも印を付ける(その他へ落とさない)", () => {
   const rows = markCoordinators(
     [thread({ agentId: "c1" }), thread({ agentId: "kid", parentAgentId: "c1" })],

@@ -361,16 +361,16 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
           prev.map((x) => (x.agentId === t.agentId ? { ...x, pinned: on } : x)),
           coordinatorIds,
         );
-      // 失敗したときに**操作前の並びへ戻す**(`flip` で戻すと、ピンを外した行が元の位置に戻らない)。
-      let before: ChildThread[] | null = null;
-      setThreads((prev) => {
-        before ??= prev;
-        return flip(pinned)(prev);
-      });
+      setThreads((prev) => flip(pinned)(prev));
       setNotice(pinned ? "ピン止めしました" : "ピン止めを外しました");
+      // 失敗したら**この行のピンの印だけ**戻し、ゲートを解除する。操作前の一覧を丸ごと書き戻すと、
+      // その間に届いた他の行の操作(アーカイブ等)まで巻き戻る(出口レビュー round2 指摘6)。
+      // 並びは次のポーリングでサーバーの値に戻る。
       const revert = () => {
-        const original = before;
-        if (original) setThreads(original);
+        setThreads((prev) =>
+          prev.map((x) => (x.agentId === t.agentId ? { ...x, pinned: t.pinned } : x)),
+        );
+        dragGateUntilRef.current = 0;
       };
       void pin({ agentId: t.agentId, pinned })
         .then((r) => {
@@ -392,20 +392,6 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   const onMenuOpen = useCallback((agentId: string) => {
     setMenu({ agentId, state: nextMenu(CLOSED_MENU, "open").state });
   }, []);
-
-  const applyMenuAction = useCallback(
-    (t: ChildThread, action: ThreadMenuAction) => {
-      if (!menu || menu.agentId !== t.agentId) return;
-      // 状態遷移は純粋関数が正(アーカイブの1回目では実行しない)。
-      const step = nextMenu(menu.state, action);
-      // 副作用は updater の外で走らせる(StrictMode で 2 回呼ばれてもアーカイブを二重に撃たない)。
-      setMenu(step.state.open ? { agentId: t.agentId, state: step.state } : null);
-      if (step.intent === "toggle-pin") onTogglePin(t);
-      else if (step.intent === "archive") onArchive(t);
-      else if (step.intent === "open-thread") openThread(t.agentId, t.access);
-    },
-    [menu, onArchive, onTogglePin, openThread],
-  );
 
   const renderThread = useCallback(
     (row: SidebarRowView<ChildThread>) => {
@@ -440,6 +426,22 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     );
     return menuCanArchive(menuThread, parentIds);
   }, [menuThread, threads]);
+  const applyMenuAction = useCallback(
+    (t: ChildThread, action: ThreadMenuAction) => {
+      if (!menu || menu.agentId !== t.agentId) return;
+      // 状態遷移は純粋関数が正(アーカイブの1回目では実行しない)。
+      const step = nextMenu(menu.state, action);
+      // 副作用は updater の外で走らせる(StrictMode で 2 回呼ばれてもアーカイブを二重に撃たない)。
+      setMenu(step.state.open ? { agentId: t.agentId, state: step.state } : null);
+      if (step.intent === "toggle-pin") onTogglePin(t);
+      // 司令塔はアーカイブしない。メニューから項目を消すだけだと、他の入口(将来のショートカット等)が
+      // 増えたときに破られるので、実行側でも止める(出口レビュー round2 指摘3)。
+      else if (step.intent === "archive") {
+        if (menuCanArchiveNow) onArchive(t);
+      } else if (step.intent === "open-thread") openThread(t.agentId, t.access);
+    },
+    [menu, menuCanArchiveNow, onArchive, onTogglePin, openThread],
+  );
   const onMenuAction = useCallback(
     (action: ThreadMenuAction) => {
       if (menuThread) applyMenuAction(menuThread, action);

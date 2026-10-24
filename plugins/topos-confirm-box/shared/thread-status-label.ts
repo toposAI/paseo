@@ -59,6 +59,10 @@ export function displayStatus(
   const stale = failed ? "(古い表示)" : "";
   if (machineState === "closed") return { text: `終了${stale}`, kind: "closed" };
   if (status === "完了") return { text: `完了${stale}`, kind: "done" };
+  // 登録簿に載らないスレの語彙(機械状態から導く)。ここを落とすと「実装中」に化ける
+  // (出口レビュー round2 指摘2)。
+  if (status === "待機中") return { text: `待機中${stale}`, kind: "idle" };
+  if (status === "承認待ち") return { text: `承認待ち${stale}`, kind: "waiting" };
   if (status === "ユーザー判断待ち") return { text: `判断待ち${stale}`, kind: "waiting" };
   return { text: `実装中${stale}`, kind: "running" };
 }

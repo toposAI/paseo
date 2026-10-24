@@ -33,6 +33,14 @@ test("機械状態から導く語彙: 動いていない状態を実行中に見
   }
 });
 
+test("displayStatus: 登録簿に載らないスレの語彙も実装中に化けない", () => {
+  // round2 指摘2: 待機中/承認待ちの分岐が無いと、どちらも「実装中」(running)で出ていた
+  assert.deepEqual(displayStatus("待機中", "idle"), { text: "待機中", kind: "idle" });
+  assert.deepEqual(displayStatus("承認待ち", null), { text: "承認待ち", kind: "waiting" });
+  // closed は帯では「終了」に揃える(idle の帯にせず、アイコン(Archive)と食い違わせない)
+  assert.deepEqual(displayStatus("待機中", "closed"), { text: "終了", kind: "closed" });
+});
+
 test("displayStatus: 取得失敗時は古い表示であることを添える", () => {
   assert.deepEqual(displayStatus("実装中", null, true), {
     text: "実装中(古い表示)",

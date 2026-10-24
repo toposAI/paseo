@@ -25,6 +25,7 @@
  */
 import type { ChildThread } from "../shared/child-threads.js";
 import { compareChildThreads } from "../shared/child-threads.js";
+import { statusKindOfMachine } from "../shared/thread-status-label.js";
 
 /** `ctx.paseo.agents.list()` の要素(読む所だけ緩く持つ)。 */
 export interface ListedAgentLike {
@@ -41,22 +42,21 @@ const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
 /**
  * 機械状態 → 上段の語彙。**動いているものだけ `実装中`**にし、承認待ちは `ユーザー判断待ち`
- * (表示は「判断待ち」)、それ以外(idle 等)は `待機中`。表示の色分けは
- * `shared/thread-status-label.ts` の `statusKindOfMachine` が同じ規則で行う。
+ * (表示は「判断待ち」)、それ以外(idle・closed 等)は `待機中`。規則は
+ * `shared/thread-status-label.ts` の `statusKindOfMachine` が正で、ここはそれを使うだけ。
  */
-function statusHintOfMachine(machineState: string | null): ChildThread["status"] | "待機中" {
-  switch (machineState) {
+function statusHintOfMachine(machineState: string | null): ChildThread["status"] {
+  // **写しは1か所**(`statusKindOfMachine`)。以前は同じ規則をここへ二重に書いていて、
+  // `closed` の扱いが帯と食い違った(出口レビュー round2 指摘2)。生の機械状態
+  // (`initializing` 等)は `statusKindOfMachine` 側が吸収する(承認待ちの名前もそちら)。
+  switch (statusKindOfMachine(machineState)) {
     case "running":
-    case "initializing":
       return "実装中";
-    // 承認待ちは現在の lifecycle enum(`packages/protocol/src/agent-lifecycle.ts` の
-    // initializing|idle|running|error|closed)には無く、`pendingPermissions` 側で表される。
-    // 上流が status に載せる形へ変えたときのために受けておく(呼ばれない分岐)。
-    case "waiting_approval":
-    case "approval":
-    case "permission":
+    case "waiting":
       return "ユーザー判断待ち";
     default:
+      // `closed` も `idle` も「動いていない」として行は残す(閉じただけの未アーカイブのスレを
+      // 一覧から消すと、元の「出ない」症状と見分けが付かない)。
       return "待機中";
   }
 }

@@ -4,8 +4,8 @@
  * - ノートの status が正(標準_サイドバーの表示ルール)。子スレ一覧の status(=古い語彙)は
  *   ノートが無いスレにだけ使う。
  * - 上段に出すのは status が 実装中/判断待ち/確認待ち の行(ノートがあるスレ)、または
- *   ノートが無く子スレ一覧でも 実装中/ユーザー判断待ち の行(ノート作成前の移行期間)。
- *   ノートがあるのに `完了` 等他の status のスレは上段から外す(勝手に畳まない)。
+ *   ノートが無く子スレ一覧でも `完了` 以外の行(実装中/ユーザー判断待ち/承認待ち/待機中)。
+ *   ノートがあるのに `完了` のスレは上段から外す(勝手に畳まない)。
  * - 行の題名と状態文字はノート側を優先する(スレ側は古いことがあるため)。
  */
 import { LOWER_TIER_STATUSES, UPPER_TIER_STATUSES } from "./notes.js";
@@ -14,7 +14,8 @@ import type { NoteStatus, SidebarNote } from "./notes.js";
 /**
  * 子スレ一覧側の status。登録簿の行は `shared/child-threads.ts` の3語彙、登録簿に載らない
  * (Paseo から直接建てた)スレは機械状態から導く2語彙(`server/unregistered-threads.ts`)を使う。
- * `待機中`/`承認待ち` は上段に出さない(動いているスレだけを上段に並べる。出口レビュー round1 指摘2)。
+ * `待機中`/`承認待ち` も上段に出す(消すと「出ない」症状と見分けが付かない。動いていないことは
+ * 状態の帯の色で示す。出口レビュー round1 指摘2)。
  */
 export type ThreadStatusHint = "実装中" | "ユーザー判断待ち" | "完了" | "承認待ち" | "待機中";
 
@@ -128,7 +129,7 @@ export function groupPressAction(
 }
 
 /**
- * 上段の行を作る。ノートの無いスレは従来どおり(実装中/ユーザー判断待ちのみ)残す。
+ * 上段の行を作る。ノートの無いスレは `完了` 以外を残す(`keepsWithoutNote`)。
  * 並びは入力の順を保つ(ドラッグ並びを壊さない)。
  */
 export function buildUpperRows<T extends RowThread>(

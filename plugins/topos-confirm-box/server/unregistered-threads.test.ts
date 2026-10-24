@@ -120,6 +120,8 @@ test("状態文字は機械状態から導く(動いているものだけ実装�
   assert.equal(byId.get("init")?.status, "実装中");
   // idle/closed/不明を「実装中」にすると、動いていないスレが動いて見える(出口レビュー round1 指摘2)
   assert.equal(byId.get("idle")?.status, "待機中");
+  // closed は行に残すが「待機中」(帯は `displayStatus` が closed を「終了」にするので食い違うか
+  // を見るテストは thread-status-label.test.ts 側)
   assert.equal(byId.get("closed")?.status, "待機中");
   assert.equal(byId.get("none")?.status, "待機中");
   assert.equal(byId.get("approval")?.status, "ユーザー判断待ち");

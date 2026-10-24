@@ -74,6 +74,10 @@ export function coordinatorRows(
     if (shown.has(id)) continue;
     const agent = agents.find((a) => str(a.id) === id);
     if (!agent) continue;
+    // 閉じた/アーカイブ済みの司令塔は行にしない。全ページの一覧が取れない縮退時は
+    // アーカイブ込みの一覧へ落ちるので、古い `coordinator_id` を指す終わったスレが司令塔として
+    // 先頭に出ていた(出口レビュー round2 指摘7)。
+    if (agent.archivedAt != null || str(agent.status) === "closed") continue;
     rows.push({
       agentId: id,
       title: str(agent.title) || id.slice(0, 8),

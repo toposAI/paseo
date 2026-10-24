@@ -192,15 +192,16 @@ export default function contribute(server: PluginServerContext) {
       threads = adoptOrphans([...coordinators, ...alive]);
       // 登録簿に載っていないスレ(= Paseo の「新しいワークスペース」から人が直接始めたスレ)も行にする
       // (2026-10-24 ユーザー報告)。取れなければ従来どおり登録簿の行だけを出す(行が消えるより出す)。
-      // 取り込みは**背景を含めず・アーカイブ済みは明示的に含めて**引く。背景を含めると、Paseo が
-      // 内部用途で建てた背景ワークスペースのスレ(通常の一覧には出ない)まで行として出てしまう。
-      // アーカイブ済みを明示的に含めるのは `mergeUnregisteredThreads` の `archived` の弾きを効かせる
-      // ため(既定の一覧は返さないが、ホストの既定が変わっても閉じたスレが行にならないように)。
+      // 取り込みは**背景もアーカイブ済みも含めず**引く。背景を含めると、Paseo が内部用途で建てた
+      // 背景ワークスペースのスレ(通常の一覧には出ない)まで行として出てしまう。アーカイブ済みを
+      // 含めると、増え続ける履歴で頁数の上限に当たり、`truncated` が**平常時にも立つ**
+      // (= 縮退通知の狼少年化。出口レビュー round2 指摘1)。`mergeUnregisteredThreads` の
+      // `archivedAt` の弾きは保険として残す(ホストの既定が変わっても閉じたスレを行にしない)。
       // ピン止めは保存値を反映する(反映しないと、ピン止めした未登録スレが次の取得で黙って外れる。
       // 出口レビュー round1 指摘3)。
       let unregisteredAgents: ListedAgentLike[] = [];
       try {
-        const unregistered = await listAllAgents(ctx.paseo.agents, { includeArchived: true });
+        const unregistered = await listAllAgents(ctx.paseo.agents);
         unregisteredAgents = unregistered.agents;
         // 頁数の上限・途中の頁の失敗: 一部のスレが出ない(=元の「出ない」症状と見分けが付かないので通知)。
         if (unregistered.truncated) threadsIncomplete = true;
@@ -228,7 +229,8 @@ export default function contribute(server: PluginServerContext) {
       // (出口レビュー round2 指摘2。既存の欠陥として残差に記録。挙動は変えない)。
       // 引けなければ空の印を付ける(=行は今まで通り押せる)。
       // 入力は1ページ目のアーカイブ込み一覧と**全ページの取り込み一覧**を合わせる(200件より古い
-      // 未登録スレにもアーカイブ済みの印を付ける。出口レビュー round1 指摘4)。
+      // 未登録スレも「開ける」と判定する。アーカイブ済みの印は1ページ目の一覧が担う。
+      // 出口レビュー round1 指摘4)。
       let access: Map<string, ThreadAccess> = new Map();
       try {
         const live = await listLiveWorkspaceIds(ctx);

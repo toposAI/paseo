@@ -318,7 +318,9 @@ export function ConceptNotesList({
       ) : null}
       {/* 空行は見出しの開閉を兼ねる。見出しの無いタブで押すと畳んで空になるので、押下を付けない
           (出口レビュー round1 指摘1) */}
-      {visible && concepts.length === 0 ? (
+      {/* 取得失敗のときは空行を出さない(「取得失敗」と「何もない」を同時に言わない。
+          出口レビュー round2 指摘5) */}
+      {visible && !error && concepts.length === 0 ? (
         <SidebarRow
           id="concept-notes-empty"
           icon="Lightbulb"
