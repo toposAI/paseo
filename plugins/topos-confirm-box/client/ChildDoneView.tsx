@@ -14,6 +14,7 @@ import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import { childThreadsListRpc, childThreadsRevertRpc } from "../shared/child-threads.js";
 import type { ChildThread, ChildThreadsListOutput } from "../shared/child-threads.js";
 import { confirmBoxAckRpc, boxSignalRpc } from "../shared/contract.js";
+import type { ToggleInfo } from "./HeaderIconBar.js";
 import { notifyBoxChanged } from "./events.js";
 import { watchBoxSignal } from "./change-signal.js";
 
@@ -45,8 +46,13 @@ function confirmLabel(acked: boolean, busy: boolean): string {
 export function ChildDoneView({
   theme,
   navigation,
+  showAcked = false,
+  onToggleInfo,
 }: Pick<PluginHostProps, "theme"> & {
   navigation?: { openAgent: (input: { agentId: string }) => void };
+  /** 確認済みも出すか。切替ボタンは親(最上部のアイコン列)に置く。 */
+  showAcked?: boolean;
+  onToggleInfo?: (info: ToggleInfo | null) => void;
 }) {
   const list = useRpc(childThreadsListRpc);
   const ack = useRpc(confirmBoxAckRpc);
@@ -60,7 +66,6 @@ export function ChildDoneView({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [showAcked, setShowAcked] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -150,13 +155,6 @@ export function ChildDoneView({
       },
       btnText: { color: c.accentForeground, fontSize: 13 },
       btnTextOff: { color: c.foreground, fontSize: 13 },
-      sub: {
-        backgroundColor: c.surface2,
-        borderRadius: 6,
-        paddingVertical: 8,
-        paddingHorizontal: 12,
-      },
-      subText: { color: c.foreground, fontSize: 13 },
     }),
     [c],
   );
@@ -167,7 +165,19 @@ export function ChildDoneView({
   const visible = showAcked ? done : done.filter((t) => !isAcked(t));
   const unconfirmed = done.filter((t) => !isAcked(t)).length;
   const header = describe(error, data !== null, done.length, unconfirmed);
-  const toggleShowAcked = useCallback(() => setShowAcked((v) => !v), []);
+  const hasDone = done.length > 0;
+  useEffect(() => {
+    if (!onToggleInfo) return undefined;
+    onToggleInfo(
+      hasDone
+        ? {
+            label: showAcked ? "確認済み隠す" : "確認済み表示",
+            a11y: showAcked ? "確認済みを隠す" : "確認済みも表示",
+          }
+        : null,
+    );
+    return () => onToggleInfo(null);
+  }, [onToggleInfo, hasDone, showAcked]);
 
   const confirm = useCallback(
     async (t: ChildThread) => {
@@ -215,13 +225,6 @@ export function ChildDoneView({
       <View style={s.head}>
         <Text style={s.headText}>{header}</Text>
       </View>
-      {done.length > 0 ? (
-        <View style={s.row}>
-          <Pressable accessibilityRole="button" style={s.sub} onPress={toggleShowAcked}>
-            <Text style={s.subText}>{showAcked ? "確認済みを隠す" : "確認済みも表示"}</Text>
-          </Pressable>
-        </View>
-      ) : null}
       {notice ? <Text style={s.meta}>{notice}</Text> : null}
       {reverted.map((r) => (
         <View key={r.agentId} style={s.card} testID={`childdone-reverted-${r.agentId}`}>
