@@ -10,11 +10,14 @@ import {
   shouldSubmitOnEnter,
   withSayInstruction,
 } from "../shared/card-pane.js";
-import { askFromPane, panePending, readCardChat } from "./cardchat.js";
+import { askFromPane, cancelFromPane, panePending, readCardChat } from "./cardchat.js";
 
 function eventsFile(dir: string): string {
   const d = new Date();
-  return path.join(dir, `events-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}.jsonl`);
+  return path.join(
+    dir,
+    `events-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}.jsonl`,
+  );
 }
 
 function addReply(dir: string, re: string, by: string, ts: number, text: string): void {
@@ -34,7 +37,14 @@ test("ハブ宛の判定(振り替え or hubIds に含まれる)", () => {
 test("返信IDと say コマンドが完成形で付く(クォート込み)", () => {
   const out = withSayInstruction("質問です", { replyId: "cbui-i1-100", cardId: "i'1" });
   assert.match(out, /^質問です\n\n/);
-  assert.match(out, /--id 'i'"'"'1' --re 'cbui-i1-100' --by hub_thread --text-file - <<'REPLY'/);
+  assert.match(
+    out,
+    /--id 'i'"'"'1' --re 'cbui-i1-100' --by hub_thread --text-file - <<'(REPLY_[0-9a-f]{16})'\n\(返事\)\n\1$/,
+  );
+  assert.notEqual(
+    withSayInstruction("a", { replyId: "r", cardId: "c" }),
+    withSayInstruction("a", { replyId: "r", cardId: "c" }),
+  );
 });
 
 test("返事待ちの目印", () => {
@@ -65,10 +75,30 @@ test("ペイン発の質問: ackなし。sayが付くまで pending、ackは話�
   assert.equal(panePending(dir, { id: "i1" }, t0 + 200_000)[0]?.state, "overdue");
   addReply(dir, re, "ack", t0 + 1, "受領");
   assert.equal(panePending(dir, { id: "i1" }, t0 + 2000).length, 1); // ackは回答に数えない
-  assert.equal(readCardChat(dir, { id: "i1" }, { topic: true }).some((m) => m.by === "ack"), false);
+  assert.equal(
+    readCardChat(dir, { id: "i1" }, { topic: true }).some((m) => m.by === "ack"),
+    false,
+  );
   addReply(dir, re, "hub_thread", t0 + 5, "答え");
   assert.equal(panePending(dir, { id: "i1" }, t0 + 6000).length, 0);
   assert.equal(readCardChat(dir, { id: "i1" }, { topic: true }).at(-1)?.text, "答え");
+});
+
+test("返信IDは200字以内(長いカードIDでも)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-pane-"));
+  const r = askFromPane(dir, { id: "x".repeat(300) }, "q", "a", 1_700_000_000_000);
+  assert.ok((r.replyId ?? "").length <= 200);
+  assert.ok((r.replyId ?? "").endsWith("-1700000000000"));
+});
+
+test("取り消した質問は待ちに出ない・7日超は出ない", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-pane-"));
+  const t0 = Date.now();
+  const r = askFromPane(dir, { id: "i1" }, "q", "a", t0);
+  assert.equal(panePending(dir, { id: "i1" }, t0 + 1).length, 1);
+  assert.equal(panePending(dir, { id: "i1" }, t0 + 8 * 24 * 3600 * 1000).length, 0);
+  assert.equal(cancelFromPane(dir, { id: "i1" }, r.replyId as string), true);
+  assert.equal(panePending(dir, { id: "i1" }, t0 + 1).length, 0);
 });
 
 test("askFromPane は空文字・宛先なしを拒否", () => {

@@ -372,6 +372,13 @@ export const cardChatAskRpc = defineRpc({
   output: z.object({ ok: z.boolean(), message: z.string(), replyId: z.string().optional() }),
 });
 
+/** ペインの送信が失敗した質問を取り消す(待ち表示・催促・集計から外す)。 */
+export const cardChatCancelRpc = defineRpc({
+  name: "topos.confirmbox.cardchat.cancel",
+  input: z.object({ ...cardChatTarget, replyId: z.string() }),
+  output: z.object({ ok: z.boolean() }),
+});
+
 export const cardChatSayRpc = defineRpc({
   name: "topos.confirmbox.cardchat.say",
   input: z.object({ ...cardChatTarget, text: z.string() }),

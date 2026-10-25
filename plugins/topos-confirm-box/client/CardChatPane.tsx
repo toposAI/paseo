@@ -6,6 +6,9 @@
  * したがってこのペインの相手は「投函元スレのエージェント」であり、箱側の質問→応答ワーカー
  * (9ec05eb92/0627b40c9 の返信行方式)は使わない。ペインで送った文は元スレへユーザー発言として
  * 届き、元スレの応答がそのままここへ流れてくる(=投函元スレと双方向)。
+ * 例外(2026-10-25 方式a): 宛先がハブ(総司令塔・子司令塔)の時だけ「そのカードの話題だけ」表示にし、
+ * 台帳に質問を書いて返信ID+say コマンドを付けて送る。会話は上位スレの `say` だけが出る(ライブ出力は流さない)。
+ * 入力欄: PC幅は Enter 送信(IME変換中・Shift+Enter は送らない)、iPhone幅は Enter=改行(送るボタンで送信)。
  *
  * ここは画面導線だけを持つ:
  * - PC幅: 一覧の右側に並べる(一覧は残る)
@@ -46,6 +49,7 @@ import {
   KIND_LABEL,
   PRIORITY_LABEL,
   cardChatAskRpc,
+  cardChatCancelRpc,
   cardChatListRpc,
   coordinatorTargetRpc,
 } from "../shared/contract.js";
@@ -201,7 +205,11 @@ function ImageChip({
 }) {
   const remove = useCallback(() => onRemove(image.id), [onRemove, image.id]);
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`${image.name} を外す`} onPress={remove}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${image.name} を外す`}
+      onPress={remove}
+    >
       <Text style={style}>🖼 {image.name} ✕</Text>
     </Pressable>
   );
@@ -236,7 +244,7 @@ export function CardChatPane({
   const [notice, setNotice] = useState("");
   const appendDictated = useCallback((said: string) => setText((cur) => cur + said), []);
   const tools = usePaneInputTools(appendDictated);
-  const { images: toolImages, clearImages } = tools;
+  const { images: toolImages, clearImages, restoreImages, resetTools } = tools;
   const [sending, setSending] = useState(false);
   // 「届いたか」の表示。送信直後=送信済み、以降は相手スレの購読で取れた事実だけで進む。
   const [activity, setActivity] = useState<PaneActivity | null>(null);
@@ -250,12 +258,14 @@ export function CardChatPane({
   const coordinatorRpc = useRpc(coordinatorTargetRpc);
   const [coordId, setCoordId] = useState<string | null | undefined>(undefined);
   // ハブ(総司令塔・子司令塔)のID一覧。宛先がこの中なら「この話題だけ」表示にする。
-  const [hubIds, setHubIds] = useState<string[]>([]);
+  // undefined = まだ引けていない(この間は履歴を引かない=ハブ宛なのに全体履歴が一瞬出るのを防ぐ)。
+  const [hubIds, setHubIds] = useState<string[] | undefined>(undefined);
   // ハブ宛でも「スレ全体」(従来のライブ表示)へ切り替えられる。
   const [topicView, setTopicView] = useState(true);
   const [topicMsgs, setTopicMsgs] = useState<TopicMessage[]>([]);
   const [topicPending, setTopicPending] = useState<TopicPending[]>([]);
   const askRpc = useRpc(cardChatAskRpc);
+  const cancelRpc = useRpc(cardChatCancelRpc);
   const listRpc = useRpc(cardChatListRpc);
   const [coordClosed, setCoordClosed] = useState(false);
   const [liveness, setLiveness] = useState<Liveness>(UNKNOWN_LIVENESS);
@@ -268,13 +278,19 @@ export function CardChatPane({
   useEffect(() => setLiveness(UNKNOWN_LIVENESS), [agentId, serverId]);
   useEffect(() => setCoordSent(false), [agentId, serverId, item?.id]);
   useEffect(() => setActivity(null), [agentId, serverId, item?.id]);
+  // 別のカード/スレへ切り替えたら、書きかけの文・添付・音声入力を持ち越さない(別の相手へ誤送信しない)。
+  useEffect(() => {
+    setText("");
+    resetTools();
+  }, [agentId, item?.id, resetTools]);
 
   const access = toAccess(liveness);
   const closedText = threadUnavailableReason(access, item ? "card" : "thread");
   // 投函元が無い/閉じているカードは総司令塔へ振り替える(スレ直接=item無しは対象外)。
   const fallback = shouldFallbackToCoordinator({ hasCard: item !== null, agentId, closedText });
   const sendAgentId = fallback ? (coordId ?? null) : agentId;
-  const hub = isHubTarget({ fallback, agentId: sendAgentId, hubIds });
+  const hub = isHubTarget({ fallback, agentId: sendAgentId, hubIds: hubIds ?? [] });
+  const hubPending = item !== null && hubIds === undefined && !fallback;
   // 話題だけ表示: ハブ宛で、カードがあり、切替で「スレ全体」にされていない時。
   const topic = hub && topicView && item !== null;
   const reason = useMemo(() => {
@@ -298,7 +314,7 @@ export function CardChatPane({
   useEffect(() => {
     setLines([]);
     setNotice("");
-    if (!agentId || !serverId || topic) return undefined;
+    if (!agentId || !serverId || topic || hubPending) return undefined;
     const handle = getPaseoClient(serverId).agents.ref(agentId);
     let alive = true;
     handle.timeline
@@ -344,6 +360,7 @@ export function CardChatPane({
       })
       .catch(() => {
         // 引けなければ従来のライブ表示のまま。
+        if (alive) setHubIds([]);
       });
     return () => {
       alive = false;
@@ -353,10 +370,14 @@ export function CardChatPane({
   // 話題だけ表示: 台帳(chat/reply)を読む。上位スレのライブ出力は流さない。
   const itemId = item?.id ?? null;
   const itemKey = item?.key ?? null;
+  const topicGen = useRef(0);
   const refreshTopic = useCallback(async () => {
     if (!itemId) return;
+    const gen = topicGen.current;
     try {
       const res = await listRpc({ id: itemId, key: itemKey, topic: true });
+      // 呼んでいる間にカードを切り替えたら、前のカードの結果を捨てる。
+      if (gen !== topicGen.current) return;
       setTopicMsgs(res.messages);
       setTopicPending(res.pending ?? []);
     } catch {
@@ -364,6 +385,7 @@ export function CardChatPane({
     }
   }, [itemId, itemKey, listRpc]);
   useEffect(() => {
+    topicGen.current += 1;
     setTopicMsgs([]);
     setTopicPending([]);
     if (!topic) return undefined;
@@ -492,7 +514,7 @@ export function CardChatPane({
 
   const send = useCallback(async () => {
     const t = text.trim();
-    if (!t || !sendAgentId || !serverId || sendingRef.current) return;
+    if (reason || !t || !sendAgentId || !serverId || sendingRef.current) return;
     sendingRef.current = true;
     setSending(true);
     setText("");
@@ -502,12 +524,14 @@ export function CardChatPane({
       seq.current += 1;
       setLines((cur) => [...cur, { id: `u${seq.current}`, role: "user", text: t }]);
     }
+    let askedId: string | null = null;
     try {
       let outgoing = fallback && item ? withCardHeader(t, item) : t;
       if (topic && item) {
         // 台帳へ質問を記録し(返事待ちの目印と催促の元)、返信ID+sayコマンドを付けて上位スレへ送る。
         const asked = await askRpc({ id: item.id, key: item.key, text: t, target: sendAgentId });
         if (!asked.ok || !asked.replyId) throw new Error(asked.message);
+        askedId = asked.replyId;
         outgoing = withSayInstruction(outgoing, { replyId: asked.replyId, cardId: item.id });
       }
       const opts = sentImages.length
@@ -520,11 +544,37 @@ export function CardChatPane({
       setNotice("");
     } catch (e) {
       setNotice(`送れません: ${e instanceof Error ? e.message : String(e)}`);
+      // 入力を失わない(書き直しや再添付を強いない)。
+      setText((cur) => (cur ? cur : t));
+      restoreImages(sentImages);
+      if (askedId && item) {
+        // 台帳には質問が残っているので取り消す(届いていない質問に催促が飛ばないように)。
+        cancelRpc({ id: item.id, key: item.key, replyId: askedId })
+          .then(() => (topic ? refreshTopic() : null))
+          .catch(() => {
+            // 取り消せなくても次の周期で催促されるだけ(受容)。
+          });
+      }
     } finally {
       sendingRef.current = false;
       setSending(false);
     }
-  }, [text, sendAgentId, serverId, fallback, item, pushActivity, topic, askRpc, refreshTopic, toolImages, clearImages]);
+  }, [
+    text,
+    reason,
+    sendAgentId,
+    serverId,
+    fallback,
+    item,
+    pushActivity,
+    topic,
+    askRpc,
+    cancelRpc,
+    refreshTopic,
+    toolImages,
+    clearImages,
+    restoreImages,
+  ]);
   const sendPress = useCallback(() => void send(), [send]);
   // Enter で送信(PC幅のWebだけ。IME変換確定・Shift+Enter・iPhone は送らず改行のまま)。
   const onKeyPress = useCallback(
@@ -869,7 +919,8 @@ export function CardChatPane({
         {reason ? <Text style={st.notice}>{reason}</Text> : null}
         {topic && topicMsgs.length === 0 && topicPending.length === 0 ? (
           <Text style={st.empty}>
-            このカードの話題の会話はまだありません。送ると上位スレに届き、そのスレが say で返した返事だけがここに出ます。
+            このカードの話題の会話はまだありません。送ると上位スレに届き、そのスレが say
+            で返した返事だけがここに出ます。
           </Text>
         ) : null}
         {topic

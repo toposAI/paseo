@@ -135,6 +135,13 @@ export function shouldSwitchPaneOnCardPress(anyPaneOpen: boolean, thisCardShown:
 export const SAY_SCRIPT =
   "/Users/user/repos/ToposAI-Mini-Project/antigravity/utils/confirm_box_reply.py";
 
+/** heredoc の終端語。返事本文に同名の行があると途中で閉じ、残りがシェル実行されるので毎回ランダムにする。 */
+export function sayEof(): string {
+  const bytes = new Uint8Array(8);
+  globalThis.crypto.getRandomValues(bytes);
+  return `REPLY_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
 /** シェルのシングルクォート(Python `_q` の写し)。 */
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
@@ -154,12 +161,16 @@ export function isHubTarget(opts: {
 }
 
 /** 上位スレへ送る文に、返信IDと say コマンド(完成形)を付ける。 */
-export function withSayInstruction(text: string, opts: { replyId: string; cardId: string }): string {
+export function withSayInstruction(
+  text: string,
+  opts: { replyId: string; cardId: string },
+): string {
+  const eof = sayEof();
   return (
     `${text}\n\n` +
     `【確認箱ペインの質問・返信ID ${opts.replyId}】返事は普通の発言ではペインに出ません。次で書いてください:\n` +
     `python3 ${SAY_SCRIPT} say --id ${shellQuote(opts.cardId)} --re ${shellQuote(opts.replyId)}` +
-    ` --by hub_thread --text-file - <<'REPLY'\n(返事)\nREPLY`
+    ` --by hub_thread --text-file - <<'${eof}'\n(返事)\n${eof}`
   );
 }
 

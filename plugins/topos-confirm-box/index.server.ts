@@ -29,6 +29,7 @@ import {
   cardChatListRpc,
   coordinatorTargetRpc,
   cardChatAskRpc,
+  cardChatCancelRpc,
   cardChatSayRpc,
   countUnreadNotifications,
   isJudgmentItem,
@@ -120,6 +121,8 @@ import {
 } from "./server/note-thread.js";
 import {
   askFromPane,
+  boxRows,
+  cancelFromPane,
   cardExists,
   panePending,
   readCardChat,
@@ -714,10 +717,12 @@ export default function contribute(server: PluginServerContext) {
   server.handle(cardChatListRpc, async (input) => {
     try {
       const dir = resolveConfirmBoxDir();
+      const target = { id: input.id, key: input.key };
+      const rows = boxRows(dir);
       return {
-        found: cardExists(dir, { id: input.id, key: input.key }),
-        messages: readCardChat(dir, { id: input.id, key: input.key }, { topic: input.topic }),
-        ...(input.topic ? { pending: panePending(dir, { id: input.id, key: input.key }) } : {}),
+        found: cardExists(dir, target, rows),
+        messages: readCardChat(dir, target, { topic: input.topic }, rows),
+        ...(input.topic ? { pending: panePending(dir, target, Date.now(), rows) } : {}),
       };
     } catch {
       return { found: false, messages: [] };
@@ -1265,6 +1270,16 @@ export default function contribute(server: PluginServerContext) {
       );
     } catch (error) {
       return { ok: false, message: `送れません: ${(error as Error).message}` };
+    }
+  });
+
+  server.handle(cardChatCancelRpc, async (input) => {
+    try {
+      return {
+        ok: cancelFromPane(resolveConfirmBoxDir(), { id: input.id, key: input.key }, input.replyId),
+      };
+    } catch {
+      return { ok: false };
     }
   });
 

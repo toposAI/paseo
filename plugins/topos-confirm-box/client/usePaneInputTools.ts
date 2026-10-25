@@ -16,6 +16,9 @@ export interface PaneImage {
 
 const IMAGES_MAX = 4;
 const IMAGE_BYTES_MAX = 5 * 1024 * 1024;
+const IMAGES_TOTAL_BYTES_MAX = 12 * 1024 * 1024;
+
+let imageSeq = 0;
 
 interface SpeechResultLike {
   isFinal: boolean;
@@ -51,7 +54,7 @@ function readImage(file: File, done: (img: PaneImage) => void): void {
       data: url.slice(url.indexOf(",") + 1),
       mimeType: file.type,
       name: file.name,
-      id: `${file.name}-${file.size}-${file.lastModified}`,
+      id: `img${(imageSeq += 1)}-${file.name}-${file.size}-${file.lastModified}`,
     });
   });
   reader.readAsDataURL(file);
@@ -112,10 +115,18 @@ export function usePaneInputTools(onDictated: (text: string) => void) {
     }
   }, []);
 
-  const addImage = useCallback(
-    (img: PaneImage) => setImages((cur) => (cur.length >= IMAGES_MAX ? cur : [...cur, img])),
-    [],
-  );
+  const addImage = useCallback((img: PaneImage) => {
+    setImages((cur) => {
+      if (cur.length >= IMAGES_MAX) return cur;
+      // base64 は元の 4/3 倍。合計がこれを超えると RPC/送信が重くなるので足さない。
+      const total = cur.reduce((n, i) => n + i.data.length, 0) + img.data.length;
+      if (total > (IMAGES_TOTAL_BYTES_MAX * 4) / 3) {
+        setToolNotice("添付が大きすぎます(合計12MBまで)");
+        return cur;
+      }
+      return [...cur, img];
+    });
+  }, []);
   const pickImages = useCallback(() => {
     if (!attachSupported) return;
     const input = document.createElement("input");
@@ -140,6 +151,17 @@ export function usePaneInputTools(onDictated: (text: string) => void) {
     setImages((cur) => cur.filter((i) => i.id !== id));
   }, []);
   const clearImages = useCallback(() => setImages([]), []);
+  /** 送信に失敗した時に、添付を元へ戻す(新しく足された分があればそれを優先して残す)。 */
+  const restoreImages = useCallback(
+    (imgs: PaneImage[]) => setImages((cur) => (cur.length > 0 ? cur : imgs)),
+    [],
+  );
+  /** カード/スレを切り替えた時に、添付・音声入力・通知を空に戻す。 */
+  const resetTools = useCallback(() => {
+    recRef.current?.stop();
+    setImages([]);
+    setToolNotice("");
+  }, []);
 
   return {
     micSupported,
@@ -150,6 +172,8 @@ export function usePaneInputTools(onDictated: (text: string) => void) {
     pickImages,
     removeImage,
     clearImages,
+    restoreImages,
+    resetTools,
     toolNotice,
   };
 }
