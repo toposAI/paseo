@@ -29,6 +29,7 @@ import {
   cardChatListRpc,
   coordinatorTargetRpc,
   cardChatSayRpc,
+  cardChatAskRpc,
   countUnreadNotifications,
   isJudgmentItem,
   isNotificationItem,
@@ -117,7 +118,7 @@ import {
   readThreadKey,
   recordConceptThread,
 } from "./server/note-thread.js";
-import { cardExists, readCardChat, sayToCard } from "./server/cardchat.js";
+import { askCard, cardExists, readCardChat, sayToCard } from "./server/cardchat.js";
 import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
 import {
   answerlessAllowBlocked,
@@ -699,7 +700,10 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.handle(coordinatorTargetRpc, async () => ({ agentId: readGeneralCoordinatorId() }));
+  server.handle(coordinatorTargetRpc, async () => ({
+    agentId: readGeneralCoordinatorId(),
+    hubIds: readCoordinatorIds(),
+  }));
 
   server.handle(cardChatListRpc, async (input) => {
     try {
@@ -1242,6 +1246,14 @@ export default function contribute(server: PluginServerContext) {
       });
     opening.set(key, task);
     return task;
+  });
+
+  server.handle(cardChatAskRpc, async (input) => {
+    try {
+      return askCard(resolveConfirmBoxDir(), { id: input.id, key: input.key }, input.text);
+    } catch (error) {
+      return { ok: false, message: `台帳に書けません: ${(error as Error).message}`, replyId: null };
+    }
   });
 
   server.handle(cardChatSayRpc, async (input) => {

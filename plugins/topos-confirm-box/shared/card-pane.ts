@@ -128,3 +128,43 @@ export function withCardHeader(
 export function shouldSwitchPaneOnCardPress(anyPaneOpen: boolean, thisCardShown: boolean): boolean {
   return anyPaneOpen && !thisCardShown;
 }
+
+// ---------------------------------------------------------------- 話題単位の会話(ハブ宛)
+
+/** 送信先が司令塔(複数カードの話が1本に混ざるスレ)か。 */
+export function isHubTarget(
+  agentId: string | null,
+  hubIds: readonly string[] | undefined,
+): boolean {
+  return agentId !== null && (hubIds ?? []).includes(agentId);
+}
+
+/** 返事が付かないまま経つとペインが注意を出す秒数。 */
+export const TOPIC_REPLY_OVERDUE_S = 300;
+
+/**
+ * ハブへ送る発言の先頭。カード題名・ID・返信IDと、返し方(`say` の1コマンド)を機械的に付ける。
+ * 普通の返事は他カードと混ざるのでカードに出ない。`say` で返した返事だけがこのカードの会話になる。
+ */
+export function withTopicHeader(
+  text: string,
+  card: { id: string; subject: string; background?: string | null },
+  replyId: string,
+): string {
+  const head = withCardHeader(text, card);
+  const how =
+    `[返信ID: ${replyId}]\n` +
+    `この話題への返事は、普通の返事とは別に次で書いてください(書いた返事だけがこのカードの会話に出ます):\n` +
+    `python3 antigravity/utils/confirm_box_reply.py say --id ${card.id} --re ${replyId} --text-file - <<'REPLY'\n(返事本文)\nREPLY`;
+  return `${how}\n\n${head}`;
+}
+
+/** 最後が「ユーザー発言で、返事がまだ無い」ときの経過秒(それ以外は null)。 */
+export function pendingReplyAgeS(
+  messages: readonly { ts: number; role: "user" | "reply" }[],
+  nowMs: number,
+): number | null {
+  const last = messages.at(-1);
+  if (!last || last.role !== "user") return null;
+  return Math.max(0, Math.floor((nowMs - last.ts) / 1000));
+}

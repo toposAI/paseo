@@ -43,11 +43,14 @@ import { getPaseoClient, useHosts, useRpc } from "@getpaseo/plugin/client";
 import type { PluginHostProps } from "@getpaseo/plugin/client";
 import { KIND_LABEL, PRIORITY_LABEL, coordinatorTargetRpc } from "../shared/contract.js";
 import type { ConfirmBoxItem } from "../shared/contract.js";
+import { PendingReplyHint, ScopeToggle, TopicEmpty } from "./TopicPaneParts.js";
+import { useTopicLedger } from "./useTopicLedger.js";
 import {
   COORDINATOR_FALLBACK_NOTICE,
   shouldFallbackToCoordinator,
   threadUnavailableReason,
   withCardHeader,
+  withTopicHeader,
 } from "../shared/card-pane.js";
 import type { ThreadAccess } from "../shared/child-threads.js";
 import { PANE_ACTIVITY_LABEL, nextPaneActivity } from "../shared/pane-activity.js";
@@ -217,6 +220,18 @@ export function CardChatPane({
   // 投函元が無い/閉じているカードは総司令塔へ振り替える(スレ直接=item無しは対象外)。
   const fallback = shouldFallbackToCoordinator({ hasCard: item !== null, agentId, closedText });
   const sendAgentId = fallback ? (coordId ?? null) : agentId;
+  const {
+    hub,
+    topicMode,
+    toggleScope,
+    shown: ledgerLines,
+    pendingAge,
+    ask,
+  } = useTopicLedger({
+    item,
+    sendAgentId,
+    fallback,
+  });
   const reason = useMemo(() => {
     if (fallback) {
       if (!serverId) return "ホストに接続できません";
@@ -399,7 +414,12 @@ export function CardChatPane({
     seq.current += 1;
     setLines((cur) => [...cur, { id: `u${seq.current}`, role: "user", text: t }]);
     try {
-      const outgoing = fallback && item ? withCardHeader(t, item) : t;
+      let outgoing = fallback && item ? withCardHeader(t, item) : t;
+      if (hub && item) {
+        // 台帳に1行書いて返信IDを得る。書けなくても送信は止めない(従来の題名+ID付きで送る)。
+        const replyId = await ask(t);
+        outgoing = replyId ? withTopicHeader(t, item, replyId) : withCardHeader(t, item);
+      }
       await getPaseoClient(serverId).agents.ref(sendAgentId).send(outgoing);
       if (fallback) setCoordSent(true);
       pushActivity({ kind: "sent" });
@@ -410,7 +430,7 @@ export function CardChatPane({
       sendingRef.current = false;
       setSending(false);
     }
-  }, [text, sendAgentId, serverId, fallback, item, pushActivity]);
+  }, [text, sendAgentId, serverId, fallback, hub, item, ask, pushActivity]);
   const sendPress = useCallback(() => void send(), [send]);
 
   // --- 全画面スライド(狭い幅のみ) ---
@@ -648,6 +668,9 @@ export function CardChatPane({
     [reason, st.input, st.inputOff],
   );
 
+  // 表示する行: 話題単位はカードの台帳、それ以外は相手スレのライブ会話。
+  const shown: ChatLine[] = topicMode ? ledgerLines : lines;
+
   const header = (
     <View style={st.header}>
       <Pressable
@@ -662,6 +685,14 @@ export function CardChatPane({
       <Text style={st.headerTitle} numberOfLines={1}>
         {item?.subject ?? title ?? "投函元スレのチャット"}
       </Text>
+      {hub ? (
+        <ScopeToggle
+          topicMode={topicMode}
+          onPress={toggleScope}
+          style={st.headerBtn}
+          textStyle={st.headerBtnText}
+        />
+      ) : null}
       {/* 同じ相手を Paseo のスレ画面(ツール実行や承認まで見える)で開きたい時の逃げ道。 */}
       {onOpenThread ? (
         <Pressable
@@ -682,12 +713,13 @@ export function CardChatPane({
       <ScrollView ref={scrollRef} style={st.scroll} contentContainerStyle={st.scrollBody}>
         <CardContext item={item} title={title} styles={st} />
         {reason ? <Text style={st.notice}>{reason}</Text> : null}
-        {lines.length === 0 && !reason && !fallback ? (
+        {topicMode && shown.length === 0 && !reason ? <TopicEmpty style={st.empty} /> : null}
+        {!topicMode && lines.length === 0 && !reason && !fallback ? (
           <Text style={st.empty}>
             まだ会話はありません。ここで送ると投函元スレに届き、そのスレの返事がここに出ます。
           </Text>
         ) : null}
-        {lines.map((line) => {
+        {shown.map((line) => {
           const mine = line.role === "user";
           return (
             <View key={line.id} style={mine ? st.msgRowMine : st.msgRow}>
@@ -698,6 +730,7 @@ export function CardChatPane({
           );
         })}
       </ScrollView>
+      {pendingAge !== null ? <PendingReplyHint ageS={pendingAge} style={st.activity} /> : null}
       {notice ? <Text style={st.notice}>{notice}</Text> : null}
       {activity ? (
         <Text style={st.activity} accessibilityLiveRegion="polite" testID="pane-activity">

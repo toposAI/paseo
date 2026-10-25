@@ -345,7 +345,18 @@ export type CardChatListOutput = z.infer<typeof cardChatListRpc.output>;
 export const coordinatorTargetRpc = defineRpc({
   name: "topos.confirmbox.coordinator",
   input: z.object({}),
-  output: z.object({ agentId: z.string().nullable() }),
+  output: z.object({
+    agentId: z.string().nullable(),
+    /** 全領域の司令塔(総司令・子司令塔)の agent id。送信先がここに含まれる時は「ハブ」として話題単位で表示する。 */
+    hubIds: z.array(z.string()).optional(),
+  }),
+});
+
+/** ペインからの送信を台帳(箱のイベント列)に1行書き、返信IDを返す。 */
+export const cardChatAskRpc = defineRpc({
+  name: "topos.confirmbox.cardchat.ask",
+  input: z.object({ ...cardChatTarget, text: z.string() }),
+  output: z.object({ ok: z.boolean(), message: z.string(), replyId: z.string().nullable() }),
 });
 
 export const cardChatSayRpc = defineRpc({

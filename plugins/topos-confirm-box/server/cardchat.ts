@@ -157,6 +157,29 @@ export function sayToCard(
   return { ok: true, message: "送りました" };
 }
 
+/**
+ * ペインから上位スレ(ハブ)へ送る質問を台帳に1行だけ書く(受領 ack は書かない)。
+ * 返事は上位スレが `confirm_box_reply.py say --re <replyId>` で書く。`source:"pane"` は応答ワーカーが
+ * 自動返答の対象から外す印(二重に返事を作らない)。返す `replyId` は送る文に埋める返信ID。
+ */
+export function askCard(
+  dir: string,
+  target: CardChatTarget,
+  text: string,
+): { ok: boolean; message: string; replyId: string | null } {
+  const id = (target.id ?? "").trim().slice(0, ID_MAX);
+  const key = (target.key ?? "").trim().slice(0, ID_MAX) || null;
+  const clean = text.replace(/\s+/g, " ").trim().slice(0, TEXT_MAX);
+  if (!id) return { ok: false, message: "この項目はチャットできません(id なし)", replyId: null };
+  if (!clean) return { ok: false, message: "空です", replyId: null };
+  const ts = Date.now();
+  const replyId = `cbui-${id}-${ts}`.slice(0, ID_MAX * 2);
+  appendLines(dir, chatsFile(), [
+    { t: "chat", id, key, ts, question: clean, client_message_id: replyId, source: "pane" },
+  ]);
+  return { ok: true, message: "台帳に書きました", replyId };
+}
+
 /** 箱のイベント列から、その項目の質問と返事。返事は `re`(質問ID)でも照合する。 */
 function boxMessages(rows: Record<string, unknown>[], keys: string[]): CardChatMessage[] {
   const mine = cardMatcher(keys);
