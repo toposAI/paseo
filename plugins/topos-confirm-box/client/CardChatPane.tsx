@@ -50,6 +50,9 @@ import {
   withCardHeader,
 } from "../shared/card-pane.js";
 import type { ThreadAccess } from "../shared/child-threads.js";
+import { PANE_ACTIVITY_LABEL, nextPaneActivity } from "../shared/pane-activity.js";
+import type { PaneActivity, PaneActivityEvent } from "../shared/pane-activity.js";
+import { usePaneResize } from "./usePaneResize.js";
 
 // Paseo のモバイルパネルと同じ 220ms / 同じイージング
 // (`packages/app/src/mobile-panels/provider.tsx:41-42` の ANIMATION_DURATION / ANIMATION_EASING)。
@@ -74,6 +77,10 @@ interface ChatLine {
   id: string;
   role: "user" | "assistant";
   text: string;
+}
+
+function itemStatus(item: TimelineItemLike | undefined): string | undefined {
+  return (item as { status?: string } | undefined)?.status;
 }
 
 function lineFromItem(item: TimelineItemLike | undefined, id: string): ChatLine | null {
@@ -182,6 +189,12 @@ export function CardChatPane({
   const [text, setText] = useState("");
   const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
+  // 「届いたか」の表示。送信直後=送信済み、以降は相手スレの購読で取れた事実だけで進む。
+  const [activity, setActivity] = useState<PaneActivity | null>(null);
+  const pushActivity = useCallback(
+    (ev: PaneActivityEvent) => setActivity((cur) => nextPaneActivity(cur, ev)),
+    [],
+  );
   // 総司令塔へ振り替えて1回でも送ったか。返事の購読はこの後だけ(相手/カードを変えたら戻す)。
   const [coordSent, setCoordSent] = useState(false);
   // 総司令塔のID(サーバが起こしデーモンの正本から読む。undefined=未取得、null=見つからない)と、閉じているか。
@@ -197,6 +210,7 @@ export function CardChatPane({
   // 相手を変えたら前の相手の生死を持ち越さない(前のスレが閉じていると新しいスレまで閉じて見える)。
   useEffect(() => setLiveness(UNKNOWN_LIVENESS), [agentId, serverId]);
   useEffect(() => setCoordSent(false), [agentId, serverId, item?.id]);
+  useEffect(() => setActivity(null), [agentId, serverId, item?.id]);
 
   const access = toAccess(liveness);
   const closedText = threadUnavailableReason(access, item ? "card" : "thread");
@@ -246,6 +260,7 @@ export function CardChatPane({
       if (!alive) return;
       const ev = (evt as { event?: { type?: string; item?: TimelineItemLike } }).event;
       if (ev?.type !== "timeline") return;
+      pushActivity({ kind: "item", itemType: ev.item?.type, status: itemStatus(ev.item) });
       // ユーザー発言は送信時に表示済み(二重表示を避ける)。
       if (ev.item?.type !== "assistant_message") return;
       seq.current += 1;
@@ -256,7 +271,7 @@ export function CardChatPane({
       alive = false;
       sub();
     };
-  }, [agentId, serverId]);
+  }, [agentId, serverId, pushActivity]);
 
   // 振り替える時だけ総司令塔のIDを引き、閉じていないか確かめる(閉じていれば送信を止める)。
   useEffect(() => {
@@ -290,16 +305,28 @@ export function CardChatPane({
       .timeline.subscribe((evt) => {
         if (!alive) return;
         const ev = (evt as { event?: { type?: string; item?: TimelineItemLike } }).event;
-        if (ev?.type !== "timeline" || ev.item?.type !== "assistant_message") return;
+        if (ev?.type !== "timeline") return;
+        pushActivity({ kind: "item", itemType: ev.item?.type, status: itemStatus(ev.item) });
+        if (ev.item?.type !== "assistant_message") return;
         seq.current += 1;
         const line = lineFromItem(ev.item, `f${seq.current}`);
         if (line) setLines((cur) => appendLine(cur, line));
       });
+    const offStatus = getPaseoClient(serverId)
+      .agents.ref(coordId)
+      .subscribe((update) => {
+        if (!alive || update.kind !== "upsert") return;
+        pushActivity({
+          kind: "agent-status",
+          status: (update.agent as { status?: string }).status,
+        });
+      });
     return () => {
       alive = false;
       off();
+      offStatus();
     };
-  }, [fallback, coordSent, coordId, serverId]);
+  }, [fallback, coordSent, coordId, serverId, pushActivity]);
 
   // 生死。引けなかった時は印を付けない(不明を「閉じています」と言い換えない)。
   useEffect(() => {
@@ -315,6 +342,12 @@ export function CardChatPane({
           ? ((update.agent as { archivedAt?: string | null }).archivedAt ?? null)
           : "removed"; // remove = 一覧から消えた(アーカイブ/削除)。どちらも閉じた扱い。
       setLiveness((l) => ({ ...l, archivedAt }));
+      if (update.kind === "upsert") {
+        pushActivity({
+          kind: "agent-status",
+          status: (update.agent as { status?: string }).status,
+        });
+      }
     });
     // 生きているワークスペースだけを返す一覧(アーカイブ済みは載らない)。
     const liveIds = () =>
@@ -347,7 +380,7 @@ export function CardChatPane({
       off();
       clearInterval(timer);
     };
-  }, [agentId, serverId]);
+  }, [agentId, serverId, pushActivity]);
 
   // 新しい行が来たら最下部へ。件数ではなく末尾の行を見る(断片の連結で件数が増えないため)。
   const lastLine = lines.at(-1);
@@ -369,6 +402,7 @@ export function CardChatPane({
       const outgoing = fallback && item ? withCardHeader(t, item) : t;
       await getPaseoClient(serverId).agents.ref(sendAgentId).send(outgoing);
       if (fallback) setCoordSent(true);
+      pushActivity({ kind: "sent" });
       setNotice("");
     } catch (e) {
       setNotice(`送れません: ${e instanceof Error ? e.message : String(e)}`);
@@ -376,11 +410,11 @@ export function CardChatPane({
       sendingRef.current = false;
       setSending(false);
     }
-  }, [text, sendAgentId, serverId, fallback, item]);
+  }, [text, sendAgentId, serverId, fallback, item, pushActivity]);
   const sendPress = useCallback(() => void send(), [send]);
 
   // --- 全画面スライド(狭い幅のみ) ---
-  const paneWidth = useMemo(() => Math.round(Math.min(440, Math.max(320, width * 0.36))), [width]);
+  const { paneWidth, resizeHandlers } = usePaneResize(width);
   const translateX = useRef(new Animated.Value(0)).current;
   const widthRef = useRef(width);
   widthRef.current = width;
@@ -467,6 +501,31 @@ export function CardChatPane({
         shadowOffset: { width: -2, height: 0 },
       } as const,
       pane: { flex: 1 },
+      // 左端の境界(掴みやすい12px。PCは col-resize カーソル)。
+      resizeHandle: {
+        position: "absolute" as const,
+        left: -6,
+        top: 0,
+        bottom: 0,
+        width: 12,
+        zIndex: 30,
+        cursor: "col-resize" as unknown as "auto",
+      } as const,
+      resizeGrip: {
+        position: "absolute" as const,
+        left: 5,
+        top: 0,
+        bottom: 0,
+        width: 2,
+        backgroundColor: colors.border,
+      },
+      activity: {
+        color: colors.accent,
+        fontSize: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        backgroundColor: colors.surface1,
+      },
       header: {
         flexDirection: "row" as const,
         alignItems: "center" as const,
@@ -640,6 +699,11 @@ export function CardChatPane({
         })}
       </ScrollView>
       {notice ? <Text style={st.notice}>{notice}</Text> : null}
+      {activity ? (
+        <Text style={st.activity} accessibilityLiveRegion="polite" testID="pane-activity">
+          {PANE_ACTIVITY_LABEL[activity]}
+        </Text>
+      ) : null}
       <View style={st.inputRow}>
         <TextInput
           value={text}
@@ -668,7 +732,21 @@ export function CardChatPane({
     </View>
   );
 
-  if (!compact) return <View style={st.desktop}>{body}</View>;
+  if (!compact) {
+    return (
+      <View style={st.desktop}>
+        {body}
+        <View
+          style={st.resizeHandle}
+          {...resizeHandlers}
+          accessibilityLabel="チャットの幅を変える(ダブルクリックで元に戻す)"
+          testID="pane-resize-handle"
+        >
+          <View style={st.resizeGrip} />
+        </View>
+      </View>
+    );
+  }
   return (
     <Animated.View style={slideStyle} {...pan.panHandlers}>
       {body}

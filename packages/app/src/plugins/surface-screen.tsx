@@ -7,6 +7,7 @@ import { Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { HeaderIconBadge } from "@/components/headers/header-icon-badge";
 import { HeaderToggleButton } from "@/components/headers/header-toggle-button";
+import { SidebarMenuToggle } from "@/components/headers/menu-header";
 import { ScreenHeader } from "@/components/headers/screen-header";
 import { ScreenTitle } from "@/components/headers/screen-title";
 import { HostFilter } from "@/components/hosts/host-filter";
@@ -177,6 +178,8 @@ export function PluginSurfaceScreen() {
   const headerLeft = useMemo(
     () => (
       <>
+        {/* 左サイドバーを畳める(確認箱の3画面表示で幅を空ける。他の画面と同じ開閉ボタン) */}
+        <SidebarMenuToggle />
         {Icon ? (
           <HeaderIconBadge>
             <ThemedPluginHeaderIcon Icon={Icon} uniProps={mutedColorMapping} />
