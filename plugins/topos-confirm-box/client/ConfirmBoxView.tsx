@@ -929,8 +929,9 @@ function RejectPanel({
   const send = useCallback(async () => {
     if (rejectComment(text) === null || busy) return;
     setBusy(true);
-    const ok = await onReject(item, text);
-    if (!ok) setBusy(false); // 失敗時は入力を残して再送できる。成功時はカードごと消える
+    await onReject(item, text);
+    // 失敗時は入力を残して再送できる。成功時はカードごと消えるが、再読込が遅れても「やめる」で閉じられるよう常に戻す
+    setBusy(false);
   }, [text, busy, onReject, item]);
   const sendPress = useCallback(() => void send(), [send]);
   const inputStyle = useMemo(() => styles.rejectInput, [styles.rejectInput]);

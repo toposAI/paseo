@@ -599,6 +599,9 @@ export default function contribute(server: PluginServerContext) {
     if (reject && !input.reason.trim()) {
       return { ok: false, message: "却下にはコメントが必要です(理由を書いてください)" };
     }
+    if (reject && !input.key.startsWith(VAULT_KEY_PREFIX)) {
+      return { ok: false, message: "却下できるのは Vault の判断ノートの項目だけです" };
+    }
     try {
       // Vault の判断ノートへの回答は、まずノート(正本)を answered にする。失敗したら台帳にも書かない。
       let noteNote = "";
@@ -622,7 +625,8 @@ export default function contribute(server: PluginServerContext) {
         appendDecision(resolveConfirmBoxDir(), {
           key: input.key,
           chosen: input.chosen,
-          recommended: input.recommended,
+          // 却下は「推奨と別の選択肢を選んだ」ではなく問いの取り下げ。推奨の的中集計(matched)を汚さない
+          recommended: reject ? null : input.recommended,
           depth: input.depth,
           reason: input.reason,
           source: input.source,

@@ -272,10 +272,11 @@ test("画面側は自前の絞り込みを書かず、共通の judgmentTabRows 
 test("却下: 判断項目(key あり・permit でない)だけに出し、コメントは空白だけを不可にする", () => {
   const base = [
     ...foldBoxEvents([
-      { t: "item", id: "box:j", ts: 1, judgment: true, key: "k", options: OPTIONS },
+      { t: "item", id: "box:j", ts: 1, judgment: true, key: "vault:j-1", options: OPTIONS },
     ]).values(),
   ][0];
   assert.equal(canRejectItem(base), true);
+  assert.equal(canRejectItem({ ...base, key: "pending:x" }), false);
   assert.equal(canRejectItem({ ...base, key: "" }), false);
   assert.equal(canRejectItem({ ...base, judgment: false }), false);
   assert.equal(canRejectItem({ ...base, kind: "permit" }), false);
