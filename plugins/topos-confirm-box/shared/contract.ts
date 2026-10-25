@@ -198,6 +198,11 @@ export type ConfirmBoxCountOutput = z.infer<typeof confirmBoxCountRpc.output>;
 
 /** 決定イベントの契約は `handoff_confirm_box_recommendation_feedback_kickoff.md` で固定。
  * ここはその**投函側**として書く(`matched` は機械計算)。 */
+/** `decide` の `chosen` にこの値を渡すと「却下」(コメント必須)。選択肢 id と衝突しない予約語。 */
+export const REJECT_CHOICE = "__reject";
+/** Vault 判断ノート項目の key 接頭辞(server/vault-decisions.ts の VAULT_KEY_PREFIX と同値) */
+export const REJECT_KEY_PREFIX = "vault:";
+
 export const confirmBoxDecideRpc = defineRpc({
   name: "topos.confirmbox.decide",
   input: z.object({
@@ -409,6 +414,23 @@ export function compareConfirmBoxItems(a: ConfirmBoxItem, b: ConfirmBoxItem): nu
  *   印を付けるのは投函側(`notify_box.deposit(judgment=True)` が `"judgment": true` を書く)。
  * - 印の無い旧形式の選択肢つき項目は `judgmentTabRows(..., { legacy: true })` でのみ見られる。
  */
+/**
+ * 「却下」ボタンを出す項目か。Vault の判断ノート由来(key が `vault:` 始まり・judgment 印あり)だけ。
+ * 却下の伝達(superseded + rejected_at → 投函元の子スレ)はノート経由なので、ノートの無い項目には出さない。
+ * 承認待ち(permit)には出さない(拒否ボタンが既にある)。key が無いと却下を記録できない。
+ */
+export function canRejectItem(item: ConfirmBoxItem): boolean {
+  return (
+    item.kind !== "permit" && item.judgment === true && !!item.key?.startsWith(REJECT_KEY_PREFIX)
+  );
+}
+
+/** 却下コメントの検査。空白だけは不可(コメント必須)。通れば前後の空白を除いた本文を返す。 */
+export function rejectComment(text: string): string | null {
+  const t = text.trim();
+  return t ? t : null;
+}
+
 export function isJudgmentItem(item: ConfirmBoxItem): boolean {
   if (item.kind === "permit") return true;
   return item.judgment === true;

@@ -7,17 +7,20 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
-import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import {
   KIND_LABEL,
   PRIORITY_LABEL,
+  REJECT_CHOICE,
+  canRejectItem,
   confirmBoxCountRpc,
   confirmBoxDecideRpc,
   confirmBoxListRpc,
   confirmBoxPermitRpc,
   judgmentTabRows,
+  rejectComment,
 } from "../shared/contract.js";
 import { confirmBoxTabs, isWideLayout } from "../shared/footer-tabs.js";
 import { onBoxChanged, notifyBoxChanged } from "./events.js";
@@ -258,6 +261,23 @@ export function ConfirmBoxView({
       btnText: { color: c.foreground, fontSize: 13 },
       btnRecText: { color: c.accentForeground, fontSize: 13 },
       warn: { color: c.statusWarning, fontSize: 12 },
+      rejectBox: {
+        borderColor: c.statusWarning,
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: 8,
+        gap: 8,
+      },
+      rejectInput: {
+        color: c.foreground,
+        fontSize: 16, // iOS は 16px 未満の入力欄でフォーカス時に拡大する
+        minHeight: 72,
+        borderColor: c.border,
+        borderWidth: 1,
+        borderRadius: 6,
+        padding: 8,
+        textAlignVertical: "top" as const,
+      },
     };
   }, [c, touch]);
 
@@ -293,6 +313,36 @@ export function ConfirmBoxView({
       notifyBoxChanged();
     },
     [decide, permit, depth, reload],
+  );
+
+  /** 却下(コメント必須)。成功したら true を返し、カードは一覧から消える。 */
+  const reject = useCallback(
+    async (item: ConfirmBoxItem, comment: string): Promise<boolean> => {
+      const text = rejectComment(comment);
+      if (!text || !item.key) {
+        setNotice("却下にはコメントが必要です");
+        return false;
+      }
+      try {
+        const r = await decide({
+          key: item.key,
+          chosen: REJECT_CHOICE,
+          recommended: item.recommended,
+          depth,
+          reason: text,
+          source: "paseo-plugin",
+        });
+        setNotice(r.message);
+        if (!r.ok) return false;
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : String(e));
+        return false;
+      }
+      void reload();
+      notifyBoxChanged();
+      return true;
+    },
+    [decide, depth, reload],
   );
 
   /** 質問への回答。押された選択肢/自由記述を `answers` として送る。 */
@@ -428,6 +478,7 @@ export function ConfirmBoxView({
             onBackground={openBackground}
             onChoose={choose}
             onAnswer={answer}
+            onReject={reject}
             paneOpen={paneCardId === item.id}
             anyPaneOpen={pane !== null}
             onOpenPane={openCard}
@@ -857,6 +908,61 @@ function PlainOptions({
   );
 }
 
+/**
+ * 却下パネル(押し間違い防止の確認ステップを兼ねる)。コメント必須: 空白だけでは送れない。
+ * 送ると Vault の判断ノートが superseded になり、コメントが回答原文へ逐語で残り、投函元へ伝わる。
+ */
+function RejectPanel({
+  item,
+  styles,
+  onReject,
+  onCancel,
+}: {
+  item: ConfirmBoxItem;
+  styles: Styles;
+  onReject: (item: ConfirmBoxItem, comment: string) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const ready = rejectComment(text) !== null && !busy;
+  const send = useCallback(async () => {
+    if (rejectComment(text) === null || busy) return;
+    setBusy(true);
+    await onReject(item, text);
+    // 失敗時は入力を残して再送できる。成功時はカードごと消えるが、再読込が遅れても「やめる」で閉じられるよう常に戻す
+    setBusy(false);
+  }, [text, busy, onReject, item]);
+  const sendPress = useCallback(() => void send(), [send]);
+  const inputStyle = useMemo(() => styles.rejectInput, [styles.rejectInput]);
+  return (
+    <View style={styles.rejectBox}>
+      <Text style={styles.text}>この判断を却下します。理由(コメント)を書いてください。</Text>
+      <TextInput
+        value={text}
+        onChangeText={setText}
+        placeholder="例: もう解決済み / 前提が違う"
+        multiline
+        autoFocus
+        style={inputStyle}
+      />
+      <View style={styles.row}>
+        <Pressable
+          accessibilityRole="button"
+          disabled={!ready}
+          style={ready ? styles.btnRec : styles.btn}
+          onPress={sendPress}
+        >
+          <Text style={ready ? styles.btnRecText : styles.btnText}>却下を送る</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" disabled={busy} style={styles.btn} onPress={onCancel}>
+          <Text style={styles.btnText}>やめる</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function ItemCard({
   item,
   styles,
@@ -866,6 +972,7 @@ function ItemCard({
   onBackground,
   onChoose,
   onAnswer,
+  onReject,
   paneOpen,
   anyPaneOpen,
   onOpenPane,
@@ -878,6 +985,7 @@ function ItemCard({
   onBackground: () => void;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
   onAnswer: (item: ConfirmBoxItem, answers: Record<string, string>) => Promise<void>;
+  onReject: (item: ConfirmBoxItem, comment: string) => Promise<boolean>;
   /** このカードの会話ペインが開いているか。 */
   paneOpen: boolean;
   /** 右ペインが(どの相手でも)開いているか。開いている間だけ、カード本体のタップで相手を切り替える。 */
@@ -885,6 +993,9 @@ function ItemCard({
   onOpenPane: (item: ConfirmBoxItem) => void;
 }) {
   const [bgOpen, setBgOpen] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const startReject = useCallback(() => setRejecting(true), []);
+  const cancelReject = useCallback(() => setRejecting(false), []);
   const toggle = useCallback(() => onToggle(item.id), [onToggle, item.id]);
   const toggleBg = useCallback(() => {
     setBgOpen((v) => {
@@ -932,6 +1043,9 @@ function ItemCard({
       ) : (
         <PlainOptions item={item} styles={styles} onChoose={onChoose} />
       )}
+      {rejecting ? (
+        <RejectPanel item={item} styles={styles} onReject={onReject} onCancel={cancelReject} />
+      ) : null}
       {open && questions.length === 0 ? <Text style={styles.text}>{item.summary}</Text> : null}
       {bgOpen && item.background ? <Text style={styles.text}>{item.background}</Text> : null}
       <View style={styles.footRow}>
@@ -950,6 +1064,16 @@ function ItemCard({
         >
           <Text style={styles.footText}>{paneOpen ? "▼会話" : "💬 会話"}</Text>
         </Pressable>
+        {canRejectItem(item) && !rejecting ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="この判断を却下する(コメント必須)"
+            style={styles.footBtn}
+            onPress={startReject}
+          >
+            <Text style={styles.footText}>✕ 却下</Text>
+          </Pressable>
+        ) : null}
         <Text style={styles.created} numberOfLines={1}>
           {created}
         </Text>

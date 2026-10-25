@@ -122,7 +122,7 @@ test("答えるとノートが answered になり、未回答行が回答に置�
   assert.match(text, /^state: answered$/m);
   assert.match(text, /^answered_at: 2026-10-24 20:05:09[+-]\d\d:\d\d$/m);
   assert.match(text, /^route: chat$/m);
-  assert.match(text, /- 2026-10-24 20:05 \(user: 確認箱で回答\)/);
+  assert.match(text, /^- "2026-10-24 20:05 \(user: 確認箱で回答\)"$/m);
   assert.match(text, /- 「2026-10-24 20:05 \(確認箱\): 選択 a「維持」」/);
   assert.doesNotMatch(text, /\(未回答\)/);
   assert.match(text, /## 実行状況/);
@@ -328,5 +328,63 @@ test("チャット宛先: ノートの threads のうち司令塔(短ID前方一
   assert.equal(
     (parseDecisionNote(NOTE("j-t2", "open"), 1, [coord]) as ConfirmBoxItem).threadRef,
     null,
+  );
+});
+
+test("却下: superseded になりコメントが逐語で残り、rejected_at が付き、一覧から消える", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "j-1.md"), NOTE("j-1", "open"));
+  const env = { TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir };
+  answerVaultDecision(
+    {
+      key: "vault:j-1",
+      chosenId: null,
+      chosenLabel: null,
+      reason: "もう解決済み: 前提が違う",
+      reject: true,
+    },
+    new Date(2026, 9, 25, 9, 30, 0),
+    env,
+  );
+  const text = fs.readFileSync(path.join(dir, "j-1.md"), "utf8");
+  assert.match(text, /^state: superseded$/m);
+  assert.match(text, /^rejected_at: 2026-10-25 09:30:00[+-]\d\d:\d\d$/m);
+  assert.doesNotMatch(text, /^state: answered$/m);
+  assert.match(text, /^- "2026-10-25 09:30 \(user: 確認箱で却下\)"$/m);
+  assert.match(text, /- 「2026-10-25 09:30 \(確認箱\): 却下\(理由: もう解決済み: 前提が違う\)」/);
+  assert.equal(readVaultDecisions(env).items.length, 0);
+});
+
+test("却下: コメントが空(空白だけ含む)なら拒否しノートは変わらない", () => {
+  const dir = tmpDir();
+  const file = path.join(dir, "j-1.md");
+  fs.writeFileSync(file, NOTE("j-1", "open"));
+  const before = fs.readFileSync(file, "utf8");
+  const env = { TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir };
+  for (const reason of ["", "  \n "]) {
+    assert.throws(
+      () =>
+        answerVaultDecision(
+          { key: "vault:j-1", chosenId: null, chosenLabel: null, reason, reject: true },
+          new Date(),
+          env,
+        ),
+      /コメントが必要/,
+    );
+  }
+  assert.equal(fs.readFileSync(file, "utf8"), before);
+});
+
+test("却下: すでに答え済みのノートは上書きしない", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "j-1.md"), NOTE("j-1", "answered"));
+  assert.throws(
+    () =>
+      answerVaultDecision(
+        { key: "vault:j-1", chosenId: null, chosenLabel: null, reason: "理由", reject: true },
+        new Date(),
+        { TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir },
+      ),
+    /上書きしません|見つかりません/,
   );
 });

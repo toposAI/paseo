@@ -37,6 +37,7 @@ import {
   priorityListRpc,
   priorityMoveRpc,
   prioritySayRpc,
+  REJECT_CHOICE,
 } from "./shared/contract.js";
 import { appendAck } from "./server/ack.js";
 import { feedbackReportsListRpc, countNewReports } from "./shared/feedback.js";
@@ -596,13 +597,20 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(confirmBoxDecideRpc, async (input) => {
     if (!input.key) return { ok: false, message: "key が空です" };
+    const reject = input.chosen === REJECT_CHOICE;
+    if (reject && !input.reason.trim()) {
+      return { ok: false, message: "却下にはコメントが必要です(理由を書いてください)" };
+    }
+    if (reject && !input.key.startsWith(VAULT_KEY_PREFIX)) {
+      return { ok: false, message: "却下できるのは Vault の判断ノートの項目だけです" };
+    }
     try {
       // Vault の判断ノートへの回答は、まずノート(正本)を answered にする。失敗したら台帳にも書かない。
       let noteNote = "";
       if (input.key.startsWith(VAULT_KEY_PREFIX)) {
         const noteItem = readVaultDecisions().items.find((i) => i.key === input.key);
         const option = noteItem?.options.find((o) => o.id === input.chosen);
-        if (input.chosen !== null && !option) {
+        if (input.chosen !== null && !reject && !option) {
           return { ok: false, message: `選択肢 ${input.chosen} はこの判断にありません` };
         }
         const label = option?.label ?? null;
@@ -611,6 +619,7 @@ export default function contribute(server: PluginServerContext) {
           chosenId: input.chosen,
           chosenLabel: label,
           reason: input.reason,
+          reject,
         });
         noteNote = `・ノート更新 ${file.split("/").pop()}`;
       }
@@ -618,7 +627,8 @@ export default function contribute(server: PluginServerContext) {
         appendDecision(resolveConfirmBoxDir(), {
           key: input.key,
           chosen: input.chosen,
-          recommended: input.recommended,
+          // 却下は「推奨と別の選択肢を選んだ」ではなく問いの取り下げ。推奨の的中集計(matched)を汚さない
+          recommended: reject ? null : input.recommended,
           depth: input.depth,
           reason: input.reason,
           source: input.source,
@@ -633,7 +643,9 @@ export default function contribute(server: PluginServerContext) {
       }
       return {
         ok: true,
-        message: `記録しました(${input.key} → ${input.chosen ?? "選択なし"})${noteNote}`,
+        message: reject
+          ? `却下しました(${input.key})${noteNote}`
+          : `記録しました(${input.key} → ${input.chosen ?? "選択なし"})${noteNote}`,
       };
     } catch (error) {
       return { ok: false, message: `記録できません: ${(error as Error).message}` };
