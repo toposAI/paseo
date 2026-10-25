@@ -253,8 +253,28 @@ function useRegisteredHeaderButtons(): { registered: typeof headerButtons; tick:
   return { registered: headerButtons, tick };
 }
 
-function Screen({ theme, navigation, layout }: PluginScreenProps) {
-  return <ConfirmBoxView theme={theme} navigation={navigation} layout={layout} />;
+/** 確認箱の最上部のアイコン列が画面を切り替えるための入口(`contribute` が受けた ctx 経由)。 */
+function openBoxScreen(input: { screenId: string; params?: Record<string, string> }) {
+  client?.openScreen(input);
+}
+
+/** 確認箱の `?tab=`。不正な値はバグ報告に倒す(下部バーから開いたときの既定)。 */
+function boxInitialTab(param: string | undefined): "bugs" | "notify" | "priority" {
+  return param === "notify" || param === "priority" ? param : "bugs";
+}
+
+function Screen({ theme, navigation, layout, params }: PluginScreenProps) {
+  const tab = boxInitialTab(params.tab);
+  return (
+    <ConfirmBoxView
+      key={tab}
+      theme={theme}
+      navigation={navigation}
+      layout={layout}
+      openScreen={openBoxScreen}
+      initialTab={tab}
+    />
+  );
 }
 
 /**
@@ -265,7 +285,14 @@ function Screen({ theme, navigation, layout }: PluginScreenProps) {
 function BoxTabScreen({ theme, navigation, layout, params }: PluginScreenProps) {
   const mode = boxTabMode(params[BOX_TAB_MODE_PARAM]);
   return (
-    <ConfirmBoxView key={mode} theme={theme} navigation={navigation} layout={layout} mode={mode} />
+    <ConfirmBoxView
+      key={mode}
+      theme={theme}
+      navigation={navigation}
+      layout={layout}
+      mode={mode}
+      openScreen={openBoxScreen}
+    />
   );
 }
 

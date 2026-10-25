@@ -6,7 +6,7 @@
  * カードごとの会話は 💬 から開く専用ペイン(CardChatPane)に一本化した(旧・カード内の自由記述欄は廃止)。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
@@ -24,7 +24,7 @@ import { onBoxChanged, notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
 import { BugReportsView } from "./BugReportsView.js";
 import { ChildDoneView } from "./ChildDoneView.js";
-import { ReloadButton } from "./ReloadButton.js";
+import { HeaderIconBar, type HeaderTabId } from "./HeaderIconBar.js";
 import { NotificationsView } from "./NotificationsView.js";
 import { BellIcon, BugIcon, CheckCircleIcon, InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
@@ -49,7 +49,13 @@ export function ConfirmBoxView({
   containerWidth,
   mode = "box",
   layout,
+  openScreen,
+  initialTab,
 }: Pick<PluginHostProps, "theme"> & {
+  /** 渡されたら最上部に5画面のアイコン列+更新ボタンを出す(全画面のとき。ポップオーバーは渡さない)。 */
+  openScreen?: (input: { screenId: string; params?: Record<string, string> }) => void;
+  /** 確認箱そのもの(`box`)を開いたときの最初のタブ。 */
+  initialTab?: "bugs" | "notify" | "priority";
   /** ホストの `layout`。省略時(ポップオーバー)は幅・高さだけで判定する。 */
   layout?: PluginHostProps["layout"];
   navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
@@ -113,7 +119,7 @@ export function ConfirmBoxView({
   // 幅の判定は一覧とチャットの並べ方にだけ使う(PC幅なら横並び、狭い幅は全画面で重ねる)。
   const wide = isBoxWide(containerWidth, windowSize, layout);
   const compact = !wide;
-  const { shownTab, tabs, selectTab } = useBoxTabs(mode);
+  const { shownTab, tabs, selectTab } = useBoxTabs(mode, initialTab);
   // カードチャットは画面を問わずこのペインに一本化した(旧・自由記述欄は廃止=2026-10-22ユーザー決定)。
   // ヘッダのポップオーバーも幅<720なので、ペインは全画面スライドとして重なる。
   // ペインの相手は2種: カードの投函元スレ(💬)と、優先順位の行の担当スレ(行タップ)。
@@ -184,13 +190,6 @@ export function ConfirmBoxView({
         alignItems: "center" as const,
         justifyContent: "flex-start" as const,
         gap: 4,
-      },
-      // 一覧の右上(更新ボタン)。見出し行を持たないタブなので、ボタンだけを右に寄せた1行を置く。
-      headLine: {
-        flexDirection: "row" as const,
-        alignItems: "center" as const,
-        justifyContent: "flex-end" as const,
-        gap: 8,
       },
       filterLine: {
         flexDirection: "row" as const,
@@ -348,6 +347,12 @@ export function ConfirmBoxView({
     count: visible.length,
   });
 
+  const { selectFromHeader, refreshFromHeader, reloadN } = useHeaderNav({
+    openScreen,
+    shownTab,
+    manualReload,
+  });
+
   // 幅で置き場所が変わる(右に並べる/全画面で重ねる)ので、SplitLayout へ要素ごと渡す。
   // ペインの相手は投函元スレ(2026-10-22 ユーザー決定)。まだ一覧に来ていないカードは null。
   const paneAgentId = paneItem ? threadAgentId(paneItem) : paneThreadId;
@@ -387,9 +392,6 @@ export function ConfirmBoxView({
   } else {
     content = (
       <>
-        <View style={s.headLine}>
-          <ReloadButton colors={c} onRefresh={manualReload} testID="judgment-reload" />
-        </View>
         <Pressable accessibilityRole="button" style={s.filterLine} onPress={toggleFilter}>
           <Text style={s.text}>{filterSummary}</Text>
           <Text style={s.muted}>{filterOpen ? "▲" : "▼"}</Text>
@@ -438,13 +440,22 @@ export function ConfirmBoxView({
   return (
     <SplitLayout styles={s} compact={compact} pane={paneEl}>
       <View style={s.flex}>
-        <ScrollView style={s.flex} contentContainerStyle={s.body}>
+        <HeaderSlot
+          show={openScreen !== undefined}
+          active={shownTab}
+          counts={counts}
+          colors={c}
+          onSelect={selectFromHeader}
+          onRefresh={refreshFromHeader}
+          touch={touch}
+        />
+        <ScrollView key={reloadN} style={s.flex} contentContainerStyle={s.body}>
           {content}
         </ScrollView>
         {shownTab === "priority" ? <ChatDock colors={c} agentId={PRIORITY_CHAT_AGENT_ID} /> : null}
         {/* 下部バーから開いた画面(`mode` が box 以外)はタブ1枚だけなので、並びは出さない。 */}
         <TabStrip
-          mode={mode}
+          mode={stripMode(mode, openScreen !== undefined)}
           tabs={tabs}
           shownTab={shownTab}
           counts={counts}
@@ -513,6 +524,50 @@ function isBoxWide(
   );
 }
 
+/**
+ * 最上部のアイコン列の動き。押した画面へ移る(今の画面なら何もしない): ユーザー判断・子スレ完了は下部バーと同じ
+ * `box-tab` 画面(`?mode=`)、それ以外は確認箱(`main`)の `?tab=`。
+ * 更新: 判断一覧は取り直しの成否を返す。他の画面は各画面が開いた時に取り直すので、作り直して取らせる。
+ */
+function useHeaderNav({
+  openScreen,
+  shownTab,
+  manualReload,
+}: {
+  openScreen: ((input: { screenId: string; params?: Record<string, string> }) => void) | undefined;
+  shownTab: TabId;
+  manualReload: () => Promise<boolean>;
+}) {
+  const selectFromHeader = useCallback(
+    (id: HeaderTabId) => {
+      if (!openScreen || id === shownTab) return;
+      if (id === "items" || id === "childdone") {
+        openScreen({ screenId: "box-tab", params: { mode: id } });
+      } else {
+        openScreen({ screenId: "main", params: { tab: id } });
+      }
+    },
+    [openScreen, shownTab],
+  );
+  const [reloadN, setReloadN] = useState(0);
+  const refreshFromHeader = useCallback(async () => {
+    if (shownTab === "items") return manualReload();
+    setReloadN((v) => v + 1);
+    notifyBoxChanged();
+    return true;
+  }, [shownTab, manualReload]);
+  return { selectFromHeader, refreshFromHeader, reloadN };
+}
+
+/** アイコン列を出す画面では、下の並び(TabStrip)は要らない(`items` を渡すと何も描かない)。 */
+function stripMode(mode: "box" | "items" | "childdone", hasHeader: boolean) {
+  return hasHeader ? "items" : mode;
+}
+
+function HeaderSlot({ show, ...props }: { show: boolean } & ComponentProps<typeof HeaderIconBar>) {
+  return show ? <HeaderIconBar {...props} /> : null;
+}
+
 type TabId = "items" | "bugs" | "childdone" | "notify" | "priority";
 
 /**
@@ -521,7 +576,10 @@ type TabId = "items" | "bugs" | "childdone" | "notify" | "priority";
  * - `items`/`childdone`: 下部バーから開いた画面。そのタブだけを出す(並びは出さない)
  * 初期タブは、開いた画面ならそのタブ、確認箱ならバグ報告。
  */
-function useBoxTabs(mode: "box" | "items" | "childdone"): {
+function useBoxTabs(
+  mode: "box" | "items" | "childdone",
+  initialTab: "bugs" | "notify" | "priority" = "bugs",
+): {
   shownTab: TabId;
   tabs: readonly (typeof TABS)[number][];
   selectTab: (id: TabId) => void;
@@ -532,7 +590,7 @@ function useBoxTabs(mode: "box" | "items" | "childdone"): {
   // 選んだタブが今の並びに無くなったときは、選んだ値を捨てて既定へ戻す
   // (並びに無いタブの中身が出続けるのを防ぐ)。
   const valid = picked !== null && tabs.some((tb) => tb.id === picked);
-  const shownTab: TabId = (valid && picked) || forcedTab || "bugs";
+  const shownTab: TabId = (valid && picked) || forcedTab || initialTab;
   const selectTab = useCallback((id: TabId) => setPicked(id), []);
   return { shownTab, tabs, selectTab };
 }

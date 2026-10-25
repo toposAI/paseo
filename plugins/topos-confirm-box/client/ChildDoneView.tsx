@@ -16,7 +16,6 @@ import type { ChildThread, ChildThreadsListOutput } from "../shared/child-thread
 import { confirmBoxAckRpc, boxSignalRpc } from "../shared/contract.js";
 import { notifyBoxChanged } from "./events.js";
 import { watchBoxSignal } from "./change-signal.js";
-import { ReloadButton } from "./ReloadButton.js";
 
 const REFRESH_MS = 30_000;
 
@@ -92,13 +91,6 @@ export function ChildDoneView({
       stop();
     };
   }, [reload, signalTimes]);
-
-  // 手動の更新。取れた時だけバッジ(件数)も取り直す(カードとバッジが同じ時点になる)
-  const manualReload = useCallback(async () => {
-    const ok = await reload();
-    if (ok) notifyBoxChanged();
-    return ok;
-  }, [reload]);
 
   const c = theme.colors;
   const s = useMemo(
@@ -222,7 +214,6 @@ export function ChildDoneView({
     <View style={s.root}>
       <View style={s.head}>
         <Text style={s.headText}>{header}</Text>
-        <ReloadButton colors={c} onRefresh={manualReload} testID="childdone-reload" />
       </View>
       {done.length > 0 ? (
         <View style={s.row}>
