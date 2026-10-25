@@ -7,7 +7,9 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { getPaseoClient, useHosts } from "@getpaseo/plugin/client";
+import { getPaseoClient, useHosts, useRpc } from "@getpaseo/plugin/client";
+import { coordinatorTargetRpc } from "../shared/contract.js";
+import { DOCK_FALLBACK_CONTEXT, pickDockTarget } from "../shared/card-pane.js";
 import { BubbleIcon } from "./Icons.js";
 import { notifyBoxChanged } from "./events.js";
 
@@ -251,7 +253,59 @@ export function ChatPanel({
 }
 
 /** 優先順位ページ右下の吹き出しボタン+展開する会話。 */
+/**
+ * 固定の常駐会話スレが閉じている/無い時は総司令塔へ振り替える(2026-10-26: 常駐スレが10/22にアーカイブ済みで
+ * 「宛先のスレッドがありません」になっていた)。生死が引けるまで(pending)は送信欄を止める。
+ */
+function useDockTarget(fixedId: string | null) {
+  const hosts = useHosts();
+  const serverId = hosts.find((h) => h.status === "online")?.serverId ?? null;
+  const coordinatorRpc = useRpc(coordinatorTargetRpc);
+  const [fixedAlive, setFixedAlive] = useState<boolean | null>(fixedId ? null : false);
+  const [coordId, setCoordId] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!fixedId) {
+      setFixedAlive(false);
+      return undefined;
+    }
+    if (!serverId) return undefined;
+    let alive = true;
+    setFixedAlive(null);
+    getPaseoClient(serverId)
+      .agents.ref(fixedId)
+      .refresh()
+      .then((snap) => {
+        const agent = snap?.agent as { archivedAt?: string | null } | undefined;
+        if (alive) setFixedAlive(Boolean(agent) && agent?.archivedAt == null);
+        return null;
+      })
+      .catch(() => {
+        if (alive) setFixedAlive(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [fixedId, serverId]);
+  useEffect(() => {
+    if (fixedAlive !== false) return undefined;
+    let alive = true;
+    coordinatorRpc({})
+      .then((res) => {
+        if (alive) setCoordId(res.agentId);
+        return null;
+      })
+      .catch(() => {
+        if (alive) setCoordId(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [fixedAlive, coordinatorRpc]);
+  return pickDockTarget({ fixedId, fixedAlive, coordinatorId: coordId });
+}
+
 export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: string | null }) {
+  const target = useDockTarget(agentId);
   const [open, setOpen] = useState(false);
   const toggle = useCallback(() => setOpen((v) => !v), []);
   const fab = useMemo(
@@ -270,7 +324,14 @@ export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: str
   );
   return (
     <>
-      {open ? <ChatPanel colors={colors} agentId={agentId} /> : null}
+      {open ? (
+        <ChatPanel
+          colors={colors}
+          agentId={target.agentId}
+          withHistory={!target.viaCoordinator}
+          {...(target.viaCoordinator ? { context: DOCK_FALLBACK_CONTEXT } : {})}
+        />
+      ) : null}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="会話を開く"

@@ -102,3 +102,31 @@ test("カード本体のタップ: ペインが開いている間だけ、別の
   assert.equal(shouldSwitchPaneOnCardPress(true, false), true); // 開いていて別のカード=切替
   assert.equal(shouldSwitchPaneOnCardPress(true, true), false); // 既に出ているカード=何もしない
 });
+
+test("pickDockTarget: 常駐スレが生きていればそれ、閉じていれば総司令塔、確認中は決めない", async () => {
+  const { pickDockTarget } = await import("../shared/card-pane.js");
+  assert.deepEqual(pickDockTarget({ fixedId: "f", fixedAlive: true, coordinatorId: "c" }), {
+    agentId: "f",
+    viaCoordinator: false,
+    pending: false,
+  });
+  assert.deepEqual(pickDockTarget({ fixedId: "f", fixedAlive: null, coordinatorId: "c" }), {
+    agentId: null,
+    viaCoordinator: false,
+    pending: true,
+  });
+  assert.deepEqual(pickDockTarget({ fixedId: "f", fixedAlive: false, coordinatorId: "c" }), {
+    agentId: "c",
+    viaCoordinator: true,
+    pending: false,
+  });
+  assert.deepEqual(pickDockTarget({ fixedId: null, fixedAlive: false, coordinatorId: undefined }), {
+    agentId: null,
+    viaCoordinator: true,
+    pending: true,
+  });
+  assert.equal(
+    pickDockTarget({ fixedId: "f", fixedAlive: false, coordinatorId: null }).agentId,
+    null,
+  );
+});

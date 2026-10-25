@@ -131,6 +131,31 @@ export function shouldSwitchPaneOnCardPress(anyPaneOpen: boolean, thisCardShown:
   return anyPaneOpen && !thisCardShown;
 }
 
+// ---------------------------------------------------------------- 優先順位ページの吹き出し(ChatDock)の宛先
+
+/** 吹き出し会話が総司令塔へ落ちた時に送信文の先頭へ付ける目印(総司令塔が出どころを判別できるように)。 */
+export const DOCK_FALLBACK_CONTEXT =
+  "【確認箱 優先順位ページの吹き出し】(常駐会話スレが閉じているため総司令塔に届いています)";
+
+/**
+ * 吹き出し会話の送り先。固定の常駐会話スレが生きていればそれ、閉じている/存在しないなら総司令塔。
+ * `fixedAlive`: true=生きている、false=閉じている/無い、null=まだ確認中(確認中は送り先を決めない)。
+ * 総司令塔のIDも無ければ null(送信不可の理由を出す)。
+ */
+export function pickDockTarget(opts: {
+  fixedId: string | null;
+  fixedAlive: boolean | null;
+  coordinatorId: string | null | undefined;
+}): { agentId: string | null; viaCoordinator: boolean; pending: boolean } {
+  if (opts.fixedId && opts.fixedAlive === true)
+    return { agentId: opts.fixedId, viaCoordinator: false, pending: false };
+  if (opts.fixedId && opts.fixedAlive === null)
+    return { agentId: null, viaCoordinator: false, pending: true };
+  if (opts.coordinatorId === undefined)
+    return { agentId: null, viaCoordinator: true, pending: true };
+  return { agentId: opts.coordinatorId, viaCoordinator: true, pending: false };
+}
+
 // ---------------------------------------------------------------- 「この話題だけ」(方式a)
 
 /** Python `confirm_box_reply.SAY_SCRIPT` と同じ。上位スレがそのまま貼って実行する。 */
