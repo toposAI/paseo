@@ -41,6 +41,7 @@ import {
 import { appendAck } from "./server/ack.js";
 import { feedbackReportsListRpc, countNewReports } from "./shared/feedback.js";
 import { readFeedbackReports } from "./server/feedback.js";
+import { loadProgressContext } from "./server/feedback-progress.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
 import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/box.js";
 import {
@@ -588,7 +589,8 @@ export default function contribute(server: PluginServerContext) {
   });
 
   server.handle(feedbackReportsListRpc, async () => {
-    const { reports, sources } = readFeedbackReports();
+    const ctx = loadProgressContext(readConfirmBox(resolveConfirmBoxDir()).items);
+    const { reports, sources } = readFeedbackReports(undefined, undefined, ctx);
     return { reports, sources, generatedAt: Date.now() };
   });
 
