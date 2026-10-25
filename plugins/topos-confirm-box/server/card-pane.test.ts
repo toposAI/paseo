@@ -1,10 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import {
-  TOPIC_REPLY_OVERDUE_S,
   cardIdFromSearch,
-  isHubTarget,
-  pendingReplyAgeS,
   paneTargetFromSearch,
   searchWithCard,
   searchWithPane,
@@ -12,7 +9,6 @@ import {
   shouldSwitchPaneOnCardPress,
   threadIdFromSearch,
   threadUnavailableReason,
-  withTopicHeader,
   withCardHeader,
 } from "../shared/card-pane.js";
 
@@ -102,34 +98,4 @@ test("カード本体のタップ: ペインが開いている間だけ、別の
   assert.equal(shouldSwitchPaneOnCardPress(false, false), false); // 閉じている=開かない(従来動作)
   assert.equal(shouldSwitchPaneOnCardPress(true, false), true); // 開いていて別のカード=切替
   assert.equal(shouldSwitchPaneOnCardPress(true, true), false); // 既に出ているカード=何もしない
-});
-
-test("isHubTarget: 司令塔IDに含まれる時だけ真", () => {
-  assert.equal(isHubTarget("h1", ["h1", "h2"]), true);
-  assert.equal(isHubTarget("x", ["h1"]), false);
-  assert.equal(isHubTarget(null, ["h1"]), false);
-  assert.equal(isHubTarget("h1", undefined), false);
-});
-
-test("withTopicHeader: 返信IDと say の1コマンドを先頭に、カード見出しと本文を続ける", () => {
-  const out = withTopicHeader("なぜ?", { id: "c9", subject: "題名X" }, "cbui-c9-1");
-  assert.ok(out.startsWith("[返信ID: cbui-c9-1]\n"));
-  assert.ok(out.includes("confirm_box_reply.py say --id c9 --re cbui-c9-1 --text-file -"));
-  assert.ok(out.endsWith("【確認箱カード】題名X(ID: c9)\n\nなぜ?"));
-});
-
-test("pendingReplyAgeS: 最後がユーザー発言の時だけ経過秒、返事が最後なら null", () => {
-  assert.equal(pendingReplyAgeS([], 1000), null);
-  assert.equal(pendingReplyAgeS([{ ts: 0, role: "user" }], 90_000), 90);
-  assert.equal(
-    pendingReplyAgeS(
-      [
-        { ts: 0, role: "user" },
-        { ts: 5, role: "reply" },
-      ],
-      9e6,
-    ),
-    null,
-  );
-  assert.ok(TOPIC_REPLY_OVERDUE_S > 0);
 });

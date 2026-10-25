@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
 
-import { ACK_TEXT, askCard, readCardChat, sayToCard } from "./cardchat.ts";
+import { ACK_TEXT, readCardChat, sayToCard } from "./cardchat.ts";
 
 let dir = "";
 
@@ -78,42 +78,6 @@ describe("sayToCard", () => {
   it("refuses an item without id (the box needs it to fold replies)", () => {
     assert.equal(sayToCard(dir, { id: "" }, "q").ok, false);
     assert.equal(sayToCard(dir, { id: "i1" }, "   ").ok, false);
-  });
-});
-
-describe("askCard", () => {
-  it("writes one pane-sourced chat row (no ack) and returns the reply id; a say reply then joins the thread", () => {
-    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "cardchat-ask-"));
-    try {
-      const out = askCard(dir2, { id: "c9", key: "k9" }, "  なぜ  ");
-      assert.equal(out.ok, true);
-      assert.ok(out.replyId?.startsWith("cbui-c9-"));
-      const msgs = readCardChat(dir2, { id: "c9", key: "k9" });
-      assert.deepEqual(
-        msgs.map((m) => [m.role, m.text]),
-        [["user", "なぜ"]],
-      ); // ack を書かない=返事待ちのまま
-      const file = fs.readdirSync(dir2).find((n) => /^events-\d{6}\.jsonl$/.test(n)) as string;
-      const row = JSON.parse(fs.readFileSync(path.join(dir2, file), "utf-8").trim());
-      assert.equal(row.source, "pane");
-      assert.equal(row.client_message_id, out.replyId);
-      fs.appendFileSync(
-        path.join(dir2, file),
-        `${JSON.stringify({ t: "reply", id: "c9", ts: row.ts + 1, re: out.replyId, by: "origin_thread", text: "答え" })}\n`,
-      );
-      const after2 = readCardChat(dir2, { id: "c9", key: "k9" });
-      assert.deepEqual(
-        after2.map((m) => m.role),
-        ["user", "reply"],
-      );
-    } finally {
-      fs.rmSync(dir2, { recursive: true, force: true });
-    }
-  });
-
-  it("refuses empty text and a missing id", () => {
-    assert.equal(askCard(dir, { id: "c9" }, "   ").ok, false);
-    assert.equal(askCard(dir, { id: "" }, "x").ok, false);
   });
 });
 
