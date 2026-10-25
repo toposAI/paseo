@@ -1159,10 +1159,14 @@ function ComposerRightControlsSlot({
   const overflowSetting = useSettings((settings) => settings.composerOverflowMenu);
   // 「スマホ幅」は画面幅(formFactor)で判定する。isCompact は親が狭いパネルとして上書きしうるため使わない。
   const isPhoneWidth = useIsCompactFormFactor();
-  const useOverflow = isPhoneWidth && toposChatStyle && overflowSetting;
   const hideVoiceForCompactInput = isCompact && hasSendableContent;
   const showVoiceModeButton =
     showVoice && !isVoiceModeForAgent && hasAgent && !isAgentRunning && !hideVoiceForCompactInput;
+  // 「…」に入れられる項目の数。項目が2つ以上になるまでは畳まず、音声会話モードをそのまま表に出す(総司令塔の代理決定 2026-10-26)。
+  // エビデンスモード等を足すときはここへ加算し、項目ごとの表示条件に分離する。
+  const overflowItemCount = showVoiceModeButton ? 1 : 0;
+  const useOverflow =
+    isPhoneWidth && toposChatStyle && overflowSetting && overflowItemCount >= MIN_OVERFLOW_ITEMS;
   // 139番アプリ内でだけ、録音画面(139番の音声入力)を直接開くマイクを出す。
   const showDictationButton = showVoice && hasAgent && isWeb;
   const dictationBridge = showDictationButton ? getDictation139Bridge() : null;
@@ -1335,6 +1339,8 @@ function ComposerDictationButton({
 }
 
 const composerDictationRecordingStyle = { backgroundColor: "#d33" } as const;
+
+const MIN_OVERFLOW_ITEMS = 2;
 
 /**
  * スマホ幅の「…」メニュー。主要操作(添付・マイク・送信)を表に残し、補助操作をここへ畳む。
