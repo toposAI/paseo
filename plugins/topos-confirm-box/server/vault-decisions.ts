@@ -16,6 +16,7 @@ import path from "node:path";
 import type { ConfirmBoxItem, ConfirmBoxOption } from "../shared/contract.js";
 import { isLegacyOptionItem } from "../shared/contract.js";
 import { isBackupPath, resolveVaultDir } from "./notes.js";
+import { readCoordinatorIds } from "./coordinator-threads.js";
 import { BACKGROUND_MAX, SUMMARY_MAX, SUBJECT_MAX, normalizePriority } from "./normalize.js";
 
 export const VAULT_DECISION_SOURCE = "vault_decision_note";
@@ -91,7 +92,44 @@ export function parseOptions(text: string): {
   return { options, recommended };
 }
 
-export function parseDecisionNote(text: string, mtimeMs: number): ConfirmBoxItem | null {
+/** frontmatter の `threads:` リスト(`- <agent id>`)。 */
+export function parseThreads(text: string): string[] {
+  const m = /^---\n([\s\S]*?)\n---/.exec(text.replace(/^﻿/, "").replace(/\r\n/g, "\n"));
+  if (!m) return [];
+  const lines = m[1].split("\n");
+  const at = lines.findIndex((l) => /^threads:\s*$/.test(l));
+  if (at < 0) return [];
+  const out: string[] = [];
+  for (let i = at + 1; i < lines.length; i += 1) {
+    const li = /^\s*-\s+(\S+)\s*$/.exec(lines[i]);
+    if (!li) break;
+    out.push(li[1].replace(/^(["'])(.*)\1$/, "$2"));
+  }
+  return out;
+}
+
+/**
+ * チャットの宛先にする司令塔。ノートの `threads` のうち司令塔のID(短ID前方一致を含む)の先頭。
+ * 無ければ null(UIは従来どおり総司令塔へ振り替える)。子スレ本人ではなく**その子を建てた司令塔**を選ぶのは、
+ * 司令塔スレへのユーザー発言だけがVaultの発言ログに残り、そこから回答済みを機械判定できるため
+ * (`antigravity/utils/judgment_answer_sweep.py`)。回答後の子スレへの転送は child_thread_stall_forward が行う。
+ */
+export function pickChatCoordinator(
+  threads: readonly string[],
+  coordinatorIds: readonly string[],
+): string | null {
+  for (const t of threads) {
+    const hit = coordinatorIds.find((c) => c === t || (t.length >= 6 && c.startsWith(t)));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+export function parseDecisionNote(
+  text: string,
+  mtimeMs: number,
+  coordinatorIds: readonly string[] = [],
+): ConfirmBoxItem | null {
   const parsed = splitFrontmatter(text);
   if (!parsed) return null;
   const { front, body } = parsed;
@@ -108,6 +146,7 @@ export function parseDecisionNote(text: string, mtimeMs: number): ConfirmBoxItem
     ? `【材料待ち】${materials || "材料が揃うのを待っています"}`
     : summaryBase;
   const key = `${VAULT_KEY_PREFIX}${id}`;
+  const chatCoordinator = pickChatCoordinator(parseThreads(text), coordinatorIds);
   return {
     id: `pending:${key}`,
     kind: "pending",
@@ -118,7 +157,7 @@ export function parseDecisionNote(text: string, mtimeMs: number): ConfirmBoxItem
     summary: summary.slice(0, SUMMARY_MAX),
     background: background.slice(0, BACKGROUND_MAX),
     source: VAULT_DECISION_SOURCE,
-    threadRef: null,
+    threadRef: chatCoordinator ? { kind: "paseo_agent", id: chatCoordinator } : null,
     stoppedCount: 0,
     options,
     recommended,
@@ -191,6 +230,7 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
       .sort()
       .toReversed() // 上限を超えたら古い(日付の小さい)ノートから落とす
       .slice(0, MAX_NOTES);
+    const coordinatorIds = readCoordinatorIds();
     const items: ConfirmBoxItem[] = [];
     const skipped: { name: string; reason: string }[] = [];
     const seen = new Set<string>();
@@ -206,7 +246,7 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
         }
         const text = fs.readFileSync(full, "utf8");
         for (const k of claimableKeys(text)) claimed.add(k);
-        const item = parseDecisionNote(text, st.mtimeMs);
+        const item = parseDecisionNote(text, st.mtimeMs, coordinatorIds);
         if (!item) continue; // open/waiting_materials 以外・frontmatter なしは対象外(欠落ではない)
         // ファイル名と id が違うノートは、回答の書き先が別ノートになるので出さない
         if (

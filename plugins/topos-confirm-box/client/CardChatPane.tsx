@@ -366,7 +366,8 @@ export function CardChatPane({
     seq.current += 1;
     setLines((cur) => [...cur, { id: `u${seq.current}`, role: "user", text: t }]);
     try {
-      const outgoing = fallback && item ? withCardHeader(t, item) : t;
+      // カードID付きで送る(司令塔宛のとき発言ログから回答済みを機械判定するため。judgment_answer_sweep.py)
+      const outgoing = item ? withCardHeader(t, item) : t;
       await getPaseoClient(serverId).agents.ref(sendAgentId).send(outgoing);
       if (fallback) setCoordSent(true);
       setNotice("");

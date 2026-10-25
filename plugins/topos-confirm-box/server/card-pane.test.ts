@@ -86,9 +86,12 @@ test("総司令塔への振り替え: カードで参照無し/閉じている�
 
 test("withCardHeader: 先頭に題名とID、本文があれば続けて、利用者の文は最後", () => {
   const out = withCardHeader("どういう意味?", { id: "c9", subject: "題名X", background: "背景Y" });
-  assert.equal(out, "【確認箱カード】題名X(ID: c9)\n[カード本文]\n背景Y\n\nどういう意味?");
+  assert.equal(
+    out,
+    "【確認箱カード】題名X(ID: c9)\n[カード本文]\n背景Y\n\n[ユーザーの発言]\nどういう意味?",
+  );
   assert.equal(
     withCardHeader("q", { id: "c9", subject: "題名X" }),
-    "【確認箱カード】題名X(ID: c9)\n\nq",
+    "【確認箱カード】題名X(ID: c9)\n\n[ユーザーの発言]\nq",
   );
 });
