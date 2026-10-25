@@ -49,13 +49,22 @@ interface AgentReports {
   reports: Map<string, KnownReport>;
 }
 
+// A transient vendor error (rate limit, timeout) keeps showing the last good report for this long.
+const LAST_GOOD_MAX_AGE_MS = 24 * 60 * 60_000;
+// While a stale report stands in for a failed fetch, retry the vendor no sooner than this.
+const STALE_RETRY_MS = 60_000;
+
 /** Owns account identity, ordered logins for each account, and the five-minute fetch cache. */
 export class UsageSourceRegistry {
   private readonly sources = new Map<string, UsageSource>();
   private readonly known = new Map<string, KnownReport>();
   private defaults = new Map<string, KnownReport>();
   private readonly byAgent = new Map<string, AgentReports>();
-  private readonly cache = new Map<string, { at: number; entry: UsageReportEntry }>();
+  private readonly cache = new Map<
+    string,
+    { at: number; entry: UsageReportEntry; ttlMs?: number }
+  >();
+  private readonly lastGood = new Map<string, UsageReportEntry>();
   private readonly pending = new Map<string, Promise<UsageReportEntry>>();
 
   constructor(
@@ -82,6 +91,7 @@ export class UsageSourceRegistry {
     for (const key of this.known.keys()) if (key.startsWith(`${id}:`)) this.known.delete(key);
     for (const key of this.cache.keys()) if (key.startsWith(`${id}:`)) this.cache.delete(key);
     for (const key of this.pending.keys()) if (key.startsWith(`${id}:`)) this.pending.delete(key);
+    for (const key of this.lastGood.keys()) if (key.startsWith(`${id}:`)) this.lastGood.delete(key);
   }
 
   async listReports(options: ListUsageReportsOptions = {}): Promise<UsageReportEntry[]> {
@@ -239,12 +249,12 @@ export class UsageSourceRegistry {
       .update(JSON.stringify([known.label, known.logins.map(loginKey)]))
       .digest("hex")}`;
     const cached = this.cache.get(cacheKey);
-    if (!forceRefresh && cached && this.now() - cached.at < this.ttlMs)
+    if (!forceRefresh && cached && this.now() - cached.at < (cached.ttlMs ?? this.ttlMs))
       return Promise.resolve(cached.entry);
     const pending = this.pending.get(cacheKey);
     if (pending) return pending;
     const request = (async () => {
-      const entry: UsageReportEntry = {
+      const fetched: UsageReportEntry = {
         id,
         sourceId: known.source.id,
         sourceLabel: known.source.label,
@@ -253,8 +263,20 @@ export class UsageSourceRegistry {
         fetchedAt: new Date(this.now()).toISOString(),
         ...(await this.fetchWithFallback(known)),
       };
-      if (this.sources.get(known.source.id) === known.source) this.writeCache(cacheKey, entry);
-      return entry;
+      const current = this.sources.get(known.source.id) === known.source;
+      if (fetched.report.status === "available") {
+        if (current) this.lastGood.set(cacheKey, fetched);
+      } else if (fetched.report.status === "error") {
+        // A transient error must not replace numbers the user was already looking at. The
+        // report keeps its original fetchedAt, so the card shows how old it is.
+        const stale = this.lastGood.get(cacheKey);
+        if (stale && this.now() - Date.parse(stale.fetchedAt) < LAST_GOOD_MAX_AGE_MS) {
+          if (current) this.writeCache(cacheKey, stale, STALE_RETRY_MS);
+          return stale;
+        }
+      }
+      if (current) this.writeCache(cacheKey, fetched);
+      return fetched;
     })();
     this.pending.set(cacheKey, request);
     void request.finally(() => {
@@ -263,12 +285,12 @@ export class UsageSourceRegistry {
     return request;
   }
 
-  private writeCache(id: string, entry: UsageReportEntry): void {
+  private writeCache(id: string, entry: UsageReportEntry, ttlMs?: number): void {
     const at = this.now();
     for (const [cachedId, cached] of this.cache) {
-      if (at - cached.at >= this.ttlMs) this.cache.delete(cachedId);
+      if (at - cached.at >= (cached.ttlMs ?? this.ttlMs)) this.cache.delete(cachedId);
     }
-    this.cache.set(id, { at, entry });
+    this.cache.set(id, { at, entry, ttlMs });
   }
 
   private async fetchBeforeDeadline(source: UsageSource, input: unknown): Promise<UsageReport> {

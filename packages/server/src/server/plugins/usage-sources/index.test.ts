@@ -556,3 +556,79 @@ test("a hung login records its own timeout and still tries the next login", asyn
     { harness: "OpenCode", report: { status: "error", error: "Login rejected" } },
   ]);
 });
+
+test("a transient error keeps the last good report with its original fetchedAt", async () => {
+  let now = 0;
+  let calls = 0;
+  let fail = false;
+  const registry = new UsageSourceRegistry(() => now);
+  registry.register(
+    source({
+      id: "claude",
+      discover: async () => [{ key: "a", input: {} }],
+      fetch: async () => {
+        calls += 1;
+        if (fail) throw new Error("Rate limited by Claude. Try again in 1m.");
+        return { status: "available", windows: [{ id: "w", label: "good" }] };
+      },
+    }),
+  );
+  const [good] = await registry.listReports();
+  expect(good?.report.status).toBe("available");
+  fail = true;
+  now = 301_000;
+  const [stale] = await registry.listReports({ forceRefresh: true });
+  expect(stale?.report.status).toBe("available");
+  expect(stale?.fetchedAt).toBe(good?.fetchedAt);
+  // The stale report is served from cache for a minute instead of re-hitting the vendor.
+  const callsAfterFailure = calls;
+  now = 330_000;
+  expect((await registry.listReports())[0]?.fetchedAt).toBe(good?.fetchedAt);
+  expect(calls).toBe(callsAfterFailure);
+  // Once the vendor recovers the fresh report replaces it.
+  fail = false;
+  now = 400_000;
+  const [fresh] = await registry.listReports();
+  expect(fresh?.report.status).toBe("available");
+  expect(fresh?.fetchedAt).not.toBe(good?.fetchedAt);
+});
+
+test("a login problem is never masked by the last good report", async () => {
+  let now = 0;
+  let problem = false;
+  const registry = new UsageSourceRegistry(() => now);
+  registry.register(
+    source({
+      id: "claude",
+      discover: async () => [{ key: "a", input: {} }],
+      fetch: async () =>
+        problem
+          ? { status: "unavailable", problem: { kind: "rejected", status: 401 } }
+          : { status: "available", windows: [] },
+    }),
+  );
+  await registry.listReports();
+  problem = true;
+  now = 301_000;
+  expect((await registry.listReports())[0]?.report.status).toBe("unavailable");
+});
+
+test("a transient error older than a day is shown as an error", async () => {
+  let now = 0;
+  let fail = false;
+  const registry = new UsageSourceRegistry(() => now);
+  registry.register(
+    source({
+      id: "claude",
+      discover: async () => [{ key: "a", input: {} }],
+      fetch: async () => {
+        if (fail) throw new Error("down");
+        return { status: "available", windows: [] };
+      },
+    }),
+  );
+  await registry.listReports();
+  fail = true;
+  now = 25 * 60 * 60_000;
+  expect((await registry.listReports())[0]?.report.status).toBe("error");
+});
