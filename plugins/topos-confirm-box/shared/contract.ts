@@ -284,6 +284,11 @@ export const PriorityProjectSchema = z.object({
    * (題名の一致などで推測しない=誤ったスレを開くよりは「未設定」と言う)。
    */
   thread: z.string().nullable(),
+  /**
+   * 動いている子スレから自動で足された行で、まだユーザーが動かしていない印(台帳の `new`)。
+   * 画面に「新規」を出す。ユーザーが並べ替えると台帳側から外れる。
+   */
+  isNew: z.boolean().optional(),
 });
 export type PriorityProject = z.infer<typeof PriorityProjectSchema>;
 

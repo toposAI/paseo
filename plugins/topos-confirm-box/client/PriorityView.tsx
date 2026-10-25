@@ -269,6 +269,7 @@ function RankRow({
   index,
   name,
   hasThread,
+  isNew,
   styles,
   onShift,
 }: {
@@ -277,6 +278,8 @@ function RankRow({
   name: string;
   /** 担当スレが台帳に入っているか。未設定でも行は押せて、押したら理由を出す(黙って無反応にしない)。 */
   hasThread: boolean;
+  /** 動いているスレから自動で足され、まだ並べ替えていない行。「新規」の印を出す。 */
+  isNew: boolean;
   styles: Styles;
   onShift: (id: string, toRank: number) => Promise<void>;
 }) {
@@ -292,7 +295,7 @@ function RankRow({
       <Text style={styles.subject}>{index + 1}</Text>
       {/* 担当スレが入っていれば「› スレ」を付ける(押すと開くという印)。入れ子の Text は作らず1行にまとめる。 */}
       <Text style={label} numberOfLines={2}>
-        {hasThread ? `${name} › スレ` : name}
+        {`${isNew ? "【新規】" : ""}${hasThread ? `${name} › スレ` : name}`}
       </Text>
       <Pressable accessibilityRole="button" style={styles.btn} onPress={up}>
         <Text style={styles.btnText}>▲</Text>
@@ -423,6 +426,7 @@ export function PriorityView({
             index={i}
             name={p.name}
             hasThread={p.thread !== null}
+            isNew={p.isNew === true}
             styles={styles}
             onShift={shift}
           />
