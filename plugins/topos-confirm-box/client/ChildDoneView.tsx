@@ -9,7 +9,7 @@
  * 隠れるため残す)。ここから削除経路を増やさない。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import { childThreadsListRpc, childThreadsRevertRpc } from "../shared/child-threads.js";
 import type { ChildThread, ChildThreadsListOutput } from "../shared/child-threads.js";
@@ -165,17 +165,6 @@ export function ChildDoneView({
         paddingHorizontal: 12,
       },
       subText: { color: c.foreground, fontSize: 13 },
-      revertBox: { gap: 6 },
-      revertInput: {
-        color: c.foreground,
-        backgroundColor: c.surface2,
-        borderColor: c.border,
-        borderWidth: 1,
-        borderRadius: 6,
-        padding: 8,
-        minHeight: 60,
-        fontSize: 13,
-      },
     }),
     [c],
   );
@@ -301,13 +290,8 @@ function DoneCard({
     [navigation, thread.agentId],
   );
   const disabled = acked || busy || !thread.summaryItemId;
-  const [revertOpen, setRevertOpen] = useState(false);
-  const [instruction, setInstruction] = useState("");
-  const toggleRevert = useCallback(() => setRevertOpen((v) => !v), []);
-  const submitRevert = useCallback(() => {
-    setRevertOpen(false);
-    void onRevert(thread, instruction.trim());
-  }, [onRevert, thread, instruction]);
+  // 追加指示はスレ側で出す運用なので入力欄は無し。押したらすぐ差し戻す。
+  const submitRevert = useCallback(() => void onRevert(thread, ""), [onRevert, thread]);
   return (
     <View style={styles.card}>
       <View style={styles.head}>
@@ -335,7 +319,7 @@ function DoneCard({
             accessibilityRole="button"
             testID={`childdone-revert-${thread.agentId}`}
             style={styles.sub}
-            onPress={busy ? undefined : toggleRevert}
+            onPress={busy ? undefined : submitRevert}
           >
             <Text style={styles.subText}>差し戻し</Text>
           </Pressable>
@@ -346,35 +330,6 @@ function DoneCard({
           </Pressable>
         ) : null}
       </View>
-      {revertOpen ? (
-        <View style={styles.revertBox}>
-          <Text style={styles.meta}>
-            子スレへの追加指示(空でも差し戻せます。子スレは作業後に [STATUS] 完了 か
-            ユーザー判断待ち のどちらかで終わります)
-          </Text>
-          <TextInput
-            testID={`childdone-revert-input-${thread.agentId}`}
-            style={styles.revertInput}
-            multiline
-            value={instruction}
-            onChangeText={setInstruction}
-            placeholder="例: 表の列を直して"
-          />
-          <View style={styles.row}>
-            <Pressable
-              accessibilityRole="button"
-              testID={`childdone-revert-submit-${thread.agentId}`}
-              style={styles.btn}
-              onPress={submitRevert}
-            >
-              <Text style={styles.btnText}>差し戻す</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" style={styles.sub} onPress={toggleRevert}>
-              <Text style={styles.subText}>やめる</Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
       {!acked && !thread.summaryItemId ? (
         <Text style={styles.meta}>
           完了まとめが確認箱に無いため、ここからは確認できません。「スレを開く」から手でアーカイブしてください。
