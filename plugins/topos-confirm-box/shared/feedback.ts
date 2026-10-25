@@ -17,6 +17,39 @@ export const FEEDBACK_KIND_LABEL: Record<FeedbackKind, string> = {
   request: "要望",
 };
 
+/** 進捗の段階(`server/feedback-progress.ts` が台帳と確認箱から導く。報告ファイルには書かない)。 */
+export const FEEDBACK_PROGRESS_STAGES = [
+  "received",
+  "investigating",
+  "awaiting_decision",
+  "applying",
+  "done",
+  "stale",
+] as const;
+export type FeedbackProgressStage = (typeof FEEDBACK_PROGRESS_STAGES)[number];
+
+export const FEEDBACK_PROGRESS_LABEL: Record<FeedbackProgressStage, string> = {
+  received: "受付",
+  investigating: "調査中",
+  awaiting_decision: "判断待ち(修正済み・確認待ち)",
+  applying: "反映中",
+  done: "完了",
+  stale: "⚠放置の疑い",
+};
+
+export const FeedbackProgressSchema = z.object({
+  stage: z.enum(FEEDBACK_PROGRESS_STAGES),
+  /** 1行の補足(日本語)。 */
+  detail: z.string(),
+  /** 調査中の子スレ id(あれば)。 */
+  threadId: z.string().nullable(),
+  /** 判断待ちの確認箱項目 id(あれば)。 */
+  itemId: z.string().nullable(),
+  /** 完了(done/rejected)。画面は既定で隠す。 */
+  archived: z.boolean(),
+});
+export type FeedbackProgress = z.infer<typeof FeedbackProgressSchema>;
+
 export const FeedbackReportSchema = z.object({
   /** `fb-YYYYMMDD-HHMMSS-xxxx`。ファイル名と一致する(契約)。 */
   id: z.string(),
@@ -43,6 +76,8 @@ export const FeedbackReportSchema = z.object({
   hasScreenshot: z.boolean(),
   /** どのディレクトリの報告か(家族版/試用版の区別)。 */
   origin: z.string(),
+  /** 進捗(台帳から導出)。古いサーバー応答には無いので optional。 */
+  progress: FeedbackProgressSchema.optional(),
 });
 export type FeedbackReport = z.infer<typeof FeedbackReportSchema>;
 
