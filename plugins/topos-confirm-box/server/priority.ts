@@ -66,7 +66,7 @@ export function normalizeProjects(raw: unknown): PriorityProject[] | null {
       thread: typeof rec.thread === "string" && rec.thread.trim() ? rec.thread.trim() : null,
       ...(rec.new === true ? { isNew: true } : {}),
       ...(rec.auto === true ? { auto: true } : {}),
-    } as PriorityProject);
+    });
   }
   return out.length > 0 ? out : null;
 }
@@ -81,7 +81,7 @@ export function readLedger(dir: string): { projects: PriorityProject[]; updatedT
 
 /** UIの `isNew`(読み込み時に `new` から写す)を台帳の `new` に戻す。`auto` はそのまま通す。 */
 function toLedgerRow(p: PriorityProject): Record<string, unknown> {
-  const { isNew, ...rest } = p as PriorityProject & { auto?: boolean };
+  const { isNew, ...rest } = p;
   return { ...rest, ...(isNew ? { new: true } : {}) };
 }
 

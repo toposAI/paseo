@@ -289,6 +289,8 @@ export const PriorityProjectSchema = z.object({
    * 画面に「新規」を出す。ユーザーが並べ替えると台帳側から外れる。
    */
   isNew: z.boolean().optional(),
+  /** 動いているスレから自動で足された行(台帳の `auto`)。UIは書き戻しで落とさない。 */
+  auto: z.boolean().optional(),
 });
 export type PriorityProject = z.infer<typeof PriorityProjectSchema>;
 
