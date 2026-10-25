@@ -150,7 +150,7 @@ function FooterIconButton({
   buttonRef?: RefObject<View | null>;
 }) {
   const isCompact = useIsCompactFormFactor();
-  const iconSize = isCompact ? theme.iconSize.lg : theme.iconSize.md;
+  const iconSize = isCompact ? 24 : theme.iconSize.md;
 
   return (
     <Tooltip delayDuration={300}>
@@ -643,8 +643,8 @@ const styles = StyleSheet.create((theme) => ({
   footerIconButton: (isCompact: boolean) => ({
     // 28 rather than matching the 32px items: at the default sidebar width the line has 194px for
     // the six items (192px), and 2px of that shortfall has to come out of the gear's own width.
-    width: isCompact ? 36 : 28,
-    height: 36,
+    width: isCompact ? 44 : 28,
+    height: isCompact ? 48 : 36,
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: theme.spacing[1],

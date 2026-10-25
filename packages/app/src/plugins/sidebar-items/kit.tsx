@@ -6,6 +6,7 @@ import { DraggableList, type DraggableRenderItemInfo } from "@/components/dragga
 import type { DraggableListDragHandleProps } from "@/components/draggable-list.types";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { SidebarSeparator as AppSidebarSeparator } from "@/components/sidebar/sidebar-separator";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { resolvePluginIcon } from "../icons";
 import { useSidebarItemFrame } from "./frame";
 
@@ -19,13 +20,17 @@ function BarIconInner({
   Icon,
   size,
   color,
+  large,
 }: {
   Icon: BarIconComponent;
   size: number;
   color: string;
+  large?: boolean;
 }) {
-  return <Icon size={size} color={color} />;
+  return <Icon size={large ? COMPACT_BAR_ICON_SIZE : size} color={color} />;
 }
+// Phone drawer: bigger glyphs than the 16px desktop ones, in a taller bar.
+const COMPACT_BAR_ICON_SIZE = 24;
 const MutedBarIcon = withUnistyles(BarIconInner, (theme) => ({
   size: theme.iconSize.md,
   color: theme.colors.foregroundMuted,
@@ -34,8 +39,20 @@ const ActiveBarIcon = withUnistyles(BarIconInner, (theme) => ({
   size: theme.iconSize.md,
   color: theme.colors.foreground,
 }));
-function BarIcon({ Icon, active }: { Icon: BarIconComponent; active: boolean }) {
-  return active ? <ActiveBarIcon Icon={Icon} /> : <MutedBarIcon Icon={Icon} />;
+function BarIcon({
+  Icon,
+  active,
+  large,
+}: {
+  Icon: BarIconComponent;
+  active: boolean;
+  large: boolean;
+}) {
+  return active ? (
+    <ActiveBarIcon Icon={Icon} large={large} />
+  ) : (
+    <MutedBarIcon Icon={Icon} large={large} />
+  );
 }
 
 /**
@@ -45,6 +62,7 @@ function BarIcon({ Icon, active }: { Icon: BarIconComponent; active: boolean }) 
  */
 export function SidebarRow({ id, icon, label, onPress, active, trailing }: SidebarRowProps) {
   const frame = useSidebarItemFrame("SidebarRow");
+  const isCompact = useIsCompactFormFactor();
   const { anchorTo, offerAnchor, releaseAnchor } = frame;
   const rowRef = useRef<View | null>(null);
   useEffect(() => {
@@ -66,13 +84,13 @@ export function SidebarRow({ id, icon, label, onPress, active, trailing }: Sideb
     return (
       <View ref={rowRef} collapsable={false} onStartShouldSetResponderCapture={anchorHere}>
         <Pressable
-          style={styles.barButton}
+          style={isCompact ? styles.barButtonCompact : styles.barButton}
           testID={id ? `${frame.testID}-${id}` : frame.testID}
           accessibilityRole="button"
           accessibilityLabel={label ?? frame.title}
           onPress={handlePress}
         >
-          {Icon ? <BarIcon Icon={Icon} active={Boolean(active)} /> : null}
+          {Icon ? <BarIcon Icon={Icon} active={Boolean(active)} large={isCompact} /> : null}
           {trailing ? (
             <View style={styles.barBadge} pointerEvents="none">
               {trailing}
@@ -204,6 +222,12 @@ const styles = StyleSheet.create((theme) => ({
     // 32 rather than 36 (192px of the 194px the line has at the default 234px sidebar width).
     width: 32,
     height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  barButtonCompact: {
+    width: 44,
+    height: 48,
     alignItems: "center",
     justifyContent: "center",
   },
