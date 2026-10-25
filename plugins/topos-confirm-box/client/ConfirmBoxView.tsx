@@ -155,6 +155,8 @@ export function ConfirmBoxView({
       badge: { color: c.accent, fontSize: 11 },
       link: { color: c.accent, fontSize: 13, textDecorationLine: "underline" as const },
       row: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: touch ? 8 : 6 },
+      plainBlock: { gap: 6 },
+      plainSymbol: { color: c.accent, fontWeight: "700" as const },
       reporter: { color: c.foreground, fontSize: 13, fontWeight: "600" as const },
       // サブ操作(背景・💬・元スレ)は小さめ。最下行は必ず1行に収める。
       footBtn: { paddingVertical: 4, paddingHorizontal: 4 },
@@ -701,26 +703,88 @@ function formatCreated(ts: number): string {
   return `${p2(d.getMonth() + 1)}/${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 
+/** 選択肢の記号。id が a〜f / 1 桁の英数ならそれ、そうでなければ 1 始まりの番号。 */
+function optionSymbol(option: ConfirmBoxItem["options"][number], index: number): string {
+  return /^[a-z0-9]$/i.test(option.id) ? option.id : String(index + 1);
+}
+
 function OptionButton({
   item,
   option,
+  symbol,
   styles,
   onChoose,
 }: {
   item: ConfirmBoxItem;
   option: ConfirmBoxItem["options"][number];
+  /** 指定時は記号だけのボタンにする(文章は別途、平文で全文を出す)。 */
+  symbol?: string;
   styles: Styles;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
 }) {
   const rec = option.id === item.recommended;
   const press = useCallback(() => void onChoose(item, option.id), [onChoose, item, option.id]);
   return (
-    <Pressable accessibilityRole="button" style={rec ? styles.btnRec : styles.btn} onPress={press}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={symbol ? `${symbol}: ${option.label}` : undefined}
+      style={rec ? styles.btnRec : styles.btn}
+      onPress={press}
+    >
       <Text style={rec ? styles.btnRecText : styles.btnText}>
-        {option.label}
-        {rec && !option.label.includes("推奨") ? "(推奨)" : ""}
+        {symbol ?? option.label}
+        {!symbol && rec && !option.label.includes("推奨") ? "(推奨)" : ""}
       </Text>
     </Pressable>
+  );
+}
+
+/** 選択肢の文章は平文で全文を折り返して出し、ボタンは記号(a b c / 1 2 3)だけを1列に並べる。
+ * 承認待ち(permit)の許可/拒否は文言が短いので従来どおり文言ボタン。 */
+function PlainOptions({
+  item,
+  styles,
+  onChoose,
+}: {
+  item: ConfirmBoxItem;
+  styles: Styles;
+  onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
+}) {
+  if (item.kind === "permit") {
+    return (
+      <View style={styles.row}>
+        {item.options.map((o) => (
+          <OptionButton key={o.id} item={item} option={o} styles={styles} onChoose={onChoose} />
+        ))}
+      </View>
+    );
+  }
+  return (
+    <View style={styles.plainBlock}>
+      {item.options.map((o, i) => {
+        const rec = o.id === item.recommended;
+        return (
+          <Text key={o.id} style={styles.text}>
+            <Text style={styles.plainSymbol}>{optionSymbol(o, i)}</Text>
+            {"  "}
+            {o.label}
+            {rec && !o.label.includes("推奨") ? "(推奨)" : ""}
+          </Text>
+        );
+      })}
+      <View style={styles.row}>
+        {item.options.map((o, i) => (
+          <OptionButton
+            key={o.id}
+            item={item}
+            option={o}
+            symbol={optionSymbol(o, i)}
+            styles={styles}
+            onChoose={onChoose}
+          />
+        ))}
+      </View>
+    </View>
   );
 }
 
@@ -788,11 +852,7 @@ function ItemCard({
           onDeny={deny}
         />
       ) : (
-        <View style={styles.row}>
-          {item.options.map((o) => (
-            <OptionButton key={o.id} item={item} option={o} styles={styles} onChoose={onChoose} />
-          ))}
-        </View>
+        <PlainOptions item={item} styles={styles} onChoose={onChoose} />
       )}
       {open && questions.length === 0 ? <Text style={styles.text}>{item.summary}</Text> : null}
       {bgOpen && item.background ? <Text style={styles.text}>{item.background}</Text> : null}
