@@ -9,7 +9,10 @@
  * サイドバーから開けなくなった(ユーザー「このスレが自作サイドバーに出ない」)。
  *
  * 司令塔の一覧はデーモンが持つ実行時の正本(`<state>/domains/<領域>/coordinator_id`)から読む。
- * 生きているかは Paseo に聞く(閉じた司令塔を出さない)。
+ * 生きているかは Paseo に聞くが、**落とすのはアーカイブ済みだけ**(2026-10-25: Paseo デーモンの再起動で
+ * 走行中の司令塔が `status=closed`(未アーカイブ)になり、閉じた行を落とす旧設計だと上部の「司令塔」から
+ * 消えて押せず、再開する手段も無かった)。`closed` の司令塔は行に残し、状態は機械状態 `closed` から
+ * 「終了」と出す(`shared/thread-status-label.ts`)。押して送れば Paseo が再開する(`paseo send`)。
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -31,7 +34,9 @@ export function coordinatorStateDir(env: NodeJS.ProcessEnv = process.env): strin
  */
 export function readGeneralCoordinatorId(stateDir: string = coordinatorStateDir()): string | null {
   try {
-    const id = fs.readFileSync(path.join(stateDir, "domains", "general", "coordinator_id"), "utf8").trim();
+    const id = fs
+      .readFileSync(path.join(stateDir, "domains", "general", "coordinator_id"), "utf8")
+      .trim();
     return /^[A-Za-z0-9-]{8,64}$/.test(id) ? id : null;
   } catch {
     return null;
@@ -83,10 +88,10 @@ export function coordinatorRows(
     if (shown.has(id)) continue;
     const agent = agents.find((a) => str(a.id) === id);
     if (!agent) continue;
-    // 閉じた/アーカイブ済みの司令塔は行にしない。全ページの一覧が取れない縮退時は
-    // アーカイブ込みの一覧へ落ちるので、古い `coordinator_id` を指す終わったスレが司令塔として
-    // 先頭に出ていた(出口レビュー round2 指摘7)。
-    if (agent.archivedAt != null || str(agent.status) === "closed") continue;
+    // アーカイブ済みの司令塔は行にしない。全ページの一覧が取れない縮退時はアーカイブ込みの一覧へ
+    // 落ちるので、古い `coordinator_id` を指す終わったスレが司令塔として先頭に出ていた(出口レビュー
+    // round2 指摘7)。`closed` は落とさない(デーモン再起動で閉じただけの司令塔を消さない)。
+    if (agent.archivedAt != null) continue;
     rows.push({
       agentId: id,
       title: str(agent.title) || id.slice(0, 8),
@@ -169,9 +174,9 @@ export function markCoordinators(rows: ChildThread[], ids: readonly string[]): C
 }
 
 /**
- * 生きていない司令塔(closed/アーカイブ済み)の行を落とす。
+ * アーカイブ済みの司令塔の行を落とす(`closed` は残す。理由は冒頭コメント)。
  * ファイルの `coordinator_id` は起こしデーモンが書き換えるまで古い id を指し続けるので、
- * Paseo の一覧と突き合わせないと、閉じた司令塔の行が一覧に残って押しても開けない
+ * Paseo の一覧と突き合わせないと、アーカイブ済みの司令塔の行が一覧に残って押しても開けない
  * (2026-10-23 ユーザー報告「タップしてもスレが開かない」の一因)。
  * 一覧に居ない id(範囲外・取得の隙間)は落とさない(消す側に倒さない)。
  */
@@ -184,7 +189,7 @@ export function dropDeadCoordinators(
     if (t.coordinator !== true) return true;
     const agent = byId.get(t.agentId);
     if (!agent) return true;
-    return str(agent.status) !== "closed" && agent.archivedAt == null;
+    return agent.archivedAt == null;
   });
 }
 
