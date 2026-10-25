@@ -2316,6 +2316,10 @@ export const en = {
         description:
           "Long-press your messages for time and copy; collapse the composer while reading answers",
       },
+      composerOverflowMenu: {
+        label: 'Composer "…" menu',
+        description: 'On phone widths, fold secondary buttons (voice mode, usage) into a "…" menu',
+      },
       toolCallDetail: {
         label: "Tool call display",
         description: "How tool calls appear in the timeline",

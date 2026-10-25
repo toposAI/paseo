@@ -2212,6 +2212,10 @@ export const ja: TranslationResources = {
         label: "Topos風の会話表示",
         description: "ユーザー発言の長押しで日時とコピーを表示し、回答を読むときは入力欄を畳みます",
       },
+      composerOverflowMenu: {
+        label: "入力欄の「…」メニュー",
+        description: "スマホ幅で、音声会話モードなどの補助ボタンと使用量を「…」にまとめます",
+      },
       toolCallDetail: {
         label: "ツール呼び出しの表示",
         description: "タイムラインでのツール呼び出しの表示方法",
