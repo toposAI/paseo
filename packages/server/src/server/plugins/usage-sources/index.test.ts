@@ -725,3 +725,26 @@ test("forced refreshes inside a minute of the last fetch are served from the cac
   await registry.listReports({ forceRefresh: true });
   expect(fetches).toBe(2);
 });
+
+test("a read five minutes after the last fetch refreshes it by default", async () => {
+  let fetches = 0;
+  let now = 1_000_000;
+  const registry = new UsageSourceRegistry(() => now);
+  registry.register(
+    source({
+      id: "codex",
+      discover: async () => [{ key: "work", input: {} }],
+      fetch: async () => {
+        fetches++;
+        return { status: "available", windows: [{ id: "session", label: String(fetches) }] };
+      },
+    }),
+  );
+  await registry.listReports();
+  now += 239_000;
+  await registry.listReports();
+  expect(fetches).toBe(1);
+  now += 61_000;
+  await registry.listReports();
+  expect(fetches).toBe(2);
+});

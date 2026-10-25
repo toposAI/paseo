@@ -53,6 +53,9 @@ interface AgentReports {
 const LAST_GOOD_MAX_AGE_MS = 24 * 60 * 60_000;
 // While a stale report stands in for a failed fetch, retry the vendor no sooner than this.
 const STALE_RETRY_MS = 60_000;
+// Shorter than the sidebar's five-minute read, so each of its reads finds the cache expired and the
+// first screen to ask refreshes it for every other screen.
+const DEFAULT_TTL_MS = 240_000;
 // A forced refresh inside this window of the last fetch is served from the cache, so repeated
 // manual refreshes from several screens reach the source's API at most once a minute.
 const MIN_FORCE_INTERVAL_MS = 60_000;
@@ -72,7 +75,7 @@ export class UsageSourceRegistry {
 
   constructor(
     private readonly now: () => number = Date.now,
-    private readonly ttlMs = 300_000,
+    private readonly ttlMs = DEFAULT_TTL_MS,
     private readonly logger: Pick<Logger, "warn"> = { warn: console.warn },
     private readonly agents: AgentUsageLookup = {
       hasAgent: () => false,
