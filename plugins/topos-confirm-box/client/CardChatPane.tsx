@@ -1028,8 +1028,8 @@ export function CardChatPane({
       </View>
       <Text style={st.hint}>
         {fallback
-          ? `${COORDINATOR_FALLBACK_NOTICE}(${text.length}/${TEXT_MAX}字)`
-          : `${text.length}/${TEXT_MAX}字 · 送信先=投函元スレ(この画面の外のスレにも同じ発言が残ります)`}
+          ? `この欄に答えるスレ: 総司令塔 · ${COORDINATOR_FALLBACK_NOTICE}(${text.length}/${TEXT_MAX}字)`
+          : `この欄に答えるスレ: ${item?.answerLabel ?? (agentId ? agentId.slice(0, 7) : "不明")} · ${text.length}/${TEXT_MAX}字(この画面の外のスレにも同じ発言が残ります)`}
       </Text>
     </View>
   );

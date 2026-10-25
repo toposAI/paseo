@@ -16,7 +16,11 @@ import path from "node:path";
 import type { ConfirmBoxItem, ConfirmBoxOption } from "../shared/contract.js";
 import { isLegacyOptionItem } from "../shared/contract.js";
 import { isBackupPath, resolveVaultDir } from "./notes.js";
-import { readCoordinatorIds } from "./coordinator-threads.js";
+import { coordinatorStateDir, readDomainCoordinators } from "./coordinator-threads.js";
+import { resolveCardDestination, EMPTY_ROUTING } from "./card-destination.js";
+import type { RegistryEntry, RoutingContext } from "./card-destination.js";
+import { CHILD_THREADS_FILE } from "./child-threads.js";
+import { resolveConfirmBoxDir } from "./box.js";
 import { BACKGROUND_MAX, SUMMARY_MAX, SUBJECT_MAX, normalizePriority } from "./normalize.js";
 
 export const VAULT_DECISION_SOURCE = "vault_decision_note";
@@ -108,27 +112,43 @@ export function parseThreads(text: string): string[] {
   return out;
 }
 
-/**
- * チャットの宛先にする司令塔。ノートの `threads` のうち司令塔のID(短ID前方一致を含む)の先頭。
- * 無ければ null(UIは従来どおり総司令塔へ振り替える)。子スレ本人ではなく**その子を建てた司令塔**を選ぶのは、
- * 司令塔スレへのユーザー発言だけがVaultの発言ログに残り、そこから回答済みを機械判定できるため
- * (`antigravity/utils/judgment_answer_sweep.py`)。回答後の子スレへの転送は child_thread_stall_forward が行う。
- */
-export function pickChatCoordinator(
-  threads: readonly string[],
-  coordinatorIds: readonly string[],
-): string | null {
-  for (const t of threads) {
-    const hit = coordinatorIds.find((c) => c === t || (t.length >= 6 && c.startsWith(t)));
-    if (hit) return hit;
+/** 登録簿 `child_threads.json` を宛先決めの材料にする。読めなければ空(=未登録扱いで領域推定へ落ちる)。 */
+export function readRegistryEntries(dir: string): RegistryEntry[] {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(dir, CHILD_THREADS_FILE), "utf8")) as {
+      threads?: unknown;
+    };
+    if (!Array.isArray(raw.threads)) return [];
+    const str = (v: unknown): string => (typeof v === "string" ? v : "");
+    return raw.threads.flatMap((o: Record<string, unknown>) => {
+      const agentId = str(o?.agent_id);
+      if (!agentId) return [];
+      return [
+        {
+          agentId,
+          title: str(o.title),
+          parentAgentId: str(o.parent_agent_id) || null,
+          parentTitle: str(o.parent_title) || null,
+          archived: o.archived === true,
+        },
+      ];
+    });
+  } catch {
+    return [];
   }
-  return null;
+}
+
+export function readRoutingContext(env: NodeJS.ProcessEnv = process.env): RoutingContext {
+  return {
+    registry: readRegistryEntries(resolveConfirmBoxDir(env)),
+    domainCoordinators: readDomainCoordinators(coordinatorStateDir(env)),
+  };
 }
 
 export function parseDecisionNote(
   text: string,
   mtimeMs: number,
-  coordinatorIds: readonly string[] = [],
+  routing: RoutingContext = EMPTY_ROUTING,
 ): ConfirmBoxItem | null {
   const parsed = splitFrontmatter(text);
   if (!parsed) return null;
@@ -146,7 +166,11 @@ export function parseDecisionNote(
     ? `【材料待ち】${materials || "材料が揃うのを待っています"}`
     : summaryBase;
   const key = `${VAULT_KEY_PREFIX}${id}`;
-  const chatCoordinator = pickChatCoordinator(parseThreads(text), coordinatorIds);
+  const destination = resolveCardDestination(
+    parseThreads(text),
+    `${id} ${title} ${parseLegacyKeys(text).join(" ")}`,
+    routing,
+  );
   return {
     id: `pending:${key}`,
     kind: "pending",
@@ -157,7 +181,8 @@ export function parseDecisionNote(
     summary: summary.slice(0, SUMMARY_MAX),
     background: background.slice(0, BACKGROUND_MAX),
     source: VAULT_DECISION_SOURCE,
-    threadRef: chatCoordinator ? { kind: "paseo_agent", id: chatCoordinator } : null,
+    threadRef: destination.id ? { kind: "paseo_agent", id: destination.id } : null,
+    answerLabel: destination.label,
     stoppedCount: 0,
     options,
     recommended,
@@ -230,7 +255,7 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
       .sort()
       .toReversed() // 上限を超えたら古い(日付の小さい)ノートから落とす
       .slice(0, MAX_NOTES);
-    const coordinatorIds = readCoordinatorIds();
+    const routing = readRoutingContext(env);
     const items: ConfirmBoxItem[] = [];
     const skipped: { name: string; reason: string }[] = [];
     const seen = new Set<string>();
@@ -246,7 +271,7 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
         }
         const text = fs.readFileSync(full, "utf8");
         for (const k of claimableKeys(text)) claimed.add(k);
-        const item = parseDecisionNote(text, st.mtimeMs, coordinatorIds);
+        const item = parseDecisionNote(text, st.mtimeMs, routing);
         if (!item) continue; // open/waiting_materials 以外・frontmatter なしは対象外(欠落ではない)
         // ファイル名と id が違うノートは、回答の書き先が別ノートになるので出さない
         if (

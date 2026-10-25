@@ -63,6 +63,29 @@ export function readCoordinatorIds(stateDir: string = coordinatorStateDir()): st
   return [...ids];
 }
 
+/** 領域名 → 司令塔の agent id(`domains/<領域>/coordinator_id`)。読めない領域は載せない。 */
+export function readDomainCoordinators(
+  stateDir: string = coordinatorStateDir(),
+): Record<string, string> {
+  const base = path.join(stateDir, "domains");
+  const out: Record<string, string> = {};
+  let names: string[];
+  try {
+    names = fs.readdirSync(base);
+  } catch {
+    return out;
+  }
+  for (const name of names.sort()) {
+    try {
+      const id = fs.readFileSync(path.join(base, name, "coordinator_id"), "utf8").trim();
+      if (/^[A-Za-z0-9-]{8,64}$/.test(id)) out[name] = id;
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
 /** `ctx.paseo.agents.list()` の要素(Paseo 側の型に依存しないよう、読む所だけ緩く持つ)。 */
 export interface CoordinatorAgent {
   id?: unknown;

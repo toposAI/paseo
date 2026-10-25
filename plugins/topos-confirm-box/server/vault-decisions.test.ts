@@ -314,21 +314,35 @@ const WITH_THREADS = (ids: string[]) =>
     `threads:\n${ids.map((i) => `- ${i}`).join("\n")}\nlegacy_keys: []`,
   );
 
-test("チャット宛先: ノートの threads のうち司令塔(短ID前方一致を含む)を threadRef にする。子スレ本人は選ばない", () => {
-  const coord = "afe8d176-d92c-4cb2-933b-8dfe790d3c20";
-  const parsed = parseDecisionNote(WITH_THREADS(["e7fd88de", "afe8d17"]), 1, [
-    coord,
-  ]) as ConfirmBoxItem;
-  assert.deepEqual(parsed.threadRef, { kind: "paseo_agent", id: coord });
-  // 司令塔が threads に無ければ null(UIは従来どおり総司令塔へ)
-  assert.equal(
-    (parseDecisionNote(WITH_THREADS(["e7fd88de"]), 1, [coord]) as ConfirmBoxItem).threadRef,
-    null,
-  );
-  assert.equal(
-    (parseDecisionNote(NOTE("j-t2", "open"), 1, [coord]) as ConfirmBoxItem).threadRef,
-    null,
-  );
+const ROUTING = {
+  registry: [
+    {
+      agentId: "e7fd88de-95e9-46a0-b716-b8a87ea936df",
+      title: "f80-walltalk-check-design",
+      parentAgentId: "afe8d176-d92c-4cb2-933b-8dfe790d3c20",
+      parentTitle: "F-80司令塔",
+      archived: false,
+    },
+  ],
+  domainCoordinators: {
+    general: "1800e2f7-63a5-40b7-9f5f-52e0ba24bb49",
+    f80: "afe8d176-d92c-4cb2-933b-8dfe790d3c20",
+  },
+};
+
+test("チャット宛先: 登録簿の親スレを threadRef にし、答えるスレの表示を付ける", () => {
+  const parsed = parseDecisionNote(WITH_THREADS(["e7fd88de"]), 1, ROUTING) as ConfirmBoxItem;
+  assert.deepEqual(parsed.threadRef, {
+    kind: "paseo_agent",
+    id: "afe8d176-d92c-4cb2-933b-8dfe790d3c20",
+  });
+  assert.equal(parsed.answerLabel, "afe8d17 F-80司令塔");
+});
+
+test("チャット宛先: threads が無いノートは総司令塔(未登録と明示)", () => {
+  const parsed = parseDecisionNote(NOTE("j-t2", "open"), 1, ROUTING) as ConfirmBoxItem;
+  assert.equal(parsed.threadRef?.id, ROUTING.domainCoordinators.general);
+  assert.match(parsed.answerLabel ?? "", /未登録/);
 });
 
 test("却下: superseded になりコメントが逐語で残り、rejected_at が付き、一覧から消える", () => {

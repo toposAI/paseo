@@ -96,6 +96,8 @@ export const ConfirmBoxItemSchema = z.object({
   background: z.string(),
   source: z.string(),
   threadRef: ConfirmBoxThreadRefSchema.nullable(),
+  /** 「この欄に答えるスレ」の表示(短ID+題名。未登録の投函元は明示)。判断ノート由来のカードだけ入る。 */
+  answerLabel: z.string().optional(),
   stoppedCount: z.number().int(),
   /** 新着バグ報告などの報告者表示名(投函側が `reporter` に入れた場合のみ)。 */
   reporter: z.string().optional(),
