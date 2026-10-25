@@ -56,9 +56,6 @@ const STALE_RETRY_MS = 60_000;
 // Shorter than the sidebar's five-minute read, so each of its reads finds the cache expired and the
 // first screen to ask refreshes it for every other screen.
 const DEFAULT_TTL_MS = 240_000;
-// A forced refresh inside this window of the last fetch is served from the cache, so repeated
-// manual refreshes from several screens reach the source's API at most once a minute.
-const MIN_FORCE_INTERVAL_MS = 60_000;
 
 /** Owns account identity, ordered logins for each account, and the five-minute fetch cache. */
 export class UsageSourceRegistry {
@@ -269,13 +266,8 @@ export class UsageSourceRegistry {
       .update(JSON.stringify([known.label, known.logins.map(loginKey)]))
       .digest("hex")}`;
     const cached = this.cache.get(cacheKey);
-    if (cached) {
-      const age = this.now() - cached.at;
-      const ttl = forceRefresh
-        ? Math.min(MIN_FORCE_INTERVAL_MS, cached.ttlMs ?? this.ttlMs)
-        : (cached.ttlMs ?? this.ttlMs);
-      if (age < ttl) return Promise.resolve(cached.entry);
-    }
+    if (!forceRefresh && cached && this.now() - cached.at < (cached.ttlMs ?? this.ttlMs))
+      return Promise.resolve(cached.entry);
     const pending = this.pending.get(cacheKey);
     if (pending) return pending;
     const request = (async () => {
