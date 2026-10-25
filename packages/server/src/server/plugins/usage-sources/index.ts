@@ -53,6 +53,9 @@ interface AgentReports {
 const LAST_GOOD_MAX_AGE_MS = 24 * 60 * 60_000;
 // While a stale report stands in for a failed fetch, retry the vendor no sooner than this.
 const STALE_RETRY_MS = 60_000;
+// A forced refresh inside this window of the last fetch is served from the cache, so repeated
+// manual refreshes from several screens reach the source's API at most once a minute.
+const MIN_FORCE_INTERVAL_MS = 60_000;
 
 /** Owns account identity, ordered logins for each account, and the five-minute fetch cache. */
 export class UsageSourceRegistry {
@@ -71,7 +74,10 @@ export class UsageSourceRegistry {
     private readonly now: () => number = Date.now,
     private readonly ttlMs = 300_000,
     private readonly logger: Pick<Logger, "warn"> = { warn: console.warn },
-    private readonly agents: AgentUsageLookup = { hasAgent: () => false, usageSession: () => null },
+    private readonly agents: AgentUsageLookup = {
+      hasAgent: () => false,
+      usageSession: () => null,
+    },
     private readonly deadlineMs = 20_000,
   ) {}
 
@@ -199,11 +205,19 @@ export class UsageSourceRegistry {
             const id = `${source.id}:${account.key}`;
             const known = reports.get(id);
             // COMPAT(usageLoginHarness): added in v0.11.0, remove after 2027-04-05 once plugin floor >= v0.11.0.
-            const login = { input: account.input, harness: account.harness ?? source.label };
+            const login = {
+              input: account.input,
+              harness: account.harness ?? source.label,
+            };
             if (known) {
               if (!known.logins.some((existing) => loginKey(existing) === loginKey(login)))
                 known.logins.push(login);
-            } else reports.set(id, { source, logins: [login], label: account.label });
+            } else
+              reports.set(id, {
+                source,
+                logins: [login],
+                label: account.label,
+              });
           }
         } catch (error) {
           this.logger.warn({ sourceId: source.id, err: error }, "Usage source discovery failed");
@@ -219,7 +233,10 @@ export class UsageSourceRegistry {
   }
 
   // COMPAT(providerUsageList): added in v0.1.98, remove after 2027-03-26.
-  async listLegacyUsage(): Promise<{ fetchedAt: string; providers: ProviderUsage[] }> {
+  async listLegacyUsage(): Promise<{
+    fetchedAt: string;
+    providers: ProviderUsage[];
+  }> {
     const reports = await this.listReports();
     return {
       fetchedAt: reports.length
@@ -249,8 +266,13 @@ export class UsageSourceRegistry {
       .update(JSON.stringify([known.label, known.logins.map(loginKey)]))
       .digest("hex")}`;
     const cached = this.cache.get(cacheKey);
-    if (!forceRefresh && cached && this.now() - cached.at < (cached.ttlMs ?? this.ttlMs))
-      return Promise.resolve(cached.entry);
+    if (cached) {
+      const age = this.now() - cached.at;
+      const ttl = forceRefresh
+        ? Math.min(MIN_FORCE_INTERVAL_MS, cached.ttlMs ?? this.ttlMs)
+        : (cached.ttlMs ?? this.ttlMs);
+      if (age < ttl) return Promise.resolve(cached.entry);
+    }
     const pending = this.pending.get(cacheKey);
     if (pending) return pending;
     const request = (async () => {
@@ -332,7 +354,10 @@ export class UsageSourceRegistry {
       return UsageReportSchema.parse(await source.fetch(input));
     } catch (error) {
       this.logger.warn({ sourceId: source.id, err: error }, "Usage fetch failed");
-      return { status: "error", error: error instanceof Error ? error.message : String(error) };
+      return {
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 }
