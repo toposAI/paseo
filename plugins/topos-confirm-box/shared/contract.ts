@@ -497,9 +497,18 @@ export function isNotificationItem(item: ConfirmBoxItem): boolean {
   return !NOTIFICATION_EXCLUDED_SOURCES.includes(item.source);
 }
 
-/** 通知タブのバッジ。未読(state=new)だけ数える。 */
+/** 通知タブの未読(緊急かどうかを問わない)。タブ内の見出し用で、バッジには使わない。 */
 export function countUnreadNotifications(items: readonly ConfirmBoxItem[]): number {
   return items.filter((i) => isNotificationItem(i) && i.state === "new").length;
+}
+
+/**
+ * 通知タブのバッジ=**緊急かつ未読**だけ(2026-10-26 ユーザー指示「バッジは緊急の件数だけ」)。
+ * 通常の通知はバッジに数えない。0 のときは呼び出し側が非表示にする。
+ */
+export function countUrgentUnreadNotifications(items: readonly ConfirmBoxItem[]): number {
+  return items.filter((i) => isNotificationItem(i) && i.state === "new" && i.urgency === "urgent")
+    .length;
 }
 
 /**

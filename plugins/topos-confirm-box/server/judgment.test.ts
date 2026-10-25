@@ -12,6 +12,7 @@ import test from "node:test";
 import {
   countOpen,
   countUnreadNotifications,
+  countUrgentUnreadNotifications,
   isJudgmentItem,
   isLegacyOptionItem,
   isNotificationItem,
@@ -155,6 +156,16 @@ test("通知タブのバッジは未読の通知だけ数える", () => {
     item({ id: "box:mail-read", source: "mailtriage_deepseek_safety_net_watchdog", state: "read" }),
   ];
   assert.equal(countUnreadNotifications(rows), 1);
+});
+
+test("通知タブのバッジ=緊急かつ未読だけ(通常は数えない・既読の緊急も数えない)", () => {
+  const rows = [
+    MAIL,
+    item({ id: "box:u1", source: "x", urgency: "urgent" }),
+    item({ id: "box:u2", source: "x", urgency: "urgent", state: "read" }),
+  ];
+  assert.equal(countUrgentUnreadNotifications(rows), 1);
+  assert.equal(countUrgentUnreadNotifications([MAIL]), 0);
 });
 
 test("判断タブの行(画面と共通の絞り込み)に通知・バグ報告・完了報告は入らない", () => {

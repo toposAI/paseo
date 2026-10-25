@@ -123,6 +123,9 @@ function applyItem(items: Map<string, ConfirmBoxItem>, e: Record<string, unknown
     state: "new",
     urgency: e.urgency === "urgent" ? "urgent" : "normal",
     judgment: e.judgment === true,
+    ...(typeof e.dup_count === "number" && e.dup_count > 1
+      ? { dupCount: Math.floor(e.dup_count) }
+      : {}),
     key: normalizeKey(e.key),
     agentId: null,
     workspaceId: null,
