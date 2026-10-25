@@ -14,6 +14,7 @@ import {
   countNewReports,
   feedbackReportsListRpc,
 } from "../shared/feedback.js";
+import type { ToggleInfo } from "./HeaderIconBar.js";
 import type { FeedbackReport, FeedbackReportsListOutput } from "../shared/feedback.js";
 
 const REFRESH_MS = 30_000;
@@ -25,13 +26,19 @@ function describe(error: string | null, loaded: boolean, total: number, newCount
   return `バグ・要望 ${total}件(未対応 ${newCount}件)`;
 }
 
-export function BugReportsView({ theme }: Pick<PluginHostProps, "theme">) {
+export function BugReportsView({
+  theme,
+  showArchived = false,
+  onToggleInfo,
+}: Pick<PluginHostProps, "theme"> & {
+  /** 完了済みも出すか。切替ボタンは親(最上部のアイコン列)に置く。 */
+  showArchived?: boolean;
+  onToggleInfo?: (info: ToggleInfo | null) => void;
+}) {
   const list = useRpc(feedbackReportsListRpc);
   const [data, setData] = useState<FeedbackReportsListOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [showArchived, setShowArchived] = useState(false);
-  const toggleArchived = useCallback(() => setShowArchived((v) => !v), []);
 
   const reload = useCallback(async () => {
     try {
@@ -88,14 +95,6 @@ export function BugReportsView({ theme }: Pick<PluginHostProps, "theme">) {
         paddingHorizontal: 6,
         paddingVertical: 1,
       },
-      btn: {
-        backgroundColor: c.surface2,
-        borderRadius: 6,
-        paddingVertical: 6,
-        paddingHorizontal: 10,
-        alignSelf: "flex-start" as const,
-      },
-      btnText: { color: c.foreground, fontSize: 12 },
       reply: {
         color: c.foreground,
         fontSize: 13,
@@ -114,17 +113,22 @@ export function BugReportsView({ theme }: Pick<PluginHostProps, "theme">) {
   // 完了(対応済み・見送り)は既定で隠す。トグルはセッション内のみ(永続化しない=「消えた」と誤解させない)
   const reports = showArchived ? allReports : allReports.filter((r) => !isHidden(r));
   const newCount = countNewReports(allReports);
+  useEffect(() => {
+    if (!onToggleInfo) return undefined;
+    onToggleInfo(
+      archivedCount > 0
+        ? {
+            label: showArchived ? "完了済み隠す" : "完了済み表示",
+            a11y: showArchived ? "完了済みを隠す" : `完了済みも表示(${archivedCount}件)`,
+          }
+        : null,
+    );
+    return () => onToggleInfo(null);
+  }, [onToggleInfo, archivedCount, showArchived]);
 
   return (
     <View style={s.root}>
       <Text style={s.meta}>{describe(error, data !== null, allReports.length, newCount)}</Text>
-      {archivedCount > 0 ? (
-        <Pressable accessibilityRole="button" onPress={toggleArchived} style={s.btn}>
-          <Text style={s.btnText}>
-            {showArchived ? "完了済みを隠す" : `完了済みも表示(${archivedCount}件)`}
-          </Text>
-        </Pressable>
-      ) : null}
       {data?.sources
         .filter((x) => !x.ok)
         .map((x) => (

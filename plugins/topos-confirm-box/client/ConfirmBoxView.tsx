@@ -27,7 +27,12 @@ import { onBoxChanged, notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
 import { BugReportsView } from "./BugReportsView.js";
 import { ChildDoneView } from "./ChildDoneView.js";
-import { HeaderIconBar, type HeaderTabId } from "./HeaderIconBar.js";
+import {
+  HeaderIconBar,
+  type HeaderTabId,
+  type HeaderToggle,
+  type ToggleInfo,
+} from "./HeaderIconBar.js";
 import { NotificationsView } from "./NotificationsView.js";
 import { BellIcon, BugIcon, CheckCircleIcon, InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
@@ -402,6 +407,7 @@ export function ConfirmBoxView({
     shownTab,
     manualReload,
   });
+  const { showAll, setToggleInfo, headerToggle } = useHeaderToggle(shownTab);
 
   // 幅で置き場所が変わる(右に並べる/全画面で重ねる)ので、SplitLayout へ要素ごと渡す。
   // ペインの相手は投函元スレ(2026-10-22 ユーザー決定)。まだ一覧に来ていないカードは null。
@@ -434,9 +440,18 @@ export function ConfirmBoxView({
       </>
     );
   } else if (shownTab === "bugs") {
-    content = <BugReportsView theme={theme} />;
+    content = (
+      <BugReportsView theme={theme} showArchived={showAll.bugs} onToggleInfo={setToggleInfo} />
+    );
   } else if (shownTab === "childdone") {
-    content = <ChildDoneView theme={theme} navigation={navigation} />;
+    content = (
+      <ChildDoneView
+        theme={theme}
+        navigation={navigation}
+        showAcked={showAll.childdone}
+        onToggleInfo={setToggleInfo}
+      />
+    );
   } else if (shownTab === "notify") {
     content = <NotificationsView theme={theme} />;
   } else {
@@ -498,9 +513,11 @@ export function ConfirmBoxView({
           colors={c}
           onSelect={selectFromHeader}
           onRefresh={refreshFromHeader}
+          toggle={headerToggle}
           touch={touch}
         />
         <ScrollView key={reloadN} style={s.flex} contentContainerStyle={s.body}>
+          <InlineToggle show={openScreen === undefined} toggle={headerToggle} styles={s} />
           {content}
         </ScrollView>
         {shownTab === "priority" ? <ChatDock colors={c} agentId={PRIORITY_CHAT_AGENT_ID} /> : null}
@@ -608,6 +625,43 @@ function useHeaderNav({
     return true;
   }, [shownTab, manualReload]);
   return { selectFromHeader, refreshFromHeader, reloadN };
+}
+
+/**
+ * 子スレ完了(確認済み)・バグ報告(完了済み)の「も表示」切替。ボタンはアイコン列の更新ボタンの左に置くので、
+ * 出す/隠すの状態はここで持ち、各画面は表示の有無とラベルだけを `setToggleInfo` で知らせる。
+ */
+function useHeaderToggle(shownTab: TabId) {
+  const [showAll, setShowAll] = useState({ bugs: false, childdone: false });
+  const [toggleInfo, setToggleInfo] = useState<ToggleInfo | null>(null);
+  const onPress = useCallback(() => {
+    if (shownTab === "bugs" || shownTab === "childdone") {
+      setShowAll((v) => ({ ...v, [shownTab]: !v[shownTab] }));
+    }
+  }, [shownTab]);
+  const headerToggle = useMemo<HeaderToggle | null>(
+    () => (toggleInfo ? { ...toggleInfo, onPress } : null),
+    [toggleInfo, onPress],
+  );
+  return { showAll, setToggleInfo, headerToggle };
+}
+
+/** アイコン列が無い画面(ポップオーバー)では、切替ボタンを一覧の先頭に出す。 */
+function InlineToggle({
+  show,
+  toggle,
+  styles,
+}: {
+  show: boolean;
+  toggle: HeaderToggle | null;
+  styles: { filterLine: object; text: object };
+}) {
+  if (!show || !toggle) return null;
+  return (
+    <Pressable accessibilityRole="button" style={styles.filterLine} onPress={toggle.onPress}>
+      <Text style={styles.text}>{toggle.a11y}</Text>
+    </Pressable>
+  );
 }
 
 /** アイコン列を出す画面では、下の並び(TabStrip)は要らない(`items` を渡すと何も描かない)。 */

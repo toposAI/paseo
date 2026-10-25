@@ -36,6 +36,7 @@ type BarColors = Pick<
   | "accent"
   | "accentForeground"
   | "border"
+  | "foreground"
   | "foregroundMuted"
   | "statusWarning"
   | "surface1"
@@ -111,12 +112,22 @@ function HeaderTab({
   );
 }
 
+/** 画面ごとの絞り込み切替(確認済み/完了済みを出す・隠す)。更新ボタンの左に出す。 */
+export interface HeaderToggle {
+  label: string;
+  a11y: string;
+  onPress: () => void;
+}
+
+export type ToggleInfo = Omit<HeaderToggle, "onPress">;
+
 export function HeaderIconBar({
   active,
   counts,
   colors,
   onSelect,
   onRefresh,
+  toggle,
   touch,
 }: {
   active: HeaderTabId;
@@ -124,6 +135,7 @@ export function HeaderIconBar({
   colors: BarColors;
   onSelect: (id: HeaderTabId) => void;
   onRefresh: () => Promise<boolean>;
+  toggle?: HeaderToggle | null;
   /** タッチ幅(iPhone 等)。行を少し高くして押しやすくする。 */
   touch: boolean;
 }) {
@@ -141,9 +153,21 @@ export function HeaderIconBar({
         backgroundColor: colors.surface1,
       },
       // 更新ボタンは右端。狭い幅でもアイコン列を折り返さない(各ボタンは縮めない)。
-      reload: { marginLeft: "auto" as const, flexShrink: 0, paddingLeft: 4 },
+      reload: { flexShrink: 0, paddingLeft: 4 },
+      // 切替ボタンは更新ボタンの左。幅が足りない時はこれだけ縮める(アイコン列は折り返さない)。
+      toggle: {
+        marginLeft: "auto" as const,
+        flexShrink: 1,
+        minWidth: 0,
+        backgroundColor: colors.surface2,
+        borderRadius: 6,
+        paddingVertical: 6,
+        paddingHorizontal: 8,
+      },
+      toggleText: { color: colors.foreground, fontSize: 12 },
+      spacer: { flex: 1 },
     }),
-    [colors.border, colors.surface1, touch],
+    [colors.border, colors.surface1, colors.surface2, colors.foreground, touch],
   );
   return (
     <View style={s.bar} accessibilityRole="tablist">
@@ -157,6 +181,21 @@ export function HeaderIconBar({
           onSelect={onSelect}
         />
       ))}
+      {toggle ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={toggle.a11y}
+          style={s.toggle}
+          onPress={toggle.onPress}
+          testID="header-toggle"
+        >
+          <Text style={s.toggleText} numberOfLines={1}>
+            {toggle.label}
+          </Text>
+        </Pressable>
+      ) : (
+        <View style={s.spacer} />
+      )}
       <View style={s.reload}>
         <ReloadButton colors={colors} onRefresh={onRefresh} testID="header-reload" />
       </View>
