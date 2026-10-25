@@ -140,7 +140,7 @@ function applyAck(items: Map<string, ConfirmBoxItem>, e: Record<string, unknown>
   else if (item.state === "new") item.state = "read";
 }
 
-/** 後から付ける判断印(`{"t":"judgment","id":…}`)。**追記専用**で item 行は書き換えない。
+/** 後から付ける判断印(`{"t":"judgment","id":…}`)。**追記専用**で item 行は書き換えない。Vault判断カードには当てない(カードの順は frontmatter の `subrank:` が正本)。
  * バックフィルの対象には箱の item のほか、まだ箱へ流していない中間形式(`pending:<key>`)も
  * あるため、そちらの id も受け付ける(`mergeBoxAndPending` の命名に合わせる)。 */
 function applyJudgment(items: Map<string, ConfirmBoxItem>, e: Record<string, unknown>): void {
@@ -164,8 +164,8 @@ export interface RerankOverride {
 }
 
 /**
- * `{"t":"rerank","id"|"key":…,"subrank":N,"priority":…}`(箱イベントにも `pending_user_decisions.jsonl` にも書ける)。
- * **追記専用**で item 行は書き換えない(hide / judgment と同じ流儀)。同じ対象への行は後勝ちで、
+ * `{"t":"rerank","id"|"key":…,"subrank":N,"priority":…}`(**箱イベント(events-*.jsonl)だけ**を読む。Python `load_items()` と同じ。保留ファイルの rerank は読まない)。
+ * **追記専用**で item 行は書き換えない。Vault判断カードには当てない(カードの順は frontmatter の `subrank:` が正本)(hide / judgment と同じ流儀)。同じ対象への行は後勝ちで、
  * `priority` と `subrank` は片方だけでも効く。対象は項目の `id` か `key`(`pending:` は省略可)。
  */
 export function parseReranks(
@@ -360,8 +360,6 @@ export function readConfirmBox(dir: string = resolveConfirmBoxDir()): ReadConfir
   } else {
     try {
       const pendingRecords = parseJsonl(fs.readFileSync(pendingPath, "utf8"));
-      for (const [k, v] of parseReranks(pendingRecords))
-        reranks.set(k, { ...reranks.get(k), ...v });
       const parsed = parsePendingRecords(pendingRecords);
       pendingOverrides = parsed.overrides;
       // 決定済みの key を外す(投函側が箱へ流す前でも、決めたものが残らないように)

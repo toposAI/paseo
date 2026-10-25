@@ -59,3 +59,17 @@ test("readConfirmBox: 追記専用の rerank で並びが変わり、item行は�
   const again = applyReranks(r.items, new Map([["b1", { subrank: -9 }]]));
   assert.equal(again.find((i) => i.id === "b1")?.subrank, -9);
 });
+
+test("保留ファイル内の rerank は読まない(Python load_items と同じ)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rerank-p-"));
+  fs.writeFileSync(
+    path.join(dir, "pending_user_decisions.jsonl"),
+    [
+      JSON.stringify({ key: "kp1", subject: "p1", priority: "normal" }),
+      JSON.stringify({ t: "rerank", key: "kp1", priority: "blocking", subrank: -9 }),
+    ].join("\n") + "\n",
+  );
+  const r = readConfirmBox(dir);
+  assert.equal(r.items[0].priority, "normal");
+  assert.equal(r.items[0].subrank, 0);
+});
