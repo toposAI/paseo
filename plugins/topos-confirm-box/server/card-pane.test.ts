@@ -6,6 +6,7 @@ import {
   searchWithCard,
   searchWithPane,
   shouldFallbackToCoordinator,
+  shouldSwitchPaneOnCardPress,
   threadIdFromSearch,
   threadUnavailableReason,
   withCardHeader,
@@ -91,4 +92,10 @@ test("withCardHeader: 先頭に題名とID、本文があれば続けて、利�
     withCardHeader("q", { id: "c9", subject: "題名X" }),
     "【確認箱カード】題名X(ID: c9)\n\nq",
   );
+});
+
+test("カード本体のタップ: ペインが開いている間だけ、別のカードへ切り替える", () => {
+  assert.equal(shouldSwitchPaneOnCardPress(false, false), false); // 閉じている=開かない(従来動作)
+  assert.equal(shouldSwitchPaneOnCardPress(true, false), true); // 開いていて別のカード=切替
+  assert.equal(shouldSwitchPaneOnCardPress(true, true), false); // 既に出ているカード=何もしない
 });

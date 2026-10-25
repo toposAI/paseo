@@ -29,6 +29,7 @@ import { NotificationsView } from "./NotificationsView.js";
 import { BellIcon, BugIcon, CheckCircleIcon, InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import { CardChatPane } from "./CardChatPane.js";
+import { shouldSwitchPaneOnCardPress } from "../shared/card-pane.js";
 import { useCardPaneRoute } from "./useCardPaneRoute.js";
 import { useConfirmBoxPane } from "./useConfirmBoxPane.js";
 import { QuestionAnswer } from "./QuestionAnswer.js";
@@ -147,6 +148,15 @@ export function ConfirmBoxView({
         borderWidth: 1,
         borderRadius: 8,
         padding: 10,
+        gap: 6,
+      },
+      // 右ペインに出ているカードの軽い強調(枠線と薄い背景)。
+      cardActive: {
+        backgroundColor: c.surface1,
+        borderColor: c.accent,
+        borderWidth: 2,
+        borderRadius: 8,
+        padding: 9,
         gap: 6,
       },
       subject: { color: c.foreground, fontSize: 15, fontWeight: "600" as const },
@@ -417,6 +427,7 @@ export function ConfirmBoxView({
             onChoose={choose}
             onAnswer={answer}
             paneOpen={paneCardId === item.id}
+            anyPaneOpen={pane !== null}
             onOpenPane={openCard}
           />
         ))}
@@ -798,6 +809,7 @@ function ItemCard({
   onChoose,
   onAnswer,
   paneOpen,
+  anyPaneOpen,
   onOpenPane,
 }: {
   item: ConfirmBoxItem;
@@ -810,6 +822,8 @@ function ItemCard({
   onAnswer: (item: ConfirmBoxItem, answers: Record<string, string>) => Promise<void>;
   /** このカードの会話ペインが開いているか。 */
   paneOpen: boolean;
+  /** 右ペインが(どの相手でも)開いているか。開いている間だけ、カード本体のタップで相手を切り替える。 */
+  anyPaneOpen: boolean;
   onOpenPane: (item: ConfirmBoxItem) => void;
 }) {
   const [bgOpen, setBgOpen] = useState(false);
@@ -821,6 +835,8 @@ function ItemCard({
     });
   }, [onBackground]);
   const openPane = useCallback(() => onOpenPane(item), [onOpenPane, item]);
+  // カード本体の何もない所のタップ。内側のボタン・リンクは自分で処理する(入れ子の Pressable は内側が勝つ)。
+  const switchPane = shouldSwitchPaneOnCardPress(anyPaneOpen, paneOpen) ? openPane : undefined;
   const deny = useCallback(() => void onChoose(item, "__deny"), [item, onChoose]);
   const answer = useCallback(
     (answers: Record<string, string>) => void onAnswer(item, answers),
@@ -829,7 +845,11 @@ function ItemCard({
   const created = useMemo(() => formatCreated(item.ts), [item.ts]);
   const questions = item.questions ?? NO_QUESTIONS;
   return (
-    <View style={styles.card}>
+    <Pressable
+      style={paneOpen ? styles.cardActive : styles.card}
+      onPress={switchPane}
+      disabled={!switchPane}
+    >
       {item.reporter ? <Text style={styles.reporter}>報告者: {item.reporter}</Text> : null}
       <Pressable accessibilityRole="button" onPress={toggle}>
         <Text style={styles.badge}>
@@ -876,6 +896,6 @@ function ItemCard({
           {created}
         </Text>
       </View>
-    </View>
+    </Pressable>
   );
 }

@@ -120,3 +120,11 @@ export function withCardHeader(
   const body = card.background ? `\n[カード本文]\n${card.background}` : "";
   return `${head}${body}\n\n${text}`;
 }
+
+/**
+ * カード本体のタップでペインの相手を切り替えるか。**ペインが既に開いている時だけ**(閉じている時は
+ * 開かない=従来動作)、かつそのカードが既に出ているカードでない時。開くのは「💬 会話」ボタンの役目。
+ */
+export function shouldSwitchPaneOnCardPress(anyPaneOpen: boolean, thisCardShown: boolean): boolean {
+  return anyPaneOpen && !thisCardShown;
+}
