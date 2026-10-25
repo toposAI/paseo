@@ -44,7 +44,12 @@ import { feedbackReportsListRpc, countNewReports } from "./shared/feedback.js";
 import { readFeedbackReports } from "./server/feedback.js";
 import { loadProgressContext } from "./server/feedback-progress.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
-import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/box.js";
+import {
+  appendDecision,
+  applyReranks,
+  readConfirmBox,
+  resolveConfirmBoxDir,
+} from "./server/box.js";
 import {
   VAULT_KEY_PREFIX,
   answerVaultDecision,
@@ -153,6 +158,8 @@ export default function contribute(server: PluginServerContext) {
     if (vaultSourceEnabled()) {
       const vault = readVaultDecisions();
       items = applyVaultSource(items, vault.items, vault.error !== null, vault.claimedKeys).items;
+      // Vault判断カード側にも並べ替えイベント(rerank)を当てる(箱の項目へは readConfirmBox 内で適用済み)
+      items = applyReranks(items, read.reranks);
       const skippedNote = vault.skipped.length
         ? `(読めず${vault.skipped.length}件: ${vault.skipped
             .slice(0, 3)
