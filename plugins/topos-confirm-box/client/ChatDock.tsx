@@ -67,6 +67,10 @@ interface ChatPanelProps {
   inline?: boolean;
   /** 返答が届いたら順位等を再読込する。 */
   notifyOnReply?: boolean;
+  /** true なら最初の送信が成功するまで返答を購読しない(総司令塔の無関係な出力が混ざるのを避ける)。 */
+  subscribeAfterSend?: boolean;
+  /** 宛先が無い時に出す理由(確認中/確認不能などを区別する)。 */
+  reasonOverride?: string;
 }
 
 export function ChatPanel({
@@ -76,22 +80,30 @@ export function ChatPanel({
   withHistory = true,
   inline = false,
   notifyOnReply = true,
+  subscribeAfterSend = false,
+  reasonOverride,
 }: ChatPanelProps) {
   const hosts = useHosts();
   const serverId = hosts.find((h) => h.status === "online")?.serverId ?? null;
   const [text, setText] = useState("");
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [notice, setNotice] = useState("");
+  const [sent, setSent] = useState(false);
   const seq = useRef(0);
 
   const reason = useMemo(() => {
-    if (!agentId) return "会話先のスレッドが未設定です(準備中)";
+    if (!agentId) return reasonOverride ?? "会話先のスレッドが未設定です(準備中)";
     if (!serverId) return "ホストに接続できません";
     return null;
-  }, [agentId, serverId]);
+  }, [agentId, serverId, reasonOverride]);
+
+  useEffect(() => {
+    setSent(false);
+  }, [agentId]);
 
   useEffect(() => {
     if (!agentId || !serverId) return undefined;
+    if (subscribeAfterSend && !sent) return undefined;
     const handle = getPaseoClient(serverId).agents.ref(agentId);
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -129,7 +141,7 @@ export function ChatPanel({
       if (timer) clearTimeout(timer);
       sub();
     };
-  }, [agentId, serverId, withHistory, notifyOnReply]);
+  }, [agentId, serverId, withHistory, notifyOnReply, subscribeAfterSend, sent]);
 
   const send = useCallback(async () => {
     const t = text.trim();
@@ -142,6 +154,7 @@ export function ChatPanel({
         .agents.ref(agentId)
         .send(context ? `${context}\n\n【ユーザーの発言】${t}` : t);
       setNotice("");
+      setSent(true);
     } catch (e) {
       setNotice(`送れません: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -263,6 +276,7 @@ function useDockTarget(fixedId: string | null) {
   const coordinatorRpc = useRpc(coordinatorTargetRpc);
   const [fixedAlive, setFixedAlive] = useState<boolean | null>(fixedId ? null : false);
   const [coordId, setCoordId] = useState<string | null | undefined>(undefined);
+  const [retry, setRetry] = useState(0);
   useEffect(() => {
     if (!fixedId) {
       setFixedAlive(false);
@@ -271,6 +285,8 @@ function useDockTarget(fixedId: string | null) {
     if (!serverId) return undefined;
     let alive = true;
     setFixedAlive(null);
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const bumpRetry = () => setRetry((n) => n + 1);
     getPaseoClient(serverId)
       .agents.ref(fixedId)
       .refresh()
@@ -280,18 +296,20 @@ function useDockTarget(fixedId: string | null) {
         return null;
       })
       .catch(() => {
-        if (alive) setFixedAlive(false);
+        // 引けなかっただけで「閉じている」とは言わない(別の相手へ誤送信しない)。数回だけ再試行する。
+        if (alive && retry < 3) retryTimer = setTimeout(bumpRetry, 3000);
       });
     return () => {
       alive = false;
+      if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [fixedId, serverId]);
+  }, [fixedId, serverId, retry]);
   useEffect(() => {
     if (fixedAlive !== false) return undefined;
     let alive = true;
     coordinatorRpc({})
       .then((res) => {
-        if (alive) setCoordId(res.agentId);
+        if (alive) setCoordId(res.agentId ?? null);
         return null;
       })
       .catch(() => {
@@ -301,7 +319,16 @@ function useDockTarget(fixedId: string | null) {
       alive = false;
     };
   }, [fixedAlive, coordinatorRpc]);
-  return pickDockTarget({ fixedId, fixedAlive, coordinatorId: coordId });
+  const target = pickDockTarget({ fixedId, fixedAlive, coordinatorId: coordId });
+  let reason: string | undefined;
+  if (!target.agentId) {
+    if (!serverId) reason = "ホストに接続できません";
+    else if (target.pending && retry >= 3)
+      reason = "宛先のスレッドを確認できません(通信を確認してください)";
+    else if (target.pending) reason = "宛先を確認しています…";
+    else reason = "総司令塔のスレッドが見つかりません(送信できません)";
+  }
+  return { ...target, reason };
 }
 
 export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: string | null }) {
@@ -329,6 +356,8 @@ export function ChatDock({ colors, agentId }: { colors: DockColors; agentId: str
           colors={colors}
           agentId={target.agentId}
           withHistory={!target.viaCoordinator}
+          subscribeAfterSend={target.viaCoordinator}
+          {...(target.reason ? { reasonOverride: target.reason } : {})}
           {...(target.viaCoordinator ? { context: DOCK_FALLBACK_CONTEXT } : {})}
         />
       ) : null}
