@@ -33,6 +33,7 @@ import {
   Animated,
   Easing,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -41,20 +42,30 @@ import {
 } from "react-native";
 import { getPaseoClient, useHosts, useRpc } from "@getpaseo/plugin/client";
 import type { PluginHostProps } from "@getpaseo/plugin/client";
-import { KIND_LABEL, PRIORITY_LABEL, coordinatorTargetRpc } from "../shared/contract.js";
+import {
+  KIND_LABEL,
+  PRIORITY_LABEL,
+  cardChatAskRpc,
+  cardChatListRpc,
+  coordinatorTargetRpc,
+} from "../shared/contract.js";
 import type { ConfirmBoxItem } from "../shared/contract.js";
-import { PendingReplyHint, ScopeToggle, TopicEmpty } from "./TopicPaneParts.js";
-import { useTopicLedger } from "./useTopicLedger.js";
 import {
   COORDINATOR_FALLBACK_NOTICE,
+  isHubTarget,
+  pendingLabel,
   shouldFallbackToCoordinator,
+  shouldSubmitOnEnter,
   threadUnavailableReason,
   withCardHeader,
-  withTopicHeader,
+  withSayInstruction,
 } from "../shared/card-pane.js";
 import type { ThreadAccess } from "../shared/child-threads.js";
 import { PANE_ACTIVITY_LABEL, nextPaneActivity } from "../shared/pane-activity.js";
 import type { PaneActivity, PaneActivityEvent } from "../shared/pane-activity.js";
+import { usePaneInputTools } from "./usePaneInputTools.js";
+import type { PaneImage } from "./usePaneInputTools.js";
+//  "./usePaneInputTools.js";
 import { usePaneResize } from "./usePaneResize.js";
 
 // Paseo のモバイルパネルと同じ 220ms / 同じイージング
@@ -67,6 +78,21 @@ const HISTORY_LIMIT = 30;
 const TEXT_MAX = 4000;
 /** 生死(アーカイブ済みか)の見直し間隔。購読で拾えない経路(別端末からのアーカイブ等)の取りこぼし用。 */
 const LIVENESS_MS = 60_000;
+/** 「この話題だけ」表示の台帳の読み直し間隔。 */
+const TOPIC_POLL_MS = 4_000;
+
+interface TopicMessage {
+  ts: number;
+  role: "user" | "reply";
+  by: string;
+  text: string;
+}
+interface TopicPending {
+  re: string;
+  ts: number;
+  state: "waiting" | "overdue";
+  nudges: number;
+}
 
 export type PaneColors = PluginHostProps["theme"]["colors"];
 
@@ -164,6 +190,23 @@ function CardContext({
   );
 }
 
+function ImageChip({
+  image,
+  onRemove,
+  style,
+}: {
+  image: PaneImage;
+  onRemove: (id: string) => void;
+  style: object;
+}) {
+  const remove = useCallback(() => onRemove(image.id), [onRemove, image.id]);
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={`${image.name} を外す`} onPress={remove}>
+      <Text style={style}>🖼 {image.name} ✕</Text>
+    </Pressable>
+  );
+}
+
 export function CardChatPane({
   item,
   agentId,
@@ -191,6 +234,9 @@ export function CardChatPane({
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [text, setText] = useState("");
   const [notice, setNotice] = useState("");
+  const appendDictated = useCallback((said: string) => setText((cur) => cur + said), []);
+  const tools = usePaneInputTools(appendDictated);
+  const { images: toolImages, clearImages } = tools;
   const [sending, setSending] = useState(false);
   // 「届いたか」の表示。送信直後=送信済み、以降は相手スレの購読で取れた事実だけで進む。
   const [activity, setActivity] = useState<PaneActivity | null>(null);
@@ -203,6 +249,14 @@ export function CardChatPane({
   // 総司令塔のID(サーバが起こしデーモンの正本から読む。undefined=未取得、null=見つからない)と、閉じているか。
   const coordinatorRpc = useRpc(coordinatorTargetRpc);
   const [coordId, setCoordId] = useState<string | null | undefined>(undefined);
+  // ハブ(総司令塔・子司令塔)のID一覧。宛先がこの中なら「この話題だけ」表示にする。
+  const [hubIds, setHubIds] = useState<string[]>([]);
+  // ハブ宛でも「スレ全体」(従来のライブ表示)へ切り替えられる。
+  const [topicView, setTopicView] = useState(true);
+  const [topicMsgs, setTopicMsgs] = useState<TopicMessage[]>([]);
+  const [topicPending, setTopicPending] = useState<TopicPending[]>([]);
+  const askRpc = useRpc(cardChatAskRpc);
+  const listRpc = useRpc(cardChatListRpc);
   const [coordClosed, setCoordClosed] = useState(false);
   const [liveness, setLiveness] = useState<Liveness>(UNKNOWN_LIVENESS);
   // 同じ描画フレーム内の二度押しで同じ文を2件送らない。
@@ -220,18 +274,9 @@ export function CardChatPane({
   // 投函元が無い/閉じているカードは総司令塔へ振り替える(スレ直接=item無しは対象外)。
   const fallback = shouldFallbackToCoordinator({ hasCard: item !== null, agentId, closedText });
   const sendAgentId = fallback ? (coordId ?? null) : agentId;
-  const {
-    hub,
-    topicMode,
-    toggleScope,
-    shown: ledgerLines,
-    pendingAge,
-    ask,
-  } = useTopicLedger({
-    item,
-    sendAgentId,
-    fallback,
-  });
+  const hub = isHubTarget({ fallback, agentId: sendAgentId, hubIds });
+  // 話題だけ表示: ハブ宛で、カードがあり、切替で「スレ全体」にされていない時。
+  const topic = hub && topicView && item !== null;
   const reason = useMemo(() => {
     if (fallback) {
       if (!serverId) return "ホストに接続できません";
@@ -253,7 +298,7 @@ export function CardChatPane({
   useEffect(() => {
     setLines([]);
     setNotice("");
-    if (!agentId || !serverId) return undefined;
+    if (!agentId || !serverId || topic) return undefined;
     const handle = getPaseoClient(serverId).agents.ref(agentId);
     let alive = true;
     handle.timeline
@@ -286,7 +331,46 @@ export function CardChatPane({
       alive = false;
       sub();
     };
-  }, [agentId, serverId, pushActivity]);
+  }, [agentId, serverId, pushActivity, topic]);
+
+  // ハブ一覧は一度だけ引く(総司令塔の生死確認は、下の振り替え時の effect が行う)。
+  useEffect(() => {
+    if (!serverId) return undefined;
+    let alive = true;
+    coordinatorRpc({})
+      .then((res) => {
+        if (alive) setHubIds(res.hubIds ?? []);
+        return null;
+      })
+      .catch(() => {
+        // 引けなければ従来のライブ表示のまま。
+      });
+    return () => {
+      alive = false;
+    };
+  }, [serverId, coordinatorRpc]);
+
+  // 話題だけ表示: 台帳(chat/reply)を読む。上位スレのライブ出力は流さない。
+  const itemId = item?.id ?? null;
+  const itemKey = item?.key ?? null;
+  const refreshTopic = useCallback(async () => {
+    if (!itemId) return;
+    try {
+      const res = await listRpc({ id: itemId, key: itemKey, topic: true });
+      setTopicMsgs(res.messages);
+      setTopicPending(res.pending ?? []);
+    } catch {
+      // 読めなかった回は前の表示を保つ。
+    }
+  }, [itemId, itemKey, listRpc]);
+  useEffect(() => {
+    setTopicMsgs([]);
+    setTopicPending([]);
+    if (!topic) return undefined;
+    void refreshTopic();
+    const timer = setInterval(() => void refreshTopic(), TOPIC_POLL_MS);
+    return () => clearInterval(timer);
+  }, [topic, refreshTopic]);
 
   // 振り替える時だけ総司令塔のIDを引き、閉じていないか確かめる(閉じていれば送信を止める)。
   useEffect(() => {
@@ -297,6 +381,7 @@ export function CardChatPane({
       .then(async (res) => {
         if (!alive) return;
         setCoordId(res.agentId);
+        setHubIds(res.hubIds ?? []);
         if (!res.agentId) return;
         const snap = await getPaseoClient(serverId).agents.ref(res.agentId).refresh();
         if (!alive) return;
@@ -313,7 +398,7 @@ export function CardChatPane({
 
   // 総司令塔へ振り替えて送った後だけ、その返事を購読して流す(履歴は読まない=総司令塔の会話が混ざらない)。
   useEffect(() => {
-    if (!fallback || !coordSent || !serverId || !coordId) return undefined;
+    if (!fallback || !coordSent || !serverId || !coordId || topic) return undefined;
     let alive = true;
     const off = getPaseoClient(serverId)
       .agents.ref(coordId)
@@ -341,7 +426,7 @@ export function CardChatPane({
       off();
       offStatus();
     };
-  }, [fallback, coordSent, coordId, serverId, pushActivity]);
+  }, [fallback, coordSent, coordId, serverId, pushActivity, topic]);
 
   // 生死。引けなかった時は印を付けない(不明を「閉じています」と言い換えない)。
   useEffect(() => {
@@ -411,16 +496,25 @@ export function CardChatPane({
     sendingRef.current = true;
     setSending(true);
     setText("");
-    seq.current += 1;
-    setLines((cur) => [...cur, { id: `u${seq.current}`, role: "user", text: t }]);
+    const sentImages = toolImages;
+    clearImages();
+    if (!topic) {
+      seq.current += 1;
+      setLines((cur) => [...cur, { id: `u${seq.current}`, role: "user", text: t }]);
+    }
     try {
       let outgoing = fallback && item ? withCardHeader(t, item) : t;
-      if (hub && item) {
-        // 台帳に1行書いて返信IDを得る。書けなくても送信は止めない(従来の題名+ID付きで送る)。
-        const replyId = await ask(t);
-        outgoing = replyId ? withTopicHeader(t, item, replyId) : withCardHeader(t, item);
+      if (topic && item) {
+        // 台帳へ質問を記録し(返事待ちの目印と催促の元)、返信ID+sayコマンドを付けて上位スレへ送る。
+        const asked = await askRpc({ id: item.id, key: item.key, text: t, target: sendAgentId });
+        if (!asked.ok || !asked.replyId) throw new Error(asked.message);
+        outgoing = withSayInstruction(outgoing, { replyId: asked.replyId, cardId: item.id });
       }
-      await getPaseoClient(serverId).agents.ref(sendAgentId).send(outgoing);
+      const opts = sentImages.length
+        ? { images: sentImages.map((i) => ({ data: i.data, mimeType: i.mimeType })) }
+        : undefined;
+      await getPaseoClient(serverId).agents.ref(sendAgentId).send(outgoing, opts);
+      if (topic) void refreshTopic();
       if (fallback) setCoordSent(true);
       pushActivity({ kind: "sent" });
       setNotice("");
@@ -430,8 +524,32 @@ export function CardChatPane({
       sendingRef.current = false;
       setSending(false);
     }
-  }, [text, sendAgentId, serverId, fallback, hub, item, ask, pushActivity]);
+  }, [text, sendAgentId, serverId, fallback, item, pushActivity, topic, askRpc, refreshTopic, toolImages, clearImages]);
   const sendPress = useCallback(() => void send(), [send]);
+  // Enter で送信(PC幅のWebだけ。IME変換確定・Shift+Enter・iPhone は送らず改行のまま)。
+  const onKeyPress = useCallback(
+    (e: {
+      nativeEvent: { key: string; shiftKey?: boolean; isComposing?: boolean; keyCode?: number };
+      preventDefault?: () => void;
+    }) => {
+      const n = e.nativeEvent;
+      if (
+        shouldSubmitOnEnter({
+          key: n.key,
+          shiftKey: n.shiftKey,
+          isComposing: n.isComposing,
+          keyCode: n.keyCode,
+          isWeb: Platform.OS === "web",
+          compact,
+        })
+      ) {
+        e.preventDefault?.();
+        void send();
+      }
+    },
+    [compact, send],
+  );
+  const toggleTopicView = useCallback(() => setTopicView((v) => !v), []);
 
   // --- 全画面スライド(狭い幅のみ) ---
   const { paneWidth, resizeHandlers } = usePaneResize(width);
@@ -626,6 +744,53 @@ export function CardChatPane({
         fontSize: 14,
       },
       inputOff: { opacity: 0.5 },
+      toolBtn: {
+        minHeight: 44,
+        minWidth: 44,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: colors.border,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
+      },
+      toolBtnOn: {
+        minHeight: 44,
+        minWidth: 44,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: colors.accent,
+        backgroundColor: colors.surface2,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
+      },
+      toolText: { color: colors.foreground, fontSize: 18 },
+      chipRow: {
+        flexDirection: "row" as const,
+        flexWrap: "wrap" as const,
+        gap: 6,
+        paddingHorizontal: 10,
+        paddingTop: 6,
+        backgroundColor: colors.surface1,
+      },
+      chip: {
+        color: colors.foreground,
+        fontSize: 12,
+        backgroundColor: colors.surface2,
+        borderRadius: 10,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+      },
+      modeRow: {
+        flexDirection: "row" as const,
+        alignItems: "center" as const,
+        justifyContent: "space-between" as const,
+        paddingHorizontal: 12,
+        paddingVertical: 2,
+      },
+      modeText: { color: colors.foregroundMuted, fontSize: 11 },
+      modeBtn: { paddingVertical: 6, paddingHorizontal: 6 },
+      modeBtnText: { color: colors.accent, fontSize: 12 },
+      pendingText: { color: colors.statusWarning, fontSize: 11, textAlign: "right" as const },
       sendBtn: {
         minHeight: 44,
         minWidth: 56,
@@ -668,9 +833,6 @@ export function CardChatPane({
     [reason, st.input, st.inputOff],
   );
 
-  // 表示する行: 話題単位はカードの台帳、それ以外は相手スレのライブ会話。
-  const shown: ChatLine[] = topicMode ? ledgerLines : lines;
-
   const header = (
     <View style={st.header}>
       <Pressable
@@ -685,14 +847,6 @@ export function CardChatPane({
       <Text style={st.headerTitle} numberOfLines={1}>
         {item?.subject ?? title ?? "投函元スレのチャット"}
       </Text>
-      {hub ? (
-        <ScopeToggle
-          topicMode={topicMode}
-          onPress={toggleScope}
-          style={st.headerBtn}
-          textStyle={st.headerBtnText}
-        />
-      ) : null}
       {/* 同じ相手を Paseo のスレ画面(ツール実行や承認まで見える)で開きたい時の逃げ道。 */}
       {onOpenThread ? (
         <Pressable
@@ -713,13 +867,36 @@ export function CardChatPane({
       <ScrollView ref={scrollRef} style={st.scroll} contentContainerStyle={st.scrollBody}>
         <CardContext item={item} title={title} styles={st} />
         {reason ? <Text style={st.notice}>{reason}</Text> : null}
-        {topicMode && shown.length === 0 && !reason ? <TopicEmpty style={st.empty} /> : null}
-        {!topicMode && lines.length === 0 && !reason && !fallback ? (
+        {topic && topicMsgs.length === 0 && topicPending.length === 0 ? (
+          <Text style={st.empty}>
+            このカードの話題の会話はまだありません。送ると上位スレに届き、そのスレが say で返した返事だけがここに出ます。
+          </Text>
+        ) : null}
+        {topic
+          ? topicMsgs.map((m) => {
+              const mine = m.role === "user";
+              return (
+                <View key={`t${m.ts}-${m.role}-${m.by}`} style={mine ? st.msgRowMine : st.msgRow}>
+                  <View style={mine ? st.bubbleMine : st.bubbleTheirs}>
+                    <Text style={mine ? st.bubbleTextMine : st.bubbleTextTheirs}>{m.text}</Text>
+                  </View>
+                </View>
+              );
+            })
+          : null}
+        {topic
+          ? topicPending.map((p) => (
+              <Text key={p.re} style={st.pendingText} testID="pane-pending">
+                {pendingLabel(p.state, p.nudges)}
+              </Text>
+            ))
+          : null}
+        {!topic && lines.length === 0 && !reason && !fallback ? (
           <Text style={st.empty}>
             まだ会話はありません。ここで送ると投函元スレに届き、そのスレの返事がここに出ます。
           </Text>
         ) : null}
-        {shown.map((line) => {
+        {(topic ? [] : lines).map((line) => {
           const mine = line.role === "user";
           return (
             <View key={line.id} style={mine ? st.msgRowMine : st.msgRow}>
@@ -730,17 +907,57 @@ export function CardChatPane({
           );
         })}
       </ScrollView>
-      {pendingAge !== null ? <PendingReplyHint ageS={pendingAge} style={st.activity} /> : null}
       {notice ? <Text style={st.notice}>{notice}</Text> : null}
+      {tools.toolNotice ? <Text style={st.notice}>{tools.toolNotice}</Text> : null}
+      {hub && item ? (
+        <View style={st.modeRow}>
+          <Text style={st.modeText}>
+            {topic ? "表示: この話題だけ(say された返事のみ)" : "表示: スレ全体(ライブ)"}
+          </Text>
+          <Pressable accessibilityRole="button" style={st.modeBtn} onPress={toggleTopicView}>
+            <Text style={st.modeBtnText}>{topic ? "スレ全体を見る" : "この話題だけにする"}</Text>
+          </Pressable>
+        </View>
+      ) : null}
       {activity ? (
         <Text style={st.activity} accessibilityLiveRegion="polite" testID="pane-activity">
           {PANE_ACTIVITY_LABEL[activity]}
         </Text>
       ) : null}
+      {tools.images.length > 0 ? (
+        <View style={st.chipRow}>
+          {tools.images.map((im) => (
+            <ImageChip key={im.id} image={im} onRemove={tools.removeImage} style={st.chip} />
+          ))}
+        </View>
+      ) : null}
       <View style={st.inputRow}>
+        {tools.attachSupported ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="画像を添付"
+            disabled={Boolean(reason)}
+            style={st.toolBtn}
+            onPress={tools.pickImages}
+          >
+            <Text style={st.toolText}>＋</Text>
+          </Pressable>
+        ) : null}
+        {tools.micSupported ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={tools.listening ? "音声入力を止める" : "音声入力"}
+            disabled={Boolean(reason)}
+            style={tools.listening ? st.toolBtnOn : st.toolBtn}
+            onPress={tools.toggleMic}
+          >
+            <Text style={st.toolText}>🎤</Text>
+          </Pressable>
+        ) : null}
         <TextInput
           value={text}
           onChangeText={setText}
+          onKeyPress={onKeyPress}
           editable={!reason}
           placeholder={reason ?? (fallback ? "総司令塔へ送る" : "投函元スレへ送る")}
           placeholderTextColor={colors.foregroundMuted}

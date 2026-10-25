@@ -129,42 +129,60 @@ export function shouldSwitchPaneOnCardPress(anyPaneOpen: boolean, thisCardShown:
   return anyPaneOpen && !thisCardShown;
 }
 
-// ---------------------------------------------------------------- 話題単位の会話(ハブ宛)
+// ---------------------------------------------------------------- 「この話題だけ」(方式a)
 
-/** 送信先が司令塔(複数カードの話が1本に混ざるスレ)か。 */
-export function isHubTarget(
-  agentId: string | null,
-  hubIds: readonly string[] | undefined,
-): boolean {
-  return agentId !== null && (hubIds ?? []).includes(agentId);
+/** Python `confirm_box_reply.SAY_SCRIPT` と同じ。上位スレがそのまま貼って実行する。 */
+export const SAY_SCRIPT =
+  "/Users/user/repos/ToposAI-Mini-Project/antigravity/utils/confirm_box_reply.py";
+
+/** シェルのシングルクォート(Python `_q` の写し)。 */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
-
-/** 返事が付かないまま経つとペインが注意を出す秒数。 */
-export const TOPIC_REPLY_OVERDUE_S = 300;
 
 /**
- * ハブへ送る発言の先頭。カード題名・ID・返信IDと、返し方(`say` の1コマンド)を機械的に付ける。
- * 普通の返事は他カードと混ざるのでカードに出ない。`say` で返した返事だけがこのカードの会話になる。
+ * ハブ宛(総司令塔・子司令塔、または総司令塔へ振り替え)か。ハブは複数話題を同じスレで扱うので、
+ * 会話を「そのカードの話題だけ」(台帳の chat/reply)に絞る。非ハブの単一話題の子スレは従来のライブ表示。
  */
-export function withTopicHeader(
-  text: string,
-  card: { id: string; subject: string; background?: string | null },
-  replyId: string,
-): string {
-  const head = withCardHeader(text, card);
-  const how =
-    `[返信ID: ${replyId}]\n` +
-    `この話題への返事は、普通の返事とは別に次で書いてください(書いた返事だけがこのカードの会話に出ます):\n` +
-    `python3 antigravity/utils/confirm_box_reply.py say --id ${card.id} --re ${replyId} --text-file - <<'REPLY'\n(返事本文)\nREPLY`;
-  return `${how}\n\n${head}`;
+export function isHubTarget(opts: {
+  fallback: boolean;
+  agentId: string | null;
+  hubIds: readonly string[];
+}): boolean {
+  if (opts.fallback) return true;
+  return opts.agentId !== null && opts.hubIds.includes(opts.agentId);
 }
 
-/** 最後が「ユーザー発言で、返事がまだ無い」ときの経過秒(それ以外は null)。 */
-export function pendingReplyAgeS(
-  messages: readonly { ts: number; role: "user" | "reply" }[],
-  nowMs: number,
-): number | null {
-  const last = messages.at(-1);
-  if (!last || last.role !== "user") return null;
-  return Math.max(0, Math.floor((nowMs - last.ts) / 1000));
+/** 上位スレへ送る文に、返信IDと say コマンド(完成形)を付ける。 */
+export function withSayInstruction(text: string, opts: { replyId: string; cardId: string }): string {
+  return (
+    `${text}\n\n` +
+    `【確認箱ペインの質問・返信ID ${opts.replyId}】返事は普通の発言ではペインに出ません。次で書いてください:\n` +
+    `python3 ${SAY_SCRIPT} say --id ${shellQuote(opts.cardId)} --re ${shellQuote(opts.replyId)}` +
+    ` --by hub_thread --text-file - <<'REPLY'\n(返事)\nREPLY`
+  );
+}
+
+/** 返事待ちの目印。3分以内=「返事待ち」、超過=「返事待ち(sayなし)」。 */
+export function pendingLabel(state: "waiting" | "overdue", nudges: number): string {
+  if (state === "waiting") return "返事待ち";
+  return nudges > 0 ? `返事待ち(sayなし・催促${nudges}回)` : "返事待ち(sayなし)";
+}
+
+/**
+ * Enter キーで送信するか。Web かつ非compact(PC幅)だけ。IME変換中(isComposing / keyCode 229)と
+ * Shift+Enter(改行)は送らない。iPhone(compact)は Enter=改行のまま。
+ */
+export function shouldSubmitOnEnter(ev: {
+  key: string;
+  shiftKey?: boolean;
+  isComposing?: boolean;
+  keyCode?: number;
+  isWeb: boolean;
+  compact: boolean;
+}): boolean {
+  if (!ev.isWeb || ev.compact) return false;
+  if (ev.key !== "Enter" || ev.shiftKey) return false;
+  if (ev.isComposing || ev.keyCode === 229) return false;
+  return true;
 }

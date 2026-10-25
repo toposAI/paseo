@@ -28,8 +28,8 @@ import {
   confirmBoxPermitRpc,
   cardChatListRpc,
   coordinatorTargetRpc,
-  cardChatSayRpc,
   cardChatAskRpc,
+  cardChatSayRpc,
   countUnreadNotifications,
   isJudgmentItem,
   isNotificationItem,
@@ -118,7 +118,13 @@ import {
   readThreadKey,
   recordConceptThread,
 } from "./server/note-thread.js";
-import { askCard, cardExists, readCardChat, sayToCard } from "./server/cardchat.js";
+import {
+  askFromPane,
+  cardExists,
+  panePending,
+  readCardChat,
+  sayToCard,
+} from "./server/cardchat.js";
 import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
 import {
   answerlessAllowBlocked,
@@ -710,7 +716,8 @@ export default function contribute(server: PluginServerContext) {
       const dir = resolveConfirmBoxDir();
       return {
         found: cardExists(dir, { id: input.id, key: input.key }),
-        messages: readCardChat(dir, { id: input.id, key: input.key }),
+        messages: readCardChat(dir, { id: input.id, key: input.key }, { topic: input.topic }),
+        ...(input.topic ? { pending: panePending(dir, { id: input.id, key: input.key }) } : {}),
       };
     } catch {
       return { found: false, messages: [] };
@@ -1250,9 +1257,14 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(cardChatAskRpc, async (input) => {
     try {
-      return askCard(resolveConfirmBoxDir(), { id: input.id, key: input.key }, input.text);
+      return askFromPane(
+        resolveConfirmBoxDir(),
+        { id: input.id, key: input.key },
+        input.text,
+        input.target,
+      );
     } catch (error) {
-      return { ok: false, message: `台帳に書けません: ${(error as Error).message}`, replyId: null };
+      return { ok: false, message: `送れません: ${(error as Error).message}` };
     }
   });
 

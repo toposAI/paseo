@@ -157,27 +157,78 @@ export function sayToCard(
   return { ok: true, message: "送りました" };
 }
 
+/** ペイン発の質問の本文上限(ペインの入力欄の上限に合わせる。改行は残す)。 */
+const PANE_TEXT_MAX = 4000;
+/** 返信待ちを「sayなし」とみなす秒数。Python `confirm_box_reply.SAY_WAIT_S` と同じ。 */
+export const SAY_WAIT_MS = 180_000;
+
 /**
- * ペインから上位スレ(ハブ)へ送る質問を台帳に1行だけ書く(受領 ack は書かない)。
- * 返事は上位スレが `confirm_box_reply.py say --re <replyId>` で書く。`source:"pane"` は応答ワーカーが
- * 自動返答の対象から外す印(二重に返事を作らない)。返す `replyId` は送る文に埋める返信ID。
+ * ペインからの質問を台帳へ書く(方式a)。ackは書かない=返事は上位スレのsayだけ。
+ * `target` = 送り先スレ(催促ワーカーの宛先)。返信ID(`replyId`)を返す。
  */
-export function askCard(
+export function askFromPane(
   dir: string,
   target: CardChatTarget,
   text: string,
-): { ok: boolean; message: string; replyId: string | null } {
+  agentId: string,
+  now: number = Date.now(),
+): { ok: boolean; message: string; replyId?: string } {
   const id = (target.id ?? "").trim().slice(0, ID_MAX);
   const key = (target.key ?? "").trim().slice(0, ID_MAX) || null;
-  const clean = text.replace(/\s+/g, " ").trim().slice(0, TEXT_MAX);
-  if (!id) return { ok: false, message: "この項目はチャットできません(id なし)", replyId: null };
-  if (!clean) return { ok: false, message: "空です", replyId: null };
-  const ts = Date.now();
-  const replyId = `cbui-${id}-${ts}`.slice(0, ID_MAX * 2);
+  const clean = text.trim().slice(0, PANE_TEXT_MAX);
+  if (!id) return { ok: false, message: "この項目はチャットできません(id なし)" };
+  if (!clean) return { ok: false, message: "空です" };
+  if (!agentId.trim()) return { ok: false, message: "送り先がありません" };
+  const replyId = `cbui-${id}-${now}`.slice(0, ID_MAX * 2);
   appendLines(dir, chatsFile(), [
-    { t: "chat", id, key, ts, question: clean, client_message_id: replyId, source: "pane" },
+    {
+      t: "chat",
+      id,
+      key,
+      ts: now,
+      question: clean,
+      client_message_id: replyId,
+      source: "pane",
+      target: agentId.trim(),
+    },
   ]);
-  return { ok: true, message: "台帳に書きました", replyId };
+  return { ok: true, message: "記録しました", replyId };
+}
+
+export interface PanePending {
+  re: string;
+  ts: number;
+  state: "waiting" | "overdue";
+  nudges: number;
+}
+
+/** ペイン発で、まだsay(ack以外の返事)が無い質問。Python `pane_status` の写し。 */
+export function panePending(
+  dir: string,
+  target: CardChatTarget,
+  now: number = Date.now(),
+): PanePending[] {
+  const rows = boxRows(dir);
+  const mine = cardMatcher(targetKeys(target));
+  const answered = new Set<string>();
+  const nudges = new Map<string, number>();
+  for (const r of rows) {
+    if (r.t === "reply" && field(r, "by") !== "ack") answered.add(field(r, "re"));
+    if (r.t === "nudge") nudges.set(field(r, "re"), (nudges.get(field(r, "re")) ?? 0) + 1);
+  }
+  const out: PanePending[] = [];
+  for (const r of rows) {
+    if (r.t !== "chat" || r.source !== "pane" || !mine(r) || typeof r.ts !== "number") continue;
+    const re = field(r, "client_message_id");
+    if (!re || answered.has(re)) continue;
+    out.push({
+      re,
+      ts: r.ts,
+      state: now - r.ts >= SAY_WAIT_MS ? "overdue" : "waiting",
+      nudges: nudges.get(re) ?? 0,
+    });
+  }
+  return out;
 }
 
 /** 箱のイベント列から、その項目の質問と返事。返事は `re`(質問ID)でも照合する。 */
@@ -226,9 +277,15 @@ export function cardExists(dir: string, target: CardChatTarget): boolean {
   return boxRows(dir).some((r) => (r.t === "item" || !r.t) && cardMatcher(keys)(r));
 }
 
-export function readCardChat(dir: string, target: CardChatTarget): CardChatMessage[] {
+export function readCardChat(
+  dir: string,
+  target: CardChatTarget,
+  opts: { topic?: boolean } = {},
+): CardChatMessage[] {
   const keys = targetKeys(target);
-  const out = [...boxMessages(boxRows(dir), keys), ...legacyMessages(dir, keys)];
+  const all = [...boxMessages(boxRows(dir), keys), ...legacyMessages(dir, keys)];
+  // 「この話題だけ」では受領(ack)を会話に入れない(返事はsayだけ)。
+  const out = opts.topic ? all.filter((m) => m.by !== "ack") : all;
   // 同じ ts なら質問が先、返答が後
   const roleOrder = (m: CardChatMessage) => (m.role === "user" ? 0 : 1);
   out.sort((a, b) => a.ts - b.ts || roleOrder(a) - roleOrder(b));

@@ -324,7 +324,8 @@ const cardChatTarget = { id: z.string(), key: z.string().nullable().optional() }
  * 本回答は別プロセス(応答ワーカー)が箱の `t:"reply"` 行として書く。 */
 export const cardChatListRpc = defineRpc({
   name: "topos.confirmbox.cardchat.list",
-  input: z.object(cardChatTarget),
+  /** `topic: true` = 「この話題だけ」表示(受領ackを除く)。pending も同時に返す。 */
+  input: z.object({ ...cardChatTarget, topic: z.boolean().optional() }),
   output: z.object({
     /** 箱にその項目が在るか。無い id(URL 手打ち・決定済み)への送信を止めるため(2026-10-22)。 */
     found: z.boolean(),
@@ -336,6 +337,17 @@ export const cardChatListRpc = defineRpc({
         text: z.string(),
       }),
     ),
+    /** ペインから送って、まだ上位スレの say が無い質問(`topic: true` の時だけ入る)。 */
+    pending: z
+      .array(
+        z.object({
+          re: z.string(),
+          ts: z.number(),
+          state: z.enum(["waiting", "overdue"]),
+          nudges: z.number(),
+        }),
+      )
+      .optional(),
   }),
 });
 export type CardChatListOutput = z.infer<typeof cardChatListRpc.output>;
@@ -347,16 +359,17 @@ export const coordinatorTargetRpc = defineRpc({
   input: z.object({}),
   output: z.object({
     agentId: z.string().nullable(),
-    /** 全領域の司令塔(総司令・子司令塔)の agent id。送信先がここに含まれる時は「ハブ」として話題単位で表示する。 */
+    /** ハブ(総司令塔・子司令塔)のスレID。宛先がこの中なら「この話題だけ」表示にする。 */
     hubIds: z.array(z.string()).optional(),
   }),
 });
 
-/** ペインからの送信を台帳(箱のイベント列)に1行書き、返信IDを返す。 */
+/** ペインからの質問。台帳へ `t:"chat"`(source:"pane", target=宛先スレ)を書き、返信IDを返す。
+ * 返事は上位スレが `confirm_box_reply.py say --re <返信ID>` で書く(方式a)。 */
 export const cardChatAskRpc = defineRpc({
   name: "topos.confirmbox.cardchat.ask",
-  input: z.object({ ...cardChatTarget, text: z.string() }),
-  output: z.object({ ok: z.boolean(), message: z.string(), replyId: z.string().nullable() }),
+  input: z.object({ ...cardChatTarget, text: z.string(), target: z.string() }),
+  output: z.object({ ok: z.boolean(), message: z.string(), replyId: z.string().optional() }),
 });
 
 export const cardChatSayRpc = defineRpc({
