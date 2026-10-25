@@ -1157,7 +1157,9 @@ function ComposerRightControlsSlot({
 }: ComposerRightControlsSlotProps) {
   const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
   const overflowSetting = useSettings((settings) => settings.composerOverflowMenu);
-  const useOverflow = isCompact && toposChatStyle && overflowSetting;
+  // 「スマホ幅」は画面幅(formFactor)で判定する。isCompact は親が狭いパネルとして上書きしうるため使わない。
+  const isPhoneWidth = useIsCompactFormFactor();
+  const useOverflow = isPhoneWidth && toposChatStyle && overflowSetting;
   const hideVoiceForCompactInput = isCompact && hasSendableContent;
   const showVoiceModeButton =
     showVoice && !isVoiceModeForAgent && hasAgent && !isAgentRunning && !hideVoiceForCompactInput;
@@ -1334,7 +1336,10 @@ function ComposerDictationButton({
 
 const composerDictationRecordingStyle = { backgroundColor: "#d33" } as const;
 
-/** スマホ幅の「…」メニュー。主要操作(添付・マイク・送信)を表に残し、補助操作をここへ畳む。 */
+/**
+ * スマホ幅の「…」メニュー。主要操作(添付・マイク・送信)を表に残し、補助操作をここへ畳む。
+ * 注意: 表示条件は現状「音声会話モードが出せるとき」と共有している。項目を足すときは表示条件を項目ごとに分離すること。
+ */
 function ComposerOverflowMenu({
   buttonIconSize,
   handleToggleRealtimeVoice,
@@ -1342,6 +1347,7 @@ function ComposerOverflowMenu({
   isVoiceSwitching,
   realtimeVoiceButtonStyle,
 }: ComposerVoiceModeButtonProps) {
+  const { t } = useTranslation();
   const renderTrigger = useCallback(
     () => <ThemedEllipsis size={buttonIconSize} uniProps={iconForegroundMutedMapping} />,
     [buttonIconSize],
@@ -1349,7 +1355,7 @@ function ComposerOverflowMenu({
   return (
     <DropdownMenu compactMode="popover">
       <DropdownMenuTrigger
-        disabled={!isConnected}
+        disabled={!isConnected || isVoiceSwitching}
         accessibilityLabel="その他の操作"
         accessibilityRole="button"
         testID="composer-overflow-button"
@@ -1370,7 +1376,7 @@ function ComposerOverflowMenu({
           disabled={isVoiceSwitching}
           onSelect={handleToggleRealtimeVoice}
         >
-          音声会話モード
+          {t("composer.voice.voiceMode")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
