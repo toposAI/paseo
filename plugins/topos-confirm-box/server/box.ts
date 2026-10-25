@@ -19,7 +19,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "../shared/contract.js";
-import { compareConfirmBoxItems, KIND_LABEL } from "../shared/contract.js";
+import { compareConfirmBoxItems, KIND_LABEL, PRIORITIES } from "../shared/contract.js";
 import {
   BACKGROUND_MAX,
   SUMMARY_MAX,
@@ -140,7 +140,7 @@ function applyAck(items: Map<string, ConfirmBoxItem>, e: Record<string, unknown>
   else if (item.state === "new") item.state = "read";
 }
 
-/** 後から付ける判断印(`{"t":"judgment","id":…}`)。**追記専用**で item 行は書き換えない。
+/** 後から付ける判断印(`{"t":"judgment","id":…}`)。**追記専用**で item 行は書き換えない。Vault判断カードには当てない(カードの順は frontmatter の `subrank:` が正本)。
  * バックフィルの対象には箱の item のほか、まだ箱へ流していない中間形式(`pending:<key>`)も
  * あるため、そちらの id も受け付ける(`mergeBoxAndPending` の命名に合わせる)。 */
 function applyJudgment(items: Map<string, ConfirmBoxItem>, e: Record<string, unknown>): void {
@@ -154,6 +154,49 @@ function applyAckAll(items: Map<string, ConfirmBoxItem>, e: Record<string, unkno
   for (const item of items.values()) {
     if (item.state === "new" && item.ts <= before) item.state = "read";
   }
+}
+
+// ---------------------------------------------------------------- 並べ替え(rerank)
+
+export interface RerankOverride {
+  priority?: ConfirmBoxItem["priority"];
+  subrank?: number;
+}
+
+/**
+ * `{"t":"rerank","id"|"key":…,"subrank":N,"priority":…}`(**箱イベント(events-*.jsonl)だけ**を読む。Python `load_items()` と同じ。保留ファイルの rerank は読まない)。
+ * **追記専用**で item 行は書き換えない。Vault判断カードには当てない(カードの順は frontmatter の `subrank:` が正本)(hide / judgment と同じ流儀)。同じ対象への行は後勝ちで、
+ * `priority` と `subrank` は片方だけでも効く。対象は項目の `id` か `key`(`pending:` は省略可)。
+ */
+export function parseReranks(
+  records: readonly Record<string, unknown>[],
+): Map<string, RerankOverride> {
+  const out = new Map<string, RerankOverride>();
+  for (const e of records) {
+    if (e.t !== "rerank") continue;
+    const target = typeof e.id === "string" && e.id ? e.id : normalizeKey(e.key);
+    if (!target) continue;
+    const next: RerankOverride = { ...out.get(target) };
+    if (typeof e.subrank === "number" && Number.isInteger(e.subrank)) next.subrank = e.subrank;
+    if (PRIORITIES.includes(e.priority as ConfirmBoxItem["priority"])) {
+      next.priority = e.priority as ConfirmBoxItem["priority"];
+    }
+    if (next.subrank !== undefined || next.priority !== undefined) out.set(target, next);
+  }
+  return out;
+}
+
+export function applyReranks(
+  items: readonly ConfirmBoxItem[],
+  reranks: ReadonlyMap<string, RerankOverride>,
+): ConfirmBoxItem[] {
+  if (reranks.size === 0) return [...items];
+  return items.map((item) => {
+    const o =
+      reranks.get(item.id) ??
+      (item.key ? (reranks.get(item.key) ?? reranks.get(`pending:${item.key}`)) : undefined);
+    return o ? { ...item, ...o } : item;
+  });
 }
 
 /** 箱のファイル一覧(古い順)。読めなければ空。 */
@@ -273,6 +316,8 @@ export function mergeBoxAndPending(
 
 export interface ReadConfirmBoxResult {
   items: ConfirmBoxItem[];
+  /** 並べ替えイベント(rerank)。Vault判断カード等、後から足す項目にも `applyReranks` で当てる。 */
+  reranks: Map<string, RerankOverride>;
   sources: ConfirmBoxSourceStatus[];
   dir: string;
 }
@@ -280,6 +325,7 @@ export interface ReadConfirmBoxResult {
 /** ディレクトリを読んで統合した一覧を返す。**例外を投げない**(読めない出所は status に出す)。 */
 export function readConfirmBox(dir: string = resolveConfirmBoxDir()): ReadConfirmBoxResult {
   const sources: ConfirmBoxSourceStatus[] = [];
+  const reranks = new Map<string, RerankOverride>();
 
   // --- 箱
   let boxItems: ConfirmBoxItem[] = [];
@@ -295,6 +341,7 @@ export function readConfirmBox(dir: string = resolveConfirmBoxDir()): ReadConfir
         parseJsonl(fs.readFileSync(path.join(dir, name), "utf8")),
       );
       boxItems = [...foldBoxEvents(records).values()];
+      for (const [k, v] of parseReranks(records)) reranks.set(k, { ...reranks.get(k), ...v });
       boxDetail = `${files.join(", ")}`;
     } catch (error) {
       boxOk = false;
@@ -312,7 +359,8 @@ export function readConfirmBox(dir: string = resolveConfirmBoxDir()): ReadConfir
     pendingDetail = `${PENDING_FILE} なし`;
   } else {
     try {
-      const parsed = parsePendingRecords(parseJsonl(fs.readFileSync(pendingPath, "utf8")));
+      const pendingRecords = parseJsonl(fs.readFileSync(pendingPath, "utf8"));
+      const parsed = parsePendingRecords(pendingRecords);
       pendingOverrides = parsed.overrides;
       // 決定済みの key を外す(投函側が箱へ流す前でも、決めたものが残らないように)
       pendingItems = parsed.items.filter((i) => !(i.key && parsed.decidedKeys.has(i.key)));
@@ -357,7 +405,14 @@ export function readConfirmBox(dir: string = resolveConfirmBoxDir()): ReadConfir
     count: pendingItems.length,
   });
 
-  return { items: mergeBoxAndPending(boxItems, pendingItems, pendingOverrides), sources, dir };
+  return {
+    items: applyReranks(mergeBoxAndPending(boxItems, pendingItems, pendingOverrides), reranks).sort(
+      compareConfirmBoxItems,
+    ),
+    reranks,
+    sources,
+    dir,
+  };
 }
 
 // ---------------------------------------------------------------- 決定の書き戻し

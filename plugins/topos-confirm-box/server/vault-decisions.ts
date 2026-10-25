@@ -175,7 +175,7 @@ export function parseDecisionNote(
     id: `pending:${key}`,
     kind: "pending",
     priority: normalizePriority(front.priority),
-    subrank: 0,
+    subrank: /^-?\d+$/.test(front.subrank ?? "") ? Number(front.subrank) : 0,
     group: null,
     subject: title.slice(0, SUBJECT_MAX),
     summary: summary.slice(0, SUMMARY_MAX),
