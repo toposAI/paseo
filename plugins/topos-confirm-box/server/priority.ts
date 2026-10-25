@@ -64,6 +64,8 @@ export function normalizeProjects(raw: unknown): PriorityProject[] | null {
       name,
       note: typeof rec.note === "string" ? rec.note : "",
       thread: typeof rec.thread === "string" && rec.thread.trim() ? rec.thread.trim() : null,
+      ...(rec.new === true ? { isNew: true } : {}),
+      ...(rec.auto === true ? { auto: true } : {}),
     });
   }
   return out.length > 0 ? out : null;
@@ -77,13 +79,23 @@ export function readLedger(dir: string): { projects: PriorityProject[]; updatedT
   return { projects, updatedTs: typeof rec?.updated_ts === "number" ? rec.updated_ts : 0 };
 }
 
+/** UIの `isNew`(読み込み時に `new` から写す)を台帳の `new` に戻す。`auto` はそのまま通す。 */
+function toLedgerRow(p: PriorityProject): Record<string, unknown> {
+  const { isNew, ...rest } = p;
+  return { ...rest, ...(isNew ? { new: true } : {}) };
+}
+
 function writeLedger(dir: string, projects: readonly PriorityProject[]): void {
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, LEDGER_FILE);
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(
     tmp,
-    JSON.stringify({ version: 1, updated_ts: Date.now(), projects }, null, 2) + "\n",
+    JSON.stringify(
+      { version: 1, updated_ts: Date.now(), projects: projects.map(toLedgerRow) },
+      null,
+      2,
+    ) + "\n",
     "utf-8",
   );
   fs.renameSync(tmp, file);
@@ -109,6 +121,8 @@ export function moveProject(
   const next = [...projects];
   const [item] = next.splice(from, 1);
   next.splice(to, 0, item);
+  // ユーザーが動かした=確認済み。『新規』の印を外す(台帳の `new`)。
+  next[to] = { ...item, isNew: undefined };
   writeLedger(dir, next);
   return { ok: true, message: `「${item.name}」を ${to + 1} 位にしました` };
 }
