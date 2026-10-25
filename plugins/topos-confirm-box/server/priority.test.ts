@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { LEDGER_FILE, normalizeProjects, readLedger } from "./priority.js";
+import { LEDGER_FILE, moveProject, normalizeProjects, readLedger } from "./priority.js";
 
 const proj = (i: number, extra: Record<string, unknown> = {}) => ({
   id: `p${i}`,
@@ -66,6 +66,40 @@ test("並べ替えの書き戻し(読み直して正規化)で thread が消え�
       projects.map((p) => p.thread),
       ["agent-1", "agent-2"],
     );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("自動追加の印: new は isNew に写り、動かすと台帳から new が外れ auto/thread は残る", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "priority-"));
+  try {
+    fs.writeFileSync(
+      path.join(dir, LEDGER_FILE),
+      JSON.stringify({
+        version: 1,
+        updated_ts: 1,
+        projects: [
+          proj(1),
+          proj(2, { thread: "agent-2", auto: true, new: true }),
+          proj(3, { thread: "agent-3", auto: true, new: true }),
+        ],
+      }),
+    );
+    const before = readLedger(dir).projects;
+    assert.deepEqual(
+      before.map((p) => p.isNew === true),
+      [false, true, true],
+    );
+    assert.equal(moveProject(dir, "p3", 1).ok, true);
+    const raw = JSON.parse(fs.readFileSync(path.join(dir, LEDGER_FILE), "utf-8"));
+    const [first, , last] = raw.projects;
+    assert.equal(first.id, "p3");
+    assert.equal(first.new, undefined);
+    assert.equal(first.auto, true);
+    assert.equal(first.thread, "agent-3");
+    assert.equal(last.id, "p2");
+    assert.equal(last.new, true); // 動かしていない行の印は残る
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
