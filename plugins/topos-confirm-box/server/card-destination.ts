@@ -93,7 +93,7 @@ export function resolveCardDestination(
   const poster = threads.map((t) => findRegistry(registry, t)).find((r) => r !== null) ?? null;
   const alive = (id: string): boolean => {
     const r = registry.find((e) => e.agentId === id);
-    return !r || !r.archived; // 登録簿に居ない(司令塔など)は生きている側に倒す
+    return !r || !r.archived; // 登録簿に居ない親(ユーザー直下スレ・司令塔)は、閉じているか分からないので生きている側に倒す(受容した残差)
   };
   const title = (id: string, fallback: string | null): string | null =>
     registry.find((e) => e.agentId === id)?.title ?? fallback;
