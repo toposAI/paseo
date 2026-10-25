@@ -2204,6 +2204,10 @@ export const ko: TranslationResources = {
         description:
           "Long-press your messages for time and copy; collapse the composer while reading answers",
       },
+      composerOverflowMenu: {
+        label: 'Composer "…" menu',
+        description: 'On phone widths, fold secondary buttons (voice mode, usage) into a "…" menu',
+      },
       toolCallDetail: {
         label: "도구 호출 표시",
         description: "타임라인에 도구 호출이 표시되는 방식",

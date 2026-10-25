@@ -2227,6 +2227,10 @@ export const ptBR: TranslationResources = {
         description:
           "Long-press your messages for time and copy; collapse the composer while reading answers",
       },
+      composerOverflowMenu: {
+        label: 'Composer "…" menu',
+        description: 'On phone widths, fold secondary buttons (voice mode, usage) into a "…" menu',
+      },
       toolCallDetail: {
         label: "Exibição de chamadas de ferramentas",
         description: "Como as chamadas de ferramentas aparecem na linha do tempo",

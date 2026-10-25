@@ -2245,6 +2245,10 @@ export const es: TranslationResources = {
         description:
           "Long-press your messages for time and copy; collapse the composer while reading answers",
       },
+      composerOverflowMenu: {
+        label: 'Composer "…" menu',
+        description: 'On phone widths, fold secondary buttons (voice mode, usage) into a "…" menu',
+      },
       toolCallDetail: {
         label: "Visualización de llamadas a herramientas",
         description: "Cómo aparecen las llamadas a herramientas en la cronología",

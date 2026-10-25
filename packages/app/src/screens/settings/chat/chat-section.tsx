@@ -41,6 +41,10 @@ export function ChatSection() {
     (toposChatStyle: boolean) => void updateSettings({ toposChatStyle }),
     [updateSettings],
   );
+  const changeComposerOverflowMenu = useCallback(
+    (composerOverflowMenu: boolean) => void updateSettings({ composerOverflowMenu }),
+    [updateSettings],
+  );
   const changeChatOutline = useCallback(
     (chatOutlineEnabled: boolean) => void updateSettings({ chatOutlineEnabled }),
     [updateSettings],
@@ -61,6 +65,12 @@ export function ChatSection() {
             hint={t("settings.general.toposChatStyle.description")}
             value={settings.toposChatStyle}
             onValueChange={changeToposChatStyle}
+          />
+          <SettingsSwitch
+            label={t("settings.general.composerOverflowMenu.label")}
+            hint={t("settings.general.composerOverflowMenu.description")}
+            value={settings.composerOverflowMenu}
+            onValueChange={changeComposerOverflowMenu}
           />
           <SettingsSelect
             label={t("settings.general.toolCallDetail.label")}

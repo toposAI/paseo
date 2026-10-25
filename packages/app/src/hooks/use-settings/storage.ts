@@ -114,6 +114,8 @@ export interface AppSettings {
   autoExpandReasoning: boolean;
   /** Topos-style chat: long-press user bubbles for time + copy, collapsible composer. */
   toposChatStyle: boolean;
+  /** Phone width + Topos chat style: fold secondary composer buttons into a "..." menu. */
+  composerOverflowMenu: boolean;
   toolCallDetailLevel: ToolCallDetailLevel;
   chatOutlineEnabled: boolean;
   vimKeybindings: boolean;
@@ -171,6 +173,7 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   usage: DEFAULT_USAGE_PREFERENCES,
   autoExpandReasoning: false,
   toposChatStyle: true,
+  composerOverflowMenu: true,
   toolCallDetailLevel: "detailed",
   chatOutlineEnabled: true,
   vimKeybindings: false,
@@ -267,6 +270,7 @@ const StoredAppSettingsSchema = z
     usage: UsagePreferencesSchema,
     autoExpandReasoning: z.boolean().catch(false),
     toposChatStyle: z.boolean().catch(true),
+    composerOverflowMenu: z.boolean().catch(true),
     toolCallDetailLevel: z
       .enum(["overview", "detailed"])
       .or(z.literal("concise").transform(() => "overview" as const))
