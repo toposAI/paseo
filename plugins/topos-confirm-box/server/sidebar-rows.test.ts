@@ -338,7 +338,32 @@ test("countStatusLabels は判断待ちと完了待ちを別々に数える", ()
     ],
     new Map(),
   );
-  assert.deepEqual(countStatusLabels(rows), { judgment: 2, doneWait: 1 });
+  assert.deepEqual(countStatusLabels(rows), {
+    judgment: 2,
+    doneWait: 1,
+    running: 1,
+    coordinator: 0,
+    idle: 0,
+  });
+});
+
+test("countStatusLabels は実装中・司令塔・待機中も数え、司令塔は実装中に含めない", () => {
+  const rows = buildUpperRows(
+    [
+      thread("a", "実装中"),
+      thread("b", "実装中"),
+      { agentId: "c", status: "実装中" as const, title: "c", coordinator: true },
+      { agentId: "d", status: "待機中" as const, title: "d" },
+    ],
+    new Map(),
+  );
+  assert.deepEqual(countStatusLabels(rows), {
+    judgment: 0,
+    doneWait: 0,
+    running: 2,
+    coordinator: 1,
+    idle: 1,
+  });
 });
 
 // ---- ピン止めを「司令塔」の外へ出す(2026-10-25 ユーザー指示) ----
