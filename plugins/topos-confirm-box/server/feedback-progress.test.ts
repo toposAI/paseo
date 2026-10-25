@@ -85,7 +85,7 @@ test("承認済みで工程が残っていれば反映中、全done なら完了
     deriveProgress(rep(), mk({ reflect: { state: "done" }, r: { state: "pending" } })).stage,
     "applying",
   );
-  assert.equal(deriveProgress(rep(), mk({ reflect: { state: "done" } })).stage, "done");
+  assert.equal(deriveProgress(rep(), mk({ "reply:x": { state: "done" } })).stage, "done");
   assert.equal(deriveProgress(rep(), mk({ reflect: { state: "returned" } })).stage, "stale");
   assert.equal(deriveProgress(rep(), ctx({ boxItems: [approved] })).stage, "applying");
 });
@@ -97,6 +97,24 @@ test("status が done/rejected なら完了+アーカイブ。返信済みを添
   assert.match(d.detail, /返信済み/);
   assert.equal(deriveProgress(rep({ status: "rejected" }), ctx()).archived, true);
   assert.equal(deriveProgress(rep({ status: "will_do" }), ctx()).archived, false);
+});
+
+test("却下・保留・reflect投入のみは正直に出す", () => {
+  const approved = item({ state: "approved" });
+  const rej = ctx({
+    boxItems: [approved],
+    approvalItems: { it1: { chosen: "reject", steps: {} } },
+  });
+  assert.match(deriveProgress(rep(), rej).detail, /見送り/);
+  assert.equal(
+    deriveProgress(rep({ status: "hold" }), ctx({ boxItems: [approved] })).detail,
+    "保留中",
+  );
+  const q = ctx({
+    boxItems: [approved],
+    approvalItems: { it1: { chosen: "both", steps: { reflect: { state: "done" } } } },
+  });
+  assert.equal(deriveProgress(rep(), q).stage, "applying");
 });
 
 test("他ソースの項目は無視し、台帳が壊れていれば受付に倒す", () => {

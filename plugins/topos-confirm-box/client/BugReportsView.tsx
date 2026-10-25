@@ -108,9 +108,11 @@ export function BugReportsView({ theme }: Pick<PluginHostProps, "theme">) {
   );
 
   const allReports = data?.reports ?? [];
-  const archivedCount = allReports.filter((r) => r.progress?.archived).length;
+  // 返信が未読の報告は、完了済みでも隠さない(管理者が未読に気づく導線を残す)
+  const isHidden = (r: FeedbackReport) => r.progress?.archived && !(r.reply && !r.replySeen);
+  const archivedCount = allReports.filter(isHidden).length;
   // 完了(対応済み・見送り)は既定で隠す。トグルはセッション内のみ(永続化しない=「消えた」と誤解させない)
-  const reports = showArchived ? allReports : allReports.filter((r) => !r.progress?.archived);
+  const reports = showArchived ? allReports : allReports.filter((r) => !isHidden(r));
   const newCount = countNewReports(allReports);
 
   return (

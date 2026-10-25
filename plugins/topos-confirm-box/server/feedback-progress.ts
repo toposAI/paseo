@@ -33,7 +33,7 @@ interface StepEntry {
 }
 export interface ProgressContext {
   intake: Record<string, IntakeEntry>;
-  approvalItems: Record<string, { steps?: Record<string, StepEntry> }>;
+  approvalItems: Record<string, { chosen?: string; steps?: Record<string, StepEntry> }>;
   /** source=feedback_auto の確認箱項目。 */
   boxItems: readonly ConfirmBoxItem[];
   now: number;
@@ -61,7 +61,7 @@ export function loadProgressContext(
     intake: asRecord<IntakeEntry>(
       readJson(path.join(ledgerDir, "feedback_intake_ledger.json")).reports,
     ),
-    approvalItems: asRecord<{ steps?: Record<string, StepEntry> }>(
+    approvalItems: asRecord<{ chosen?: string; steps?: Record<string, StepEntry> }>(
       readJson(path.join(ledgerDir, "feedback_approval_ledger.json")).items,
     ),
     boxItems: boxItems.filter((i) => i.source === "feedback_auto"),
@@ -87,14 +87,21 @@ function progressForItem(
   threadId: string | null,
   replied: string,
 ): FeedbackProgress {
-  const steps = Object.values(ctx.approvalItems[item.id]?.steps ?? {});
+  const ent = ctx.approvalItems[item.id];
+  const steps = Object.values(ent?.steps ?? {});
   const at = { threadId, itemId: item.id };
+  if (ent?.chosen === "reject" && steps.length === 0) {
+    return make("done", `見送り(状態の書き戻し待ち)${replied}`, at);
+  }
   if (item.state !== "approved") return make("awaiting_decision", `あなたの判断待ち${replied}`, at);
   if (steps.some((s) => s.state === "returned")) {
     return make("stale", "承認後の処理が止まりました。確認箱の【要確認】を見てください", at);
   }
   if (steps.length > 0 && steps.every((s) => s.state === "done")) {
-    return make("done", `処理完了(状態の書き戻し待ち)${replied}`, at);
+    const queued = ent?.steps && "reflect" in ent.steps;
+    return queued
+      ? make("applying", `反映待ち行列に投入済み(次の再起動枠で反映)${replied}`, at)
+      : make("done", `処理完了(状態の書き戻し待ち)${replied}`, at);
   }
   return make("applying", `承認済み・反映と返信を処理中${replied}`, at);
 }
@@ -127,6 +134,7 @@ export function deriveProgress(
   const replied = report.reply ? "・返信済み" : "";
   if (report.status === "done") return make("done", `対応済み${replied}`, { archived: true });
   if (report.status === "rejected") return make("done", `見送り${replied}`, { archived: true });
+  if (report.status === "hold") return make("awaiting_decision", `保留中${replied}`);
   const agentId = ctx.intake[report.id]?.agent_id;
   const threadId = typeof agentId === "string" ? agentId : null;
   const item = findItem(report.id, ctx.boxItems);
