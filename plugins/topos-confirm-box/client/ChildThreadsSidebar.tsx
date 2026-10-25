@@ -1111,7 +1111,10 @@ function StatusCountChips({
   rows: readonly SidebarRowView<ChildThread>[];
   openScreen: (input: { screenId: string; params?: Record<string, string> }) => void;
 }) {
-  const { judgment, doneWait } = useMemo(() => countStatusLabels(rows), [rows]);
+  const { judgment, doneWait, running, coordinator, idle } = useMemo(
+    () => countStatusLabels(rows),
+    [rows],
+  );
   const openJudgment = useCallback(
     () => openScreen({ screenId: BOX_TAB_SCREEN_ID, params: { [BOX_TAB_MODE_PARAM]: "items" } }),
     [openScreen],
@@ -1121,7 +1124,7 @@ function StatusCountChips({
       openScreen({ screenId: BOX_TAB_SCREEN_ID, params: { [BOX_TAB_MODE_PARAM]: "childdone" } }),
     [openScreen],
   );
-  if (judgment === 0 && doneWait === 0) return null;
+  if (judgment + doneWait + running + coordinator + idle === 0) return null;
   return (
     <View style={styles.chips} testID="status-count-chips">
       {judgment > 0 ? (
@@ -1139,6 +1142,19 @@ function StatusCountChips({
           testID="status-count-donewait"
           onPress={openDone}
         />
+      ) : null}
+      {running > 0 ? (
+        <StatusBadge text={`実装中 ${running}`} kind="running" testID="status-count-running" />
+      ) : null}
+      {coordinator > 0 ? (
+        <StatusBadge
+          text={`司令塔 ${coordinator}`}
+          kind="running"
+          testID="status-count-coordinator"
+        />
+      ) : null}
+      {idle > 0 ? (
+        <StatusBadge text={`待機中 ${idle}`} kind="idle" testID="status-count-idle" />
       ) : null}
     </View>
   );

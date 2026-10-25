@@ -118,7 +118,9 @@ export function withCardHeader(
 ): string {
   const head = `【確認箱カード】${card.subject}(ID: ${card.id})`;
   const body = card.background ? `\n[カード本文]\n${card.background}` : "";
-  return `${head}${body}\n\n${text}`;
+  // 「[ユーザーの発言]」区切りは機械が原文を切り出す目印(antigravity/utils/judgment_answer_sweep.py が
+  // 司令塔スレの発言ログから読み、回答済みにする)。文言を変えるなら両方を揃えること。
+  return `${head}${body}\n\n[ユーザーの発言]\n${text}`;
 }
 
 /**

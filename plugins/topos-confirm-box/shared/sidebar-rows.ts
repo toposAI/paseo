@@ -226,18 +226,23 @@ export function buildUpperRows<T extends RowThread>(
   return rows;
 }
 
-/** 上段の行を「判断待ち」「完了待ち」で数える(一覧の上の件数チップ用。下部バーの件数とは別集計)。 */
-export function countStatusLabels(rows: readonly { statusLabel: string }[]): {
+/** 上段の行を状態ごとに数える(一覧の上の件数チップ用。下部バーの件数とは別集計)。司令塔は実装中に含めず別に数える。 */
+export function countStatusLabels(rows: readonly { statusLabel: string; thread: RowThread }[]): {
   judgment: number;
   doneWait: number;
+  running: number;
+  coordinator: number;
+  idle: number;
 } {
-  let judgment = 0;
-  let doneWait = 0;
+  const c = { judgment: 0, doneWait: 0, running: 0, coordinator: 0, idle: 0 };
   for (const r of rows) {
-    if (r.statusLabel === "判断待ち") judgment += 1;
-    else if (r.statusLabel === "完了待ち") doneWait += 1;
+    if (r.thread.coordinator === true) c.coordinator += 1;
+    else if (r.statusLabel === "判断待ち") c.judgment += 1;
+    else if (r.statusLabel === "完了待ち") c.doneWait += 1;
+    else if (r.statusLabel === "実装中") c.running += 1;
+    else if (r.statusLabel === "待機中") c.idle += 1;
   }
-  return { judgment, doneWait };
+  return c;
 }
 
 /**

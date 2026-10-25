@@ -307,3 +307,26 @@ test("シンボリックリンクのノートには書かない / 選択の改�
   );
   assert.ok(!/^## 乗っ取り/m.test(fs.readFileSync(path.join(dir, "j-1.md"), "utf8")));
 });
+
+const WITH_THREADS = (ids: string[]) =>
+  NOTE("j-t1", "open").replace(
+    "legacy_keys: []",
+    `threads:\n${ids.map((i) => `- ${i}`).join("\n")}\nlegacy_keys: []`,
+  );
+
+test("チャット宛先: ノートの threads のうち司令塔(短ID前方一致を含む)を threadRef にする。子スレ本人は選ばない", () => {
+  const coord = "afe8d176-d92c-4cb2-933b-8dfe790d3c20";
+  const parsed = parseDecisionNote(WITH_THREADS(["e7fd88de", "afe8d17"]), 1, [
+    coord,
+  ]) as ConfirmBoxItem;
+  assert.deepEqual(parsed.threadRef, { kind: "paseo_agent", id: coord });
+  // 司令塔が threads に無ければ null(UIは従来どおり総司令塔へ)
+  assert.equal(
+    (parseDecisionNote(WITH_THREADS(["e7fd88de"]), 1, [coord]) as ConfirmBoxItem).threadRef,
+    null,
+  );
+  assert.equal(
+    (parseDecisionNote(NOTE("j-t2", "open"), 1, [coord]) as ConfirmBoxItem).threadRef,
+    null,
+  );
+});

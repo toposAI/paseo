@@ -526,7 +526,8 @@ export function CardChatPane({
     }
     let askedId: string | null = null;
     try {
-      let outgoing = fallback && item ? withCardHeader(t, item) : t;
+      // カードID付きで送る(司令塔宛のとき発言ログから回答済みを機械判定するため。judgment_answer_sweep.py)
+      let outgoing = item ? withCardHeader(t, item) : t;
       if (topic && item) {
         // 台帳へ質問を記録し(返事待ちの目印と催促の元)、返信ID+sayコマンドを付けて上位スレへ送る。
         const asked = await askRpc({ id: item.id, key: item.key, text: t, target: sendAgentId });
