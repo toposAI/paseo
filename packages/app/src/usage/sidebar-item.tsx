@@ -159,9 +159,8 @@ function PinnedUsageTrigger({
 }
 
 /**
- * One provider's line, led by its name. Off-screen copies measure it with labels and with percents alone; the
- * line already shows its name and provider icon (usage reporting always ships one), so only the windows'
- * text decides what fits.
+ * One provider's line, identified by its icon only. Off-screen copies measure it with labels and with percents alone; the
+ * richest layout that fits is shown, and what it leaves out takes no space at all.
  */
 function PinnedUsageRowView({ row }: { row: PinnedUsageRow }) {
   const [available, setAvailable] = useState<number | null>(null);
@@ -184,9 +183,6 @@ function PinnedUsageRowView({ row }: { row: PinnedUsageRow }) {
   });
   return (
     <View style={styles.row}>
-      <Text style={styles.rowTitle} numberOfLines={1}>
-        {row.title}
-      </Text>
       <View style={styles.line} onLayout={handleAvailableLayout}>
         <PinnedUsageLine sources={row.sources} layout={layout} />
       </View>
@@ -197,11 +193,11 @@ function PinnedUsageRowView({ row }: { row: PinnedUsageRow }) {
         importantForAccessibility="no-hide-descendants"
         aria-hidden
       >
-        <View style={styles.measuredNoIcons} onLayout={handleLabelsLayout}>
-          <PinnedUsageLine sources={row.sources} layout="labels" measuring withoutIcons />
+        <View style={styles.measured} onLayout={handleLabelsLayout}>
+          <PinnedUsageLine sources={row.sources} layout="labels" measuring />
         </View>
-        <View style={styles.measuredNoIcons} onLayout={handlePercentsLayout}>
-          <PinnedUsageLine sources={row.sources} layout="percents" measuring withoutIcons />
+        <View style={styles.measured} onLayout={handlePercentsLayout}>
+          <PinnedUsageLine sources={row.sources} layout="percents" measuring />
         </View>
       </View>
     </View>
@@ -216,13 +212,10 @@ function PinnedUsageLine({
   sources,
   layout,
   measuring = false,
-  withoutIcons = false,
 }: {
   sources: readonly PinnedUsageSource[];
   layout: PinnedUsageLayout;
   measuring?: boolean;
-  /** Mirrors the visible line's spacing for measuring, minus the source icons. */
-  withoutIcons?: boolean;
 }) {
   return sources.map((source, sourceIndex) => (
     <Fragment key={source.key}>
@@ -230,7 +223,7 @@ function PinnedUsageLine({
         style={sourceIndex === 0 ? null : styles.sourceGap}
         testID={measuring ? undefined : "sidebar-usage-source"}
       >
-        {withoutIcons ? null : <UsageSourceIcon svg={source.icon} size={14} />}
+        <UsageSourceIcon svg={source.icon} size={14} />
       </View>
       {source.windows.map((window, windowIndex) => {
         const leadStyle = windowIndex === 0 ? styles.iconGap : styles.windowGap;
@@ -286,13 +279,6 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
   },
-  // The provider's name leads its line, so the two lines stay tellable apart at a glance.
-  rowTitle: {
-    flexShrink: 0,
-    marginRight: theme.spacing[1.5],
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
-  },
   line: {
     flex: 1,
     minWidth: 0,
@@ -308,8 +294,7 @@ const styles = StyleSheet.create((theme) => ({
     width: 10_000,
     opacity: 0,
   },
-  // Same line without the source icons, which the visible line leads with instead.
-  measuredNoIcons: {
+  measured: {
     alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
