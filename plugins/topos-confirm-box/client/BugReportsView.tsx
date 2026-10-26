@@ -13,6 +13,7 @@ import {
   FEEDBACK_PROGRESS_LABEL,
   countNewReports,
   feedbackReportsListRpc,
+  isReportComplete,
 } from "../shared/feedback.js";
 import type { ToggleInfo } from "./HeaderIconBar.js";
 import type { FeedbackReport, FeedbackReportsListOutput } from "../shared/feedback.js";
@@ -108,7 +109,8 @@ export function BugReportsView({
 
   const allReports = data?.reports ?? [];
   // 返信が未読の報告は、完了済みでも隠さない(管理者が未読に気づく導線を残す)
-  const isHidden = (r: FeedbackReport) => r.progress?.archived && !(r.reply && !r.replySeen);
+  // 判定はバッジ(`countOpenReports`)と同じ `isReportComplete` を使う(バッジの数と一覧の行数を揃える)
+  const isHidden = (r: FeedbackReport) => isReportComplete(r) && !(r.reply && !r.replySeen);
   const archivedCount = allReports.filter(isHidden).length;
   // 完了(対応済み・見送り)は既定で隠す。トグルはセッション内のみ(永続化しない=「消えた」と誤解させない)
   const reports = showArchived ? allReports : allReports.filter((r) => !isHidden(r));

@@ -49,7 +49,7 @@ import {
   setEnabled as setReadPositionEnabled,
   setPosition,
 } from "./server/read-position.js";
-import { feedbackReportsListRpc, countNewReports } from "./shared/feedback.js";
+import { feedbackReportsListRpc, countOpenReports } from "./shared/feedback.js";
 import { readFeedbackReports } from "./server/feedback.js";
 import { loadProgressContext } from "./server/feedback-progress.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
@@ -500,7 +500,8 @@ export default function contribute(server: PluginServerContext) {
     // バッジは失敗しても0で返す(件数が取れないだけで確認箱そのものは開けるようにする)
     let bugs = 0;
     try {
-      bugs = countNewReports(readFeedbackReports().reports);
+      // バッジ=**まだ終わっていない**報告(2026-10-26 ユーザー判断。以前は status==="new" だけ数えていた)
+      bugs = countOpenReports(readFeedbackReports().reports);
     } catch {
       bugs = 0;
     }
