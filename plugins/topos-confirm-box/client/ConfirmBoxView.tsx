@@ -5,7 +5,7 @@
  * 決定の記録は押した時だけ(自動では何も決めない)。
  * カードごとの会話は 💬 から開く専用ペイン(CardChatPane)に一本化した(旧・カード内の自由記述欄は廃止)。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
@@ -19,6 +19,7 @@ import {
   confirmBoxDecideRpc,
   confirmBoxListRpc,
   confirmBoxPermitRpc,
+  countOpen,
   judgmentTabRows,
   rejectComment,
 } from "../shared/contract.js";
@@ -91,10 +92,17 @@ export function ConfirmBoxView({
   // 判断印(`judgment: true`)の無い旧形式(選択肢つき)は既定では出さない。押した時だけ並べる。
   const [legacyOff, setLegacyOff] = useState(true);
 
+  const lastOpen = useRef<number | null>(null);
   const reload = useCallback(async () => {
     try {
-      setData(await list({}));
+      const next = await list({});
+      setData(next);
       setError(null);
+      // 一覧とバッジは別の取得なので、30秒の周期次第で数がずれて見える(2026-10-26 20対18の報告)。
+      // 一覧の未決数が前回から変わったら、バッジ側も同時に取り直して揃える。
+      const open = countOpen(next.items);
+      if (lastOpen.current !== null && lastOpen.current !== open) notifyBoxChanged();
+      lastOpen.current = open;
       return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
