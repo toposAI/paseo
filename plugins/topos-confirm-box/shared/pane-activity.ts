@@ -7,6 +7,7 @@
  * - timeline の `tool_call*` → working(ツール実行中)
  * - timeline の `assistant_message` → replying(返信中)
  * - エージェント状態が running 以外になったら解除(idle/終了)
+ * 作業中の項目(thinking/compacting/working/replying)は、スレが running と分かってからだけ進める。
  * 取れない情報は推測で出さない(例: running だが項目がまだ無い間は、新しい状態へ進めず `sent` のまま)。
  *
  * 2026-10-27: 購読は接続直後に**過去の**書き込みまで `tool_call` として届ける。スレの状態を見ずに
@@ -45,30 +46,53 @@ export function nextPaneActivity(
     case "reset":
       return null;
     case "agent-status":
-      // running 以外=手が止まった。送信済みだけは、「送ったのに相手は反応していない」という事実なので残す。
-      if (ev.status === "running") {
-        if (cur === "sent") return "sent-running";
-        if (cur === "sent-running") return cur;
-        return "running";
-      }
-      if (cur === "sent") return cur;
-      if (cur === "sent-running") return "sent";
-      return null;
-    case "item": {
-      const t = ev.itemType ?? "";
-      // 過去の書き込みか今の作業かはスレの状態で判る。止まっている間(null/`sent`)は作業系を進めず、
-      // 送信後に届いた返信だけは見せる。
-      const settled = cur === null || cur === "sent";
-      if (t === "assistant_message") return "replying";
-      if (settled && (t === "reasoning" || t.startsWith("tool_call"))) return cur;
-      if (t === "reasoning") return "thinking";
-      if (t === "compaction") return ev.status === "loading" ? "compacting" : "thinking";
-      if (t.startsWith("tool_call")) return "working";
-      return cur;
-    }
+      return nextFromAgentStatus(cur, ev.status);
+    case "item":
+      return nextFromItem(cur, ev.itemType, ev.status);
     default:
       return cur;
   }
+}
+
+function nextFromAgentStatus(
+  cur: PaneActivityState | null,
+  status: string | undefined,
+): PaneActivityState | null {
+  // running 以外=手が止まった。送信済みだけは、「送ったのに相手は反応していない」という事実なので残す。
+  if (status === "running") {
+    if (cur === "sent") return "sent-running";
+    if (cur === "sent-running") return cur;
+    // 作業中の表示は running の再通知で消さない(状態の再送出でラベルが点滅しない)。
+    if (cur !== null && cur !== "running") return cur;
+    return "running";
+  }
+  if (cur === "sent") return cur;
+  if (cur === "sent-running") return "sent";
+  return null;
+}
+
+function nextFromItem(
+  cur: PaneActivityState | null,
+  itemType: string | undefined,
+  status: string | undefined,
+): PaneActivityState | null {
+  const t = itemType ?? "";
+  // 過去の書き込みか今の作業かはスレの状態で判る。止まっている間(null/`sent`)は**何も進めない**
+  // (返信も、送った後に届いたものだけを見せる。`cur === "sent"` のときだけ)。
+  const settled = cur === null || cur === "sent";
+  if (settled) {
+    if (cur === "sent" && t === "assistant_message") return "replying";
+    return cur;
+  }
+  if (t === "assistant_message") return "replying";
+  if (t === "reasoning") return "thinking";
+  if (t === "compaction") {
+    // completed は「圧縮中」を解除する。他の状態からは何も始めない(running の作業表示を保つ)。
+    if (status === "loading") return "compacting";
+    return cur === "compacting" ? "running" : cur;
+  }
+  if (t.startsWith("tool_call")) return "working";
+  return cur;
 }
 
 export const PANE_ACTIVITY_LABEL: Record<PaneActivity, string> = {

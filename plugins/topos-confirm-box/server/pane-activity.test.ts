@@ -22,7 +22,9 @@ test("送信→考え中→圧縮中→完了→返信→idleで解除", () => {
     itemType: "compaction",
     status: "completed",
   });
-  assert.equal(s, "thinking");
+  // 圧縮が終わったら「圧縮中」を解除する。まだ項目が無い間は印(running)でラベルは出さない。
+  assert.equal(s, "running");
+  assert.equal(paneActivityLabel(s), null);
   s = nextPaneActivity(s, { kind: "item", itemType: "assistant_message" });
   assert.equal(s, "replying");
   assert.equal(nextPaneActivity(s, { kind: "agent-status", status: "idle" }), null);
@@ -67,6 +69,35 @@ test("(2) スレが実行中になってから開いた作業は「実行中」�
   });
   assert.equal(nextPaneActivity(running, { kind: "item", itemType: "tool_call" }), "working");
   assert.equal(nextPaneActivity(running, { kind: "item", itemType: "reasoning" }), "thinking");
+});
+
+test("(2) 止まっているスレの過去の返信・圧縮では何も出さない(表示が止まらない)", () => {
+  // 返信・圧縮も過去分の流し込みで届く。状態を見ずに進めると「返信中…」「考え中…」が残る(round1 F1)。
+  assert.equal(nextPaneActivity(null, { kind: "item", itemType: "assistant_message" }), null);
+  assert.equal(
+    nextPaneActivity(null, { kind: "item", itemType: "compaction", status: "completed" }),
+    null,
+  );
+  assert.equal(
+    nextPaneActivity(null, { kind: "item", itemType: "compaction", status: "loading" }),
+    null,
+  );
+});
+
+test("(2) 圧縮の完了は「圧縮中」だけを解除する", () => {
+  assert.equal(
+    nextPaneActivity("working", { kind: "item", itemType: "compaction", status: "completed" }),
+    "working",
+  );
+  assert.equal(
+    nextPaneActivity("compacting", { kind: "item", itemType: "compaction", status: "completed" }),
+    "running",
+  );
+});
+
+test("(2) 実行中の再通知(running)で作業表示を消さない", () => {
+  assert.equal(nextPaneActivity("working", { kind: "agent-status", status: "running" }), "working");
+  assert.equal(nextPaneActivity("thinking", { kind: "agent-status", status: "running" }), "thinking");
 });
 
 test("(2) 実行中に始まった作業は、スレが止まったら「実行中」を消す", () => {

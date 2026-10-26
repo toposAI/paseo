@@ -306,6 +306,7 @@ export function CardChatPane({
   // 開いた時点のスレの状態を1回読む。購読は接続直後に過去の書き込みを流すので、状態を見ないと
   // 送信もしていないのに「ツールを実行中…」が出る(2026-10-27 本番。`shared/pane-activity.ts`)。
   // 読み直し(リロード)で空になるのも防ぐ: 開いた時点で running なら、その後の書き込みで表示を戻す。
+  // 履歴の最後の項目からは起こさない(パネルに返事が残ったままの idle スレで「返信中…」が出続けるため)。
   useEffect(() => {
     statusSeen.current = false;
     if (!serverId || topic || hubPending) return undefined;
@@ -371,15 +372,10 @@ export function CardChatPane({
           if (line) past.push(line);
         });
         setLines((cur) => (cur.length === 0 ? past : cur));
-        // 開いた時点で既に作業中なら、最後の項目から「実行中/考え中」を起こす(リロードで空にしない)。
-        const last = past.length > 0 ? (res.entries ?? [])[past.length - 1]?.item : undefined;
-        if (last) {
-          seeActivity({
-            kind: "item",
-            itemType: last.type,
-            status: itemStatus(last),
-          });
-        }
+        // 開いた時点の表示(「ツールを実行中…」等)は、スレの状態を読む effect が下で起こす。
+        // ここで履歴の最後の項目から起こすと、idle のスレ(返信が残ったまま)でも「返信中…」などが先に出て、
+        // 状態の読み取りより先に届く場合に止まったままになる(2026-10-27 出口レビュー round1 F1)。
+        // 嘘の表示を避ける方を優先する: 履歴の読み直しと状態の読み取りがどちらも失敗したら、ラベルは出ない。
         return null;
       })
       .catch(() => {

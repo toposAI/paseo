@@ -38,6 +38,7 @@ import { BellIcon, BugIcon, InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import { CardChatPane } from "./CardChatPane.js";
 import { openThreadInPane } from "./open-pane-thread.js";
+import type { OpenThreadContext } from "./open-pane-thread.js";
 import { resolveOpenThreadId } from "./thread-target.js";
 import { useCoordinatorTargets } from "./useCoordinatorTargets.js";
 import { shouldSwitchPaneOnCardPress } from "../shared/card-pane.js";
@@ -456,7 +457,9 @@ export function ConfirmBoxView({
     agentId: openTarget,
     item: paneItem,
     destination: paneItem ? paneAgentId : null,
-    currentPane: pane,
+    // ペインに今出ている相手。URL の `?card=` にはカードIDしか無いので、答えるスレを添える
+    // (「分からない(null)」と「同じ」を取り違えないため。round1 F2)。
+    currentPane: currentPaneWithAnswer(pane, paneAgentId),
     onFold: foldPane,
     threadTitle: paneThreadTitle,
     wide,
@@ -919,8 +922,8 @@ function usePaneOpenThread({
   item: ConfirmBoxItem | null;
   /** この欄に答えるスレ。開くスレが閉じていて宛先が決まらないときの次点。 */
   destination: string | null;
-  /** 確認箱のペインに今出ている相手(URL の `?card=`/`?thread=`)。スレを開くとこれと同じなら主ペイン化。 */
-  currentPane: ReturnType<typeof useCardPaneRoute>["pane"];
+  /** 確認箱のペインに今出ている相手(カードは答えるスレ付き)。開くスレがこれと同じなら主ペイン化。 */
+  currentPane: OpenThreadContext["currentPane"];
   /** 同じ相手を主ペインで開き直すとき、確認箱のペインを外す。 */
   onFold: () => void;
   threadTitle: string | null;
@@ -974,6 +977,18 @@ function usePaneOpenThread({
  * - `answer` … この欄に答えるスレ(チャットの送り先)。
  * - `open`   … 「スレを開く」の宛先(投函元)。答えるスレ(親)は、開くスレが閉じているときの次点。
  */
+/**
+ * ペインの相手に「カードのときは答えるスレ」を添える。`paneItem` を引けていない(まだ一覧に来ていない)間は
+ * 答えるスレが分からないので、そのカードを開くスレと同じ扱いにはしない(畳まない=右に開く)。
+ */
+function currentPaneWithAnswer(
+  pane: ReturnType<typeof useCardPaneRoute>["pane"],
+  answerId: string | null,
+): OpenThreadContext["currentPane"] {
+  if (pane?.kind !== "card") return pane;
+  return { kind: "card", id: pane.id, answerId };
+}
+
 function paneTargets(
   paneItem: ConfirmBoxItem | null,
   paneThreadId: string | null,

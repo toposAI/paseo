@@ -77,9 +77,12 @@ test("投函元が無く次点(この欄に答えるスレ)を開くときも、
 });
 
 test("カードは「同じカード」ではなく「同じ相手を出しているか」で判定する", () => {
-  const card = { kind: "card", id: "c1" } as const;
-  assert.equal(showsSameThread(card, "A", "A"), true);
-  assert.equal(showsSameThread(card, "A", "B"), false, "答えの宛先が別スレなら畳まない");
+  const card = { kind: "card", id: "c1", answerId: "A" } as const;
+  assert.equal(showsSameThread(card, "A"), true);
+  assert.equal(showsSameThread({ kind: "card", id: "c1", answerId: "B" }, "A"), false, "出している相手が別なら畳まない");
+  // 答えるスレが分からないカードは畳まない(「分からない」を「同じ」と取り違えない。round1 F2)。
+  assert.equal(showsSameThread({ kind: "card", id: "c1" }, "A"), false);
+  assert.equal(showsSameThread({ kind: "card", id: "c1", answerId: null }, "A"), false);
   assert.equal(showsSameThread({ kind: "thread", id: "A" }, "A"), true);
   assert.equal(showsSameThread({ kind: "thread", id: "B" }, "A"), false);
   assert.equal(showsSameThread(null, "A"), false);

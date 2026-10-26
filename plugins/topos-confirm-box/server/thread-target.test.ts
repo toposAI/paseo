@@ -141,6 +141,14 @@ describe("resolveOpenThreadId", () => {
     );
   });
 
+  test("threads: の先頭からは推測しない(解釈はサーバ側の1箇所だけ。round1 F4)", () => {
+    const id = resolveOpenThreadId({
+      threadCandidates: [TOPOS_DEV],
+      threadRef: { kind: "paseo_agent", id: F80 },
+    });
+    assert.equal(id, F80, "候補よりサーバが入れた threadId/thread_ref を使う");
+  });
+
   test("何も無ければ null(宛先を決めない)", () => {
     assert.equal(resolveOpenThreadId(null), null);
     assert.equal(resolveOpenThreadId({ threadId: "  ", threadRef: null, agentId: null }), null);

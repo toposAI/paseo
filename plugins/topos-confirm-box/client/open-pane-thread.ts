@@ -22,8 +22,9 @@ export interface OpenThreadContext {
   /**
    * 確認箱自身のペインに今出ている相手(`?card=`/`?thread=`)。開くスレと同じなら、右カラムへもう1枚
    * 並べずに**確認箱のペインを外して主ペインにする**(同じ相手が2枚並ぶのを防ぐ。2026-10-27)。
+   * カードの `answerId` は「そのカードが今出している相手」。分からない(null)なら畳まない。
    */
-  currentPane?: { kind: "card" | "thread"; id: string } | null;
+  currentPane?: { kind: "card" | "thread"; id: string; answerId?: string | null } | null;
   /** 開くカードの題名(管轄の推測に使う)。 */
   title?: string | null;
   /** サーバが返す総司令塔のID(取得前・失敗は undefined)。 */
@@ -72,10 +73,12 @@ export async function listDirectory(serverId: string): Promise<DirectoryAgent[] 
         }
       }
       const next: string | null | undefined = res.pageInfo.nextCursor;
-      if (!res.pageInfo.hasMore || !next) break;
+      if (!res.pageInfo.hasMore || !next) return out;
       cursor = next;
     }
-    return out;
+    // 上限まで読んでも終わらない=一覧を確かめられない。**部分的に読めた一覧を「全部」と取り違えない**
+    // (入っていないスレを「一覧に無い=閉じている」と扱って振り替えない。2026-10-27 round1 F3)。
+    return null;
   } catch {
     return null;
   } finally {
@@ -88,13 +91,14 @@ export async function listDirectory(serverId: string): Promise<DirectoryAgent[] 
  * (`?card=` はカードIDなので、同じカードでも答えの宛先が別スレなら同じではない)。
  */
 export function showsSameThread(
-  current: { kind: "card" | "thread"; id: string } | null | undefined,
+  current: { kind: "card" | "thread"; id: string; answerId?: string | null } | null | undefined,
   agentId: string,
-  answerId?: string | null,
 ): boolean {
   if (!current) return false;
   if (current.kind === "thread") return current.id === agentId;
-  return agentId === (answerId ?? agentId);
+  // カードは「そこに今出している相手」で判定する。分からない(null)は畳まない(安全側=右に開く)。
+  const shown = current.answerId ?? null;
+  return shown !== null && agentId === shown;
 }
 
 /** 「スレを開く」を押したときの処理。決まった宛先を1回だけ開く。 */
@@ -116,7 +120,7 @@ export async function openThreadInPane(input: {
   /** 決まった宛先を開く。確認箱のペインが同じ相手を出しているなら主ペイン化する。 */
   const openThread = async (agentId: string) => {
     // 右に同じ相手が2枚並ばないよう、確認箱のペインを外して主ペインで開く(2026-10-27)。
-    const samePane = showsSameThread(context.currentPane, agentId, destination);
+    const samePane = showsSameThread(context.currentPane, agentId);
     if (context.placement && samePane) {
       onFold?.();
       await open({ agentId });

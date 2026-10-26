@@ -5,7 +5,7 @@
  * (Vault 由来カードの `thread_ref` に、交代前の司令塔のIDが残っている)。アプリのスレ一覧
  * (session store)に居ないIDは右カラムの置き場所を決められず、確認箱ごと全画面で入れ替わる。
  * そこで開く前に、宛先が今の一覧に居るかを確かめ、居なければ持ち主のスレ(題名から分かる管轄の
- * 司令塔 → 起こしデーモンが指す総司令塔)で振り替える。どれも見つからなければ
+ * 司令塔 → このカードに答えるスレ(親)→ 起こしデーモンが指す総司令塔)で振り替える。どれも見つからなければ
  * 従来どおり全画面で開き、理由を1行出す(黙って入れ替えない)。
  */
 
@@ -107,7 +107,7 @@ export function resolveThreadTarget(input: ThreadTargetInput): ThreadTargetResul
   if (input.coordinatorId && isOpen(byId.get(input.coordinatorId))) {
     return pick(input.coordinatorId, "general-coordinator");
   }
-  // 宛先が無い(投函元も thread_ref も無い)なら、開くスレは決まらない。
+  // 振り替え先が無い(宛先が閉じていて、領域司令塔・親・総司令塔も開けない)、または宛先自体が無い。
   return {
     agentId: input.target,
     reason: "no-live-thread",
@@ -122,7 +122,7 @@ export interface ThreadIdLike {
   threadId?: string | null;
   /** 承認待ち項目のエージェント。 */
   agentId?: string | null;
-  /** 判断ノートの `threads:`。1本目が投函元のスレ。 */
+  /** 判断ノートの `threads:`(解釈はサーバ側。宛先決定には使わない)。 */
   threadCandidates?: readonly string[] | null;
 }
 
@@ -135,13 +135,15 @@ const trimmed = (v: unknown): string | null =>
  * 「投函元の親」を組み立てた `thread_ref` を開いていた。親がアーカイブ済みだと開けなかった)。
  * 無いときは従来どおり `thread_ref`(paseo_agent)→ 承認待ちの `agentId`。
  *
- * `threadId` はサーバが `thread_id`(箱の行・中間形式)か、判断ノートの `thread_id:` / `threads:` の
- * 1本目(=投函元。書き手 `judgment_notes.create_from_deposit` は `thread_id` をここへ書く)から入れる。
- * `threadCandidates` の先頭を「投函元」とみなすのは、投函元を名指ししない旧ノートでは空だから。
+ * `threadId` はサーバが入れる(箱の行・中間形式の `thread_id`、判断ノートの `thread_id:`/`threads:` の
+ * 1本目。判断ノート側の解釈の正本は `server/notes.ts` の `threadIdCandidates` と `vault-decisions.ts`)。
+ * クライアントはここで推測を足さない。
  */
 export function resolveOpenThreadId(item: ThreadIdLike | null | undefined): string | null {
   if (!item) return null;
-  const direct = trimmed(item.threadId) ?? trimmed(item.threadCandidates?.[0]);
+  // `threadCandidates[0]` は使わない: 「先頭=投函元」の解釈はサーバ(`vault-decisions.ts`)の1箇所に置く。
+  // ここでも同じ推測を繰り返すと、別の書き手の `threads:` で無関係なスレを通知なしに開きうる(round1 F4)。
+  const direct = trimmed(item.threadId);
   if (direct) return direct;
   if (item.threadRef?.kind === "paseo_agent") return trimmed(item.threadRef.id);
   return trimmed(item.agentId);
