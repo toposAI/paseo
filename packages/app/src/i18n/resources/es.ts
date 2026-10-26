@@ -368,6 +368,11 @@ export const es: TranslationResources = {
       openFile: "Abrir archivo",
       copied: "Copiado",
     },
+    relayTurn: {
+      fromSender: "Mensaje de {{sender}}",
+      fromSenderPreview: "Mensaje largo (remitente no registrado)",
+      hide: "Ocultar el mensaje completo; mostrar una línea",
+    },
     harnessContext: {
       show: "Mostrar contexto del harness",
       hide: "Ocultar contexto del harness",
@@ -2242,6 +2247,12 @@ export const es: TranslationResources = {
         label: "Siempre expandir razonamiento",
         description:
           "Mostrar los bloques de pensamiento y razonamiento del agente totalmente expandidos de forma predeterminada",
+      },
+      relayFolding: {
+        label: "Plegar los mensajes largos en los hilos de retransmisión",
+        description:
+          "Los hilos cuyo título contiene «{{mark}}» muestran los mensajes largos recibidos en una sola línea; pulsa para leerlo entero",
+        noMark: "(sin coincidencia en el título)",
       },
       toposChatStyle: {
         label: "Topos-style chat",

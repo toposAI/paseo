@@ -361,6 +361,11 @@ export const ar: TranslationResources = {
       openFile: "افتح الملف",
       copied: "منقول",
     },
+    relayTurn: {
+      fromSender: "رسالة من {{sender}}",
+      fromSenderPreview: "رسالة طويلة (لم يُسجَّل المرسل)",
+      hide: "إخفاء الرسالة كاملةً وإظهار سطر واحد",
+    },
     harnessContext: {
       show: "إظهار سياق الـharness",
       hide: "إخفاء سياق الـharness",
@@ -2188,6 +2193,12 @@ export const ar: TranslationResources = {
       autoExpandReasoning: {
         label: "عرض التفكير دائماً",
         description: "إظهار تفكير الوكيل وخطوات الاستدلال بشكل كامل بشكل افتراضي",
+      },
+      relayFolding: {
+        label: "طيّ الرسائل الطويلة في خيوط إعادة التوجيه",
+        description:
+          "تعرض الخيوط التي يحتوي عنوانها على «{{mark}}» الرسائل الطويلة الواردة في سطر واحد؛ اضغط لقراءتها كاملة",
+        noMark: "(لا تطابق في العنوان)",
       },
       toposChatStyle: {
         label: "Topos-style chat",

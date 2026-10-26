@@ -27,6 +27,7 @@ import {
   type ThemePreference,
 } from "@/styles/theme";
 import { z } from "zod";
+import type { RelayFolding } from "@/utils/user-message-fold";
 import { APP_SETTINGS_KEY, LEGACY_SETTINGS_KEY, TOPOS_TOOL_OVERVIEW_APPLIED_KEY } from "./keys";
 import { migrateAppSettings } from "./migrations";
 
@@ -112,6 +113,10 @@ export interface AppSettings {
   /** How usage reads and which windows the sidebar summary shows. */
   usage: UsagePreferences;
   autoExpandReasoning: boolean;
+  /** Fold long incoming turns to one line in relay threads (完了箱C and the like). */
+  relayFolding: RelayFolding;
+  /** Thread-title substring that marks a relay thread; empty turns the fold off. */
+  relayTitleMark: string;
   /** Topos-style chat: long-press user bubbles for time + copy, collapsible composer. */
   toposChatStyle: boolean;
   /** Phone width + Topos chat style: fold secondary composer buttons into a "..." menu. */
@@ -149,6 +154,9 @@ export interface Settings extends AppSettings {
   releaseChannel: ReleaseChannel;
 }
 
+/** The relay thread whose long incoming turns fold to one line by default. */
+export const DEFAULT_RELAY_TITLE_MARK = "完了箱C";
+
 export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   theme: DEFAULT_THEME_PREFERENCE,
   pluginThemeId: null,
@@ -172,6 +180,8 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   sidebarFooterItems: [],
   usage: DEFAULT_USAGE_PREFERENCES,
   autoExpandReasoning: false,
+  relayFolding: "relay",
+  relayTitleMark: DEFAULT_RELAY_TITLE_MARK,
   toposChatStyle: true,
   composerOverflowMenu: true,
   toolCallDetailLevel: "overview",
@@ -269,6 +279,8 @@ const StoredAppSettingsSchema = z
     sidebarFooterItems: z.array(z.object({ key: z.string(), visible: z.boolean() })).catch([]),
     usage: UsagePreferencesSchema,
     autoExpandReasoning: z.boolean().catch(false),
+    relayFolding: z.enum(["off", "relay"]).catch("relay"),
+    relayTitleMark: z.string().trim().max(40).catch(DEFAULT_RELAY_TITLE_MARK),
     toposChatStyle: z.boolean().catch(true),
     composerOverflowMenu: z.boolean().catch(true),
     toolCallDetailLevel: z

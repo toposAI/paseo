@@ -364,6 +364,11 @@ export const ko: TranslationResources = {
       openFile: "파일 열기",
       copied: "복사됨",
     },
+    relayTurn: {
+      fromSender: "{{sender}} 님의 메시지",
+      fromSenderPreview: "긴 메시지(보낸 곳 기록 없음)",
+      hide: "전체 메시지 숨기고 한 줄로 보기",
+    },
     harnessContext: {
       show: "하네스 내부 알림 표시",
       hide: "하네스 내부 알림 숨기기",
@@ -2201,6 +2206,12 @@ export const ko: TranslationResources = {
       autoExpandReasoning: {
         label: "추론 항상 펼치기",
         description: "에이전트의 사고 및 추론 블록을 기본적으로 모두 펼쳐 표시합니다.",
+      },
+      relayFolding: {
+        label: "중계 스레드의 긴 수신 메시지를 한 줄로 접기",
+        description:
+          "제목에 “{{mark}}”이(가) 포함된 스레드는 긴 수신 메시지를 한 줄로 표시합니다(누르면 전체)",
+        noMark: "(제목 일치 없음)",
       },
       toposChatStyle: {
         label: "Topos-style chat",
