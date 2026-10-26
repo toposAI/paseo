@@ -72,13 +72,18 @@ export function displayStatus(
 }
 
 /**
- * 行末の状態の文字と色(一覧の行が使う規則の1か所。`shared/sidebar-rows.ts` の `rowStatusText` と
- * 同じ判断。閉じたスレ= `closed` の「実装中」だけ「終了」にする。2026-10-27、通し検証B 指摘2)。
+ * 行末の状態の文字と色(一覧の行・チップが使う規則の1か所)。閉じたスレ(`closed`)の「実装中」「待機中」を
+ * 「終了」にする(`displayStatus` の closed 優先と同じ判断。2026-10-27、通し検証B 指摘2)。
  *
  * `判断待ち` は機械状態が idle/closed でも残す(返事待ちの印。動いていないことは色で示す)。
  */
 export function rowStatusText(label: string, machineState: string | null | undefined): StatusLabel {
-  if (label === "実装中" && statusKindOfMachine(machineState ?? null) === "closed") {
+  // 閉じたスレは「実装中」「待機中」とも「終了」に寄せる(未登録の closed 行は「待機中」で来るため、
+  // 実装中だけを対象にすると同じ closed が行の種類で別の語になる。出口レビュー round1 R1-7)。
+  if (
+    (label === "実装中" || label === "待機中") &&
+    statusKindOfMachine(machineState ?? null) === "closed"
+  ) {
     return { text: "終了", kind: "closed" };
   }
   return { text: label, kind: statusKindOfLabel(label) };

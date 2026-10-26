@@ -44,6 +44,7 @@ import {
   groupPressAction,
   groupThreadRows,
   openableParentIds,
+  reorderableIds,
   rowGroupKeyOf,
 } from "../shared/sidebar-rows.js";
 import { BOX_TAB_SCREEN_ID } from "../shared/footer-tabs.js";
@@ -252,18 +253,18 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   const rows = useMemo(() => buildUpperRows(threads, implByThread), [threads, implByThread]);
   // 描画(SidebarContents)と並べ替えで同じ集合を使う(全スレから作る。common のコメント参照)。
   const coordinatorIds = useMemo(() => coordinatorIdSet(threads), [threads]);
-  const visibleIds = useMemo(() => new Set(rows.map((r) => r.thread.agentId)), [rows]);
-
   // グループ内のドラッグ結果を全体の並びへ戻す(他グループ・上段に出ていない行の並びはそのまま)。
   // 絞り込みで隠れている行を詰めて並べ替えると、隠れた行の順序まで動いてしまうため、
   // 画面に出ている行だけを keys で置き換える。グループの割り方は画面と同じ `rowGroupKeyOf`。
   // ピン止めグループの並べ替えも全体順への書き戻しなので、変わるのはピン同士の順だけ。
+  // 並べ替えの置換先はグループの行だけ(見出しは除く。出口レビュー round1 R1-4)。
+  const reorderable = useMemo(() => reorderableIds(rows), [rows]);
   const onReorderGroup = useCallback(
     (groupKey: string, keys: string[]) => {
       const queue = [...keys];
       const flat = threads.map((t) =>
         rowGroupKeyOf(t, coordinatorIds, COORDINATOR_GROUP, PINNED_GROUP) === groupKey &&
-        visibleIds.has(t.agentId)
+        reorderable.has(t.agentId)
           ? (queue.shift() ?? t.agentId)
           : t.agentId,
       );
@@ -271,7 +272,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
       // 別グループへ移り、次の取得までの間だけ並びが崩れる(2026-10-27 指摘1)。
       persistOrder(flat);
     },
-    [coordinatorIds, persistOrder, threads, visibleIds],
+    [coordinatorIds, persistOrder, reorderable, threads],
   );
   const resetOrder = useCallback(() => persistOrder([]), [persistOrder]);
   const toggleGroup = useCallback((key: string) => {

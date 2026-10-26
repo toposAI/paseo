@@ -55,7 +55,12 @@ const str = (v: unknown): string => (typeof v === "string" ? v : "");
  * 壊れた値は 0(落ちない)。
  */
 export function timestampOf(v: unknown): number {
-  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  // 契約は ISO 文字列。数値も受けるが、秒(1e12 未満)とミリ秒が混ざると並びが逆転するので秒は ms へ揃える
+  // (出口レビュー round1 R1-10)。タイムゾーンの無い文字列は `Date.parse` の地方時解釈に任せる(並び順だけに使う)。
+  if (typeof v === "number") {
+    if (!Number.isFinite(v) || v <= 0) return 0;
+    return v < 1e12 ? Math.round(v * 1000) : v;
+  }
   if (typeof v === "string") {
     const t = Date.parse(v);
     return Number.isFinite(t) ? t : 0;
@@ -141,9 +146,14 @@ export function mergeUnregisteredThreads(
 ): UnregisteredThreads {
   const listed = new Set(rows.map((t) => t.agentId));
   const coordinators = new Set(coordinatorIds);
-  // 子の見出しになっている親は「行に無い」が未登録ではない(登録簿に載っている。2026-10-27 指摘1)
+  // 子の見出しになっている親は「行に無い」が未登録ではない(登録簿に載っている。2026-10-27 指摘1)。
+  // ピン止めした親は見出しではなく普通の行として返る(`server/child-threads.ts`)ので、行に無ければ
+  // **未登録として足す**(足さないとピン止めが一覧から消える。出口レビュー round1 R1-6)。
+  const pinnedParentIds = new Set(pinnedIds);
   const parents = new Set(
-    rows.map((t) => t.parentAgentId).filter((id): id is string => id !== null),
+    rows
+      .map((t) => t.parentAgentId)
+      .filter((id): id is string => id !== null && !pinnedParentIds.has(id)),
   );
   const skipped: Record<SkippedReason, number> = {
     listed: 0,

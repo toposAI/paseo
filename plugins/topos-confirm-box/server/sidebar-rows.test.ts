@@ -5,6 +5,8 @@ import path from "node:path";
 import { test } from "node:test";
 import type { SidebarNote } from "../shared/notes.js";
 import { readSidebarNotes } from "./notes.js";
+import { normalizeChildThreads } from "./child-threads.js";
+import { markOpenableParents } from "./coordinator-threads.js";
 import {
   buildUpperRows,
   coordinatorIdSet,
@@ -14,10 +16,15 @@ import {
   indexImplementationNotes,
   lowerTierNotes,
   openableParentIds,
+  reorderableIds,
   rowGroupKeyOf,
   visibleGroupKeyOf,
 } from "../shared/sidebar-rows.js";
-import { COORDINATOR_GROUP, PINNED_GROUP } from "../shared/sidebar-section-mode.js";
+import {
+  COORDINATOR_GROUP,
+  PINNED_GROUP,
+  PINNED_GROUP_LABEL,
+} from "../shared/sidebar-section-mode.js";
 import type { RowThread, SidebarRowView } from "../shared/sidebar-rows.js";
 
 const thread = (
@@ -730,4 +737,122 @@ test("指摘1(画面の割り方): 司令塔の見出しとピン止めの割り
       [COORDINATOR_GROUP, ["chief", "kid"]],
     ],
   );
+});
+
+// ---- 2026-10-27 出口レビュー round1 R1-4 / R1-5 / R1-6 ----
+
+test("R1-4: 並べ替えの置換先から見出しを除く(ピン止めした親は普通の行なので含める)", () => {
+  const rows = sortHeadingsLast(
+    buildUpperRows(
+      [
+        parentRow("cc", { status: "実装中", parentAgentId: "boss" }),
+        parentRow("pk", { status: "実装中", pinned: true }),
+        {
+          agentId: "k1",
+          title: "k1",
+          status: "実装中" as const,
+          parentAgentId: "cc",
+          parentTitle: "cc",
+        },
+      ],
+      new Map(),
+    ),
+  );
+  const ids = reorderableIds(rows);
+  assert.equal(ids.has("cc"), false, "見出しは置換先にしない");
+  assert.equal(ids.has("pk"), true, "ピン止めした親は普通の行");
+  assert.equal(ids.has("k1"), true);
+});
+
+test("R1-6: ピン止めした親は見出しにならず、ピン止めグループの行として出る", () => {
+  const groups = groupThreadRows(
+    buildUpperRows(
+      [
+        parentRow("pk", { status: "実装中", pinned: true }),
+        {
+          agentId: "k1",
+          title: "k1",
+          status: "実装中" as const,
+          parentAgentId: "pk",
+          parentTitle: "pk",
+        },
+      ],
+      new Map(),
+    ),
+    new Set(),
+    COORDINATOR_GROUP,
+    PINNED_GROUP,
+    PINNED_GROUP_LABEL,
+    "その他",
+  );
+  const pinnedGroup = groups.find((g) => g.key === PINNED_GROUP);
+  assert.deepEqual(
+    pinnedGroup?.rows.map((r) => r.thread.agentId),
+    ["pk"],
+  );
+  assert.equal(pinnedGroup?.heading, null);
+});
+
+// ---- 2026-10-27 受け入れ条件1(サーバーの組み立てを通す) ----
+
+test("受け入れ1: 子司令塔の判断待ちがチップに出て、行は二重にならない(サーバー経路の通し)", () => {
+  // 登録簿(JSON) → normalizeChildThreads(親の印) → markOpenableParents(見出しの帯) → buildUpperRows
+  // → groupThreadRows → countStatusLabels、という本番と同じ順で組む(出口レビュー round1 R1-5)。
+  const registry = {
+    threads: [
+      {
+        agent_id: "cc",
+        title: "子司令塔",
+        status: "ユーザー判断待ち",
+        machine_state: "idle",
+        updated_at: 2,
+      },
+      {
+        agent_id: "kid",
+        title: "子",
+        status: "実装中",
+        machine_state: "running",
+        updated_at: 1,
+        parent_agent_id: "cc",
+        parent_title: "子司令塔",
+      },
+    ],
+  };
+  const threads = markOpenableParents(
+    normalizeChildThreads(registry),
+    [
+      { id: "cc", title: "子司令塔", status: "idle" },
+      { id: "kid", title: "子", status: "running" },
+    ],
+    new Map(),
+  );
+  const rows = buildUpperRows(threads, new Map());
+  const groups = groupThreadRows(
+    rows,
+    coordinatorIdSet(threads),
+    COORDINATOR_GROUP,
+    PINNED_GROUP,
+    PINNED_GROUP_LABEL,
+    "その他",
+  );
+  // 行そのものは2本(親は見出し、子はグループの行)。親の行が group.rows に混ざらない
+  const rendered = groups.flatMap((g) => [
+    ...(g.heading ? [g.heading.thread.agentId] : []),
+    ...g.rows.map((r) => r.thread.agentId),
+  ]);
+  assert.deepEqual(rendered.sort(), ["cc", "kid"]);
+  const ccGroup = groups.find((g) => g.heading?.thread.agentId === "cc");
+  assert.deepEqual(
+    ccGroup?.rows.map((r) => r.thread.agentId),
+    ["kid"],
+  );
+  assert.equal(ccGroup?.heading?.statusLabel, "判断待ち");
+  // チップの「判断待ち」に親が乗る(見落とし側に倒れない)
+  assert.deepEqual(countStatusLabels(rows), {
+    judgment: 1,
+    running: 1,
+    coordinator: 0,
+    idle: 0,
+    closed: 0,
+  });
 });
