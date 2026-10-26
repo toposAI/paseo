@@ -240,6 +240,29 @@ test("登録簿に載っている id でも、ピン止めした親は従来ど�
   );
 });
 
+test("R1-4: 登録簿にあるスレでも、Paseo で動いていれば行として足す(台帳では完了のまま再開したスレを隠さない)", () => {
+  const result = mergeUnregisteredThreads(
+    [],
+    [
+      { id: "resumed", title: "再開した", status: "running" },
+      { id: "approval", title: "承認待ち", status: "running", attentionReason: "permission" },
+      { id: "idle", title: "止まっている", status: "idle" },
+    ],
+    [],
+    new Set(),
+    new Set(),
+    new Set(["resumed", "approval", "idle"]),
+  );
+  // 並びは既定順の後ろ+updatedAt 無しは id 順(足した行の順は既存規則のまま)
+  assert.deepEqual(
+    result.rows.map((t) => t.agentId),
+    ["approval", "resumed"],
+  );
+  assert.equal(result.rows[0]?.status, "ユーザー判断待ち");
+  assert.equal(result.rows[1]?.status, "実装中");
+  assert.equal(result.skipped.inRegistry, 1);
+});
+
 test("指摘4: 登録簿で畳み済み(archived)のスレは、一覧に残っていても未登録の行として足さない", () => {
   // agent のアーカイブが失敗し、Paseo 側にだけ残っているもの。登録簿 archivable() が見失っている
   // その1本を `retryListedArchivedIds` で拾って渡す。

@@ -100,6 +100,16 @@ function machineHint(machineState: string | null): ChildThread["status"] {
   }
 }
 
+/**
+ * 組み立て中(=動きが無く、承認待ちでもない)の機械状態か。`statusKindOfMachine` のうち idle/closed だけ。
+ * 登録簿にあるスレを未登録行として足さない条件に使う(`inRegistry`)。`error`・未知・null もここに入る
+ * (`statusKindOfMachine` の寄せ方)ので、その場合は従来どおり行を足す=消す側に倒さない。
+ */
+function isAtRestMachine(v: unknown): boolean {
+  const kind = statusKindOfMachine(str(v) || null);
+  return kind === "idle" || kind === "closed";
+}
+
 /** 承認待ちは機械状態では `running` のままなので、点(同じ材料で決めたもの)で上書きする。 */
 function statusHintOfMachine(
   machineState: string | null,
@@ -120,7 +130,7 @@ export type SkippedReason =
   | "parent"
   /** 登録簿で畳み済み(archived)なのに Paseo 側に残っている(アーカイブ失敗の再試行待ち。指摘4)。 */
   | "archivedRegistry"
-  /** 登録簿に載っている(行に出ていなくても未登録ではない。2026-10-27 実測: `12b4eab`)。 */
+  /** 登録簿に載っていて、機械状態が idle/closed(行に出ていなくても未登録ではない。2026-10-27 実測: `12b4eab`)。 */
   | "inRegistry";
 
 export interface UnregisteredThreads {
@@ -198,7 +208,10 @@ export function mergeUnregisteredThreads(
     // `12b4eab`「判断窓口スレ2本を作る」: 本人は `[STATUS] 完了`・台帳も完了・自身はアーカイブ済みだが、
     // 直下の常駐の子(窓口B・判断窓口A)が未アーカイブなので親として読み飛ばされ、Paseo 側は idle のまま
     // 残っているため、機械状態だけで「待機中」の行が足されていた。完了の自己申告を失い、直す手段も無い)。
-    if (registryKnownIds.has(agentId)) {
+    // ただし**動いている/承認待ちなら隠さない**(2026-10-27 出口レビュー round1 指摘4)。台帳の status は
+    // Stop hook の取りこぼしがあり判定に使わない方針なので、隠す判断は機械状態が idle/closed のときだけ。
+    // さもないと「台帳では完了のまま Paseo で再開したスレ」がどこにも表示されない。
+    if (registryKnownIds.has(agentId) && isAtRestMachine(a.status)) {
       skipped.inRegistry += 1;
       continue;
     }
