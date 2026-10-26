@@ -5,8 +5,11 @@ export type UserMessageFold =
   | { kind: "full" }
   | { kind: "folded"; preview: string; sender: string | null };
 
-/** Settings value: fold long user turns only in threads whose title carries the mark. */
-export type RelayFolding = "off" | "relay";
+/**
+ * Settings value: fold long user turns only in a relay thread whose title *is* the mark
+ * (`完了箱C`); "suffix" accepts titles that add something after it (`完了箱C (2)`).
+ */
+export type RelayFolding = "off" | "relay" | "suffix";
 
 /** Turns longer than this fold; the one-line `#<n> <path>` report stays well below it. */
 export const RELAY_FOLD_MIN_CHARS = 120;
@@ -17,6 +20,8 @@ interface FoldUserMessageInput {
   agentTitle: string | null | undefined;
   /** Whether the turn carries the user's own images or attachments (never folded). */
   hasMedia?: boolean;
+  /** Whether this app sent the turn (the composer stamps every send); the reader's own words stay whole. */
+  isOwnSend?: boolean;
   relayFolding: RelayFolding;
   text: string;
   /** Substring identifying a relay thread, e.g. `完了箱C`. */
@@ -35,8 +40,17 @@ export function selectRelayFoldSettings(settings: {
 }
 
 /** The envelope the server wraps around a message sent by another agent. */
-const AGENT_MESSAGE_ENVELOPE =
-  /^<paseo-system((?:\s+[a-z-]+="[^"<>]*")+)\s+message-id="[^"<>]*"[^<>]*>\n([\s\S]*)\n<\/paseo-system>$/;
+const AGENT_MESSAGE_ENVELOPE = /^<paseo-system([^<>]*)>\n([\s\S]*)\n<\/paseo-system>$/;
+
+/** The thread is the relay itself, not a thread that merely talks about it. */
+function isRelayTitle(title: string | null | undefined, mark: string, mode: RelayFolding): boolean {
+  if (!title) return false;
+  const normalized = title.trim();
+  if (mode === "relay") return normalized === mark;
+  return (
+    normalized === mark || normalized.startsWith(`${mark} `) || normalized.startsWith(`${mark}(`)
+  );
+}
 
 function findAttribute(attributes: string, name: string): string | null {
   const match = new RegExp(`\\s${name}="([^"<>]*)"`).exec(attributes);
@@ -62,15 +76,16 @@ function truncate(text: string, max: number): string {
  * whether the server wrapped it as an agent message or an older CLI pasted it in without
  * attributing the sender — folds to one line, so a direct send cannot take over the screen and
  * the relay's own answer stays the main content. Short turns (one-line `#<n> <path>` reports,
- * the reader's comments), turns carrying images, and every thread without `titleMark` are
- * shown whole. `relayFolding` is the reader's setting; `off` leaves the fold out entirely.
+ * turns this app sent itself, turns carrying images, and every thread whose title is not the
+ * relay's are shown whole. `relayFolding` is the reader's setting; `off` leaves the fold out
+ * entirely.
  */
 export function foldUserMessage(input: FoldUserMessageInput): UserMessageFold {
-  const { agentTitle, hasMedia = false, relayFolding, text, titleMark } = input;
-  if (relayFolding === "off" || !titleMark || hasMedia) return { kind: "full" };
-  if (!agentTitle?.includes(titleMark)) return { kind: "full" };
+  const { agentTitle, hasMedia = false, isOwnSend = false, relayFolding, text, titleMark } = input;
+  if (relayFolding === "off" || !titleMark || hasMedia || isOwnSend) return { kind: "full" };
+  if (!isRelayTitle(agentTitle, titleMark, relayFolding)) return { kind: "full" };
   if (isHarnessContextOnlyMessage(text)) return { kind: "full" };
-  if (text.trim().length < RELAY_FOLD_MIN_CHARS) return { kind: "full" };
+  if (Array.from(text.trim()).length < RELAY_FOLD_MIN_CHARS) return { kind: "full" };
 
   const envelope = AGENT_MESSAGE_ENVELOPE.exec(text);
   const attributes = envelope?.[1];

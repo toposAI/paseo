@@ -137,6 +137,8 @@ interface UserMessageProps {
   isLastInGroup?: boolean;
   isPending?: boolean;
   disableOuterSpacing?: boolean;
+  /** Replaces the text inside the bubble (a long relay turn folded to one line). */
+  foldedBody?: ReactNode;
 }
 
 const MessageOuterSpacingContext = createContext(false);
@@ -446,6 +448,7 @@ export const UserMessage = memo(function UserMessage({
   isLastInGroup = true,
   isPending = false,
   disableOuterSpacing,
+  foldedBody,
 }: UserMessageProps) {
   const isCompact = useIsCompactFormFactor();
   const { t } = useTranslation();
@@ -525,6 +528,11 @@ export const UserMessage = memo(function UserMessage({
     [showTrailingRow],
   );
 
+  const bodyNode = foldedBody ?? (
+    <Text selectable style={userMessageStylesheet.text} dataSet={MESSAGE_TEXT_DATASET}>
+      {message}
+    </Text>
+  );
   const bubbleNode = (
     <View style={userMessageStylesheet.bubble}>
       {hasImages ? (
@@ -557,11 +565,7 @@ export const UserMessage = memo(function UserMessage({
           })}
         </View>
       ) : null}
-      {hasText ? (
-        <Text selectable style={userMessageStylesheet.text} dataSet={MESSAGE_TEXT_DATASET}>
-          {message}
-        </Text>
-      ) : null}
+      {bodyNode}
     </View>
   );
   const handleResend = useCallback(() => {

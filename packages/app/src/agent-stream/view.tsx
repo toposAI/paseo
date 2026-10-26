@@ -734,38 +734,31 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       });
     }, []);
 
-    const renderFoldedUserMessage = useCallback(
-      (
-        layoutItem: StreamLayoutItem,
-        item: Extract<StreamItem, { kind: "user_message" }>,
-      ): ReactNode => {
-        const fold = foldUserMessage({
-          agentTitle: sessionAgentTitle,
-          hasMedia: (item.images?.length ?? 0) > 0 || (item.attachments?.length ?? 0) > 0,
-          relayFolding: RELAY_TURN_FOLDING_ENABLED ? relayFolding : "off",
-          text: item.text,
-          titleMark: relayTitleMark,
-        });
-        if (fold.kind === "full") return null;
-        return (
-          <FoldedUserMessage
-            preview={fold.preview}
-            sender={fold.sender}
-            text={item.text}
-            timestamp={item.timestamp.getTime()}
-          />
-        );
-      },
-      [relayFolding, relayTitleMark, sessionAgentTitle],
-    );
-
     const renderUserMessageItem = useCallback(
       (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "user_message" }>) => {
         if (isHarnessContextOnlyMessage(item.text)) {
           return <HarnessContextMessage text={item.text} timestamp={item.timestamp.getTime()} />;
         }
-        const folded = renderFoldedUserMessage(layoutItem, item);
-        if (folded) return folded;
+        const fold = foldUserMessage({
+          agentTitle: sessionAgentTitle,
+          hasMedia: (item.images?.length ?? 0) > 0 || (item.attachments?.length ?? 0) > 0,
+          // The composer stamps every turn this app sends; the reader's own words stay whole.
+          isOwnSend: item.clientMessageId !== undefined,
+          relayFolding: RELAY_TURN_FOLDING_ENABLED ? relayFolding : "off",
+          text: item.text,
+          titleMark: relayTitleMark,
+        });
+        const foldedView = fold.kind === "folded" ? fold : null;
+        let foldedBody: ReactNode;
+        if (foldedView) {
+          foldedBody = (
+            <FoldedUserMessage
+              preview={foldedView.preview}
+              sender={foldedView.sender}
+              text={item.text}
+            />
+          );
+        }
         return (
           <UserMessage
             serverId={resolvedServerId}
@@ -783,16 +776,19 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               item.clientMessageId !== undefined &&
               pendingClientMessageIds.has(item.clientMessageId)
             }
+            foldedBody={foldedBody}
           />
         );
       },
       [
-        context.capabilities,
         agentId,
         client,
+        context.capabilities,
         pendingClientMessageIds,
-        renderFoldedUserMessage,
+        relayFolding,
+        relayTitleMark,
         resolvedServerId,
+        sessionAgentTitle,
       ],
     );
 

@@ -2214,8 +2214,10 @@ export const ja: TranslationResources = {
       },
       relayFolding: {
         label: "中継スレの長い受信文を1行に畳む",
-        description: "題名に「{{mark}}」を含むスレでは、長い受信文を1行だけ表示します(押すと全文)",
+        description:
+          "題名が「{{mark}}」のスレでは、長い受信文を1行だけ表示します(押すと全文)。自分の入力はそのまま表示します",
         noMark: "(題名の一致なし)",
+        suffix: "(2) のような続きが付いた題名でも畳む",
       },
       toposChatStyle: {
         label: "Topos風の会話表示",
