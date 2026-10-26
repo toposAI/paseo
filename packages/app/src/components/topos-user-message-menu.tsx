@@ -60,7 +60,12 @@ export const ToposUserMessageMenu = memo(function ToposUserMessageMenu({
   const handleCopy = useCallback(async () => {
     const content = getContent();
     if (!content) return;
-    await writeMarkdownToRichClipboard(content, getDefaultMarkdownClipboardEnvironment());
+    try {
+      await writeMarkdownToRichClipboard(content, getDefaultMarkdownClipboardEnvironment());
+    } catch {
+      // Copy failed: keep the popup open without the check mark so the failure is visible.
+      return;
+    }
     setCopied(true);
     closeTimerRef.current = setTimeout(() => {
       closeTimerRef.current = null;
