@@ -13,9 +13,10 @@
  *
  * - 質問: `{t:"chat", id, key, ts, question, client_message_id}`
  * - 返事: `{t:"reply", id, key, ts, re, by, text}`(`re` = 質問の client_message_id)
- *   `by` = ack(受領) | origin_thread(元スレ) | worker(応答ワーカー) | fallback(詰み)
+ *   `by` = ack(受領) | origin_thread(元スレ) | hub_thread(上位スレのsay) | worker(応答ワーカー) | fallback(詰み)
  *
- * UIが書くのは質問と**即時の受領(ack)**だけ。本回答は `confirm_box_reply_worker.py`
+ * 通常の質問(`sayToCard`)でUIが書くのは質問と**即時の受領(ack)**だけ。ペイン発(`askFromPane`)は
+ * ackを書かず、上位スレの `say` だけが返事になる(方式a)。本回答は `confirm_box_reply_worker.py`
  * (60秒ごと)が元スレへの転送かLLMで書き戻す=**このプラグインUIから聞いた限りは**
  * 受領が同期で必ず1行返る(fail-open)。
  * 未知の `t` は既存の読み手が無視する契約なので、この2行を足しても箱は壊れない。
@@ -88,7 +89,7 @@ function readRows(dir: string, file: string): Record<string, unknown>[] {
   return out;
 }
 
-function boxRows(dir: string): Record<string, unknown>[] {
+export function boxRows(dir: string): Record<string, unknown>[] {
   const rows: Record<string, unknown>[] = [];
   for (const name of eventFiles(dir)) rows.push(...readRows(dir, name));
   return rows;
@@ -157,6 +158,111 @@ export function sayToCard(
   return { ok: true, message: "送りました" };
 }
 
+/** ペイン発の質問の本文上限(ペインの入力欄の上限に合わせる。改行は残す)。 */
+const PANE_TEXT_MAX = 4000;
+/** これより古いペイン発の質問は待ち表示・集計から外す。Python `QUESTION_MAX_AGE_S`(7日)と同じ。 */
+const PANE_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+/** 返信IDの全長上限。Python側が `re` を200字で切るので、ここで200字以内に収める。 */
+const REPLY_ID_MAX = 200;
+/** 返信待ちを「sayなし」とみなす秒数。Python `confirm_box_reply.SAY_WAIT_S` と同じ。 */
+export const SAY_WAIT_MS = 180_000;
+
+/**
+ * ペインからの質問を台帳へ書く(方式a)。ackは書かない=返事は上位スレのsayだけ。
+ * `target` = 送り先スレ(催促ワーカーの宛先)。返信ID(`replyId`)を返す。
+ */
+export function askFromPane(
+  dir: string,
+  target: CardChatTarget,
+  text: string,
+  agentId: string,
+  now: number = Date.now(),
+): { ok: boolean; message: string; replyId?: string } {
+  const id = (target.id ?? "").trim().slice(0, ID_MAX);
+  const key = (target.key ?? "").trim().slice(0, ID_MAX) || null;
+  const clean = text.trim().slice(0, PANE_TEXT_MAX);
+  if (!id) return { ok: false, message: "この項目はチャットできません(id なし)" };
+  if (!clean) return { ok: false, message: "空です" };
+  if (!agentId.trim()) return { ok: false, message: "送り先がありません" };
+  const replyId = `cbui-${id.slice(0, 120)}-${now}`.slice(0, REPLY_ID_MAX);
+  appendLines(dir, chatsFile(), [
+    {
+      t: "chat",
+      id,
+      key,
+      ts: now,
+      question: clean,
+      client_message_id: replyId,
+      source: "pane",
+      target: agentId.trim(),
+    },
+  ]);
+  return { ok: true, message: "記録しました", replyId };
+}
+
+/** 送信(上位スレへの転送)に失敗したペイン発の質問を取り消す。催促・待ち表示・集計から外れる。 */
+export function cancelFromPane(dir: string, target: CardChatTarget, replyId: string): boolean {
+  const id = (target.id ?? "").trim().slice(0, ID_MAX);
+  const re = replyId.trim().slice(0, REPLY_ID_MAX);
+  if (!id || !re.startsWith("cbui-")) return false;
+  appendLines(dir, chatsFile(), [
+    {
+      t: "chat_cancel",
+      id,
+      key: (target.key ?? "").trim().slice(0, ID_MAX) || null,
+      ts: Date.now(),
+      re,
+    },
+  ]);
+  return true;
+}
+
+export interface PanePending {
+  re: string;
+  ts: number;
+  state: "waiting" | "overdue";
+  nudges: number;
+}
+
+/** 台帳から「say済み(ack以外の返事)」「取消済み」の返信IDと、返信IDごとの催促回数を集める。 */
+function paneLedgerState(rows: Record<string, unknown>[]) {
+  const answered = new Set<string>();
+  const cancelled = new Set<string>();
+  const nudges = new Map<string, number>();
+  for (const r of rows) {
+    const re = field(r, "re");
+    if (r.t === "reply" && field(r, "by") !== "ack") answered.add(re);
+    else if (r.t === "chat_cancel") cancelled.add(re);
+    else if (r.t === "nudge") nudges.set(re, (nudges.get(re) ?? 0) + 1);
+  }
+  return { answered, cancelled, nudges };
+}
+
+/** ペイン発で、まだsay(ack以外の返事)が無い質問。Python `pane_status` の写し(7日超・取消済みは除く)。 */
+export function panePending(
+  dir: string,
+  target: CardChatTarget,
+  now: number = Date.now(),
+  preRead?: Record<string, unknown>[],
+): PanePending[] {
+  const rows = preRead ?? boxRows(dir);
+  const mine = cardMatcher(targetKeys(target));
+  const { answered, cancelled, nudges } = paneLedgerState(rows);
+  const out: PanePending[] = [];
+  for (const r of rows) {
+    if (r.t !== "chat" || r.source !== "pane" || !mine(r) || typeof r.ts !== "number") continue;
+    const re = field(r, "client_message_id");
+    if (!re || answered.has(re) || cancelled.has(re) || r.ts < now - PANE_MAX_AGE_MS) continue;
+    out.push({
+      re,
+      ts: r.ts,
+      state: now - r.ts >= SAY_WAIT_MS ? "overdue" : "waiting",
+      nudges: nudges.get(re) ?? 0,
+    });
+  }
+  return out;
+}
+
 /** 箱のイベント列から、その項目の質問と返事。返事は `re`(質問ID)でも照合する。 */
 function boxMessages(rows: Record<string, unknown>[], keys: string[]): CardChatMessage[] {
   const mine = cardMatcher(keys);
@@ -198,14 +304,25 @@ function legacyMessages(dir: string, keys: string[]): CardChatMessage[] {
  * その id/key の項目が箱(item 行)にあるか。URL 手打ち・決定済みで消えた項目の会話を
  * 開いた時に「送っても迷子になる」ことをUIで伝えるために使う(2026-10-22)。
  */
-export function cardExists(dir: string, target: CardChatTarget): boolean {
+export function cardExists(
+  dir: string,
+  target: CardChatTarget,
+  preRead?: Record<string, unknown>[],
+): boolean {
   const keys = targetKeys(target);
-  return boxRows(dir).some((r) => (r.t === "item" || !r.t) && cardMatcher(keys)(r));
+  return (preRead ?? boxRows(dir)).some((r) => (r.t === "item" || !r.t) && cardMatcher(keys)(r));
 }
 
-export function readCardChat(dir: string, target: CardChatTarget): CardChatMessage[] {
+export function readCardChat(
+  dir: string,
+  target: CardChatTarget,
+  opts: { topic?: boolean } = {},
+  preRead?: Record<string, unknown>[],
+): CardChatMessage[] {
   const keys = targetKeys(target);
-  const out = [...boxMessages(boxRows(dir), keys), ...legacyMessages(dir, keys)];
+  const all = [...boxMessages(preRead ?? boxRows(dir), keys), ...legacyMessages(dir, keys)];
+  // 「この話題だけ」では受領(ack)を会話に入れない(返事はsayだけ)。
+  const out = opts.topic ? all.filter((m) => m.by !== "ack") : all;
   // 同じ ts なら質問が先、返答が後
   const roleOrder = (m: CardChatMessage) => (m.role === "user" ? 0 : 1);
   out.sort((a, b) => a.ts - b.ts || roleOrder(a) - roleOrder(b));

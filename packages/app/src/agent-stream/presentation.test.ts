@@ -363,7 +363,7 @@ describe("stream presentation through installed plugins", () => {
       head: [],
       transform: installedTransform(installProbe("tool_call", 'item.name === "bash"')),
     });
-    expect(result.groupsByHostId.get(result.tail[0]!.id)?.run.calls).toEqual(calls.slice(0, 2));
+    expect(result.groupsByHostId.get(result.tail[0]!.id)?.run.items).toEqual(calls.slice(0, 2));
     expect(pluginData(rows(result))).toEqual([
       {
         callId: "call-3",
@@ -631,9 +631,11 @@ describe("adjacent thinking rows", () => {
     expect(thoughts[0]?.id).toBe(firstId);
   });
 
-  it("still breaks the run at a rendered tool call", () => {
+  it("folds reasoning around a rendered tool call into one activity row", () => {
     const harness = streamHarness();
-    harness.send(reasoning("Before the tool."));
+    const firstId = rows(harness.send(reasoning("Before the tool."))).find(
+      (item) => item.kind === "thought",
+    )?.id;
     harness.send({
       type: "timeline",
       provider: "codex",
@@ -649,7 +651,13 @@ describe("adjacent thinking rows", () => {
     harness.send(reasoning("After the tool."));
     const result = harness.send({ type: "turn_completed", provider: "claude" });
 
-    const thoughts = rows(result).filter((item) => item.kind === "thought");
-    expect(thoughts).toMatchObject([{ text: "Before the tool." }, { text: "After the tool." }]);
+    // The reader sees one row for the whole span; the reasoning segments are not merged
+    // with each other, they sit inside the run in order.
+    const folded = rows(result);
+    expect(folded).toHaveLength(1);
+    expect(folded[0]?.id).toBe(firstId);
+    const group = result.groupsByHostId.get(firstId ?? "");
+    expect(group?.run.items.map((item) => item.kind)).toEqual(["thought", "tool_call", "thought"]);
+    expect(group?.summary.thinkingCount).toBe(2);
   });
 });

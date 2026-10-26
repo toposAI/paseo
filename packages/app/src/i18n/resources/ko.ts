@@ -2004,6 +2004,9 @@ export const ko: TranslationResources = {
     output: "출력",
   },
   toolCallGroup: {
+    thinking: "생각",
+    thinkingActive: "생각 중…",
+    summarySeparator: " · ",
     editedFiles: {
       one: "{{count}} 파일을 편집했습니다.",
       other: "{{count}} 파일을 편집했습니다.",
@@ -2203,6 +2206,10 @@ export const ko: TranslationResources = {
         label: "Topos-style chat",
         description:
           "Long-press your messages for time and copy; collapse the composer while reading answers",
+      },
+      composerOverflowMenu: {
+        label: 'Composer "…" menu',
+        description: 'On phone widths, fold secondary buttons (voice mode, usage) into a "…" menu',
       },
       toolCallDetail: {
         label: "도구 호출 표시",

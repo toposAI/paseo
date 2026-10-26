@@ -13,6 +13,7 @@ function thread(overrides: Partial<ChildThread>): ChildThread {
     machineState: null,
     request: "",
     summaryItemId: null,
+    nocard: false,
     summary: null,
     summaryState: null,
     summaryAcked: false,

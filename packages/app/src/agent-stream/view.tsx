@@ -68,11 +68,13 @@ import { QuestionFormCard } from "@/components/question-form-card";
 import { ToolCallSheetProvider } from "@/components/tool-call-sheet";
 import { createStreamPresentation, getStreamItemMessageId } from "./presentation";
 import { OverviewToolCallGroupView } from "@/tool-calls/detail-level/overview/view";
+import type { ToolCallDetailGroup } from "@/tool-calls/detail-level/projection";
 import { type AgentStreamRenderModel, buildAgentStreamRenderModel } from "./model";
 import { resolveStreamRenderStrategy } from "./strategy-resolver";
 import { type StreamSegmentRenderers, type StreamViewportHandle } from "./strategy";
 import { ChatOutlineRail } from "@/agent-stream/chat-outline/rail";
 import { useChatOutline } from "@/agent-stream/chat-outline/use-chat-outline";
+import { useReadPositionSync } from "@/agent-stream/use-read-position-sync";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
 import {
@@ -655,6 +657,18 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       revealLoadedMessage: revealLoadedHistory,
     });
 
+    const findItemsForSync = useMemo(
+      () => [...effectiveStreamItems, ...(effectiveStreamHead ?? [])],
+      [effectiveStreamItems, effectiveStreamHead],
+    );
+    const reportViewedSeq = useReadPositionSync({
+      serverId: resolvedServerId,
+      agentId,
+      timelineEpoch,
+      items: findItemsForSync,
+      jumpToSeq: chatOutline.jumpToPrompt,
+    });
+
     useImperativeHandle(
       ref,
       () => ({
@@ -772,15 +786,19 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [agentId, client, handleInlinePathPress, resolvedServerId, toast, workspaceRoot],
     );
 
-    const renderThoughtItem = useCallback(
-      (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "thought" }>) => {
+    const renderThoughtSlot = useCallback(
+      (
+        item: Extract<StreamItem, { kind: "thought" }>,
+        isLastInSequence: boolean,
+        status: Extract<StreamItem, { kind: "thought" }>["status"],
+      ) => {
         return (
           <ThoughtSlot
             itemId={item.id}
             onInlineDetailsExpandedChangeByItemId={setInlineDetailsExpanded}
             text={item.text}
-            status={item.status}
-            isLastInSequence={layoutItem.isLastInToolSequence}
+            status={status}
+            isLastInSequence={isLastInSequence}
             defaultExpanded={autoExpandReasoning}
           />
         );
@@ -851,12 +869,24 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const getToolCallGroup = useStableEvent((hostId: string) =>
       presentation.groupsByHostId.get(hostId),
     );
-    const renderToolCallItem = useCallback(
-      (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "tool_call" }>) => {
-        const group = getToolCallGroup(item.id);
-        if (!group) {
-          return renderSingleToolCallItem(item, layoutItem.isLastInToolSequence);
-        }
+    // Reasoning and tool calls share one row. While the run is live only its newest item
+    // keeps moving: earlier rows are already settled, so they render as complete.
+    const renderActivityGroupChildren = useCallback(
+      (group: ToolCallDetailGroup) =>
+        group.run.items.map((entry, index) => {
+          const isLast = index === group.run.items.length - 1;
+          return (
+            <React.Fragment key={entry.id}>
+              {entry.kind === "thought"
+                ? renderThoughtSlot(entry, isLast, isLast ? entry.status : "ready")
+                : renderSingleToolCallItem(entry, isLast, GROUPED_TOOL_CALL_DETAIL_MAX_HEIGHT)}
+            </React.Fragment>
+          );
+        }),
+      [renderSingleToolCallItem, renderThoughtSlot],
+    );
+    const renderActivityGroup = useCallback(
+      (layoutItem: StreamLayoutItem, group: ToolCallDetailGroup) => {
         const expanded = expandedToolCallGroupIds.has(group.run.id);
         return (
           <OverviewToolCallGroupView
@@ -865,26 +895,31 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             isLastInSequence={layoutItem.isLastInToolSequence}
             onExpandedChange={setToolCallGroupExpanded}
           >
-            {expanded
-              ? group.run.calls.map((call, index) => (
-                  <React.Fragment key={call.id}>
-                    {renderSingleToolCallItem(
-                      call,
-                      index === group.run.calls.length - 1,
-                      GROUPED_TOOL_CALL_DETAIL_MAX_HEIGHT,
-                    )}
-                  </React.Fragment>
-                ))
-              : null}
+            {expanded ? renderActivityGroupChildren(group) : null}
           </OverviewToolCallGroupView>
         );
       },
-      [
-        expandedToolCallGroupIds,
-        getToolCallGroup,
-        renderSingleToolCallItem,
-        setToolCallGroupExpanded,
-      ],
+      [expandedToolCallGroupIds, renderActivityGroupChildren, setToolCallGroupExpanded],
+    );
+    const renderThoughtItem = useCallback(
+      (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "thought" }>) => {
+        const group = getToolCallGroup(item.id);
+        if (group) {
+          return renderActivityGroup(layoutItem, group);
+        }
+        return renderThoughtSlot(item, layoutItem.isLastInToolSequence, item.status);
+      },
+      [getToolCallGroup, renderActivityGroup, renderThoughtSlot],
+    );
+    const renderToolCallItem = useCallback(
+      (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "tool_call" }>) => {
+        const group = getToolCallGroup(item.id);
+        if (!group) {
+          return renderSingleToolCallItem(item, layoutItem.isLastInToolSequence);
+        }
+        return renderActivityGroup(layoutItem, group);
+      },
+      [getToolCallGroup, renderActivityGroup, renderSingleToolCallItem],
     );
 
     const renderStreamItemContent = useCallback(
@@ -1059,13 +1094,22 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       return itemById;
     }, [streamLayout.liveHead]);
 
-    const handleReadingPositionChange = useStableEvent((rowId: string | null) => {
-      const row =
-        rowId === null
-          ? undefined
-          : (layoutHistoryItemById.get(rowId) ?? layoutLiveHeadItemById.get(rowId));
-      chatOutline.reportReadingPosition(row?.item.timelineCursor?.seq ?? null);
-    });
+    const handleReadingPositionChange = useStableEvent(
+      (rowId: string | null, viewedRowId?: string | null) => {
+        const row =
+          rowId === null
+            ? undefined
+            : (layoutHistoryItemById.get(rowId) ?? layoutLiveHeadItemById.get(rowId));
+        chatOutline.reportReadingPosition(row?.item.timelineCursor?.seq ?? null);
+        const viewedCursor = viewedRowId
+          ? (layoutHistoryItemById.get(viewedRowId) ?? layoutLiveHeadItemById.get(viewedRowId))
+              ?.item.timelineCursor
+          : undefined;
+        reportViewedSeq(
+          viewedCursor && viewedCursor.epoch === timelineEpoch ? viewedCursor.seq : null,
+        );
+      },
+    );
 
     const renderHistoryRow = useCallback(
       (item: StreamItem) =>

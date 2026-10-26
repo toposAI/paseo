@@ -2026,6 +2026,9 @@ export const ptBR: TranslationResources = {
     output: "Saída",
   },
   toolCallGroup: {
+    thinking: "Pensamento",
+    thinkingActive: "Pensando…",
+    summarySeparator: " · ",
     editedFiles: {
       one: "editou {{count}} arquivo",
       other: "editou {{count}} arquivos",
@@ -2226,6 +2229,10 @@ export const ptBR: TranslationResources = {
         label: "Topos-style chat",
         description:
           "Long-press your messages for time and copy; collapse the composer while reading answers",
+      },
+      composerOverflowMenu: {
+        label: 'Composer "…" menu',
+        description: 'On phone widths, fold secondary buttons (voice mode, usage) into a "…" menu',
       },
       toolCallDetail: {
         label: "Exibição de chamadas de ferramentas",

@@ -1992,6 +1992,9 @@ export const ar: TranslationResources = {
     output: "الإخراج",
   },
   toolCallGroup: {
+    thinking: "تفكير",
+    thinkingActive: "جارٍ التفكير…",
+    summarySeparator: " · ",
     editedFiles: {
       one: "حرّر {{count}} ملفًا",
       other: "حرّر {{count}} ملفات",
@@ -2190,6 +2193,10 @@ export const ar: TranslationResources = {
         label: "Topos-style chat",
         description:
           "Long-press your messages for time and copy; collapse the composer while reading answers",
+      },
+      composerOverflowMenu: {
+        label: 'Composer "…" menu',
+        description: 'On phone widths, fold secondary buttons (voice mode, usage) into a "…" menu',
       },
       toolCallDetail: {
         label: "عرض استدعاءات الأدوات",

@@ -27,7 +27,7 @@ import {
   type ThemePreference,
 } from "@/styles/theme";
 import { z } from "zod";
-import { APP_SETTINGS_KEY, LEGACY_SETTINGS_KEY } from "./keys";
+import { APP_SETTINGS_KEY, LEGACY_SETTINGS_KEY, TOPOS_TOOL_OVERVIEW_APPLIED_KEY } from "./keys";
 import { migrateAppSettings } from "./migrations";
 
 export { APP_SETTINGS_KEY } from "./keys";
@@ -114,6 +114,8 @@ export interface AppSettings {
   autoExpandReasoning: boolean;
   /** Topos-style chat: long-press user bubbles for time + copy, collapsible composer. */
   toposChatStyle: boolean;
+  /** Phone width + Topos chat style: fold secondary composer buttons into a "..." menu. */
+  composerOverflowMenu: boolean;
   toolCallDetailLevel: ToolCallDetailLevel;
   chatOutlineEnabled: boolean;
   vimKeybindings: boolean;
@@ -171,7 +173,8 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   usage: DEFAULT_USAGE_PREFERENCES,
   autoExpandReasoning: false,
   toposChatStyle: true,
-  toolCallDetailLevel: "detailed",
+  composerOverflowMenu: true,
+  toolCallDetailLevel: "overview",
   chatOutlineEnabled: true,
   vimKeybindings: false,
   openInSidePane: DEFAULT_OPEN_IN_SIDE_PANE_PREFERENCES,
@@ -267,11 +270,12 @@ const StoredAppSettingsSchema = z
     usage: UsagePreferencesSchema,
     autoExpandReasoning: z.boolean().catch(false),
     toposChatStyle: z.boolean().catch(true),
+    composerOverflowMenu: z.boolean().catch(true),
     toolCallDetailLevel: z
       .enum(["overview", "detailed"])
       .or(z.literal("concise").transform(() => "overview" as const))
       .optional()
-      .catch("detailed"),
+      .catch("overview"),
     // COMPAT(compactToolCalls): migrated in v0.1.105, remove after 2027-01-12.
     compactToolCalls: z.boolean().optional().catch(undefined),
     chatOutlineEnabled: z.boolean().catch(true),
@@ -320,8 +324,7 @@ const StoredAppSettingsSchema = z
       (isChecksHiddenByLegacyRowItem(stored.sidebarRowItems)
         ? "none"
         : DEFAULT_SIDEBAR_CHECKS_DISPLAY);
-    const toolCallDetailLevel =
-      stored.toolCallDetailLevel ?? (stored.compactToolCalls ? "overview" : "detailed");
+    const toolCallDetailLevel = stored.toolCallDetailLevel ?? "overview";
     return {
       ...stored,
       openInSidePane,
@@ -388,8 +391,29 @@ export async function saveAppSettings(input: {
 export async function loadAppSettingsFromStorage(deps: SettingsDeps): Promise<AppSettings> {
   try {
     const read = await readAppSettings(deps);
+    // Topos: 既定をoverviewへ変えたので、保存済みの"detailed"(compactToolCalls:false の旧端末も含む)を
+    // 端末ごとに一度だけ上書きする。印は別キー(設定本体に足すと設定同士の全体比較が崩れる)で、
+    // 本体を書いた後に立てる(途中で失敗しても次回やり直せる)。移行の失敗は読み込みを止めない。
+    // 既知の制限: デプロイ前から開いている古いタブが後から"detailed"を書き戻すことは防げない。
+    let overviewApplied = true;
+    try {
+      overviewApplied = (await deps.storage.getItem(TOPOS_TOOL_OVERVIEW_APPLIED_KEY)) !== null;
+    } catch (error) {
+      console.warn("[AppSettings] Failed to read the tool overview migration marker:", error);
+    }
+    if (!overviewApplied && read.settings.toolCallDetailLevel === "detailed") {
+      read.settings = { ...read.settings, toolCallDetailLevel: "overview" };
+      read.needsWrite = true;
+    }
     if (read.needsWrite) {
       await writeAppSettings(deps.storage, read.stored, read.settings);
+    }
+    if (!overviewApplied) {
+      try {
+        await deps.storage.setItem(TOPOS_TOOL_OVERVIEW_APPLIED_KEY, "1");
+      } catch (error) {
+        console.warn("[AppSettings] Failed to write the tool overview migration marker:", error);
+      }
     }
     const { needsWrite: _needsWrite, ...stored } = read.stored;
     return await migrateAppSettings(read.settings, deps.storage, stored, { native: isNative });

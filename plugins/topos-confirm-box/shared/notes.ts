@@ -15,7 +15,7 @@ import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
 import type { ConceptZone, SidebarPlace, ZoneCounts } from "./concept-places.js";
 
-/** ノートの status 語彙(標準_スレは検収単位)。 */
+/** ノートの status 語彙(標準_スレは検収単位)。`確認待ち` は旧語彙(2026-10-26 廃止)。 */
 export const NOTE_STATUSES = [
   "構想",
   "壁打ち中",
@@ -38,7 +38,11 @@ export const NOTE_STATUS_ALIASES: Readonly<Record<string, NoteStatus>> = {
 export const NOTE_KINDS = ["implementation", "concept"] as const;
 export type NoteKind = (typeof NOTE_KINDS)[number];
 
-/** **上段**に並べる status(実装ノート)。`完了` は確認待ちの間だけ別判定で残す。 */
+/**
+ * **上段**に並べる status(実装ノート)。`確認待ち` は**旧語彙**(2026-10-26 に廃止。完了はユーザー
+ * 確認を待たない)。移行中に残っているノートを取りこぼさないため語彙としては残し、
+ * `impl_note_completion_sync` が完了へ進めるまでの間だけ上段に出す。
+ */
 export const UPPER_TIER_STATUSES: readonly NoteStatus[] = ["実装中", "判断待ち", "確認待ち"];
 /** **下段**に並べる status(進行中の構想)。 */
 export const LOWER_TIER_STATUSES: readonly NoteStatus[] = ["構想", "壁打ち中"];

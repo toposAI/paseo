@@ -17,6 +17,7 @@ import {
   FEEDBACK_TITLE_MAX,
 } from "../shared/feedback.js";
 import type { FeedbackKind, FeedbackReport, FeedbackSourceStatus } from "../shared/feedback.js";
+import { deriveProgress, type ProgressContext } from "./feedback-progress.js";
 
 export const DEFAULT_FEEDBACK_DIRS = [
   "/Users/user/topos-family/data/_feedback",
@@ -143,6 +144,7 @@ export interface ReadFeedbackResult {
 export function readFeedbackReports(
   dirs: readonly string[] = resolveFeedbackDirs(),
   labels: ReadonlyMap<string, string> = loadReporterLabels(),
+  progressCtx: ProgressContext | null = null,
 ): ReadFeedbackResult {
   const reports: FeedbackReport[] = [];
   const sources: FeedbackSourceStatus[] = [];
@@ -189,5 +191,7 @@ export function readFeedbackReports(
     sources.push({ id: dir, label, ok: true, detail: reportsDir, count });
   }
   reports.sort((a, b) => b.ts - a.ts || (a.id < b.id ? 1 : -1));
-  return { reports: reports.slice(0, FEEDBACK_REPORT_LIMIT), sources };
+  const out = reports.slice(0, FEEDBACK_REPORT_LIMIT);
+  if (progressCtx) for (const r of out) r.progress = deriveProgress(r, progressCtx);
+  return { reports: out, sources };
 }

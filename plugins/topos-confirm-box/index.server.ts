@@ -9,7 +9,6 @@
  * **読み取りはファイル直読み**。既存のサーバー側確認箱(`/api/confirm-box/*`)は通さない
  * (HTTPのポートと認証が要るうえ、同じディレクトリを別経路で読む意味が無い)。
  */
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -28,17 +27,31 @@ import {
   confirmBoxPermitRpc,
   cardChatListRpc,
   coordinatorTargetRpc,
+  cardChatAskRpc,
+  cardChatCancelRpc,
   cardChatSayRpc,
-  countUnreadNotifications,
+  countUrgentUnreadNotifications,
   isJudgmentItem,
   isNotificationItem,
   priorityListRpc,
   priorityMoveRpc,
   prioritySayRpc,
+  REJECT_CHOICE,
 } from "./shared/contract.js";
 import { appendAck } from "./server/ack.js";
-import { feedbackReportsListRpc, countNewReports } from "./shared/feedback.js";
+import {
+  readPositionEnableRpc,
+  readPositionGetRpc,
+  readPositionSetRpc,
+} from "./shared/read-position.js";
+import {
+  getPosition,
+  setEnabled as setReadPositionEnabled,
+  setPosition,
+} from "./server/read-position.js";
+import { feedbackReportsListRpc, countOpenReports } from "./shared/feedback.js";
 import { readFeedbackReports } from "./server/feedback.js";
+import { loadProgressContext } from "./server/feedback-progress.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
 import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/box.js";
 import {
@@ -53,10 +66,8 @@ import {
   childThreadsArchiveRpc,
   childThreadsListRpc,
   childThreadsPinRpc,
-  childThreadsRevertRpc,
   childThreadsSetOrderRpc,
 } from "./shared/child-threads.js";
-import { buildRevertArgs, summarizeRevert } from "./server/child-revert.js";
 import type { ThreadAccess } from "./shared/child-threads.js";
 import {
   applyChildThreadOrder,
@@ -83,6 +94,7 @@ import {
 } from "./server/thread-liveness.js";
 import { listAllAgents } from "./server/agent-pages.js";
 import { applyStateDots, stateDotsById } from "./server/agent-state-dots.js";
+import { applyWindowUnread, readWindowId } from "./server/window-unread.js";
 import { mergeUnregisteredThreads } from "./server/unregistered-threads.js";
 import type { ListedAgentLike } from "./server/unregistered-threads.js";
 import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
@@ -117,7 +129,15 @@ import {
   readThreadKey,
   recordConceptThread,
 } from "./server/note-thread.js";
-import { cardExists, readCardChat, sayToCard } from "./server/cardchat.js";
+import {
+  askFromPane,
+  boxRows,
+  cancelFromPane,
+  cardExists,
+  panePending,
+  readCardChat,
+  sayToCard,
+} from "./server/cardchat.js";
 import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
 import {
   answerlessAllowBlocked,
@@ -319,6 +339,14 @@ export default function contribute(server: PluginServerContext) {
         threads,
         stateDotsById([...finalAgents, ...forAccess.entries.map((e) => e.agent)]),
       );
+      // 完了箱C(完了報告の窓口)の行だけ、読んでいない報告があるあいだ「未読あり」にする
+      // (2026-10-26 ユーザー依頼。橙は判断待ち専用なので緑=新着を使う)。既読は Paseo の
+      // attention が消えた時点で判る(`server/window-unread.ts`)。点を付けた後に重ねる。
+      threads = applyWindowUnread(
+        threads,
+        [...finalAgents, ...forAccess.entries.map((e) => e.agent)],
+        readWindowId(),
+      );
       // 子を持つ親(=グループ見出し)のうち、一覧に生きていて開けるものを「開ける親」にする。
       // 子司令塔はデーモンの `coordinator_id` に載らないため、これが無いと見出しを押しても開けない
       // (2026-10-24 ユーザー報告)。行は増やさない(親の行は見出しが既に担う)。
@@ -441,39 +469,6 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  // 完了カードの差し戻し。本体は登録簿の CLI(`revert`)で、自動取り下げと同じ後始末を走らせる。
-  // 司令塔は対象にしない(完了報告の取り下げは子スレだけの機構)。
-  server.handle(childThreadsRevertRpc, async (input) => {
-    if (readCoordinatorIds().includes(input.agentId)) {
-      return { ok: false, message: "司令塔のスレは差し戻せません" };
-    }
-    const script =
-      process.env.TOPOS_CHILD_REGISTRY_CLI ??
-      path.join(
-        os.homedir(),
-        "repos",
-        "ToposAI-Mini-Project",
-        "antigravity",
-        "utils",
-        "child_thread_registry.py",
-      );
-    const stdout = await new Promise<string>((resolve) => {
-      execFile(
-        "/usr/bin/python3",
-        buildRevertArgs(script, input.agentId, input.instruction),
-        { timeout: 40_000, maxBuffer: 1 << 20, env: process.env },
-        (error, out, err) => resolve(error ? `ERR:${err || error.message}` : out),
-      );
-    });
-    if (stdout.startsWith("ERR:")) {
-      return {
-        ok: false,
-        message: `差し戻しの結果を確認できませんでした(処理は途中まで走った可能性があります。一覧を更新して確かめてください): ${stdout.slice(4, 160)}`,
-      };
-    }
-    return summarizeRevert(stdout);
-  });
-
   // ピン止めの切り替え。保存先は `child_threads_pins.json` だけで、登録簿(`child_threads.json`)は触らない。
   server.handle(childThreadsPinRpc, async (input) => {
     try {
@@ -502,31 +497,21 @@ export default function contribute(server: PluginServerContext) {
     const { items, sources, generatedAt } = await collect(ctx);
     // 判断タブと同じ定義(SSOT は `isJudgmentItem`)。通知だけの項目は数えない。
     const open = items.filter((i) => isJudgmentItem(i) && i.state !== "approved");
-    const dir = resolveConfirmBoxDir();
     // バッジは失敗しても0で返す(件数が取れないだけで確認箱そのものは開けるようにする)
     let bugs = 0;
     try {
-      bugs = countNewReports(readFeedbackReports().reports);
+      // バッジ=**まだ終わっていない**報告(2026-10-26 ユーザー判断。以前は status==="new" だけ数えていた)
+      bugs = countOpenReports(readFeedbackReports().reports);
     } catch {
       bugs = 0;
-    }
-    let childDone = 0;
-    try {
-      // 画面の「確認待ち」と同じ定義(個別 ack が無い)。一覧とバッジの数が食い違わないようにする。
-      childDone = readChildThreads(dir, items).filter(
-        (t) => t.status === "完了" && !t.summaryAcked,
-      ).length;
-    } catch {
-      childDone = 0;
     }
     return {
       open: open.length,
       blocking: open.filter((i) => i.priority === "blocking").length,
       permits: open.filter((i) => i.kind === "permit").length,
       failedSources: sources.filter((src) => !src.ok).length,
-      notifications: countUnreadNotifications(items),
+      notifications: countUrgentUnreadNotifications(items),
       bugs,
-      childDone,
       generatedAt,
     };
   });
@@ -578,19 +563,27 @@ export default function contribute(server: PluginServerContext) {
   });
 
   server.handle(feedbackReportsListRpc, async () => {
-    const { reports, sources } = readFeedbackReports();
+    const ctx = loadProgressContext(readConfirmBox(resolveConfirmBoxDir()).items);
+    const { reports, sources } = readFeedbackReports(undefined, undefined, ctx);
     return { reports, sources, generatedAt: Date.now() };
   });
 
   server.handle(confirmBoxDecideRpc, async (input) => {
     if (!input.key) return { ok: false, message: "key が空です" };
+    const reject = input.chosen === REJECT_CHOICE;
+    if (reject && !input.reason.trim()) {
+      return { ok: false, message: "却下にはコメントが必要です(理由を書いてください)" };
+    }
+    if (reject && !input.key.startsWith(VAULT_KEY_PREFIX)) {
+      return { ok: false, message: "却下できるのは Vault の判断ノートの項目だけです" };
+    }
     try {
       // Vault の判断ノートへの回答は、まずノート(正本)を answered にする。失敗したら台帳にも書かない。
       let noteNote = "";
       if (input.key.startsWith(VAULT_KEY_PREFIX)) {
         const noteItem = readVaultDecisions().items.find((i) => i.key === input.key);
         const option = noteItem?.options.find((o) => o.id === input.chosen);
-        if (input.chosen !== null && !option) {
+        if (input.chosen !== null && !reject && !option) {
           return { ok: false, message: `選択肢 ${input.chosen} はこの判断にありません` };
         }
         const label = option?.label ?? null;
@@ -599,6 +592,7 @@ export default function contribute(server: PluginServerContext) {
           chosenId: input.chosen,
           chosenLabel: label,
           reason: input.reason,
+          reject,
         });
         noteNote = `・ノート更新 ${file.split("/").pop()}`;
       }
@@ -606,7 +600,8 @@ export default function contribute(server: PluginServerContext) {
         appendDecision(resolveConfirmBoxDir(), {
           key: input.key,
           chosen: input.chosen,
-          recommended: input.recommended,
+          // 却下は「推奨と別の選択肢を選んだ」ではなく問いの取り下げ。推奨の的中集計(matched)を汚さない
+          recommended: reject ? null : input.recommended,
           depth: input.depth,
           reason: input.reason,
           source: input.source,
@@ -621,7 +616,9 @@ export default function contribute(server: PluginServerContext) {
       }
       return {
         ok: true,
-        message: `記録しました(${input.key} → ${input.chosen ?? "選択なし"})${noteNote}`,
+        message: reject
+          ? `却下しました(${input.key})${noteNote}`
+          : `記録しました(${input.key} → ${input.chosen ?? "選択なし"})${noteNote}`,
       };
     } catch (error) {
       return { ok: false, message: `記録できません: ${(error as Error).message}` };
@@ -699,14 +696,54 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.handle(coordinatorTargetRpc, async () => ({ agentId: readGeneralCoordinatorId() }));
+  // 読んだ位置(端末をまたいで同じ位置で開き直す)。取得失敗は「記録しない」側に倒し、画面は止めない。
+  server.handle(readPositionGetRpc, async (input) => {
+    try {
+      return getPosition(resolveConfirmBoxDir(), input.agentId, input.title);
+    } catch {
+      return { enabled: false, seq: null, epoch: null, updatedAt: null };
+    }
+  });
+  server.handle(readPositionSetRpc, async (input) => {
+    try {
+      return setPosition(
+        resolveConfirmBoxDir(),
+        input.agentId,
+        input.title,
+        input.seq,
+        input.epoch,
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        seq: null,
+        message: `読んだ位置を保存できません: ${(error as Error).message}`,
+      };
+    }
+  });
+  server.handle(readPositionEnableRpc, async (input) => {
+    try {
+      setReadPositionEnabled(resolveConfirmBoxDir(), input.agentId, input.enabled);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: `切り替えを保存できません: ${(error as Error).message}` };
+    }
+  });
+
+  server.handle(coordinatorTargetRpc, async () => ({
+    agentId: readGeneralCoordinatorId(),
+    hubIds: readCoordinatorIds(),
+  }));
 
   server.handle(cardChatListRpc, async (input) => {
     try {
       const dir = resolveConfirmBoxDir();
+      const target = { id: input.id, key: input.key };
+      const rows = boxRows(dir);
       return {
-        found: cardExists(dir, { id: input.id, key: input.key }),
-        messages: readCardChat(dir, { id: input.id, key: input.key }),
+        found: cardExists(dir, target, rows),
+        messages: readCardChat(dir, target, { topic: input.topic }, rows),
+        ...(input.topic ? { pending: panePending(dir, target, Date.now(), rows) } : {}),
       };
     } catch {
       return { found: false, messages: [] };
@@ -1242,6 +1279,29 @@ export default function contribute(server: PluginServerContext) {
       });
     opening.set(key, task);
     return task;
+  });
+
+  server.handle(cardChatAskRpc, async (input) => {
+    try {
+      return askFromPane(
+        resolveConfirmBoxDir(),
+        { id: input.id, key: input.key },
+        input.text,
+        input.target,
+      );
+    } catch (error) {
+      return { ok: false, message: `送れません: ${(error as Error).message}` };
+    }
+  });
+
+  server.handle(cardChatCancelRpc, async (input) => {
+    try {
+      return {
+        ok: cancelFromPane(resolveConfirmBoxDir(), { id: input.id, key: input.key }, input.replyId),
+      };
+    } catch {
+      return { ok: false };
+    }
   });
 
   server.handle(cardChatSayRpc, async (input) => {

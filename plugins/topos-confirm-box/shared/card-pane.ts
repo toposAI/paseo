@@ -122,3 +122,105 @@ export function withCardHeader(
   // 司令塔スレの発言ログから読み、回答済みにする)。文言を変えるなら両方を揃えること。
   return `${head}${body}\n\n[ユーザーの発言]\n${text}`;
 }
+
+/**
+ * カード本体のタップでペインの相手を切り替えるか。**ペインが既に開いている時だけ**(閉じている時は
+ * 開かない=従来動作)、かつそのカードが既に出ているカードでない時。開くのは「💬 会話」ボタンの役目。
+ */
+export function shouldSwitchPaneOnCardPress(anyPaneOpen: boolean, thisCardShown: boolean): boolean {
+  return anyPaneOpen && !thisCardShown;
+}
+
+// ---------------------------------------------------------------- 優先順位ページの吹き出し(ChatDock)の宛先
+
+/** 吹き出し会話が総司令塔へ落ちた時に送信文の先頭へ付ける目印(総司令塔が出どころを判別できるように)。 */
+export const DOCK_FALLBACK_CONTEXT =
+  "【確認箱 優先順位ページの吹き出し】(常駐会話スレが閉じているため総司令塔に届いています)";
+
+/**
+ * 吹き出し会話の送り先。固定の常駐会話スレが生きていればそれ、閉じている/存在しないなら総司令塔。
+ * `fixedAlive`: true=生きている、false=閉じている/無い、null=まだ確認中(確認中は送り先を決めない)。
+ * 総司令塔のIDも無ければ null(送信不可の理由を出す)。
+ */
+export function pickDockTarget(opts: {
+  fixedId: string | null;
+  fixedAlive: boolean | null;
+  coordinatorId: string | null | undefined;
+}): { agentId: string | null; viaCoordinator: boolean; pending: boolean } {
+  if (opts.fixedId && opts.fixedAlive === true)
+    return { agentId: opts.fixedId, viaCoordinator: false, pending: false };
+  if (opts.fixedId && opts.fixedAlive === null)
+    return { agentId: null, viaCoordinator: false, pending: true };
+  if (opts.coordinatorId === undefined)
+    return { agentId: null, viaCoordinator: true, pending: true };
+  return { agentId: opts.coordinatorId, viaCoordinator: true, pending: false };
+}
+
+// ---------------------------------------------------------------- 「この話題だけ」(方式a)
+
+/** Python `confirm_box_reply.SAY_SCRIPT` と同じ。上位スレがそのまま貼って実行する。 */
+export const SAY_SCRIPT =
+  "/Users/user/repos/ToposAI-Mini-Project/antigravity/utils/confirm_box_reply.py";
+
+/** heredoc の終端語。返事本文に同名の行があると途中で閉じ、残りがシェル実行されるので毎回ランダムにする。 */
+export function sayEof(): string {
+  const bytes = new Uint8Array(8);
+  globalThis.crypto.getRandomValues(bytes);
+  return `REPLY_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** シェルのシングルクォート(Python `_q` の写し)。 */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+/**
+ * ハブ宛(総司令塔・子司令塔、または総司令塔へ振り替え)か。ハブは複数話題を同じスレで扱うので、
+ * 会話を「そのカードの話題だけ」(台帳の chat/reply)に絞る。非ハブの単一話題の子スレは従来のライブ表示。
+ */
+export function isHubTarget(opts: {
+  fallback: boolean;
+  agentId: string | null;
+  hubIds: readonly string[];
+}): boolean {
+  if (opts.fallback) return true;
+  return opts.agentId !== null && opts.hubIds.includes(opts.agentId);
+}
+
+/** 上位スレへ送る文に、返信IDと say コマンド(完成形)を付ける。 */
+export function withSayInstruction(
+  text: string,
+  opts: { replyId: string; cardId: string },
+): string {
+  const eof = sayEof();
+  return (
+    `${text}\n\n` +
+    `【確認箱ペインの質問・返信ID ${opts.replyId}】返事は普通の発言ではペインに出ません。次で書いてください:\n` +
+    `python3 ${SAY_SCRIPT} say --id ${shellQuote(opts.cardId)} --re ${shellQuote(opts.replyId)}` +
+    ` --by hub_thread --text-file - <<'${eof}'\n(返事)\n${eof}`
+  );
+}
+
+/** 返事待ちの目印。3分以内=「返事待ち」、超過=「返事待ち(sayなし)」。 */
+export function pendingLabel(state: "waiting" | "overdue", nudges: number): string {
+  if (state === "waiting") return "返事待ち";
+  return nudges > 0 ? `返事待ち(sayなし・催促${nudges}回)` : "返事待ち(sayなし)";
+}
+
+/**
+ * Enter キーで送信するか。Web かつ非compact(PC幅)だけ。IME変換中(isComposing / keyCode 229)と
+ * Shift+Enter(改行)は送らない。iPhone(compact)は Enter=改行のまま。
+ */
+export function shouldSubmitOnEnter(ev: {
+  key: string;
+  shiftKey?: boolean;
+  isComposing?: boolean;
+  keyCode?: number;
+  isWeb: boolean;
+  compact: boolean;
+}): boolean {
+  if (!ev.isWeb || ev.compact) return false;
+  if (ev.key !== "Enter" || ev.shiftKey) return false;
+  if (ev.isComposing || ev.keyCode === 229) return false;
+  return true;
+}

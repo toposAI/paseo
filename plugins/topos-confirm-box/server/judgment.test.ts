@@ -12,11 +12,15 @@ import test from "node:test";
 import {
   countOpen,
   countUnreadNotifications,
+  countUrgentUnreadNotifications,
   isJudgmentItem,
   isLegacyOptionItem,
   isNotificationItem,
   judgmentTabRows,
   notificationTabRows,
+  REJECT_CHOICE,
+  canRejectItem,
+  rejectComment,
 } from "../shared/contract.js";
 import type { ConfirmBoxItem } from "../shared/contract.js";
 import { foldBoxEvents, mergeBoxAndPending, parsePendingRecords } from "./box.js";
@@ -154,6 +158,16 @@ test("通知タブのバッジは未読の通知だけ数える", () => {
   assert.equal(countUnreadNotifications(rows), 1);
 });
 
+test("通知タブのバッジ=緊急かつ未読だけ(通常は数えない・既読の緊急も数えない)", () => {
+  const rows = [
+    MAIL,
+    item({ id: "box:u1", source: "x", urgency: "urgent" }),
+    item({ id: "box:u2", source: "x", urgency: "urgent", state: "read" }),
+  ];
+  assert.equal(countUrgentUnreadNotifications(rows), 1);
+  assert.equal(countUrgentUnreadNotifications([MAIL]), 0);
+});
+
 test("判断タブの行(画面と共通の絞り込み)に通知・バグ報告・完了報告は入らない", () => {
   const rows = judgmentTabRows(
     [
@@ -264,4 +278,27 @@ test("画面側は自前の絞り込みを書かず、共通の judgmentTabRows 
   const view = readFileSync(new URL("../client/ConfirmBoxView.tsx", import.meta.url), "utf8");
   assert.match(view, /judgmentTabRows\(/);
   assert.doesNotMatch(view, /isJudgmentItem\(/);
+});
+
+test("却下: 判断項目(key あり・permit でない)だけに出し、コメントは空白だけを不可にする", () => {
+  const base = [
+    ...foldBoxEvents([
+      { t: "item", id: "box:j", ts: 1, judgment: true, key: "vault:j-1", options: OPTIONS },
+    ]).values(),
+  ][0];
+  assert.equal(canRejectItem(base), true);
+  assert.equal(canRejectItem({ ...base, key: "pending:x" }), false);
+  assert.equal(canRejectItem({ ...base, key: "" }), false);
+  assert.equal(canRejectItem({ ...base, judgment: false }), false);
+  assert.equal(canRejectItem({ ...base, kind: "permit" }), false);
+  assert.equal(rejectComment("   \n"), null);
+  assert.equal(rejectComment("  解決済み "), "解決済み");
+});
+
+test("却下(chosen=__reject の決定行)は中間形式の判断項目を未決から外す", () => {
+  const parsed = parsePendingRecords([
+    { key: "k", judgment: true, options: OPTIONS },
+    { t: "decision", key: "k", chosen: REJECT_CHOICE, reason: "不要" },
+  ]);
+  assert.equal(parsed.decidedKeys.has("k"), true);
 });

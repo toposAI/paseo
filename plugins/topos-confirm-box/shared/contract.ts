@@ -96,6 +96,8 @@ export const ConfirmBoxItemSchema = z.object({
   background: z.string(),
   source: z.string(),
   threadRef: ConfirmBoxThreadRefSchema.nullable(),
+  /** 「この欄に答えるスレ」の表示(短ID+題名。未登録の投函元は明示)。判断ノート由来のカードだけ入る。 */
+  answerLabel: z.string().optional(),
   stoppedCount: z.number().int(),
   /** 新着バグ報告などの報告者表示名(投函側が `reporter` に入れた場合のみ)。 */
   reporter: z.string().optional(),
@@ -187,8 +189,6 @@ export const confirmBoxCountRpc = defineRpc({
     notifications: z.number().int().default(0),
     /** バグ報告タブの未対応(status=new)。 */
     bugs: z.number().int().default(0),
-    /** 子スレ完了報告タブの未確認(完了かつまとめが未読)。 */
-    childDone: z.number().int().default(0),
     generatedAt: z.number(),
   }),
 });
@@ -198,6 +198,11 @@ export type ConfirmBoxCountOutput = z.infer<typeof confirmBoxCountRpc.output>;
 
 /** 決定イベントの契約は `handoff_confirm_box_recommendation_feedback_kickoff.md` で固定。
  * ここはその**投函側**として書く(`matched` は機械計算)。 */
+/** `decide` の `chosen` にこの値を渡すと「却下」(コメント必須)。選択肢 id と衝突しない予約語。 */
+export const REJECT_CHOICE = "__reject";
+/** Vault 判断ノート項目の key 接頭辞(server/vault-decisions.ts の VAULT_KEY_PREFIX と同値) */
+export const REJECT_KEY_PREFIX = "vault:";
+
 export const confirmBoxDecideRpc = defineRpc({
   name: "topos.confirmbox.decide",
   input: z.object({
@@ -279,6 +284,13 @@ export const PriorityProjectSchema = z.object({
    * (題名の一致などで推測しない=誤ったスレを開くよりは「未設定」と言う)。
    */
   thread: z.string().nullable(),
+  /**
+   * 動いている子スレから自動で足された行で、まだユーザーが動かしていない印(台帳の `new`)。
+   * 画面に「新規」を出す。ユーザーが並べ替えると台帳側から外れる。
+   */
+  isNew: z.boolean().optional(),
+  /** 動いているスレから自動で足された行(台帳の `auto`)。UIは書き戻しで落とさない。 */
+  auto: z.boolean().optional(),
 });
 export type PriorityProject = z.infer<typeof PriorityProjectSchema>;
 
@@ -324,7 +336,8 @@ const cardChatTarget = { id: z.string(), key: z.string().nullable().optional() }
  * 本回答は別プロセス(応答ワーカー)が箱の `t:"reply"` 行として書く。 */
 export const cardChatListRpc = defineRpc({
   name: "topos.confirmbox.cardchat.list",
-  input: z.object(cardChatTarget),
+  /** `topic: true` = 「この話題だけ」表示(受領ackを除く)。pending も同時に返す。 */
+  input: z.object({ ...cardChatTarget, topic: z.boolean().optional() }),
   output: z.object({
     /** 箱にその項目が在るか。無い id(URL 手打ち・決定済み)への送信を止めるため(2026-10-22)。 */
     found: z.boolean(),
@@ -336,6 +349,17 @@ export const cardChatListRpc = defineRpc({
         text: z.string(),
       }),
     ),
+    /** ペインから送って、まだ上位スレの say が無い質問(`topic: true` の時だけ入る)。 */
+    pending: z
+      .array(
+        z.object({
+          re: z.string(),
+          ts: z.number(),
+          state: z.enum(["waiting", "overdue"]),
+          nudges: z.number(),
+        }),
+      )
+      .optional(),
   }),
 });
 export type CardChatListOutput = z.infer<typeof cardChatListRpc.output>;
@@ -345,7 +369,26 @@ export type CardChatListOutput = z.infer<typeof cardChatListRpc.output>;
 export const coordinatorTargetRpc = defineRpc({
   name: "topos.confirmbox.coordinator",
   input: z.object({}),
-  output: z.object({ agentId: z.string().nullable() }),
+  output: z.object({
+    agentId: z.string().nullable(),
+    /** ハブ(総司令塔・子司令塔)のスレID。宛先がこの中なら「この話題だけ」表示にする。 */
+    hubIds: z.array(z.string()).optional(),
+  }),
+});
+
+/** ペインからの質問。台帳へ `t:"chat"`(source:"pane", target=宛先スレ)を書き、返信IDを返す。
+ * 返事は上位スレが `confirm_box_reply.py say --re <返信ID>` で書く(方式a)。 */
+export const cardChatAskRpc = defineRpc({
+  name: "topos.confirmbox.cardchat.ask",
+  input: z.object({ ...cardChatTarget, text: z.string(), target: z.string() }),
+  output: z.object({ ok: z.boolean(), message: z.string(), replyId: z.string().optional() }),
+});
+
+/** ペインの送信が失敗した質問を取り消す(待ち表示・催促・集計から外す)。 */
+export const cardChatCancelRpc = defineRpc({
+  name: "topos.confirmbox.cardchat.cancel",
+  input: z.object({ ...cardChatTarget, replyId: z.string() }),
+  output: z.object({ ok: z.boolean() }),
 });
 
 export const cardChatSayRpc = defineRpc({
@@ -378,6 +421,23 @@ export function compareConfirmBoxItems(a: ConfirmBoxItem, b: ConfirmBoxItem): nu
  *   印を付けるのは投函側(`notify_box.deposit(judgment=True)` が `"judgment": true` を書く)。
  * - 印の無い旧形式の選択肢つき項目は `judgmentTabRows(..., { legacy: true })` でのみ見られる。
  */
+/**
+ * 「却下」ボタンを出す項目か。Vault の判断ノート由来(key が `vault:` 始まり・judgment 印あり)だけ。
+ * 却下の伝達(superseded + rejected_at → 投函元の子スレ)はノート経由なので、ノートの無い項目には出さない。
+ * 承認待ち(permit)には出さない(拒否ボタンが既にある)。key が無いと却下を記録できない。
+ */
+export function canRejectItem(item: ConfirmBoxItem): boolean {
+  return (
+    item.kind !== "permit" && item.judgment === true && !!item.key?.startsWith(REJECT_KEY_PREFIX)
+  );
+}
+
+/** 却下コメントの検査。空白だけは不可(コメント必須)。通れば前後の空白を除いた本文を返す。 */
+export function rejectComment(text: string): string | null {
+  const t = text.trim();
+  return t ? t : null;
+}
+
 export function isJudgmentItem(item: ConfirmBoxItem): boolean {
   if (item.kind === "permit") return true;
   return item.judgment === true;
@@ -442,9 +502,18 @@ export function isNotificationItem(item: ConfirmBoxItem): boolean {
   return !NOTIFICATION_EXCLUDED_SOURCES.includes(item.source);
 }
 
-/** 通知タブのバッジ。未読(state=new)だけ数える。 */
+/** 通知タブの未読(緊急かどうかを問わない)。タブ内の見出し用で、バッジには使わない。 */
 export function countUnreadNotifications(items: readonly ConfirmBoxItem[]): number {
   return items.filter((i) => isNotificationItem(i) && i.state === "new").length;
+}
+
+/**
+ * 通知タブのバッジ=**緊急かつ未読**だけ(2026-10-26 ユーザー指示「バッジは緊急の件数だけ」)。
+ * 通常の通知はバッジに数えない。0 のときは呼び出し側が非表示にする。
+ */
+export function countUrgentUnreadNotifications(items: readonly ConfirmBoxItem[]): number {
+  return items.filter((i) => isNotificationItem(i) && i.state === "new" && i.urgency === "urgent")
+    .length;
 }
 
 /**

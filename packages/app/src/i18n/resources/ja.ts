@@ -2014,6 +2014,9 @@ export const ja: TranslationResources = {
     output: "出力",
   },
   toolCallGroup: {
+    thinking: "思考",
+    thinkingActive: "考え中…",
+    summarySeparator: "・",
     editedFiles: {
       one: "{{count}}個のファイルを編集",
       other: "{{count}}個のファイルを編集",
@@ -2211,6 +2214,10 @@ export const ja: TranslationResources = {
       toposChatStyle: {
         label: "Topos風の会話表示",
         description: "ユーザー発言の長押しで日時とコピーを表示し、回答を読むときは入力欄を畳みます",
+      },
+      composerOverflowMenu: {
+        label: "入力欄の「…」メニュー",
+        description: "スマホ幅で、音声会話モードなどの補助ボタンと使用量を「…」にまとめます",
       },
       toolCallDetail: {
         label: "ツール呼び出しの表示",

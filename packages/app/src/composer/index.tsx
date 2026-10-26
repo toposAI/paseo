@@ -33,6 +33,7 @@ import {
   Square,
   Pencil,
   AudioLines,
+  Ellipsis,
   CircleDot,
   FileText,
   GitPullRequest,
@@ -44,6 +45,12 @@ import {
   MicOff,
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   getDictation139Bridge,
   insertIntoComposer,
@@ -1148,13 +1155,36 @@ function ComposerRightControlsSlot({
   insertDictationText,
   ...voiceProps
 }: ComposerRightControlsSlotProps) {
+  const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
+  const overflowSetting = useSettings((settings) => settings.composerOverflowMenu);
+  // 「スマホ幅」は画面幅(formFactor)で判定する。isCompact は親が狭いパネルとして上書きしうるため使わない。
+  const isPhoneWidth = useIsCompactFormFactor();
   const hideVoiceForCompactInput = isCompact && hasSendableContent;
   const showVoiceModeButton =
     showVoice && !isVoiceModeForAgent && hasAgent && !isAgentRunning && !hideVoiceForCompactInput;
+  // 「…」に入れられる項目の数。項目が2つ以上になるまでは畳まず、音声会話モードをそのまま表に出す(総司令塔の代理決定 2026-10-26)。
+  // エビデンスモード等を足すときはここへ加算し、項目ごとの表示条件に分離する。
+  const overflowItemCount = showVoiceModeButton ? 1 : 0;
+  const useOverflow =
+    isPhoneWidth && toposChatStyle && overflowSetting && overflowItemCount >= MIN_OVERFLOW_ITEMS;
   // 139番アプリ内でだけ、録音画面(139番の音声入力)を直接開くマイクを出す。
   const showDictationButton = showVoice && hasAgent && isWeb;
   const dictationBridge = showDictationButton ? getDictation139Bridge() : null;
   if (!showVoiceModeButton && !dictationBridge) return null;
+  if (useOverflow) {
+    return (
+      <View style={styles.rightControls}>
+        {dictationBridge ? (
+          <ComposerDictationButton
+            buttonIconSize={voiceProps.buttonIconSize}
+            realtimeVoiceButtonStyle={voiceProps.realtimeVoiceButtonStyle}
+            insertText={insertDictationText}
+          />
+        ) : null}
+        {showVoiceModeButton ? <ComposerOverflowMenu {...voiceProps} /> : null}
+      </View>
+    );
+  }
   return (
     <View style={styles.rightControls}>
       {dictationBridge ? (
@@ -1309,6 +1339,55 @@ function ComposerDictationButton({
 }
 
 const composerDictationRecordingStyle = { backgroundColor: "#d33" } as const;
+
+const MIN_OVERFLOW_ITEMS = 2;
+
+/**
+ * スマホ幅の「…」メニュー。主要操作(添付・マイク・送信)を表に残し、補助操作をここへ畳む。
+ * 注意: 表示条件は現状「音声会話モードが出せるとき」と共有している。項目を足すときは表示条件を項目ごとに分離すること。
+ */
+function ComposerOverflowMenu({
+  buttonIconSize,
+  handleToggleRealtimeVoice,
+  isConnected,
+  isVoiceSwitching,
+  realtimeVoiceButtonStyle,
+}: ComposerVoiceModeButtonProps) {
+  const { t } = useTranslation();
+  const renderTrigger = useCallback(
+    () => <ThemedEllipsis size={buttonIconSize} uniProps={iconForegroundMutedMapping} />,
+    [buttonIconSize],
+  );
+  return (
+    <DropdownMenu compactMode="popover">
+      <DropdownMenuTrigger
+        disabled={!isConnected || isVoiceSwitching}
+        accessibilityLabel="その他の操作"
+        accessibilityRole="button"
+        testID="composer-overflow-button"
+        style={realtimeVoiceButtonStyle}
+      >
+        {renderTrigger}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side="top"
+        align="end"
+        offset={8}
+        minWidth={176}
+        testID="composer-overflow-menu"
+        sheetTitle="その他の操作"
+      >
+        <DropdownMenuItem
+          testID="composer-overflow-item-voice-mode"
+          disabled={isVoiceSwitching}
+          onSelect={handleToggleRealtimeVoice}
+        >
+          {t("composer.voice.voiceMode")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 function ComposerVoiceModeButton({
   buttonIconSize,
@@ -3112,6 +3191,7 @@ const ThemedArrowUp = withUnistyles(ArrowUp);
 const ThemedGitPullRequest = withUnistyles(GitPullRequest);
 const ThemedCircleDot = withUnistyles(CircleDot);
 const ThemedAudioLines = withUnistyles(AudioLines);
+const ThemedEllipsis = withUnistyles(Ellipsis);
 const ThemedMic = withUnistyles(Mic);
 const ThemedMicOff = withUnistyles(MicOff);
 /** 139番の音声入力が失敗した時のマイク表示(失敗を無言にしないための色)。 */

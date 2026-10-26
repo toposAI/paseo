@@ -18,6 +18,7 @@ import {
   saveAppSettings,
   type SettingsDeps,
 } from "./storage";
+import { TOPOS_TOOL_OVERVIEW_APPLIED_KEY } from "./keys";
 import { createFakeDesktopBridge, createInMemoryKeyValueStorage } from "./fakes";
 import {
   DEFAULT_SIDEBAR_ROW_ITEMS,
@@ -781,7 +782,45 @@ describe("appearance settings", () => {
     expect(result.contentFontSize).toBe(DEFAULT_UI_BASE_FONT_SIZE);
     expect(result.codeFontSize).toBe(DEFAULT_CODE_FONT_SIZE);
     expect(result.syntaxTheme).toBe("one");
-    expect(result.toolCallDetailLevel).toBe("detailed");
+    expect(result.toolCallDetailLevel).toBe("overview");
+  });
+
+  it("applies the overview default once to a device that stored detailed, then keeps its choice", async () => {
+    const storage = createInMemoryKeyValueStorage({
+      [APP_SETTINGS_KEY]: JSON.stringify({ toolCallDetailLevel: "detailed" }),
+    });
+    const deps = makeDeps({ storage });
+
+    expect((await loadAppSettingsFromStorage(deps)).toolCallDetailLevel).toBe("overview");
+
+    const persisted = JSON.parse(storage.entries.get(APP_SETTINGS_KEY) ?? "null");
+    storage.entries.set(
+      APP_SETTINGS_KEY,
+      JSON.stringify({ ...persisted, toolCallDetailLevel: "detailed" }),
+    );
+    expect((await loadAppSettingsFromStorage(deps)).toolCallDetailLevel).toBe("detailed");
+  });
+
+  it("sets the migration marker on a fresh device and leaves a marked device's detailed choice alone", async () => {
+    const fresh = createInMemoryKeyValueStorage({});
+    await loadAppSettingsFromStorage(makeDeps({ storage: fresh }));
+    expect(fresh.entries.get(TOPOS_TOOL_OVERVIEW_APPLIED_KEY)).toBe("1");
+
+    const marked = createInMemoryKeyValueStorage({
+      [APP_SETTINGS_KEY]: JSON.stringify({ toolCallDetailLevel: "detailed" }),
+      [TOPOS_TOOL_OVERVIEW_APPLIED_KEY]: "1",
+    });
+    const loaded = await loadAppSettingsFromStorage(makeDeps({ storage: marked }));
+    expect(loaded.toolCallDetailLevel).toBe("detailed");
+  });
+
+  it("treats compactToolCalls:false like the new overview default", async () => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ compactToolCalls: false }),
+      }),
+    });
+    expect((await loadAppSettingsFromStorage(deps)).toolCallDetailLevel).toBe("overview");
   });
 
   it("migrates the enabled compact tool call preference to overview", async () => {
@@ -801,7 +840,7 @@ describe("appearance settings", () => {
       }),
     });
 
-    expect((await loadAppSettingsFromStorage(deps)).toolCallDetailLevel).toBe("detailed");
+    expect((await loadAppSettingsFromStorage(deps)).toolCallDetailLevel).toBe("overview");
   });
 
   it("migrates a switched-off checks row item to the hidden checks display", async () => {

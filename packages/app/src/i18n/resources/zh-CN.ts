@@ -1970,6 +1970,9 @@ export const zhCN: TranslationResources = {
     output: "输出",
   },
   toolCallGroup: {
+    thinking: "思考",
+    thinkingActive: "思考中…",
+    summarySeparator: " · ",
     editedFiles: {
       one: "编辑了 {{count}} 个文件",
       other: "编辑了 {{count}} 个文件",
@@ -2165,6 +2168,10 @@ export const zhCN: TranslationResources = {
         label: "Topos-style chat",
         description:
           "Long-press your messages for time and copy; collapse the composer while reading answers",
+      },
+      composerOverflowMenu: {
+        label: 'Composer "…" menu',
+        description: 'On phone widths, fold secondary buttons (voice mode, usage) into a "…" menu',
       },
       toolCallDetail: {
         label: "工具调用显示",

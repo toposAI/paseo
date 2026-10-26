@@ -77,8 +77,8 @@ import { createAssistantMarkdownParser } from "@/utils/assistant-markdown-parser
 import { formatDuration, formatMessageTimestamp } from "@/utils/time";
 import { getTurnDurationLabel } from "./assistant-turn-footer-label";
 import { useSettings } from "@/hooks/use-settings";
-import { ToposUserMessageContextMenu } from "@/components/topos-user-message-context-menu";
-import { ToposUserMessageMenu } from "@/components/topos-user-message-menu";
+import { UserMessageBubbleFrame } from "@/components/user-message-bubble-frame";
+import { resolveUserMessageChrome } from "@/components/user-message-chrome";
 import { useToposComposerCollapse } from "@/composer/topos-collapse-store";
 import { writeMarkdownToRichClipboard } from "@/utils/rich-clipboard";
 import { getDefaultMarkdownClipboardEnvironment } from "@/utils/rich-clipboard-default-environment";
@@ -461,8 +461,19 @@ export const UserMessage = memo(function UserMessage({
   const hasImages = images.length > 0;
   const hasAttachments = attachments.length > 0;
   const toposChatStyle = useSettings((settings) => settings.toposChatStyle);
-  const showTrailingRow =
-    !toposChatStyle && !isPending && hasText && (isCompact || isNative || isHovered);
+  const {
+    menu: userMessageMenu,
+    showTrailingRow,
+    allowRewind: allowUserMessageRewind,
+  } = resolveUserMessageChrome({
+    toposChatStyle,
+    hasText,
+    isPending,
+    isWeb,
+    isNative,
+    isCompact,
+    isHovered,
+  });
   const formattedTimestamp = useMemo(
     () => formatMessageTimestamp(new Date(timestamp)),
     [timestamp],
@@ -556,20 +567,16 @@ export const UserMessage = memo(function UserMessage({
   const handleResend = useCallback(() => {
     if (agentId) useToposComposerCollapse.getState().requestResend(agentId, message);
   }, [agentId, message]);
-  let bubbleOrMenu = bubbleNode;
-  if (toposChatStyle && hasText && !isPending) {
-    // Phones: long-press popup. Desktop web: right-click menu (copy / resend).
-    bubbleOrMenu =
-      isCompact || isNative ? (
-        <ToposUserMessageMenu getContent={getMessageContent} timestampLabel={formattedTimestamp}>
-          {bubbleNode}
-        </ToposUserMessageMenu>
-      ) : (
-        <ToposUserMessageContextMenu getContent={getMessageContent} onResend={handleResend}>
-          {bubbleNode}
-        </ToposUserMessageContextMenu>
-      );
-  }
+  const bubbleOrMenu = (
+    <UserMessageBubbleFrame
+      menu={userMessageMenu}
+      getContent={getMessageContent}
+      timestampLabel={formattedTimestamp}
+      onResend={handleResend}
+    >
+      {bubbleNode}
+    </UserMessageBubbleFrame>
+  );
 
   return (
     <View style={containerStyle} testID="user-message" aria-busy={isPending}>
@@ -588,7 +595,7 @@ export const UserMessage = memo(function UserMessage({
             <Text style={userMessageStylesheet.timestampText} testID="user-message-timestamp">
               {formattedTimestamp}
             </Text>
-            {capabilities && messageId ? (
+            {allowUserMessageRewind && capabilities && messageId ? (
               <RewindMenu
                 capabilities={capabilities}
                 isPending={rewindMutation.isPending}

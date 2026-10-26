@@ -26,10 +26,16 @@ const BUSY = { disabled: true } as const;
 const IDLE = { disabled: false } as const;
 
 /** 見出し文。読み込み中/エラー/件数の3状態をここで畳む(JSX に入れ子の三項を書かない)。 */
-function describe(error: string | null, loaded: boolean, total: number, unread: number): string {
+function describe(
+  error: string | null,
+  loaded: boolean,
+  total: number,
+  unread: number,
+  urgent: number,
+): string {
   if (error) return `取得できません: ${error}`;
   if (!loaded) return "読み込み中…";
-  return `通知 ${total}件(未読 ${unread}件)`;
+  return `通知 ${total}件(未読 ${unread}件・うち緊急 ${urgent}件)`;
 }
 
 export function NotificationsView({ theme }: Pick<PluginHostProps, "theme">) {
@@ -69,6 +75,24 @@ export function NotificationsView({ theme }: Pick<PluginHostProps, "theme">) {
         borderRadius: 8,
         padding: 10,
         gap: 6,
+      },
+      cardUrgent: {
+        backgroundColor: c.surface1,
+        borderColor: "#b91c1c",
+        borderWidth: 2,
+        borderRadius: 8,
+        padding: 10,
+        gap: 6,
+      },
+      urgentTag: {
+        color: "#ffffff",
+        backgroundColor: "#b91c1c",
+        fontSize: 12,
+        fontWeight: "700" as const,
+        borderRadius: 4,
+        paddingHorizontal: 6,
+        paddingVertical: 1,
+        overflow: "hidden" as const,
       },
       cardRead: {
         backgroundColor: c.surface1,
@@ -118,7 +142,8 @@ export function NotificationsView({ theme }: Pick<PluginHostProps, "theme">) {
   const items = useMemo(() => notificationTabRows(data?.items ?? [], true), [data]);
   const unread = items.filter((i) => i.state === "new").length;
   const visible = showRead ? items : items.filter((i) => i.state === "new");
-  const header = describe(error, data !== null, items.length, unread);
+  const urgentUnread = items.filter((i) => i.state === "new" && i.urgency === "urgent").length;
+  const header = describe(error, data !== null, items.length, unread, urgentUnread);
   const toggleShowRead = useCallback(() => setShowRead((v) => !v), []);
 
   const markRead = useCallback(
@@ -205,12 +230,17 @@ function NotificationCard({
   onRead: (item: ConfirmBoxItem) => Promise<void>;
 }) {
   const read = item.state !== "new";
+  const urgent = item.urgency === "urgent";
+  let cardStyle = styles.card;
+  if (read) cardStyle = styles.cardRead;
+  else if (urgent) cardStyle = styles.cardUrgent;
   const press = useCallback(() => onToggle(open ? null : item.id), [onToggle, open, item.id]);
   const markRead = useCallback(() => void onRead(item), [onRead, item]);
   const body = item.background || item.summary;
   return (
-    <View style={read ? styles.cardRead : styles.card}>
+    <View style={cardStyle}>
       <View style={styles.head}>
+        {urgent ? <Text style={styles.urgentTag}>緊急</Text> : null}
         <Text style={styles.meta}>{item.source}</Text>
         {item.dupCount && item.dupCount > 1 ? (
           <Text style={styles.meta}>×{item.dupCount}件</Text>

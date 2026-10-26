@@ -14,9 +14,18 @@ export const CHILD_THREAD_STATUSES = ["実装中", "ユーザー判断待ち", "
 export type ChildThreadStatus = (typeof CHILD_THREAD_STATUSES)[number];
 
 /**
+ * 常駐の窓口(判断窓口A/A'・B・壁打ちN・完了箱C・裏方)が登録簿に書く status(2026-10-26 ユーザー指示)。
+ * 意味は「待ち受けていて、ユーザーの確認も判断も溜めていない」= 行の語彙 `待機中` に寄せる。
+ * 常駐の判定と書き込みは登録簿(`child_thread_registry.py` の `resident_thread_ids`)が持つ。
+ * この語彙が来ても件数・台帳には載せない(`isCardDone` は完了しか見ない)。
+ */
+export const STANDBY_THREAD_STATUS = "待機";
+
+/**
  * 行の status に載せてよい語彙。登録簿の3語彙に、登録簿に載らないスレ(= Paseo から直接建てた
  * スレ)の機械状態から導く `待機中` を足したもの(2026-10-24、出口レビュー round1 指摘2)。
  * 登録簿の書き込み語彙(`CHILD_THREAD_STATUSES`)は変えない = ノートや Python 側へ漏らさない。
+ * 常駐の窓口の `待機` も行には `待機中` として出す(`normalizeChildThreads`)。
  */
 export const CHILD_THREAD_ROW_STATUSES = [...CHILD_THREAD_STATUSES, "待機中"] as const;
 
@@ -36,9 +45,21 @@ export const ChildThreadSchema = z.object({
    * 一覧に居ないスレ(アーカイブ済み等)は null(点を出さない=分からないものを推測しない)。
    */
   stateDot: z.enum(STATE_DOT_KINDS).nullable().optional(),
+  /**
+   * 完了箱C(完了報告の窓口)の行だけが持つ「新しい報告をまだ読んでいない」印
+   * (`server/window-unread.ts`。2026-10-26 ユーザー依頼)。未指定は「未読でない/対象外」。
+   * 既読の判定は Paseo の attention(読むと消える)をそのまま使う。
+   */
+  unread: z.boolean().optional(),
   request: z.string(),
   /** 完了まとめを投函した確認箱 item の id。未完了なら null。 */
   summaryItemId: z.string().nullable(),
+  /**
+   * 完了まとめの**カードを作らない**運用の行か(登録簿の `summary_item_id` が目印 `nocard:<key>`)。
+   * 目印の id は箱に存在しないので `summaryItemId` は null になる。箱に引く項目が無い以上、
+   * 件数には数えない(`isCardDone`)。
+   */
+  nocard: z.boolean().default(false),
   /** 完了まとめの本文(箱の item の background)。箱から引けなければ null。 */
   summary: z.string().nullable(),
   /** 完了まとめの確認状態(箱の state)。表示用(既読=read を含む)。 */
@@ -72,6 +93,27 @@ export const ChildThreadSchema = z.object({
   access: z.enum(["open", "workspace-archived", "thread-archived"]).nullable().default(null),
 });
 export type ChildThread = z.infer<typeof ChildThreadSchema>;
+
+/**
+ * 完了まとめのカードを作らない運用の目印(正本は `antigravity/utils/child_thread_registry.py` の
+ * `NOCARD_PREFIX`)。箱に実在しない id なので、`summaryItemId` としては使わない。
+ */
+export const NOCARD_PREFIX = "nocard:";
+
+/** 登録簿の `summary_item_id` がカードを作らない運用の目印か。 */
+export function isNocardSummaryId(value: string): boolean {
+  return value.startsWith(NOCARD_PREFIX);
+}
+
+/**
+ * 完了まとめを**箱の項目**で確認する運用の完了行か(カードを作らない `nocard` の行は false)。
+ * 2026-10-26 に「完了待ち」の判定は廃止した。今は一覧の「確認済み」注記と、箱に実在する
+ * 項目だけを扱うための絞り込みに使う: 箱に引く項目が無い行を確認済みとして出すと、
+ * 押しても効かない確認になる。
+ */
+export function isCardDone(t: { status: string; nocard?: boolean }): boolean {
+  return t.status === "完了" && t.nocard !== true;
+}
 
 /** 開けるかの印。 */
 export type ThreadAccess = NonNullable<ChildThread["access"]>;
@@ -140,21 +182,6 @@ export const childThreadsSetOrderRpc = defineRpc({
   }),
 });
 export type ChildThreadsSetOrderOutput = z.infer<typeof childThreadsSetOrderRpc.output>;
-
-/**
- * 完了カードの差し戻し。登録簿の `child_thread_registry.py revert` を呼ぶ
- * (自動取り下げと同じ後始末+子スレへの通知+送達確認)。結果は短い文で画面に出す。
- */
-export const childThreadsRevertRpc = defineRpc({
-  name: "topos.childthreads.revert",
-  input: z.object({
-    agentId: z.string().uuid(),
-    /** 子スレへ添える追加指示(空でも押せる。空なら子スレが何を直すかを自分で確認する)。 */
-    instruction: z.string().max(2000).default(""),
-  }),
-  output: z.object({ ok: z.boolean(), message: z.string() }),
-});
-export type ChildThreadsRevertOutput = z.infer<typeof childThreadsRevertRpc.output>;
 
 /** 行のアーカイブ(スレ + そのスレのワークスペース)。 */
 export const childThreadsArchiveRpc = defineRpc({

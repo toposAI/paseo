@@ -2039,6 +2039,9 @@ export const fr: TranslationResources = {
     output: "Sortie",
   },
   toolCallGroup: {
+    thinking: "Réflexion",
+    thinkingActive: "Réflexion en cours…",
+    summarySeparator: " · ",
     editedFiles: {
       one: "{{count}} fichier modifié",
       other: "{{count}} fichiers modifiés",
@@ -2240,6 +2243,10 @@ export const fr: TranslationResources = {
         label: "Topos-style chat",
         description:
           "Long-press your messages for time and copy; collapse the composer while reading answers",
+      },
+      composerOverflowMenu: {
+        label: 'Composer "…" menu',
+        description: 'On phone widths, fold secondary buttons (voice mode, usage) into a "…" menu',
       },
       toolCallDetail: {
         label: "Affichage des appels d’outils",

@@ -45,7 +45,7 @@ import {
   openableParentIds,
   rowGroupKeyOf,
 } from "../shared/sidebar-rows.js";
-import { BOX_TAB_MODE_PARAM, BOX_TAB_SCREEN_ID } from "../shared/footer-tabs.js";
+import { BOX_TAB_SCREEN_ID } from "../shared/footer-tabs.js";
 import {
   COORDINATOR_GROUP,
   PINNED_GROUP,
@@ -1075,7 +1075,7 @@ function rowIcon(row: SidebarRowView<ChildThread>, t: ChildThread): string {
   if (t.access === "workspace-archived") return ICON.closed;
   // 止まったスレは帯の語彙に関わらず「終了」の見た目にする(従来どおり)。
   if (t.machineState === "closed") return ICON.closed;
-  if (row.statusLabel === "完了待ち" || row.note?.status === "確認待ち") return "CircleCheck";
+  if (row.note?.status === "確認待ち") return "CircleCheck"; // 旧語彙のノート(移行中だけ)
   if (row.statusLabel === "判断待ち") return "CircleHelp";
   if (row.statusLabel === "実装中" && t.status === "完了") return "Loader";
   // 帯と同じ判断で選ぶ(登録簿に載らないスレは「待機中」= idle のアイコンになる)。
@@ -1087,22 +1087,20 @@ function rowIcon(row: SidebarRowView<ChildThread>, t: ChildThread): string {
  * `closed` は行末の印(箱)と揃える(`shared/thread-status-label` の `displayStatus` と同じ規則。
  * 出口レビュー round3 指摘1)。
  */
-function kindOfStatusLabel(
-  label: NoteStatus | "待機中" | "完了待ち",
-  _machineState: string | null,
-): StatusKind {
+function kindOfStatusLabel(label: NoteStatus | "待機中", _machineState: string | null): StatusKind {
   // 帯の文字は実装ノートの status なので、色も機械状態(closed)で上書きせず文字の語彙で選ぶ
   // (上書きすると「判断待ち」「実装中」の文字が灰色の帯になり、同じ状態で色が割れる)。
   if (label === "待機中") return "idle";
   if (label === "完了") return "done";
   if (label === "判断待ち" || label === "構想") return "waiting";
-  if (label === "確認待ち" || label === "完了待ち") return "done";
+  if (label === "確認待ち") return "done"; // 旧語彙のノート(移行中だけ)
   return "running";
 }
 
 /**
- * 一覧の上に出す「判断待ち N / 完了待ち M」。帯と同じ色(橙/緑)で、押すと下部バーと同じ画面
- * (ユーザー判断 / 子スレ完了)を開く。0件の状態は出さない(件数の無いチップは情報にならない)。
+ * 一覧の上に出す「判断待ち N」。帯と同じ色(橙)で、押すと下部バーと同じ画面(ユーザー判断)を開く。
+ * 2026-10-26 に「完了待ち」を廃止したので、完了待ちの件数チップは無い。
+ * 0件の状態は出さない(件数の無いチップは情報にならない)。
  */
 function StatusCountChips({
   rows,
@@ -1111,17 +1109,9 @@ function StatusCountChips({
   rows: readonly SidebarRowView<ChildThread>[];
   openScreen: (input: { screenId: string; params?: Record<string, string> }) => void;
 }) {
-  const { judgment, doneWait } = useMemo(() => countStatusLabels(rows), [rows]);
-  const openJudgment = useCallback(
-    () => openScreen({ screenId: BOX_TAB_SCREEN_ID, params: { [BOX_TAB_MODE_PARAM]: "items" } }),
-    [openScreen],
-  );
-  const openDone = useCallback(
-    () =>
-      openScreen({ screenId: BOX_TAB_SCREEN_ID, params: { [BOX_TAB_MODE_PARAM]: "childdone" } }),
-    [openScreen],
-  );
-  if (judgment === 0 && doneWait === 0) return null;
+  const { judgment, running, coordinator, idle } = useMemo(() => countStatusLabels(rows), [rows]);
+  const openJudgment = useCallback(() => openScreen({ screenId: BOX_TAB_SCREEN_ID }), [openScreen]);
+  if (judgment + running + coordinator + idle === 0) return null;
   return (
     <View style={styles.chips} testID="status-count-chips">
       {judgment > 0 ? (
@@ -1132,16 +1122,42 @@ function StatusCountChips({
           onPress={openJudgment}
         />
       ) : null}
-      {doneWait > 0 ? (
+      {running > 0 ? (
+        <StatusBadge text={`実装中 ${running}`} kind="running" testID="status-count-running" />
+      ) : null}
+      {coordinator > 0 ? (
         <StatusBadge
-          text={`完了待ち ${doneWait}`}
-          kind="done"
-          testID="status-count-donewait"
-          onPress={openDone}
+          text={`司令塔 ${coordinator}`}
+          kind="running"
+          testID="status-count-coordinator"
         />
+      ) : null}
+      {idle > 0 ? (
+        <StatusBadge text={`待機中 ${idle}`} kind="idle" testID="status-count-idle" />
       ) : null}
     </View>
   );
+}
+
+/**
+ * 行末の帯の文字と色。
+ *
+ * - 開けない行は状態より先に「要復元」を出す(押しても会話に着かないことが行末で分かる)。
+ * - 完了箱C(完了報告の窓口)は、読んでいない報告があるあいだ「未読あり」にする
+ *   (2026-10-26 ユーザー依頼)。橙は判断待ち専用なので、点と同じ新着の緑を使う。
+ *   既読になったらサーバーが印を外し、帯は「待機中」に戻る(`server/window-unread.ts`)。
+ */
+function threadStatusOf(
+  row: SidebarRowView<ChildThread>,
+  state: { failed: boolean; unread: boolean },
+): { text: string; kind: StatusKind } {
+  const stale = state.failed ? "(古い表示)" : "";
+  if (row.thread.access === "workspace-archived") return { text: "要復元", kind: "closed" };
+  if (state.unread) return { text: `未読あり${stale}`, kind: "done" };
+  return {
+    text: `${row.statusLabel}${stale}`,
+    kind: kindOfStatusLabel(row.statusLabel, row.thread.machineState),
+  };
 }
 
 function ThreadRow({
@@ -1167,14 +1183,7 @@ function ThreadRow({
 }) {
   const t = row.thread;
   const onPress = useCallback(() => onOpen(t.agentId, t.access), [onOpen, t.agentId, t.access]);
-  // 開けない行は状態より先に「要復元」を出す(押しても会話に着かないことが行末で分かる)。
-  const status: { text: string; kind: StatusKind } =
-    t.access === "workspace-archived"
-      ? { text: "要復元", kind: "closed" }
-      : {
-          text: failed ? `${row.statusLabel}(古い表示)` : row.statusLabel,
-          kind: kindOfStatusLabel(row.statusLabel, t.machineState),
-        };
+  const status = threadStatusOf(row, { failed, unread: t.unread === true });
   const testID = `child-thread-status-${t.agentId}`;
   // 状態の帯を押すとメニュー(ピン止め/アーカイブ/スレを開く)が開く。司令塔の行も例外にしない:
   // 旧実装では司令塔の行にもピン/アーカイブのボタンがあったので、外すと機能の退行になる
@@ -1185,6 +1194,8 @@ function ThreadRow({
   // (帯そのものに ref を渡すには `StatusBadge` の props を増やす必要がある)。
   const badgeRef = useRef<View | null>(null);
   const pressBadge = useCallback(() => onOpenMenu(row, badgeRef.current), [onOpenMenu, row]);
+  // 行末は状態の帯ひとつだけ。帯そのものがメニューの入口(2026-10-24 ユーザー指示)で、
+  // 行末に別のボタンを並べない(2026-10-26、⋯ を戻した後退の差し戻し)。
   const trailing = useMemo(
     () => (
       <View ref={badgeRef} style={styles.trailing}>

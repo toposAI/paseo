@@ -114,10 +114,14 @@ function supportsUsage(session: SessionState | undefined): boolean {
   return supportsUsageReports(session?.serverInfo?.features);
 }
 
-async function refreshReports(queryClient: QueryClient, serverId: string): Promise<void> {
+async function refreshReports(
+  queryClient: QueryClient,
+  serverId: string,
+  forceRefresh = true,
+): Promise<void> {
   await queryClient.fetchQuery({
     queryKey: usageReportsQueryKey(serverId),
-    queryFn: () => listReports(queryClient, serverId, true),
+    queryFn: () => listReports(queryClient, serverId, forceRefresh),
     staleTime: 0,
   });
 }
@@ -131,7 +135,10 @@ function toQueryState(query: {
 }
 
 /** Usage reports for one host, as shown on its settings page. */
-export function useHostUsage(serverId: string): { view: UsageView; refresh: () => void } {
+export function useHostUsage(serverId: string): {
+  view: UsageView;
+  refresh: () => void;
+} {
   const queryClient = useQueryClient();
   const isConnected = useHostRuntimeIsConnected(serverId);
   const isSupported = useSessionStore((state) => supportsUsage(state.sessions[serverId]));
@@ -170,12 +177,14 @@ export function useUsageHostReports(serverId: string | null): UsageReportEntry[]
     staleTimeMs: REPORTS_STALE_TIME_MS,
   });
   // The sidebar meters stay mounted, so they would otherwise only change once the usage page is
-  // opened. Force a fresh read every few minutes while the tab is visible.
+  // opened. Re-read every few minutes while the tab is visible. This read never forces: the daemon
+  // is the single fetcher and refreshes its five-minute cache itself, so the number of open screens
+  // does not multiply the calls to the source's API.
   useEffect(() => {
     if (!serverId) return;
     const timer = setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-      void refreshReports(queryClient, serverId).catch(() => undefined);
+      void refreshReports(queryClient, serverId, false).catch(() => undefined);
     }, SIDEBAR_REFRESH_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [queryClient, serverId]);

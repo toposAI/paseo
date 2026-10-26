@@ -10,9 +10,12 @@ import { Pressable, Text, View } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import {
   FEEDBACK_KIND_LABEL,
+  FEEDBACK_PROGRESS_LABEL,
   countNewReports,
   feedbackReportsListRpc,
+  isReportComplete,
 } from "../shared/feedback.js";
+import type { ToggleInfo } from "./HeaderIconBar.js";
 import type { FeedbackReport, FeedbackReportsListOutput } from "../shared/feedback.js";
 
 const REFRESH_MS = 30_000;
@@ -24,7 +27,15 @@ function describe(error: string | null, loaded: boolean, total: number, newCount
   return `バグ・要望 ${total}件(未対応 ${newCount}件)`;
 }
 
-export function BugReportsView({ theme }: Pick<PluginHostProps, "theme">) {
+export function BugReportsView({
+  theme,
+  showArchived = false,
+  onToggleInfo,
+}: Pick<PluginHostProps, "theme"> & {
+  /** 完了済みも出すか。切替ボタンは親(最上部のアイコン列)に置く。 */
+  showArchived?: boolean;
+  onToggleInfo?: (info: ToggleInfo | null) => void;
+}) {
   const list = useRpc(feedbackReportsListRpc);
   const [data, setData] = useState<FeedbackReportsListOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -85,14 +96,6 @@ export function BugReportsView({ theme }: Pick<PluginHostProps, "theme">) {
         paddingHorizontal: 6,
         paddingVertical: 1,
       },
-      btn: {
-        backgroundColor: c.surface2,
-        borderRadius: 6,
-        paddingVertical: 6,
-        paddingHorizontal: 10,
-        alignSelf: "flex-start" as const,
-      },
-      btnText: { color: c.foreground, fontSize: 12 },
       reply: {
         color: c.foreground,
         fontSize: 13,
@@ -104,12 +107,30 @@ export function BugReportsView({ theme }: Pick<PluginHostProps, "theme">) {
     [c],
   );
 
-  const reports = data?.reports ?? [];
-  const newCount = countNewReports(reports);
+  const allReports = data?.reports ?? [];
+  // 返信が未読の報告は、完了済みでも隠さない(管理者が未読に気づく導線を残す)
+  // 判定はバッジ(`countOpenReports`)と同じ `isReportComplete` を使う(バッジの数と一覧の行数を揃える)
+  const isHidden = (r: FeedbackReport) => isReportComplete(r) && !(r.reply && !r.replySeen);
+  const archivedCount = allReports.filter(isHidden).length;
+  // 完了(対応済み・見送り)は既定で隠す。トグルはセッション内のみ(永続化しない=「消えた」と誤解させない)
+  const reports = showArchived ? allReports : allReports.filter((r) => !isHidden(r));
+  const newCount = countNewReports(allReports);
+  useEffect(() => {
+    if (!onToggleInfo) return undefined;
+    onToggleInfo(
+      archivedCount > 0
+        ? {
+            label: showArchived ? "完了済み隠す" : "完了済み表示",
+            a11y: showArchived ? "完了済みを隠す" : `完了済みも表示(${archivedCount}件)`,
+          }
+        : null,
+    );
+    return () => onToggleInfo(null);
+  }, [onToggleInfo, archivedCount, showArchived]);
 
   return (
     <View style={s.root}>
-      <Text style={s.meta}>{describe(error, data !== null, reports.length, newCount)}</Text>
+      <Text style={s.meta}>{describe(error, data !== null, allReports.length, newCount)}</Text>
       {data?.sources
         .filter((x) => !x.ok)
         .map((x) => (
@@ -117,7 +138,11 @@ export function BugReportsView({ theme }: Pick<PluginHostProps, "theme">) {
             {x.label}: {x.detail}
           </Text>
         ))}
-      {data && reports.length === 0 && !error ? <Text style={s.meta}>報告はありません</Text> : null}
+      {data && reports.length === 0 && !error ? (
+        <Text style={s.meta}>
+          {allReports.length === 0 ? "報告はありません" : "対応中の報告はありません"}
+        </Text>
+      ) : null}
       {reports.map((r) => (
         <ReportCard key={r.id} report={r} styles={s} open={openId === r.id} onToggle={setOpenId} />
       ))}
@@ -158,6 +183,12 @@ function ReportCard({
           </Text>
         )}
       </Pressable>
+      {report.progress ? (
+        <Text style={report.progress.stage === "stale" ? styles.warn : styles.meta}>
+          進捗: {FEEDBACK_PROGRESS_LABEL[report.progress.stage]} — {report.progress.detail}
+          {report.progress.threadId ? `(子スレ ${report.progress.threadId.slice(0, 8)})` : ""}
+        </Text>
+      ) : null}
       {open ? <Text style={styles.text}>{report.text}</Text> : null}
       {open && report.reply ? <Text style={styles.reply}>返信: {report.reply}</Text> : null}
       {open && report.reply && !report.replySeen ? (

@@ -2018,6 +2018,9 @@ export const en = {
     output: "Output",
   },
   toolCallGroup: {
+    thinking: "Thinking",
+    thinkingActive: "Thinking…",
+    summarySeparator: " · ",
     editedFiles: {
       one: "edited {{count}} file",
       other: "edited {{count}} files",
@@ -2315,6 +2318,10 @@ export const en = {
         label: "Topos-style chat",
         description:
           "Long-press your messages for time and copy; collapse the composer while reading answers",
+      },
+      composerOverflowMenu: {
+        label: 'Composer "…" menu',
+        description: 'On phone widths, fold secondary buttons (voice mode, usage) into a "…" menu',
       },
       toolCallDetail: {
         label: "Tool call display",

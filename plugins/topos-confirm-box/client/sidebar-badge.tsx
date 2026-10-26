@@ -73,14 +73,15 @@ function usePressableStyle(base: object): (state: { pressed: boolean }) => objec
 const styles = StyleSheet.create({
   badge: {
     borderRadius: 999,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
     // 状態名が長くても行末で抑え、題名の幅を食い尽くさない
-    maxWidth: 96,
+    maxWidth: 110,
   },
   text: {
-    fontSize: 11,
-    fontWeight: "600",
+    // 11pxでは読めないという指摘が3回(台帳 ui-be238b34bf)。13pxに上げる。
+    fontSize: 13,
+    fontWeight: "700",
   },
   pressed: {
     opacity: 0.6,

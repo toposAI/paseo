@@ -388,6 +388,38 @@ interface AgentLike {
   title?: string | null;
 }
 
+type FetchedAgents = Awaited<ReturnType<DaemonClient["fetchAgents"]>>;
+
+/** The daemon caps fetch_agents pages at 200 entries; paginate so older agents stay resolvable. */
+const FETCH_ALL_AGENTS_PAGE_LIMIT = 200;
+const FETCH_ALL_AGENTS_MAX_PAGES = 500;
+
+/**
+ * Fetch every agent the daemon lists (archived and background included) across all pages.
+ * Commands that resolve an ID locally must use this: a single unpaged fetch only sees the
+ * newest page, so older agents look "not found".
+ */
+export async function fetchAllAgents(
+  client: Pick<DaemonClient, "fetchAgents">,
+): Promise<FetchedAgents["entries"][number]["agent"][]> {
+  const agents: FetchedAgents["entries"][number]["agent"][] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < FETCH_ALL_AGENTS_MAX_PAGES; page++) {
+    const payload = await client.fetchAgents({
+      filter: { includeArchived: true, includeBackground: true },
+      page: { limit: FETCH_ALL_AGENTS_PAGE_LIMIT, ...(cursor ? { cursor } : {}) },
+    });
+    agents.push(...payload.entries.map((entry) => entry.agent));
+    cursor = payload.pageInfo.nextCursor ?? undefined;
+    if (!cursor) {
+      return agents;
+    }
+  }
+  throw new Error(
+    `Agent listing exceeded ${FETCH_ALL_AGENTS_MAX_PAGES} pages; refusing to resolve from a partial list`,
+  );
+}
+
 /**
  * Resolve an agent ID from a partial ID or name.
  * Supports:

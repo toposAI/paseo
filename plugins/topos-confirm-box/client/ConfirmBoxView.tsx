@@ -5,30 +5,39 @@
  * 決定の記録は押した時だけ(自動では何も決めない)。
  * カードごとの会話は 💬 から開く専用ペイン(CardChatPane)に一本化した(旧・カード内の自由記述欄は廃止)。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
-import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ComponentProps, ReactNode } from "react";
+import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import {
   KIND_LABEL,
   PRIORITY_LABEL,
+  REJECT_CHOICE,
+  canRejectItem,
   confirmBoxCountRpc,
   confirmBoxDecideRpc,
   confirmBoxListRpc,
   confirmBoxPermitRpc,
+  countOpen,
   judgmentTabRows,
+  rejectComment,
 } from "../shared/contract.js";
 import { confirmBoxTabs, isWideLayout } from "../shared/footer-tabs.js";
 import { onBoxChanged, notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
 import { BugReportsView } from "./BugReportsView.js";
-import { ChildDoneView } from "./ChildDoneView.js";
-import { ReloadButton } from "./ReloadButton.js";
+import {
+  HeaderIconBar,
+  type HeaderTabId,
+  type HeaderToggle,
+  type ToggleInfo,
+} from "./HeaderIconBar.js";
 import { NotificationsView } from "./NotificationsView.js";
-import { BellIcon, BugIcon, CheckCircleIcon, InboxIcon, ListIcon } from "./Icons.js";
+import { BellIcon, BugIcon, InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import { CardChatPane } from "./CardChatPane.js";
+import { shouldSwitchPaneOnCardPress } from "../shared/card-pane.js";
 import { useCardPaneRoute } from "./useCardPaneRoute.js";
 import { useConfirmBoxPane } from "./useConfirmBoxPane.js";
 import { QuestionAnswer } from "./QuestionAnswer.js";
@@ -48,7 +57,13 @@ export function ConfirmBoxView({
   containerWidth,
   mode = "box",
   layout,
+  openScreen,
+  initialTab,
 }: Pick<PluginHostProps, "theme"> & {
+  /** 渡されたら最上部に5画面のアイコン列+更新ボタンを出す(全画面のとき。ポップオーバーは渡さない)。 */
+  openScreen?: (input: { screenId: string; params?: Record<string, string> }) => void;
+  /** 確認箱そのもの(`box`)を開いたときの最初のタブ。 */
+  initialTab?: "bugs" | "notify" | "priority";
   /** ホストの `layout`。省略時(ポップオーバー)は幅・高さだけで判定する。 */
   layout?: PluginHostProps["layout"];
   navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
@@ -56,9 +71,9 @@ export function ConfirmBoxView({
   containerWidth?: number;
   /**
    * 開き方。`box`=確認箱そのもの(下部バー:「バグ報告」等から開く。中は バグ報告・通知・優先順位 の3枚)、
-   * `items`/`childdone`=下部バーの「ユーザー判断」「子スレ完了」から開いた画面(そのタブだけ)。
+   * `items`=下部バーの「ユーザー判断」から開いた画面(そのタブだけ)。
    */
-  mode?: "box" | "items" | "childdone";
+  mode?: "box" | "items";
 }) {
   const list = useRpc(confirmBoxListRpc);
   const decide = useRpc(confirmBoxDecideRpc);
@@ -76,10 +91,17 @@ export function ConfirmBoxView({
   // 判断印(`judgment: true`)の無い旧形式(選択肢つき)は既定では出さない。押した時だけ並べる。
   const [legacyOff, setLegacyOff] = useState(true);
 
+  const lastOpen = useRef<number | null>(null);
   const reload = useCallback(async () => {
     try {
-      setData(await list({}));
+      const next = await list({});
+      setData(next);
       setError(null);
+      // 一覧とバッジは別の取得なので、30秒の周期次第で数がずれて見える(2026-10-26 20対18の報告)。
+      // 一覧の未決数が前回から変わったら、バッジ側も同時に取り直して揃える。
+      const open = countOpen(next.items);
+      if (lastOpen.current !== null && lastOpen.current !== open) notifyBoxChanged();
+      lastOpen.current = open;
       return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -107,12 +129,12 @@ export function ConfirmBoxView({
   // 窓幅で判定すると一覧とチャットペインが同じ狭い箱に横並びで押し込まれる。
   const width = layoutWidth(containerWidth, windowSize.width);
   const touch = width < 600;
-  // 「ユーザー判断」「子スレ完了」は下部バーへ出したので、確認箱の中は PC も iPhone も3枚
-  // (バグ報告・通知・優先順位)。下部バーから開いた画面はそのタブだけ。
+  // 「ユーザー判断」は下部バーへ出した。「子スレ完了」は 2026-10-26 に撤去したので、確認箱の中は
+  // PC も iPhone も3枚(バグ報告・通知・優先順位)。下部バーから開いた画面はそのタブだけ。
   // 幅の判定は一覧とチャットの並べ方にだけ使う(PC幅なら横並び、狭い幅は全画面で重ねる)。
   const wide = isBoxWide(containerWidth, windowSize, layout);
   const compact = !wide;
-  const { shownTab, tabs, selectTab } = useBoxTabs(mode);
+  const { shownTab, tabs, selectTab } = useBoxTabs(mode, initialTab);
   // カードチャットは画面を問わずこのペインに一本化した(旧・自由記述欄は廃止=2026-10-22ユーザー決定)。
   // ヘッダのポップオーバーも幅<720なので、ペインは全画面スライドとして重なる。
   // ペインの相手は2種: カードの投函元スレ(💬)と、優先順位の行の担当スレ(行タップ)。
@@ -149,12 +171,23 @@ export function ConfirmBoxView({
         padding: 10,
         gap: 6,
       },
+      // 右ペインに出ているカードの軽い強調(枠線と薄い背景)。
+      cardActive: {
+        backgroundColor: c.surface1,
+        borderColor: c.accent,
+        borderWidth: 2,
+        borderRadius: 8,
+        padding: 9,
+        gap: 6,
+      },
       subject: { color: c.foreground, fontSize: 15, fontWeight: "600" as const },
       muted: { color: c.foregroundMuted, fontSize: 12 },
       text: { color: c.foreground, fontSize: 13 },
       badge: { color: c.accent, fontSize: 11 },
       link: { color: c.accent, fontSize: 13, textDecorationLine: "underline" as const },
       row: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: touch ? 8 : 6 },
+      plainBlock: { gap: 6 },
+      plainSymbol: { color: c.accent, fontWeight: "700" as const },
       reporter: { color: c.foreground, fontSize: 13, fontWeight: "600" as const },
       // サブ操作(背景・💬・元スレ)は小さめ。最下行は必ず1行に収める。
       footBtn: { paddingVertical: 4, paddingHorizontal: 4 },
@@ -172,13 +205,6 @@ export function ConfirmBoxView({
         alignItems: "center" as const,
         justifyContent: "flex-start" as const,
         gap: 4,
-      },
-      // 一覧の右上(更新ボタン)。見出し行を持たないタブなので、ボタンだけを右に寄せた1行を置く。
-      headLine: {
-        flexDirection: "row" as const,
-        alignItems: "center" as const,
-        justifyContent: "flex-end" as const,
-        gap: 8,
       },
       filterLine: {
         flexDirection: "row" as const,
@@ -247,6 +273,23 @@ export function ConfirmBoxView({
       btnText: { color: c.foreground, fontSize: 13 },
       btnRecText: { color: c.accentForeground, fontSize: 13 },
       warn: { color: c.statusWarning, fontSize: 12 },
+      rejectBox: {
+        borderColor: c.statusWarning,
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: 8,
+        gap: 8,
+      },
+      rejectInput: {
+        color: c.foreground,
+        fontSize: 16, // iOS は 16px 未満の入力欄でフォーカス時に拡大する
+        minHeight: 72,
+        borderColor: c.border,
+        borderWidth: 1,
+        borderRadius: 6,
+        padding: 8,
+        textAlignVertical: "top" as const,
+      },
     };
   }, [c, touch]);
 
@@ -282,6 +325,36 @@ export function ConfirmBoxView({
       notifyBoxChanged();
     },
     [decide, permit, depth, reload],
+  );
+
+  /** 却下(コメント必須)。成功したら true を返し、カードは一覧から消える。 */
+  const reject = useCallback(
+    async (item: ConfirmBoxItem, comment: string): Promise<boolean> => {
+      const text = rejectComment(comment);
+      if (!text || !item.key) {
+        setNotice("却下にはコメントが必要です");
+        return false;
+      }
+      try {
+        const r = await decide({
+          key: item.key,
+          chosen: REJECT_CHOICE,
+          recommended: item.recommended,
+          depth,
+          reason: text,
+          source: "paseo-plugin",
+        });
+        setNotice(r.message);
+        if (!r.ok) return false;
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : String(e));
+        return false;
+      }
+      void reload();
+      notifyBoxChanged();
+      return true;
+    },
+    [decide, depth, reload],
   );
 
   /** 質問への回答。押された選択肢/自由記述を `answers` として送る。 */
@@ -336,6 +409,13 @@ export function ConfirmBoxView({
     count: visible.length,
   });
 
+  const { selectFromHeader, refreshFromHeader, reloadN } = useHeaderNav({
+    openScreen,
+    shownTab,
+    manualReload,
+  });
+  const { showAll, setToggleInfo, headerToggle } = useHeaderToggle(shownTab);
+
   // 幅で置き場所が変わる(右に並べる/全画面で重ねる)ので、SplitLayout へ要素ごと渡す。
   // ペインの相手は投函元スレ(2026-10-22 ユーザー決定)。まだ一覧に来ていないカードは null。
   const paneAgentId = paneItem ? threadAgentId(paneItem) : paneThreadId;
@@ -368,17 +448,14 @@ export function ConfirmBoxView({
       </>
     );
   } else if (shownTab === "bugs") {
-    content = <BugReportsView theme={theme} />;
-  } else if (shownTab === "childdone") {
-    content = <ChildDoneView theme={theme} navigation={navigation} />;
+    content = (
+      <BugReportsView theme={theme} showArchived={showAll.bugs} onToggleInfo={setToggleInfo} />
+    );
   } else if (shownTab === "notify") {
     content = <NotificationsView theme={theme} />;
   } else {
     content = (
       <>
-        <View style={s.headLine}>
-          <ReloadButton colors={c} onRefresh={manualReload} testID="judgment-reload" />
-        </View>
         <Pressable accessibilityRole="button" style={s.filterLine} onPress={toggleFilter}>
           <Text style={s.text}>{filterSummary}</Text>
           <Text style={s.muted}>{filterOpen ? "▲" : "▼"}</Text>
@@ -415,7 +492,9 @@ export function ConfirmBoxView({
             onBackground={openBackground}
             onChoose={choose}
             onAnswer={answer}
+            onReject={reject}
             paneOpen={paneCardId === item.id}
+            anyPaneOpen={pane !== null}
             onOpenPane={openCard}
           />
         ))}
@@ -426,13 +505,24 @@ export function ConfirmBoxView({
   return (
     <SplitLayout styles={s} compact={compact} pane={paneEl}>
       <View style={s.flex}>
-        <ScrollView style={s.flex} contentContainerStyle={s.body}>
+        <HeaderSlot
+          show={openScreen !== undefined}
+          active={shownTab}
+          counts={counts}
+          colors={c}
+          onSelect={selectFromHeader}
+          onRefresh={refreshFromHeader}
+          toggle={headerToggle}
+          touch={touch}
+        />
+        <ScrollView key={reloadN} style={s.flex} contentContainerStyle={s.body}>
+          <InlineToggle show={openScreen === undefined} toggle={headerToggle} styles={s} />
           {content}
         </ScrollView>
         {shownTab === "priority" ? <ChatDock colors={c} agentId={PRIORITY_CHAT_AGENT_ID} /> : null}
         {/* 下部バーから開いた画面(`mode` が box 以外)はタブ1枚だけなので、並びは出さない。 */}
         <TabStrip
-          mode={mode}
+          mode={stripMode(mode, openScreen !== undefined)}
           tabs={tabs}
           shownTab={shownTab}
           counts={counts}
@@ -501,15 +591,99 @@ function isBoxWide(
   );
 }
 
-type TabId = "items" | "bugs" | "childdone" | "notify" | "priority";
+/**
+ * 最上部のアイコン列の動き。押した画面へ移る(今の画面なら何もしない): ユーザー判断は下部バーと同じ
+ * `box-tab` 画面、それ以外は確認箱(`main`)の `?tab=`。
+ * 更新: 判断一覧は取り直しの成否を返す。他の画面は各画面が開いた時に取り直すので、作り直して取らせる。
+ */
+function useHeaderNav({
+  openScreen,
+  shownTab,
+  manualReload,
+}: {
+  openScreen: ((input: { screenId: string; params?: Record<string, string> }) => void) | undefined;
+  shownTab: TabId;
+  manualReload: () => Promise<boolean>;
+}) {
+  const selectFromHeader = useCallback(
+    (id: HeaderTabId) => {
+      if (!openScreen || id === shownTab) return;
+      if (id === "items") {
+        openScreen({ screenId: "box-tab" });
+      } else {
+        openScreen({ screenId: "main", params: { tab: id } });
+      }
+    },
+    [openScreen, shownTab],
+  );
+  const [reloadN, setReloadN] = useState(0);
+  const refreshFromHeader = useCallback(async () => {
+    if (shownTab === "items") return manualReload();
+    setReloadN((v) => v + 1);
+    notifyBoxChanged();
+    return true;
+  }, [shownTab, manualReload]);
+  return { selectFromHeader, refreshFromHeader, reloadN };
+}
+
+/**
+ * バグ報告(完了済み)の「も表示」切替。ボタンはアイコン列の更新ボタンの左に置くので、
+ * 出す/隠すの状態はここで持ち、画面は表示の有無とラベルだけを `setToggleInfo` で知らせる。
+ */
+function useHeaderToggle(shownTab: TabId) {
+  const [showAll, setShowAll] = useState({ bugs: false });
+  const [toggleInfo, setToggleInfo] = useState<ToggleInfo | null>(null);
+  const onPress = useCallback(() => {
+    if (shownTab === "bugs") {
+      setShowAll((v) => ({ ...v, bugs: !v.bugs }));
+    }
+  }, [shownTab]);
+  const headerToggle = useMemo<HeaderToggle | null>(
+    () => (toggleInfo ? { ...toggleInfo, onPress } : null),
+    [toggleInfo, onPress],
+  );
+  return { showAll, setToggleInfo, headerToggle };
+}
+
+/** アイコン列が無い画面(ポップオーバー)では、切替ボタンを一覧の先頭に出す。 */
+function InlineToggle({
+  show,
+  toggle,
+  styles,
+}: {
+  show: boolean;
+  toggle: HeaderToggle | null;
+  styles: { filterLine: object; text: object };
+}) {
+  if (!show || !toggle) return null;
+  return (
+    <Pressable accessibilityRole="button" style={styles.filterLine} onPress={toggle.onPress}>
+      <Text style={styles.text}>{toggle.a11y}</Text>
+    </Pressable>
+  );
+}
+
+/** アイコン列を出す画面では、下の並び(TabStrip)は要らない(`items` を渡すと何も描かない)。 */
+function stripMode(mode: "box" | "items", hasHeader: boolean) {
+  return hasHeader ? "items" : mode;
+}
+
+function HeaderSlot({ show, ...props }: { show: boolean } & ComponentProps<typeof HeaderIconBar>) {
+  return show ? <HeaderIconBar {...props} /> : null;
+}
+
+type TabId = "items" | "bugs" | "notify" | "priority";
 
 /**
  * 出すタブの並びと現在のタブ。
- * - `box`: 確認箱そのもの。下部バーへ移した2枚(ユーザー判断/子スレ完了)を外した3枚(PC も iPhone も同じ)
- * - `items`/`childdone`: 下部バーから開いた画面。そのタブだけを出す(並びは出さない)
+ * - `box`: 確認箱そのもの。下部バーへ移した1枚(ユーザー判断)を外した3枚(PC も iPhone も同じ)
+ * - `items`: 下部バーから開いた画面。そのタブだけを出す(並びは出さない)
  * 初期タブは、開いた画面ならそのタブ、確認箱ならバグ報告。
  */
-function useBoxTabs(mode: "box" | "items" | "childdone"): {
+function useBoxTabs(
+  mode: "box" | "items",
+  initialTab: "bugs" | "notify" | "priority" = "bugs",
+): {
   shownTab: TabId;
   tabs: readonly (typeof TABS)[number][];
   selectTab: (id: TabId) => void;
@@ -520,7 +694,7 @@ function useBoxTabs(mode: "box" | "items" | "childdone"): {
   // 選んだタブが今の並びに無くなったときは、選んだ値を捨てて既定へ戻す
   // (並びに無いタブの中身が出続けるのを防ぐ)。
   const valid = picked !== null && tabs.some((tb) => tb.id === picked);
-  const shownTab: TabId = (valid && picked) || forcedTab || "bugs";
+  const shownTab: TabId = (valid && picked) || forcedTab || initialTab;
   const selectTab = useCallback((id: TabId) => setPicked(id), []);
   return { shownTab, tabs, selectTab };
 }
@@ -535,7 +709,7 @@ function TabStrip({
   styles: s,
   colors: c,
 }: {
-  mode: "box" | "items" | "childdone";
+  mode: "box" | "items";
   tabs: readonly (typeof TABS)[number][];
   shownTab: TabId;
   counts: Partial<Record<TabId, number>>;
@@ -572,7 +746,6 @@ function TabStrip({
 const TABS: { id: TabId; label: string; Icon: typeof InboxIcon }[] = [
   { id: "items", label: "判断待ち", Icon: InboxIcon },
   { id: "bugs", label: "Toposバグ報告", Icon: BugIcon },
-  { id: "childdone", label: "子スレ完了", Icon: CheckCircleIcon },
   { id: "notify", label: "通知", Icon: BellIcon },
   { id: "priority", label: "優先順位", Icon: ListIcon },
 ];
@@ -590,7 +763,6 @@ function useBadgeCounts(): Partial<Record<TabId, number>> {
           setN({
             items: r.open,
             bugs: r.bugs,
-            childdone: r.childDone,
             notify: r.notifications,
           });
         }
@@ -702,26 +874,143 @@ function formatCreated(ts: number): string {
   return `${p2(d.getMonth() + 1)}/${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 
+/** 選択肢の記号。id が a〜f / 1 桁の英数ならそれ、そうでなければ 1 始まりの番号。 */
+function optionSymbol(option: ConfirmBoxItem["options"][number], index: number): string {
+  return /^[a-z0-9]$/i.test(option.id) ? option.id : String(index + 1);
+}
+
 function OptionButton({
   item,
   option,
+  symbol,
   styles,
   onChoose,
 }: {
   item: ConfirmBoxItem;
   option: ConfirmBoxItem["options"][number];
+  /** 指定時は記号だけのボタンにする(文章は別途、平文で全文を出す)。 */
+  symbol?: string;
   styles: Styles;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
 }) {
   const rec = option.id === item.recommended;
   const press = useCallback(() => void onChoose(item, option.id), [onChoose, item, option.id]);
   return (
-    <Pressable accessibilityRole="button" style={rec ? styles.btnRec : styles.btn} onPress={press}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={symbol ? `${symbol}: ${option.label}` : undefined}
+      style={rec ? styles.btnRec : styles.btn}
+      onPress={press}
+    >
       <Text style={rec ? styles.btnRecText : styles.btnText}>
-        {option.label}
-        {rec && !option.label.includes("推奨") ? "(推奨)" : ""}
+        {symbol ?? option.label}
+        {!symbol && rec && !option.label.includes("推奨") ? "(推奨)" : ""}
       </Text>
     </Pressable>
+  );
+}
+
+/** 選択肢の文章は平文で全文を折り返して出し、ボタンは記号(a b c / 1 2 3)だけを1列に並べる。
+ * 承認待ち(permit)の許可/拒否は文言が短いので従来どおり文言ボタン。 */
+function PlainOptions({
+  item,
+  styles,
+  onChoose,
+}: {
+  item: ConfirmBoxItem;
+  styles: Styles;
+  onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
+}) {
+  if (item.kind === "permit") {
+    return (
+      <View style={styles.row}>
+        {item.options.map((o) => (
+          <OptionButton key={o.id} item={item} option={o} styles={styles} onChoose={onChoose} />
+        ))}
+      </View>
+    );
+  }
+  return (
+    <View style={styles.plainBlock}>
+      {item.options.map((o, i) => {
+        const rec = o.id === item.recommended;
+        return (
+          <Text key={o.id} style={styles.text}>
+            <Text style={styles.plainSymbol}>{optionSymbol(o, i)}</Text>
+            {"  "}
+            {o.label}
+            {rec && !o.label.includes("推奨") ? "(推奨)" : ""}
+          </Text>
+        );
+      })}
+      <View style={styles.row}>
+        {item.options.map((o, i) => (
+          <OptionButton
+            key={o.id}
+            item={item}
+            option={o}
+            symbol={optionSymbol(o, i)}
+            styles={styles}
+            onChoose={onChoose}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * 却下パネル(押し間違い防止の確認ステップを兼ねる)。コメント必須: 空白だけでは送れない。
+ * 送ると Vault の判断ノートが superseded になり、コメントが回答原文へ逐語で残り、投函元へ伝わる。
+ */
+function RejectPanel({
+  item,
+  styles,
+  onReject,
+  onCancel,
+}: {
+  item: ConfirmBoxItem;
+  styles: Styles;
+  onReject: (item: ConfirmBoxItem, comment: string) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const ready = rejectComment(text) !== null && !busy;
+  const send = useCallback(async () => {
+    if (rejectComment(text) === null || busy) return;
+    setBusy(true);
+    await onReject(item, text);
+    // 失敗時は入力を残して再送できる。成功時はカードごと消えるが、再読込が遅れても「やめる」で閉じられるよう常に戻す
+    setBusy(false);
+  }, [text, busy, onReject, item]);
+  const sendPress = useCallback(() => void send(), [send]);
+  const inputStyle = useMemo(() => styles.rejectInput, [styles.rejectInput]);
+  return (
+    <View style={styles.rejectBox}>
+      <Text style={styles.text}>この判断を却下します。理由(コメント)を書いてください。</Text>
+      <TextInput
+        value={text}
+        onChangeText={setText}
+        placeholder="例: もう解決済み / 前提が違う"
+        multiline
+        autoFocus
+        style={inputStyle}
+      />
+      <View style={styles.row}>
+        <Pressable
+          accessibilityRole="button"
+          disabled={!ready}
+          style={ready ? styles.btnRec : styles.btn}
+          onPress={sendPress}
+        >
+          <Text style={ready ? styles.btnRecText : styles.btnText}>却下を送る</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" disabled={busy} style={styles.btn} onPress={onCancel}>
+          <Text style={styles.btnText}>やめる</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -734,7 +1023,9 @@ function ItemCard({
   onBackground,
   onChoose,
   onAnswer,
+  onReject,
   paneOpen,
+  anyPaneOpen,
   onOpenPane,
 }: {
   item: ConfirmBoxItem;
@@ -745,11 +1036,17 @@ function ItemCard({
   onBackground: () => void;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
   onAnswer: (item: ConfirmBoxItem, answers: Record<string, string>) => Promise<void>;
+  onReject: (item: ConfirmBoxItem, comment: string) => Promise<boolean>;
   /** このカードの会話ペインが開いているか。 */
   paneOpen: boolean;
+  /** 右ペインが(どの相手でも)開いているか。開いている間だけ、カード本体のタップで相手を切り替える。 */
+  anyPaneOpen: boolean;
   onOpenPane: (item: ConfirmBoxItem) => void;
 }) {
   const [bgOpen, setBgOpen] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const startReject = useCallback(() => setRejecting(true), []);
+  const cancelReject = useCallback(() => setRejecting(false), []);
   const toggle = useCallback(() => onToggle(item.id), [onToggle, item.id]);
   const toggleBg = useCallback(() => {
     setBgOpen((v) => {
@@ -758,6 +1055,8 @@ function ItemCard({
     });
   }, [onBackground]);
   const openPane = useCallback(() => onOpenPane(item), [onOpenPane, item]);
+  // カード本体の何もない所のタップ。内側のボタン・リンクは自分で処理する(入れ子の Pressable は内側が勝つ)。
+  const switchPane = shouldSwitchPaneOnCardPress(anyPaneOpen, paneOpen) ? openPane : undefined;
   const deny = useCallback(() => void onChoose(item, "__deny"), [item, onChoose]);
   const answer = useCallback(
     (answers: Record<string, string>) => void onAnswer(item, answers),
@@ -766,7 +1065,11 @@ function ItemCard({
   const created = useMemo(() => formatCreated(item.ts), [item.ts]);
   const questions = item.questions ?? NO_QUESTIONS;
   return (
-    <View style={styles.card}>
+    <Pressable
+      style={paneOpen ? styles.cardActive : styles.card}
+      onPress={switchPane}
+      disabled={!switchPane}
+    >
       {item.reporter ? <Text style={styles.reporter}>報告者: {item.reporter}</Text> : null}
       <Pressable accessibilityRole="button" onPress={toggle}>
         <Text style={styles.badge}>
@@ -789,12 +1092,11 @@ function ItemCard({
           onDeny={deny}
         />
       ) : (
-        <View style={styles.row}>
-          {item.options.map((o) => (
-            <OptionButton key={o.id} item={item} option={o} styles={styles} onChoose={onChoose} />
-          ))}
-        </View>
+        <PlainOptions item={item} styles={styles} onChoose={onChoose} />
       )}
+      {rejecting ? (
+        <RejectPanel item={item} styles={styles} onReject={onReject} onCancel={cancelReject} />
+      ) : null}
       {open && questions.length === 0 ? <Text style={styles.text}>{item.summary}</Text> : null}
       {bgOpen && item.background ? <Text style={styles.text}>{item.background}</Text> : null}
       <View style={styles.footRow}>
@@ -813,10 +1115,20 @@ function ItemCard({
         >
           <Text style={styles.footText}>{paneOpen ? "▼会話" : "💬 会話"}</Text>
         </Pressable>
+        {canRejectItem(item) && !rejecting ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="この判断を却下する(コメント必須)"
+            style={styles.footBtn}
+            onPress={startReject}
+          >
+            <Text style={styles.footText}>✕ 却下</Text>
+          </Pressable>
+        ) : null}
         <Text style={styles.created} numberOfLines={1}>
           {created}
         </Text>
       </View>
-    </View>
+    </Pressable>
   );
 }

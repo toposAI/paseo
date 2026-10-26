@@ -1,0 +1,210 @@
+/**
+ * @vitest-environment jsdom
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  collectAllPanes,
+  createWorkspaceLayoutStore,
+  createWorkspaceLayoutWithExplorerSidebar,
+  useWorkspaceLayoutStore,
+  type WorkspaceLayout,
+} from "@/stores/workspace-layout-store";
+import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
+import { useSessionStore } from "@/stores/session-store";
+import { openAgentInRightColumn, planOpenAgentInRightColumn } from "./open-agent-right";
+
+vi.mock("@/stores/navigation-active-workspace-store", () => ({
+  navigateToWorkspace: vi.fn(),
+}));
+
+const navigateToWorkspaceMock = vi.mocked(navigateToWorkspace);
+const SERVER_ID = "host-1";
+const WORKSPACE_ID = "ws-main";
+const WORKSPACE_KEY = `${SERVER_ID}:${WORKSPACE_ID}`;
+// 初期レイアウトのエクスプローラペインは非表示なので collectAllPanes には出ないが、
+// 記録側のIDとの突き合わせを確かめるために固定値を使う。
+const EXPLORER_SIDEBAR_PANE_ID = "explorer";
+
+function createLayoutStore() {
+  let index = 0;
+  return createWorkspaceLayoutStore({
+    createNodeId: (prefix: "pane" | "group") => `${prefix}_t${++index}`,
+    createFocusRestorationToken: () => `token-${++index}`,
+  });
+}
+
+const layoutStore = createLayoutStore();
+
+/** サイドペイン(右カラム)に既存のスレを1つ開いておく。 */
+function layoutWithSidePane(): string {
+  layoutStore.setState({ layoutByWorkspace: {}, explorerSidebarPaneIdByWorkspace: {} });
+  const paneId = layoutStore.getState().ensureSidePane(WORKSPACE_KEY);
+  if (!paneId) throw new Error("サイドペインを作れなかった");
+  layoutStore.getState().openTab({
+    workspaceKey: WORKSPACE_KEY,
+    target: { kind: "agent", agentId: "existing-agent" },
+    intent: "reveal",
+    placement: { mode: "pane", paneId },
+  });
+  return paneId;
+}
+
+function baseDeps(overrides: Partial<Parameters<typeof planOpenAgentInRightColumn>[1]> = {}) {
+  return {
+    readAgentWorkspaceId: () => WORKSPACE_ID,
+    resolveWorkspaceMapKey: ({ workspaceId }: { workspaceId: string }) => workspaceId,
+    readLayout: (_key: string): WorkspaceLayout | null => null,
+    readExplorerSidebarPaneId: () => null,
+    readSidePaneId: () => null,
+    ...overrides,
+  };
+}
+
+describe("planOpenAgentInRightColumn", () => {
+  it("エージェントのワークスペースがわからなければ開かない", () => {
+    expect(
+      planOpenAgentInRightColumn(
+        { serverId: SERVER_ID, agentId: "a" },
+        baseDeps({ readAgentWorkspaceId: () => null }),
+      ),
+    ).toBeNull();
+    expect(
+      planOpenAgentInRightColumn(
+        { serverId: SERVER_ID, agentId: "a" },
+        baseDeps({ resolveWorkspaceMapKey: () => null }),
+      ),
+    ).toBeNull();
+  });
+
+  it("保存済みレイアウトが無ければ、呼び出し側が右カラムを作る(paneId: null)", () => {
+    expect(planOpenAgentInRightColumn({ serverId: SERVER_ID, agentId: "a" }, baseDeps())).toEqual({
+      workspaceId: WORKSPACE_ID,
+      workspaceKey: WORKSPACE_KEY,
+      paneId: null,
+    });
+  });
+
+  it("スレが左で開いていても右カラムのサイドペインに開く", () => {
+    layoutStore.setState({ layoutByWorkspace: {}, explorerSidebarPaneIdByWorkspace: {} });
+    const mainPaneId = layoutStore.getState().openTab({
+      workspaceKey: WORKSPACE_KEY,
+      target: { kind: "agent", agentId: "agent-1" },
+      intent: "reveal",
+    });
+    const sidePaneId = layoutStore.getState().ensureSidePane(WORKSPACE_KEY);
+    expect(mainPaneId).not.toBeNull();
+    expect(sidePaneId).not.toBeNull();
+
+    const plan = planOpenAgentInRightColumn(
+      { serverId: SERVER_ID, agentId: "agent-1" },
+      baseDeps({
+        readLayout: (key) => layoutStore.getState().layoutByWorkspace[key] ?? null,
+        readSidePaneId: (key) => layoutStore.getState().sidePaneIdByWorkspace[key],
+      }),
+    );
+    expect(plan?.paneId).toBe(sidePaneId);
+  });
+
+  it("そのスレがすでにサイドペインで開いていれば、そのペインをそのまま使う", () => {
+    layoutStore.setState({ layoutByWorkspace: {}, explorerSidebarPaneIdByWorkspace: {} });
+    const sidePaneId = layoutStore.getState().ensureSidePane(WORKSPACE_KEY) as string;
+    layoutStore.getState().openTab({
+      workspaceKey: WORKSPACE_KEY,
+      target: { kind: "agent", agentId: "agent-1" },
+      intent: "reveal",
+      placement: { mode: "pane", paneId: sidePaneId },
+    });
+    const plan = planOpenAgentInRightColumn(
+      { serverId: SERVER_ID, agentId: "agent-1" },
+      baseDeps({
+        readLayout: (key) => layoutStore.getState().layoutByWorkspace[key] ?? null,
+        readSidePaneId: (key) => layoutStore.getState().sidePaneIdByWorkspace[key],
+      }),
+    );
+    expect(plan?.paneId).toBe(sidePaneId);
+  });
+
+  it("サイドペインの記録が古ければ、一番右の(エクスプローラ以外の)ペインに開く", () => {
+    layoutStore.setState({ layoutByWorkspace: {}, explorerSidebarPaneIdByWorkspace: {} });
+    const mainPaneId = layoutStore.getState().openTab({
+      workspaceKey: WORKSPACE_KEY,
+      target: { kind: "agent", agentId: "agent-1" },
+      intent: "reveal",
+    }) as string;
+    const rightmostPaneId = layoutStore.getState().ensureSidePane(WORKSPACE_KEY) as string;
+    const plan = planOpenAgentInRightColumn(
+      { serverId: SERVER_ID, agentId: "a" },
+      baseDeps({
+        readLayout: (key) => layoutStore.getState().layoutByWorkspace[key] ?? null,
+        readExplorerSidebarPaneId: () => EXPLORER_SIDEBAR_PANE_ID,
+        readSidePaneId: () => "stale-pane",
+      }),
+    );
+    expect(plan?.paneId).not.toBe(mainPaneId);
+    expect(rightmostPaneId).toBeTruthy();
+    expect(plan?.paneId).toBe(rightmostPaneId);
+    expect(plan?.paneId).not.toBe(EXPLORER_SIDEBAR_PANE_ID);
+  });
+});
+
+describe("openAgentInRightColumn", () => {
+  const initialSessionState = useSessionStore.getState();
+  let initialLayoutState: ReturnType<typeof layoutStore.getState>;
+
+  // 実装はアプリのストア(useWorkspaceLayoutStore)を持つ。テストはそのストアに状態を置き、
+  // 変更をこのテスト用ストアへも写して確かめる(差し替えではなく観測)。
+  beforeEach(() => {
+    navigateToWorkspaceMock.mockReset();
+    initialLayoutState ??= useWorkspaceLayoutStore.getState();
+    vi.spyOn(useWorkspaceLayoutStore, "getState").mockImplementation(() => layoutStore.getState());
+    vi.spyOn(useWorkspaceLayoutStore, "setState").mockImplementation(layoutStore.setState as never);
+    layoutStore.setState({
+      layoutByWorkspace: {},
+      explorerSidebarPaneIdByWorkspace: {},
+      sidePaneIdByWorkspace: {},
+    });
+    useSessionStore.setState({
+      sessions: {
+        [SERVER_ID]: {
+          ...initialSessionState.sessions[SERVER_ID],
+          agents: new Map([["agent-1", { id: "agent-1", workspaceId: WORKSPACE_ID }]]),
+          agentDetails: new Map(),
+          workspaces: new Map([[WORKSPACE_ID, { id: WORKSPACE_ID, projectId: "p" }]]),
+        },
+      } as never,
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useSessionStore.setState({ sessions: initialSessionState.sessions });
+    useWorkspaceLayoutStore.setState(initialLayoutState);
+  });
+
+  it("PC幅の「スレを開く」はサイドペインにエージェントを置く", () => {
+    const paneId = layoutWithSidePane();
+    expect(openAgentInRightColumn({ serverId: SERVER_ID, agentId: "agent-1" })).toBe(true);
+    expect(navigateToWorkspaceMock).toHaveBeenCalledWith({
+      serverId: SERVER_ID,
+      workspaceId: WORKSPACE_ID,
+      target: { kind: "agent", agentId: "agent-1" },
+      placement: { mode: "pane", paneId },
+    });
+  });
+
+  it("エージェントが見つからなければ false を返し、呼び出し側が通常遷移へ落とせる", () => {
+    layoutWithSidePane();
+    expect(openAgentInRightColumn({ serverId: SERVER_ID, agentId: "missing" })).toBe(false);
+    expect(navigateToWorkspaceMock).not.toHaveBeenCalled();
+  });
+
+  it("サイドペインの無いワークスペースでは右カラムを作ってから開く", () => {
+    expect(openAgentInRightColumn({ serverId: SERVER_ID, agentId: "agent-1" })).toBe(true);
+    const sidePaneId = layoutStore.getState().sidePaneIdByWorkspace[WORKSPACE_KEY];
+    expect(sidePaneId).toBeTruthy();
+    expect(navigateToWorkspaceMock).toHaveBeenCalledWith(
+      expect.objectContaining({ placement: { mode: "pane", paneId: sidePaneId } }),
+    );
+  });
+
+});

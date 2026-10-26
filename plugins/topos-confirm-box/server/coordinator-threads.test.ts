@@ -23,6 +23,7 @@ function thread(overrides: Partial<ChildThread>): ChildThread {
     machineState: null,
     request: "",
     summaryItemId: null,
+    nocard: false,
     summary: null,
     summaryState: null,
     summaryAcked: false,
@@ -37,7 +38,7 @@ function thread(overrides: Partial<ChildThread>): ChildThread {
   };
 }
 
-test("閉じた/アーカイブ済みの司令塔の行は落とし、生きている・一覧に居ない行は残す", () => {
+test("アーカイブ済みの司令塔の行は落とし、closed・生きている・一覧に居ない行は残す", () => {
   const rows = dropDeadCoordinators(
     [
       thread({ agentId: "live", coordinator: true }),
@@ -54,7 +55,7 @@ test("閉じた/アーカイブ済みの司令塔の行は落とし、生きて�
   );
   assert.deepEqual(
     rows.map((r) => r.agentId),
-    ["live", "away", "kid"],
+    ["live", "closed", "away", "kid"],
   );
 });
 
@@ -101,7 +102,7 @@ test("司令塔の行は一覧に居るものだけ・登録簿に既に居る�
   );
 });
 
-test("閉じた/アーカイブ済みの司令塔は行にしない(縮退時のアーカイブ込み一覧でも出さない)", () => {
+test("アーカイブ済みの司令塔は行にしない・closed(再起動で閉じただけ)は行に残す", () => {
   // round2 指摘7: 全ページの一覧が取れないと finalAgents がアーカイブ込みになるため、
   // 古い coordinator_id を指す終わったスレが司令塔として先頭に出ていた。
   const rows = coordinatorRows(
@@ -114,8 +115,11 @@ test("閉じた/アーカイブ済みの司令塔は行にしない(縮退時の
     [],
   );
   assert.deepEqual(
-    rows.map((r) => r.agentId),
-    ["live"],
+    rows.map((r) => [r.agentId, r.machineState]),
+    [
+      ["dead", "closed"],
+      ["live", "idle"],
+    ],
   );
 });
 

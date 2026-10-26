@@ -168,6 +168,7 @@ export function mergeUnregisteredThreads(
       stateDot,
       request: "",
       summaryItemId: null,
+      nocard: false,
       summary: null,
       summaryState: null,
       summaryAcked: false,

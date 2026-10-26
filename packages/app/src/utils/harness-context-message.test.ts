@@ -63,4 +63,56 @@ describe("isHarnessContextOnlyMessage", () => {
     expect(isHarnessContextOnlyMessage("このスレ、今日どうする?")).toBe(false);
     expect(isHarnessContextOnlyMessage("")).toBe(false);
   });
+
+  it("folds a turn made of SessionStart hook output after compaction", () => {
+    const turn = `SessionStart:compact hook success: [cloud_setup.sh] apt-get not found
+
+SessionStart:compact hook success: [HookHealthcheck] OK: all registered hook scripts present.
+
+SessionStart hook additional context: このセッションはメインworking treeで直接起動されています。
+[compact_context] ★未処理の依頼★ 次のユーザー発言は圧縮の直前に届きました。`;
+    expect(isHarnessContextOnlyMessage(turn)).toBe(true);
+    expect(isHarnessContextOnlyMessage(`> ${turn.split("\n").join("\n> ")}`)).toBe(true);
+    expect(isHarnessContextOnlyMessage("UserPromptSubmit hook additional context: x")).toBe(true);
+  });
+
+  it("keeps a message that only mentions hook output", () => {
+    expect(isHarnessContextOnlyMessage("SessionStart hookの出力が見える件")).toBe(false);
+    expect(isHarnessContextOnlyMessage("これ見て\nSessionStart:compact hook success: foo")).toBe(
+      false,
+    );
+  });
+
+  it("keeps the user's own paragraph that follows pasted hook output", () => {
+    expect(
+      isHarnessContextOnlyMessage(
+        "SessionStart:compact hook success: [HookHealthcheck] OK\n\nこの表示を消したい",
+      ),
+    ).toBe(false);
+  });
+
+  it("folds hook output whose compaction block holds blank lines and quoted requests", () => {
+    expect(
+      isHarnessContextOnlyMessage(
+        "SessionStart hook additional context: x\n[compact_context] ★未処理の依頼★\n■ 最初の依頼:\n\n# 依頼: 直して\n\nお願いします",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a turn that carries only a compaction marker after the user's words", () => {
+    expect(isHarnessContextOnlyMessage("これ見て\n\n[compact_context] こういう表示が出る")).toBe(
+      false,
+    );
+  });
+
+  it("folds the summary turn written when a session is compacted or resumed", () => {
+    expect(
+      isHarnessContextOnlyMessage(
+        "This session is being continued from a previous conversation that ran out of context.\n\nSummary:\n1. Primary Request",
+      ),
+    ).toBe(true);
+    expect(
+      isHarnessContextOnlyMessage("前の会話の続きです。\n\nThis session is being continued"),
+    ).toBe(false);
+  });
 });

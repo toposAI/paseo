@@ -13,6 +13,7 @@ import {
   writeChildThreadOrder,
   writeChildThreadPin,
 } from "./child-threads.js";
+import { isCardDone } from "../shared/child-threads.js";
 import type { ChildThread } from "../shared/child-threads.js";
 import { buildUpperRows, coordinatorIdSet, visibleGroupKeyOf } from "../shared/sidebar-rows.js";
 import { COORDINATOR_GROUP } from "../shared/sidebar-section-mode.js";
@@ -60,6 +61,53 @@ test("完了まとめは箱の項目から引く(summary_item_id 一致)", () =>
   ]);
   assert.equal(t.summary, "## 結論\nX");
   assert.equal(t.summaryState, "read");
+});
+
+test("カードを作らない運用の目印(nocard:)は箱を引かず、完了の実カードとして扱わない", () => {
+  // 目印は箱に実在しない id。summaryItemId に載せると、押しても効かない確認として出てしまう。
+  const [t] = normalizeChildThreads(
+    { threads: [row({ agent_id: "nc", status: "完了", summary_item_id: "nocard:abc" })] },
+    [{ id: "nocard:abc", background: "箱に在るはずのない本文", state: "read" }],
+  );
+  assert.equal(t.summaryItemId, null);
+  assert.equal(t.summary, null);
+  assert.equal(t.summaryState, null);
+  assert.equal(t.nocard, true);
+  assert.equal(t.summaryAcked, false);
+  assert.equal(isCardDone(t), false);
+});
+
+test("実カードの行は nocard=false のまま(表示・件数は従来どおり)", () => {
+  const [t] = normalizeChildThreads({ threads: [row({ status: "完了", summary_item_id: "i1" })] }, [
+    { id: "i1", background: "X", state: "read" },
+  ]);
+  assert.equal(t.nocard, false);
+  assert.equal(t.summaryItemId, "i1");
+  assert.equal(isCardDone(t), true);
+});
+
+test("目印の id が ack 済みに入っていても確認済みにしない・nocard 未指定はカードあり扱い", () => {
+  // 目印は箱の項目ではないので、ack イベントに同じ文字列があっても「確認済み」にしない。
+  const [t] = normalizeChildThreads(
+    { threads: [row({ status: "完了", summary_item_id: "nocard:abc" })] },
+    [],
+    new Set(["nocard:abc"]),
+  );
+  assert.equal(t.summaryAcked, false);
+  // 古い形(契約に nocard が無い)は「カードがある」として従来どおり扱う(後方互換)。
+  assert.equal(isCardDone({ status: "完了" }), true);
+  assert.equal(isCardDone({ status: "完了", nocard: true }), false);
+  assert.equal(isCardDone({ status: "実装中" }), false);
+});
+
+test("常駐の窓口の status『待機』は行の『待機中』になり、完了として数えない", () => {
+  // 登録簿(Python)は常駐の窓口を『待機』で書く。行の語彙へ寄せないと enum で落ちるか
+  // 既定の『実装中』に化けて、動いていない窓口が動いて見える(2026-10-26)。
+  const [t] = normalizeChildThreads({
+    threads: [row({ agent_id: "waitwin", status: "待機", title: "判断窓口A'" })],
+  });
+  assert.equal(t.status, "待機中");
+  assert.equal(isCardDone(t), false);
 });
 
 test("ファイルが無ければ空配列、あれば読む", () => {
@@ -196,14 +244,14 @@ test("確認済みは個別 ack のときだけ(すべて既読=ackall では真
   assert.equal(byId.get("a2")?.summaryState, "read");
 });
 
-test("確認待ちの文言は箱の決定印(承認済み扱い)では減らない — 個別 ack だけが確認", () => {
+test("完了まとめの個別 ack は箱の決定印(承認済み扱い)では立たない — 記録用に区別する", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-"));
   fs.writeFileSync(
     path.join(dir, "child_threads.json"),
     JSON.stringify({ threads: [row({ agent_id: "a1", status: "完了", summary_item_id: "bx" })] }),
   );
   // 別機能(自由記述の決定行)で key が決定済みになった項目は箱側で approved になるが、
-  // 「子スレ完了」タブの確認待ちはそれを確認と見なさない(ユーザーが明示的に畳んだ時だけ)。
+  // 完了まとめの ack は個別の ack だけで立てる(2026-10-26: 表示の条件ではなく記録用)。
   const [t] = readChildThreads(dir, [{ id: "bx", background: "s", state: "approved" as const }]);
   assert.equal(t.summaryAcked, false);
 });
@@ -253,6 +301,7 @@ test("司令塔の行が手動順の末尾にあっても、司令塔グルー�
     machineState: null,
     request: "",
     summaryItemId: null,
+    nocard: false,
     summary: null,
     summaryState: null,
     summaryAcked: false,

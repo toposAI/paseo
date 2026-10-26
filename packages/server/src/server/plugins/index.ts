@@ -104,7 +104,7 @@ export class PluginService {
     this.logger = logger.child({ module: "plugin-service" });
     this.usageSources = new UsageSourceRegistry(
       Date.now,
-      300_000,
+      240_000,
       this.logger,
       dependencies.usageAgents,
     );

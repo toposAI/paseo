@@ -119,4 +119,13 @@ describe("reading anchor", () => {
       ),
     ).toBe(0);
   });
+
+  it("reports the last row that fits entirely on screen", () => {
+    const anchor = createReadingAnchor();
+    anchor.reconcile(0, rows);
+    expect(anchor.getLastFullyVisibleRowId(0, 1000)).toBe("reading");
+    expect(anchor.getLastFullyVisibleRowId(500, 1000)).toBe("below");
+    expect(anchor.getLastFullyVisibleRowId(300, 700)).toBe("reading");
+    expect(anchor.getLastFullyVisibleRowId(0, 300)).toBeNull();
+  });
 });
