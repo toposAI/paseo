@@ -474,7 +474,19 @@ export async function generateStructuredAgentResponseWithFallback<T>(
         error: errorMessage(error),
       });
       logger?.warn(
-        { err: error, provider: candidate.provider, model: candidate.model, schemaName },
+        {
+          err: error,
+          provider: candidate.provider,
+          model: candidate.model,
+          schemaName,
+          // 何が返ってきたか分からないと原因を追えない(題名が付かない時に効く)。
+          ...(error instanceof StructuredAgentResponseError
+            ? {
+                lastResponse: error.lastResponse.slice(0, 500),
+                validationErrors: error.validationErrors,
+              }
+            : {}),
+        },
         "Structured generation: provider failed, trying next",
       );
     }

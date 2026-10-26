@@ -5,7 +5,9 @@ import type { AgentTimelineItem } from "./agent-sdk-types.js";
 import {
   TITLE_REGENERATE_LABEL,
   TITLE_SOURCE_AUTO,
+  TITLE_SOURCE_INITIAL,
   TITLE_SOURCE_LABEL,
+  TITLE_SOURCE_USER,
   buildTitleSummaryPrompt,
   createAgentTitleSummarizer,
   isAutoOwnedTitle,
@@ -58,7 +60,8 @@ function setup(options: {
     });
     await summarizer.idle();
   };
-  return { record, updates, generateCalls, finishTurn };
+  const retitle = (agentId: string) => summarizer.retitle(agentId);
+  return { record, updates, generateCalls, finishTurn, retitle };
 }
 
 describe("title helpers", () => {
@@ -93,6 +96,27 @@ describe("title helpers", () => {
     ).toBe(true);
   });
 
+  // 回帰: 修正前は `--title` で作られたスレ(例: f80-complete-integration)が
+  // 「人が付けた題名」とみなされ、LLMの題名が一度も生成されなかった(サイドバーに識別名が出続けた)。
+  test("creation-time titles are replaceable, titles renamed later are not", () => {
+    for (const title of ["f80-complete-integration", "coordinator_backstage", "窓口B"]) {
+      expect(
+        isAutoOwnedTitle({
+          title,
+          labels: { [TITLE_SOURCE_LABEL]: TITLE_SOURCE_INITIAL },
+          firstUserMessage: FIRST_PROMPT,
+        }),
+      ).toBe(true);
+    }
+    expect(
+      isAutoOwnedTitle({
+        title: "窓口B",
+        labels: { [TITLE_SOURCE_LABEL]: TITLE_SOURCE_USER },
+        firstUserMessage: FIRST_PROMPT,
+      }),
+    ).toBe(false);
+  });
+
   test("prompt carries the current title and asks for stability", () => {
     const prompt = buildTitleSummaryPrompt({
       currentTitle: "Topos司令塔",
@@ -114,10 +138,28 @@ describe("createAgentTitleSummarizer", () => {
   });
 
   test("never touches a user-chosen title", async () => {
-    const s = setup({ title: "Topos司令塔" });
+    const s = setup({ title: "Topos司令塔", labels: { [TITLE_SOURCE_LABEL]: TITLE_SOURCE_USER } });
     await s.finishTurn();
     expect(s.generateCalls).toHaveLength(0);
     expect(s.record.title).toBe("Topos司令塔");
+  });
+
+  // 回帰: サイドバーに英語の識別名(f80-…, coordinator_…)が出続けた本体の修正。
+  test("replaces a creation-time title on the first finished turn", async () => {
+    const s = setup({
+      title: "f80-complete-integration",
+      labels: { [TITLE_SOURCE_LABEL]: TITLE_SOURCE_INITIAL },
+    });
+    await s.finishTurn();
+    expect(s.record.title).toBe("F-80 判定失敗の修正");
+    expect(s.record.labels[TITLE_SOURCE_LABEL]).toBe(TITLE_SOURCE_AUTO);
+  });
+
+  test("retitle forces a one-shot replacement even of a user-chosen title", async () => {
+    const s = setup({ title: "coordinator_backstage", labels: {} });
+    await s.retitle("a1");
+    expect(s.record.title).toBe("F-80 判定失敗の修正");
+    expect(s.record.labels[TITLE_SOURCE_LABEL]).toBe(TITLE_SOURCE_AUTO);
   });
 
   test("keeps the title when generation fails", async () => {

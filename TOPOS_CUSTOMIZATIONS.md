@@ -116,3 +116,21 @@ variant \`tool_definition\`, expected \`tool_reference\``で失敗していた�
     push は公式アプリのExpoトークンが登録されている場合だけ届く(トークン0件なら無通知)。
   - `TOPOS_CONFIRM_BOX=0` で無効化。vitest実行中は `TOPOS_CONFIRM_BOX_DIR` 未指定なら無効(本番heartbeatを汚さない)。
   - テスト: `confirm-box/confirm-box.test.ts`(store増分読込・Python契約形式・ack畳込み・push方針・HTTP)。
+- **スレ名のLLM生成**(2026-10-27)。サイドバーに出すスレ名は LLM が生成したものにする、という
+  ユーザー決定(2026-10-26)への対応。上流の自動要約(`agent-title-summarizer.ts`)は完成しているのに
+  ほぼ動いていなかった(作成時に `--title` で付けた題名を「人が付けた題名」とみなし、自動要約が手を出さない)。
+  修正の要点:
+  - 題名の出どころをラベル `paseo.title-source` で持つ(値は `packages/protocol/src/agent-title-limits.ts` が正本)。
+    `initial`=作成時の題名(置き換え可)、`auto`=自動要約が書いた題名(置き換え可)、`user`=人が付けた題名
+    (触らない)。ラベル無しの旧スレは、題名が最初の発言の写し(`initial`)のときだけ置き換える。
+  - 作成時は `agent-manager.ts` が自動で `initial` を付ける。作成後の改名(`lifecycle-command.ts`)は `user`。
+    常駐の役スレは名前そのものが識別子なので、起動スクリプト側が
+    `paseo run --label paseo.title-source=user` で固定する。該当は ToposAI-Mini-Project の
+    `spawn_backstage.sh`(裏方)・`spawn_window_thread.sh`(窓口B/判断窓口A' /壁打ちN)・
+    `spawn_judgment_windows.sh`(判断窓口A)。`spawn_completion_reporter.sh` / `spawn_backoffice2.sh` は
+    裏方スクリプトを呼ぶので対象外(将来 `--label` を足すならそちら)。
+  - 要約の指示に「英字の識別名(`f80-…`, `coordinator_…`)が現在の題名なら必ず日本語に置き換える」を追加。
+  - 既存スレの付け直し: `paseo.title-retitle=1` を付けたスレだけが、デーモン起動の60秒後に
+    `agent-title-backfill.ts` が1本ずつ(読み込み→付け直し→閉じる)処理する。合図は成否によらず `done` に
+    するので1回だけ。印付けは `scripts/mark-title-retitle.mjs`(CLI 経由。既定は一覧表示、`--execute` で実行)。
+  - 生成失敗の調査用に `agent-response-loop.ts` の失敗ログへ返答本文(`lastResponse`)と検証エラーを追加。
