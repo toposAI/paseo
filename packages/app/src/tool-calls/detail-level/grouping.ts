@@ -85,9 +85,9 @@ export function isGroupableActivityItem(item: StreamItem): item is ActivityItem 
 }
 
 /**
- * A row of nothing but reasoning is still an ordinary Thinking row: folding it would hide
- * its text behind a second press and would leave `autoExpandReasoning` with nothing to
- * expand. The tail and the head are merged separately, so the last thought of a turn and
+ * A row of nothing but reasoning is still an ordinary Thinking row: folding it would cost
+ * the reader a second press to reach the same text. The tail and the head are merged
+ * separately, so the last thought of a turn and
  * the first thought of the next refresh arrive here as two thoughts with no tool call
  * between them; folding those would make the row flip between a Thinking row and a badge.
  * A run therefore becomes a group only once a tool call joins it, and it keeps the first

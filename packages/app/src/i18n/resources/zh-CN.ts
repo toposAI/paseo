@@ -361,6 +361,11 @@ export const zhCN: TranslationResources = {
       openFile: "打开文件",
       copied: "已复制",
     },
+    relayTurn: {
+      fromSender: "来自 {{sender}} 的消息",
+      fromSenderPreview: "长消息(未记录发送方)",
+      hide: "隐藏完整消息，恢复一行",
+    },
     harnessContext: {
       show: "显示 harness 上下文",
       hide: "隐藏 harness 上下文",
@@ -2160,9 +2165,10 @@ export const zhCN: TranslationResources = {
         description: "内置终端缓冲区保留的行数",
         accessibilityLabel: "终端回滚行数",
       },
-      autoExpandReasoning: {
-        label: "始终展开推理过程",
-        description: "默认情况下完全展开 AI 的思考和推理过程",
+      relayFolding: {
+        label: "将中转线程中的长消息折叠为一行",
+        description: "标题包含“{{mark}}”的线程中，收到的长消息只显示一行(点击查看全文)",
+        noMark: "(标题不匹配)",
       },
       toposChatStyle: {
         label: "Topos-style chat",

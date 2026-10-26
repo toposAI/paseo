@@ -33,8 +33,8 @@ export function ChatSection() {
       void updateSettings({ toolCallDetailLevel }),
     [updateSettings],
   );
-  const changeAutoExpandReasoning = useCallback(
-    (autoExpandReasoning: boolean) => void updateSettings({ autoExpandReasoning }),
+  const changeRelayFolding = useCallback(
+    (enabled: boolean) => void updateSettings({ relayFolding: enabled ? "relay" : "off" }),
     [updateSettings],
   );
   const changeToposChatStyle = useCallback(
@@ -55,10 +55,12 @@ export function ChatSection() {
       <SettingsSection title={t("settings.appearance.detailLevel.title")}>
         <SettingsCard>
           <SettingsSwitch
-            label={t("settings.general.autoExpandReasoning.label")}
-            hint={t("settings.general.autoExpandReasoning.description")}
-            value={settings.autoExpandReasoning}
-            onValueChange={changeAutoExpandReasoning}
+            label={t("settings.general.relayFolding.label")}
+            hint={t("settings.general.relayFolding.description", {
+              mark: settings.relayTitleMark || t("settings.general.relayFolding.noMark"),
+            })}
+            value={settings.relayFolding === "relay"}
+            onValueChange={changeRelayFolding}
           />
           <SettingsSwitch
             label={t("settings.general.toposChatStyle.label")}

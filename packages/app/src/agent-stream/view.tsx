@@ -58,6 +58,9 @@ import { useRevealedText } from "@/hooks/use-revealed-text";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
 import { resolveContentMaxWidth, useSettings } from "@/hooks/use-settings";
+import { RELAY_TURN_FOLDING_ENABLED } from "@/relay-thread/policy";
+import { FoldedUserMessage } from "@/components/folded-user-message";
+import { foldUserMessage, selectRelayFoldSettings } from "@/utils/user-message-fold";
 import { openKeyboardWarmup, useToposComposerCollapse } from "@/composer/topos-collapse-store";
 import { ToposSelectionActions } from "@/topos-selection/selection-actions";
 import type { ToastApi } from "@/components/toast-host";
@@ -354,10 +357,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     ref,
   ) {
     const { t } = useTranslation();
-    const autoExpandReasoning = useSettings((settings) => settings.autoExpandReasoning);
     const toolCallDetailLevel = useSettings((settings) => settings.toolCallDetailLevel);
     const chatOutlineEnabled = useSettings((settings) => settings.chatOutlineEnabled);
     const contentMaxWidth = useSettings(resolveContentMaxWidth);
+    const { relayFolding, relayTitleMark } = useSettings(selectRelayFoldSettings);
     const viewportRef = useRef<StreamViewportHandle | null>(null);
     const pendingClientMessageIds = useMemo(
       () => new Set(pendingMessageSubmissions.map((submission) => submission.clientMessageId)),
@@ -408,6 +411,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       state.sessions[resolvedServerId]?.agentStreamHead?.get(agentId),
     );
     const streamHead = providedStreamHead ?? sessionStreamHead;
+    // Relay threads (完了箱C) fold long incoming turns to one line; the title names the thread.
+    const sessionAgentTitle = useSessionStore(
+      (state) => state.sessions[resolvedServerId]?.agents.get(agentId)?.title ?? null,
+    );
     const forkAgent = useForkAgent({ serverId: resolvedServerId, toast, readOnly });
     const supportsAgentForkContextCursor = useSessionStore(
       (state) =>
@@ -727,11 +734,38 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       });
     }, []);
 
+    const renderFoldedUserMessage = useCallback(
+      (
+        layoutItem: StreamLayoutItem,
+        item: Extract<StreamItem, { kind: "user_message" }>,
+      ): ReactNode => {
+        const fold = foldUserMessage({
+          agentTitle: sessionAgentTitle,
+          hasMedia: (item.images?.length ?? 0) > 0 || (item.attachments?.length ?? 0) > 0,
+          relayFolding: RELAY_TURN_FOLDING_ENABLED ? relayFolding : "off",
+          text: item.text,
+          titleMark: relayTitleMark,
+        });
+        if (fold.kind === "full") return null;
+        return (
+          <FoldedUserMessage
+            preview={fold.preview}
+            sender={fold.sender}
+            text={item.text}
+            timestamp={item.timestamp.getTime()}
+          />
+        );
+      },
+      [relayFolding, relayTitleMark, sessionAgentTitle],
+    );
+
     const renderUserMessageItem = useCallback(
       (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "user_message" }>) => {
         if (isHarnessContextOnlyMessage(item.text)) {
           return <HarnessContextMessage text={item.text} timestamp={item.timestamp.getTime()} />;
         }
+        const folded = renderFoldedUserMessage(layoutItem, item);
+        if (folded) return folded;
         return (
           <UserMessage
             serverId={resolvedServerId}
@@ -752,7 +786,14 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           />
         );
       },
-      [context.capabilities, agentId, client, pendingClientMessageIds, resolvedServerId],
+      [
+        context.capabilities,
+        agentId,
+        client,
+        pendingClientMessageIds,
+        renderFoldedUserMessage,
+        resolvedServerId,
+      ],
     );
 
     const renderAssistantMessageItem = useCallback(
@@ -792,6 +833,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         isLastInSequence: boolean,
         status: Extract<StreamItem, { kind: "thought" }>["status"],
       ) => {
+        // Thinking stays one collapsed row in every thread; the text is one press away (2026-10-27).
         return (
           <ThoughtSlot
             itemId={item.id}
@@ -799,11 +841,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             text={item.text}
             status={status}
             isLastInSequence={isLastInSequence}
-            defaultExpanded={autoExpandReasoning}
+            defaultExpanded={false}
           />
         );
       },
-      [autoExpandReasoning, setInlineDetailsExpanded],
+      [setInlineDetailsExpanded],
     );
 
     const renderSingleToolCallItem = useCallback(

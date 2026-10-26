@@ -10,20 +10,25 @@ import type { StoredAgentRecord } from "./agent-storage.js";
 export const TITLE_RETITLE_LABEL = AGENT_TITLE_RETITLE_LABEL;
 /** 付け直しが済んだ印。`1` のまま残すと次の起動でまた走るため、必ず書き換える。 */
 export const TITLE_RETITLE_DONE = "done";
+/** 読み込み・閉じるが返ってこないときに一括処理ごと止まらないための上限。 */
+export const TITLE_BACKFILL_IO_TIMEOUT_MS = 30_000;
 
 export interface TitleBackfillDeps {
   listStored(): Promise<StoredAgentRecord[]>;
   /** すでにメモリに載っているか(載っていないものだけ、こちらで読み込んで閉じる)。 */
   isLoaded(agentId: string): boolean;
+  /** 実行中のターンがあるか(あるスレは閉じない・触れるなら触らない)。 */
+  isBusy(agentId: string): boolean;
   /** 履歴を読める状態にする(セッションを復元する)。 */
   ensureLoaded(agentId: string): Promise<void>;
   /** こちらで読み込んだものだけ閉じる(元から開いていたスレには触らない)。 */
   close(agentId: string): Promise<void>;
-  /** 題名を付け直す。書き換えたら true。 */
+  /** 題名を付け直す。人が固定した題名(`user`)は触らない。書き換えたら true。 */
   retitle(agentId: string): Promise<boolean>;
   /** 付け直しの合図を落とす(`1` -> `done`)。 */
   markDone(agentId: string): Promise<void>;
   logger: Logger;
+  ioTimeoutMs?: number;
 }
 
 export interface TitleBackfillResult {
@@ -35,6 +40,21 @@ export interface TitleBackfillResult {
   failed: number;
   /** 材料(最初のユーザー発言)が無くて付け直せなかったスレ。 */
   skipped: number;
+  /** 実行中だったので触らず、合図も残したままにしたスレ(次の起動で再挑戦する)。 */
+  busy: number;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`title backfill I/O timed out after ${ms}ms`)), ms);
+      timer.unref();
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 /**
@@ -43,9 +63,11 @@ export interface TitleBackfillResult {
  * なぜ起動時にやるか: 閉じているスレは履歴がメモリに無く、題名の材料(最初のユーザー発言)が
  * 取れない。デーモン起動直後に1本ずつ読み込み → 付け直し → 閉じる、を直列で行う。
  * 合図は成否にかかわらず `done` にする(失敗したスレで毎回やり直さない = 「1回だけ」)。
+ * ただし実行中のスレには触らない(閉じるとターンを中断してしまう)。合図も残し、次の起動で拾い直す。
  */
 export async function runTitleBackfill(deps: TitleBackfillDeps): Promise<TitleBackfillResult> {
-  const result: TitleBackfillResult = { marked: 0, retitled: 0, failed: 0, skipped: 0 };
+  const ioTimeoutMs = deps.ioTimeoutMs ?? TITLE_BACKFILL_IO_TIMEOUT_MS;
+  const result: TitleBackfillResult = { marked: 0, retitled: 0, failed: 0, skipped: 0, busy: 0 };
   const stored = await deps.listStored();
   const targets = stored.filter(
     (record) =>
@@ -62,26 +84,50 @@ export async function runTitleBackfill(deps: TitleBackfillDeps): Promise<TitleBa
   deps.logger.info({ count: targets.length }, "agent title backfill started");
   for (const record of targets) {
     const agentId = record.id;
-    const wasLoaded = deps.isLoaded(agentId);
+    // 冒頭で載っていなかったスレだけ、こちらで読み込んで閉じる。載っていたスレは閉じない。
+    let openedByUs = false;
     try {
-      if (!wasLoaded) await deps.ensureLoaded(agentId);
+      if (deps.isBusy(agentId)) {
+        result.busy += 1;
+        continue;
+      }
+      if (!deps.isLoaded(agentId)) {
+        await withTimeout(deps.ensureLoaded(agentId), ioTimeoutMs);
+        openedByUs = true;
+      }
       const changed = await deps.retitle(agentId);
       if (changed) result.retitled += 1;
       else result.skipped += 1;
+      await deps.markDone(agentId);
     } catch (error) {
       result.failed += 1;
       deps.logger.warn({ err: error, agentId }, "agent title backfill failed for agent");
+      await deps.markDone(agentId).catch((markError) => logMarkFailure(deps, markError, agentId));
     } finally {
-      if (!wasLoaded) {
-        await deps.close(agentId).catch((error) => {
-          deps.logger.warn({ err: error, agentId }, "agent title backfill could not close agent");
-        });
+      if (openedByUs) {
+        await closeIfIdle(deps, agentId, ioTimeoutMs);
       }
-      await deps.markDone(agentId).catch((error) => {
-        deps.logger.warn({ err: error, agentId }, "agent title backfill could not clear the label");
-      });
     }
   }
   deps.logger.info(result, "agent title backfill finished");
   return result;
+}
+
+function logMarkFailure(deps: TitleBackfillDeps, error: unknown, agentId: string): void {
+  deps.logger.warn({ err: error, agentId }, "agent title backfill could not clear the label");
+}
+
+/** 閉じる直前にもう一度見る: 処理中に誰かが送っていたら、ターンごと閉じてしまわないように残す。 */
+async function closeIfIdle(
+  deps: TitleBackfillDeps,
+  agentId: string,
+  ioTimeoutMs: number,
+): Promise<void> {
+  if (deps.isBusy(agentId)) {
+    deps.logger.info({ agentId }, "agent title backfill left an agent open (it became busy)");
+    return;
+  }
+  await withTimeout(deps.close(agentId), ioTimeoutMs).catch((error) => {
+    deps.logger.warn({ err: error, agentId }, "agent title backfill could not close agent");
+  });
 }

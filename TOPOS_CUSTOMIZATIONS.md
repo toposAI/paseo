@@ -134,3 +134,17 @@ variant \`tool_definition\`, expected \`tool_reference\``で失敗していた�
     `agent-title-backfill.ts` が1本ずつ(読み込み→付け直し→閉じる)処理する。合図は成否によらず `done` に
     するので1回だけ。印付けは `scripts/mark-title-retitle.mjs`(CLI 経由。既定は一覧表示、`--execute` で実行)。
   - 生成失敗の調査用に `agent-response-loop.ts` の失敗ログへ返答本文(`lastResponse`)と検証エラーを追加。
+  - 出口レビュー(2026-10-27)の指摘を反映:
+    - 一括処理は**実行中のスレに触らない**。処理の冒頭と、閉じる直前に `hasInFlightRun` を見る
+      (見てから閉じるまでの隙間で送られた場合にターンごと閉じてしまうのを防ぐ)。実行中で飛ばしたスレは
+      印 `1` を残すので、次の起動で拾い直す。読み込み・閉じるは 30 秒でタイムアウトする。
+    - 付け直しの前後で `paseo.title-source=user` を再確認する(`retitle(id, {preserveUser:true})`)。
+      処理中に人が題名を固定したら上書きしない。
+    - 元の題名を `paseo.title-before-retitle` ラベルに退避する(戻したいときはこの値で `agent update --name`)。
+    - **ラベルだけの更新では `paseo.title-source` を付けない**(`--label` で印を付けただけで `user` に
+      なっていた)。改名と同時に `paseo.title-regenerate=1` を頼まれた場合も `user` を付けない。
+    - `PASEO_DISABLE_TITLE_BACKFILL=1` で一括付け直しを止められる(戻し手順)。
+  - 常駐の役スレを `--title` で作る起動スクリプトは `--label paseo.title-source=user` も渡す
+    (ToposAI-Mini-Project の `spawn_backstage.sh`・`spawn_window_thread.sh`・`spawn_judgment_windows.sh`・
+    `spawn_progress_window.sh`)。窓口系は識別子を兼ねるため、表示用の題名を
+    `paseo.title-display-title` にも入れておく(表示名と識別子を分ける準備)。

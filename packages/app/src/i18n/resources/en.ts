@@ -359,6 +359,11 @@ export const en = {
       openFile: "Open file",
       copied: "Copied",
     },
+    relayTurn: {
+      fromSender: "Message from {{sender}}",
+      fromSenderPreview: "Long message (sender not recorded)",
+      hide: "Hide full message; show one line",
+    },
     harnessContext: {
       show: "Show harness context",
       hide: "Hide harness context",
@@ -2310,9 +2315,11 @@ export const en = {
         description: "Lines kept in the built-in terminal buffer",
         accessibilityLabel: "Terminal scrollback lines",
       },
-      autoExpandReasoning: {
-        label: "Always expand reasoning",
-        description: "Show agent thinking and chain-of-thought blocks fully expanded by default",
+      relayFolding: {
+        label: "Fold long messages in relay threads",
+        description:
+          "Threads whose title contains '{{mark}}' show long incoming messages as one line; press it to read the whole message",
+        noMark: "(no title match)",
       },
       toposChatStyle: {
         label: "Topos-style chat",

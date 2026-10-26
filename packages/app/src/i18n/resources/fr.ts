@@ -368,6 +368,11 @@ export const fr: TranslationResources = {
       openFile: "Ouvrir le fichier",
       copied: "Copié",
     },
+    relayTurn: {
+      fromSender: "Message de {{sender}}",
+      fromSenderPreview: "Message long (expéditeur non enregistré)",
+      hide: "Masquer le message complet ; afficher une ligne",
+    },
     harnessContext: {
       show: "Afficher le contexte du harness",
       hide: "Masquer le contexte du harness",
@@ -2235,9 +2240,11 @@ export const fr: TranslationResources = {
         description: "Lignes conservées dans le tampon du terminal intégré",
         accessibilityLabel: "Lignes d’historique du terminal",
       },
-      autoExpandReasoning: {
-        label: "Toujours afficher le raisonnement",
-        description: "Afficher par défaut le raisonnement de l’agent entièrement déplié",
+      relayFolding: {
+        label: "Replier les longs messages dans les fils de relais",
+        description:
+          "Les fils dont le titre contient « {{mark}} » affichent les longs messages reçus sur une seule ligne ; appuyez pour tout lire",
+        noMark: "(aucune correspondance de titre)",
       },
       toposChatStyle: {
         label: "Topos-style chat",

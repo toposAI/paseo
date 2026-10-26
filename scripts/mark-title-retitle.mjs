@@ -12,6 +12,7 @@
 // 用法:
 //   node scripts/mark-title-retitle.mjs            # 対象を一覧するだけ(何も書かない)
 //   node scripts/mark-title-retitle.mjs --execute  # 印を付ける
+//   node scripts/mark-title-retitle.mjs --execute --lock <id>[,<id>...]  # 指定のスレは題名を user 固定
 //
 // 対象 = アーカイブ済み・内部用(internal)を除いた全スレ。
 // `paseo.title-source=user`(人が固定した題名)のスレは対象外にする(役スレの名前を守る)。
@@ -26,6 +27,7 @@ const SOURCE_LABEL = "paseo.title-source";
 const RETITLE_DONE = "done";
 
 const execute = process.argv.slice(2).includes("--execute");
+// 本番は /opt/homebrew/bin/paseo(0.10.1)。`--label` は `agent update` にあり、ラベルだけの更新では題名は動かない。
 const paseo = process.env.PASEO_BIN || "paseo";
 const agentsRoot = join(homedir(), ".paseo", "agents");
 
@@ -81,6 +83,26 @@ if (execute) {
     } catch (error) {
       failed += 1;
       console.error(`失敗 ${record.id.slice(0, 8)}: ${error.message}`);
+    }
+  }
+  const argv = process.argv.slice(2);
+  const lockAt = argv.indexOf("--lock");
+  const lockIds = lockAt >= 0 ? (argv[lockAt + 1] ?? "").split(",").filter(Boolean) : [];
+  for (const prefix of lockIds) {
+    const record = records.find((r) => r.id.startsWith(prefix));
+    if (!record) {
+      failed += 1;
+      console.error(`固定できません(該当なし) ${prefix}`);
+      continue;
+    }
+    try {
+      execFileSync(paseo, ["agent", "update", record.id, "--label", `${SOURCE_LABEL}=user`], {
+        stdio: "pipe",
+      });
+      console.log(`固定 ${record.id.slice(0, 8)}  ${record.title ?? "(なし)"}`);
+    } catch (error) {
+      failed += 1;
+      console.error(`固定に失敗 ${prefix}: ${error.message}`);
     }
   }
 }
