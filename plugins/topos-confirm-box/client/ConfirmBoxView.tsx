@@ -422,7 +422,11 @@ export function ConfirmBoxView({
   const openPaneThread = useMemo(() => {
     if (!paneAgentId || !navigation) return undefined;
     // PC幅(wide)は右に新しいカラムで開く(2026-10-25 ユーザー指示)。狭い幅は従来どおり遷移。
-    return () => navigation.openAgent({ agentId: paneAgentId, ...(wide ? { placement: "right" as const } : {}) });
+    return () =>
+      navigation.openAgent({
+        agentId: paneAgentId,
+        ...(wide ? { placement: "right" as const } : {}),
+      });
   }, [paneAgentId, navigation, wide]);
   // eslint-disable-next-line eslint-plugin-react-perf/jsx-no-jsx-as-prop -- 同一レンダーの子として一度だけ置く
   const paneEl = pane ? (
