@@ -209,7 +209,8 @@ test("親(子司令塔)ごとにまとめ、司令塔自身の行は出さず、
   });
   assert.deepEqual(
     list.map((t) => t.agentId),
-    ["c1", "a2", "a1", "x1"],
+    // 親(`boss`)は見出しとして残す(2026-10-27 通し検証B 指摘1)。行としては子の後ろ
+    ["c1", "a2", "a1", "x1", "boss"],
   );
   assert.equal(list[0].parentTitle, "C");
 });
@@ -346,4 +347,26 @@ test("ピン止めの往復(切り替え・外す。壊れた/無いファイル
   assert.deepEqual(readChildThreadPins(dir), ["a2"]);
   fs.writeFileSync(path.join(dir, "child_threads_pins.json"), "{broken");
   assert.deepEqual(readChildThreadPins(dir), []);
+});
+
+// ---- 2026-10-27 通し検証BのOpus指摘1 ----
+
+test("親(子司令塔)は行として残し `groupingParent` を立てる(状態を落とさない)", () => {
+  const list = normalizeChildThreads({
+    threads: [
+      row({ agent_id: "cc", status: "ユーザー判断待ち", updated_at: 9 }),
+      row({
+        agent_id: "k1",
+        status: "実装中",
+        updated_at: 5,
+        parent_agent_id: "cc",
+        parent_title: "子司令塔",
+      }),
+    ],
+  });
+  const byId = new Map(list.map((t) => [t.agentId, t]));
+  assert.equal(byId.get("cc")?.groupingParent, true);
+  assert.equal(byId.get("cc")?.status, "ユーザー判断待ち");
+  // 子はフラグ無し
+  assert.equal(byId.get("k1")?.groupingParent, false);
 });

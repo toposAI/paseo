@@ -74,6 +74,12 @@ export const ChildThreadSchema = z.object({
   parentAgentId: z.string().nullable().default(null),
   /** 親の題名(グループ見出し用)。 */
   parentTitle: z.string().nullable().default(null),
+  /**
+   * この行が**他の行の親**(=グループ見出し)である子司令塔の行か(2026-10-27、通し検証B 指摘1)。
+   * 真の行は子の行のグループ見出しに出し、行としては並べない。未登録スレの取り込みからも外す
+   * (`mergeUnregisteredThreads`)。サーバーが立てるので、古い応答(未指定)は偽。
+   */
+  groupingParent: z.boolean().optional(),
   /** ピン止め(そのグループの先頭に固定)。 */
   pinned: z.boolean().default(false),
   /**

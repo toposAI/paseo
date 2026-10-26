@@ -10,6 +10,7 @@ import {
   coordinatorIdSet,
   countStatusLabels,
   groupPressAction,
+  groupThreadRows,
   indexImplementationNotes,
   lowerTierNotes,
   openableParentIds,
@@ -17,7 +18,7 @@ import {
   visibleGroupKeyOf,
 } from "../shared/sidebar-rows.js";
 import { COORDINATOR_GROUP, PINNED_GROUP } from "../shared/sidebar-section-mode.js";
-import type { RowThread } from "../shared/sidebar-rows.js";
+import type { RowThread, SidebarRowView } from "../shared/sidebar-rows.js";
 
 const thread = (
   agentId: string,
@@ -372,6 +373,7 @@ test("countStatusLabels は判断待ち・実装中・司令塔・待機中を�
     running: 1,
     coordinator: 0,
     idle: 0,
+    closed: 0,
   });
 });
 
@@ -390,6 +392,7 @@ test("countStatusLabels は実装中・司令塔・待機中も数え、司令�
     running: 2,
     coordinator: 1,
     idle: 1,
+    closed: 0,
   });
 });
 
@@ -427,5 +430,304 @@ test("司令塔の行はピンの印が付いていても「司令塔」グル�
       COORDINATOR_GROUP,
     ),
     COORDINATOR_GROUP,
+  );
+});
+
+// ---- 2026-10-27 通し検証BのOpus指摘(1・2・6) ----
+
+const parentRow = (agentId: string, over: Record<string, unknown> = {}) => ({
+  agentId,
+  title: `子司令塔 ${agentId}`,
+  status: "実装中" as const,
+  groupingParent: true as const,
+  parentAgentId: null, // サーバーは親の行を「その他」の親なしにして後ろへ置く(child-threads.ts)
+  ...over,
+});
+
+test("指摘1: 見出しになっている親(子司令塔)の行は、自分のグループの先頭にだけ出る(二重に出ない)", () => {
+  const rows = sortHeadingsLast(
+    buildUpperRows(
+      [
+        parentRow("cc", { status: "ユーザー判断待ち" }),
+        {
+          agentId: "k1",
+          title: "子1",
+          status: "実装中",
+          parentAgentId: "cc",
+          parentTitle: "子司令塔 cc",
+        },
+        {
+          agentId: "k2",
+          title: "子2",
+          status: "実装中",
+          parentAgentId: "cc",
+          parentTitle: "子司令塔 cc",
+        },
+        { agentId: "x", title: "親なし", status: "実装中", parentAgentId: null },
+      ],
+      new Map(),
+    ),
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.thread.agentId, r.statusLabel]),
+    [
+      ["k1", "実装中"],
+      ["k2", "実装中"],
+      ["x", "実装中"],
+      ["cc", "判断待ち"],
+    ],
+  );
+  // 画面の割り方では、親の行は自分の見出しのグループに入る(別の行として二重にはならない)
+  const keyOf = (id: string) => {
+    const r = rows.find((row) => row.thread.agentId === id)!.thread;
+    return rowGroupKeyOf(r, new Set(), COORDINATOR_GROUP, PINNED_GROUP);
+  };
+  // サーバーが付けた親なし(`parentAgentId: null`)の見出し行は「その他」に入る
+  assert.equal(keyOf("cc"), "");
+  assert.equal(keyOf("k1"), "cc");
+});
+
+test("指摘1: 子司令塔が判断待ちなら、チップの「判断待ち」に数える", () => {
+  const rows = sortHeadingsLast(
+    buildUpperRows(
+      [
+        parentRow("cc", { status: "ユーザー判断待ち" }),
+        { agentId: "k1", title: "子1", status: "実装中", parentAgentId: "cc" },
+      ],
+      new Map(),
+    ),
+  );
+  assert.deepEqual(countStatusLabels(rows), {
+    judgment: 1,
+    running: 1,
+    coordinator: 0,
+    idle: 0,
+    closed: 0,
+  });
+});
+
+test("指摘1: 子司令塔が完了でも、子の行は末尾(heading)の見出しとして残る", () => {
+  const rows = sortHeadingsLast(
+    buildUpperRows(
+      [
+        parentRow("cc", { status: "完了" }),
+        { agentId: "k1", title: "子1", status: "実装中", parentAgentId: "cc" },
+        { agentId: "k2", title: "子2", status: "ユーザー判断待ち", parentAgentId: "cc" },
+      ],
+      new Map(),
+    ),
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.thread.agentId, r.statusLabel]),
+    [
+      ["k1", "実装中"],
+      ["k2", "判断待ち"],
+      ["cc", "完了"],
+    ],
+  );
+  // 完了の見出しは件数に数えない(実装中にも判断待ちにも化けない)
+  assert.deepEqual(countStatusLabels(rows), {
+    judgment: 1,
+    running: 1,
+    coordinator: 0,
+    idle: 0,
+    closed: 0,
+  });
+});
+
+test("指摘2: 閉じたスレ(closed)の自分申告の「実装中」は「終了」として出す(チップの軸は変えない)", () => {
+  const rows = buildUpperRows(
+    [
+      { agentId: "run", title: "動いている", status: "実装中", machineState: "running" },
+      { agentId: "closed", title: "閉じた", status: "実装中", machineState: "closed" },
+      { agentId: "fresh", title: "状態不明", status: "実装中", machineState: null },
+      { agentId: "wait", title: "待ち", status: "ユーザー判断待ち", machineState: "idle" },
+    ],
+    new Map(),
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.thread.agentId, r.statusLabel]),
+    [
+      ["run", "実装中"],
+      ["closed", "終了"],
+      ["fresh", "実装中"],
+      ["wait", "判断待ち"],
+    ],
+  );
+  // チップの軸は「記録上の状態」(自己申告・ノート)。closed を実装中に足したり差し引いたりしない
+  // (running だけに寄せると、登録簿の判断待ち・完了の件数が消えて別の数え方になる)。
+  assert.deepEqual(countStatusLabels(rows), {
+    judgment: 1,
+    running: 2,
+    coordinator: 0,
+    idle: 0,
+    closed: 1,
+  });
+});
+
+test("指摘2: ノートの「実装中」でも閉じたスレは「終了」、遡りノート(参照用)は食い違い扱いしない", () => {
+  const impl = new Map([
+    ["a", note({ path: "/v/a.md", status: "実装中", threadId: "a" })],
+    ["b", note({ path: "/v/b.md", status: "実装中", threadId: "b", zone: "later" })],
+  ]);
+  const rows = buildUpperRows(
+    [
+      { agentId: "a", title: "a", status: "実装中", machineState: "closed" },
+      { agentId: "b", title: "b", status: "ユーザー判断待ち", machineState: "closed" },
+    ],
+    impl,
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.thread.agentId, r.statusLabel, r.conflict]),
+    [
+      ["a", "終了", null],
+      ["b", "終了", null], // 遡りノートの「実装中」も、閉じたスレなので帯は「終了」
+    ],
+  );
+});
+
+test("指摘6: 登録簿とノートの状態が食い違う行は、ノート側を出したまま食い違いを添える(12a)", () => {
+  const impl = new Map([
+    // 262b0713 の形: 登録簿=判断待ち、ノート=実装中
+    ["judge", note({ path: "/v/j.md", status: "実装中", threadId: "judge" })],
+    // cf8be489 の形: 登録簿=実装中、ノート=確認待ち(旧語彙)
+    ["check", note({ path: "/v/c.md", status: "確認待ち", threadId: "check" })],
+    // 一致している行は添えない
+    ["same", note({ path: "/v/s.md", status: "実装中", threadId: "same" })],
+  ]);
+  const rows = buildUpperRows(
+    [
+      { agentId: "judge", title: "judge", status: "ユーザー判断待ち", machineState: "closed" },
+      { agentId: "check", title: "check", status: "実装中", machineState: "running" },
+      { agentId: "same", title: "same", status: "実装中", machineState: "running" },
+    ],
+    impl,
+  );
+  const byId = new Map(rows.map((r) => [r.thread.agentId, r]));
+  // 表示はノート(正)のまま変えない。食い違いは別の項目で添える
+  assert.equal(byId.get("judge")?.statusLabel, "終了"); // 閉じたスレなので帯は「終了」(指摘2)
+  assert.deepEqual(byId.get("judge")?.conflict, { note: "実装中", registry: "判断待ち" });
+  assert.deepEqual(byId.get("check")?.conflict, { note: "確認待ち", registry: "実装中" });
+  assert.equal(byId.get("same")?.conflict, null);
+  // その他の正しい行は増えない
+  const plain = buildUpperRows([thread("x", "実装中")], new Map());
+  assert.equal(plain[0]?.conflict, null);
+});
+
+test("指摘6: 食い違いの行も数え方は従来どおり(チップから消さない)", () => {
+  const impl = new Map([["j", note({ path: "/v/j.md", status: "実装中", threadId: "j" })]]);
+  const rows = buildUpperRows([{ agentId: "j", title: "j", status: "ユーザー判断待ち" }], impl);
+  assert.deepEqual(countStatusLabels(rows), {
+    judgment: 0,
+    running: 1,
+    coordinator: 0,
+    idle: 0,
+    closed: 0,
+  });
+});
+
+/** 画面と同じ組(サーバーの並びで親の行が後ろ)→ 上段 → 親の行を子の行の後ろへ。 */
+function sortHeadingsLast<T>(rows: SidebarRowView<T>[]): SidebarRowView<T>[] {
+  const isHeading = (r: SidebarRowView<T>) =>
+    (r.thread as { groupingParent?: boolean }).groupingParent === true;
+  return [...rows.filter((r) => !isHeading(r)), ...rows.filter(isHeading)];
+}
+
+test("指摘1(画面の割り方): 親の行は子の見出しになり、行として二重に並ばない", () => {
+  const rows = sortHeadingsLast(
+    buildUpperRows(
+      [
+        parentRow("cc", { status: "ユーザー判断待ち" }),
+        {
+          agentId: "k1",
+          title: "子1",
+          status: "実装中",
+          parentAgentId: "cc",
+          parentTitle: "子司令塔",
+        },
+        {
+          agentId: "k2",
+          title: "子2",
+          status: "実装中",
+          parentAgentId: "cc",
+          parentTitle: "子司令塔",
+        },
+        { agentId: "x", title: "親なし", status: "実装中", parentAgentId: null },
+      ],
+      new Map(),
+    ),
+  );
+  const groups = groupThreadRows(
+    rows,
+    new Set(),
+    COORDINATOR_GROUP,
+    PINNED_GROUP,
+    "ピン止め",
+    "その他",
+  );
+  assert.deepEqual(
+    groups.map((g) => [
+      g.title,
+      g.heading?.statusLabel ?? null,
+      g.rows.map((r) => r.thread.agentId),
+    ]),
+    [
+      ["子司令塔", "判断待ち", ["k1", "k2"]],
+      ["その他", null, ["x"]],
+    ],
+  );
+});
+
+test("指摘1(画面の割り方): 子の行が上段に無い親は、見出しだけ残さず普通の行として出す", () => {
+  const rows = buildUpperRows(
+    [
+      // 親は判断待ち・子は全員完了(上段から外れる) → 親の行は全行の一覧に残る
+      parentRow("cc", { status: "ユーザー判断待ち" }),
+    ],
+    new Map(),
+  );
+  const groups = groupThreadRows(
+    rows,
+    new Set(),
+    COORDINATOR_GROUP,
+    PINNED_GROUP,
+    "ピン止め",
+    "その他",
+  );
+  assert.deepEqual(
+    groups.map((g) => [g.title, g.heading, g.rows.map((r) => r.thread.agentId)]),
+    [["その他", null, ["cc"]]],
+  );
+});
+
+test("指摘1(画面の割り方): 司令塔の見出しとピン止めの割り方は従来どおり", () => {
+  const rows = buildUpperRows(
+    [
+      { agentId: "chief", title: "総司令", status: "実装中", coordinator: true },
+      {
+        agentId: "kid",
+        title: "子",
+        status: "実装中",
+        parentAgentId: "chief",
+        parentTitle: "総司令",
+      },
+      { agentId: "pin", title: "ピン", status: "実装中", pinned: true, parentAgentId: "p" },
+    ],
+    new Map(),
+  );
+  const groups = groupThreadRows(
+    rows,
+    new Set(["chief"]),
+    COORDINATOR_GROUP,
+    PINNED_GROUP,
+    "ピン止め",
+    "その他",
+  );
+  assert.deepEqual(
+    groups.map((g) => [g.key, g.rows.map((r) => r.thread.agentId)]),
+    [
+      [PINNED_GROUP, ["pin"]],
+      [COORDINATOR_GROUP, ["chief", "kid"]],
+    ],
   );
 });

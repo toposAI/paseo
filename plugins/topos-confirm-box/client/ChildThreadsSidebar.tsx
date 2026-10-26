@@ -42,6 +42,7 @@ import {
   coordinatorIdSet,
   countStatusLabels,
   groupPressAction,
+  groupThreadRows,
   openableParentIds,
   rowGroupKeyOf,
 } from "../shared/sidebar-rows.js";
@@ -51,11 +52,12 @@ import {
   PINNED_GROUP,
   PINNED_GROUP_LABEL,
 } from "../shared/sidebar-section-mode.js";
-import type { SidebarRowView } from "../shared/sidebar-rows.js";
-import type { NoteStatus, SidebarNote } from "../shared/notes.js";
+import type { SidebarRowView, ThreadGroup } from "../shared/sidebar-rows.js";
+import type { SidebarNote } from "../shared/notes.js";
 import type { SidebarPlace, ZoneCounts } from "../shared/concept-places.js";
 import { emptySectionLabel } from "../shared/sidebar-section-mode.js";
 import type { SidebarSectionKey } from "../shared/sidebar-section-mode.js";
+import { rowStatusKind, rowStatusText } from "../shared/thread-status-label.js";
 import type { StatusKind } from "../shared/thread-status-label.js";
 import { pickReadableText } from "../shared/contrast.js";
 import { menuCanArchive } from "../shared/thread-menu.js";
@@ -130,14 +132,9 @@ interface MenuAnchor {
 }
 
 /**
- * グループ見出しの題名。「司令塔」グループは呼び出し元が固定の `coordinatorGroup` を使うので
- * ここへは来ない。それ以外は親の題名(サーバーが Paseo の一覧の題名で上書きする)を使い、
- * 無ければ「その他」。
+ * グループ見出しの題名と割り方は `shared/sidebar-rows.ts` の `groupThreadRows` が持つ
+ * (並べ替え・挿入の整列と同じキーの定義)。ここは開閉の保存だけを持つ。
  */
-function groupTitleOf(r: SidebarRowView<ChildThread>): string {
-  return r.thread.parentTitle || OTHER_LABEL;
-}
-
 function readCollapsed(): ReadonlySet<string> {
   try {
     const raw: unknown = JSON.parse(globalThis.localStorage?.getItem(COLLAPSED_KEY) ?? "[]");
@@ -153,52 +150,6 @@ function writeCollapsed(set: ReadonlySet<string>): void {
   } catch {
     // 保存できなくても画面上の開閉は動く
   }
-}
-
-interface ThreadGroup {
-  key: string;
-  title: string;
-  rows: SidebarRowView<ChildThread>[];
-}
-
-/**
- * サーバーの並び(グループ単位でまとまっている)を出現順のままグループへ割る。
- * 上段の絞り込み(実装ノートの status)を通した後の行で割る。ピン止めした行は「ピン止め」グループへ
- * 先に集め、司令塔の行と司令塔の子スレは1つの「司令塔」グループへ寄せる。並びは
- * ピン止め → 司令塔 → その他(ピン止めが空なら司令塔が先頭)。キーの規則は `rowGroupKeyOf`。
- */
-function groupRows(
-  rows: readonly SidebarRowView<ChildThread>[],
-  coordinatorIds: ReadonlySet<string>,
-): ThreadGroup[] {
-  const groups = new Map<string, ThreadGroup>();
-  const fixed: Record<string, ThreadGroup> = {
-    [PINNED_GROUP]: { key: PINNED_GROUP, title: PINNED_GROUP_LABEL, rows: [] },
-    [COORDINATOR_GROUP]: { key: COORDINATOR_GROUP, title: "司令塔", rows: [] },
-  };
-  for (const r of rows) {
-    const key = rowGroupKeyOf(r.thread, coordinatorIds, COORDINATOR_GROUP, PINNED_GROUP);
-    let g = groups.get(key);
-    if (!g) {
-      g = fixed[key] ?? { key, title: groupTitleOf(r), rows: [] };
-      groups.set(key, g);
-    }
-    g.rows.push(r);
-  }
-  // ピン止め → 司令塔 → その他(出現順)。空のグループは出さない。
-  // `groups` には固定グループも入っている(行があった時点で `groups.set` している)ので、
-  // そのまま `...groups.values()` を足すと同じグループが2回描画される(実測 2026-10-25:
-  // ピン止め・司令塔の見出しと行が丸ごと2回ずつ出た)。固定の2つは `groups` から取り出し、
-  // 残りだけを出現順で後ろに置く。
-  const ordered: ThreadGroup[] = [];
-  for (const key of [PINNED_GROUP, COORDINATOR_GROUP]) {
-    const g = groups.get(key);
-    if (g) ordered.push(g);
-  }
-  for (const g of groups.values()) {
-    if (g.key !== PINNED_GROUP && g.key !== COORDINATOR_GROUP) ordered.push(g);
-  }
-  return ordered.filter((g) => g.rows.length > 0);
 }
 
 export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
@@ -316,6 +267,8 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
           ? (queue.shift() ?? t.agentId)
           : t.agentId,
       );
+      // 上段に出ていない行(親の見出し・完了した行)には置き換えの id を入れない。入れるとその行が
+      // 別グループへ移り、次の取得までの間だけ並びが崩れる(2026-10-27 指摘1)。
       persistOrder(flat);
     },
     [coordinatorIds, persistOrder, threads, visibleIds],
@@ -873,7 +826,18 @@ function SidebarContents({
 }) {
   // `coordinatorIds` は呼び出し元から受ける(上段に出ている行だけで作ると、上段から外れた司令塔の
   // 子スレが「司令塔」から漏れ、並べ替え側のキーとずれる。出口レビュー round3 指摘3)。
-  const groups = useMemo(() => groupRows(rows, coordinatorIds), [rows, coordinatorIds]);
+  const groups = useMemo(
+    () =>
+      groupThreadRows(
+        rows,
+        coordinatorIds,
+        COORDINATOR_GROUP,
+        PINNED_GROUP,
+        PINNED_GROUP_LABEL,
+        OTHER_LABEL,
+      ),
+    [rows, coordinatorIds],
+  );
   const noticeStyle = useMemo(() => [styles.noticeText, { color: noticeColor }], [noticeColor]);
   const statusNoticeStyle = useMemo(
     () => [styles.noticeText, { color: statusColor }],
@@ -953,7 +917,7 @@ function ThreadGroupSection({
   renderThread,
   statusColor,
 }: {
-  group: ThreadGroup;
+  group: ThreadGroup<ChildThread>;
   open: boolean;
   onToggle: (key: string) => void;
   /** Opens the group's coordinator agent; absent on older hosts. */
@@ -981,6 +945,10 @@ function ThreadGroupSection({
   const textStyle = useMemo(() => ({ color: statusColor }), [statusColor]);
   const chevronStyle = useMemo(() => [styles.chevron, { color: statusColor }], [statusColor]);
   const count = group.rows.length;
+  // 見出しの状態(子司令塔)。件数の左に出す(帯の文字・色は行と同じ規則)。
+  const headingStatus = group.heading
+    ? rowStatusText(group.heading.statusLabel, group.heading.thread.machineState)
+    : null;
   // ピン止めグループは開閉しない(出した行を畳む意味が無く、畳むと「ピン止めしたのに見えない」に戻る)。
   // 件数とシェブロンは出さず、常に開いたまま並べる。
   const pinned = group.key === PINNED_GROUP;
@@ -989,6 +957,13 @@ function ThreadGroupSection({
     () =>
       pinned ? undefined : (
         <View style={styles.trailing}>
+          {headingStatus ? (
+            <StatusBadge
+              text={headingStatus.text}
+              kind={headingStatus.kind}
+              testID={`child-group-status-${group.key || "other"}`}
+            />
+          ) : null}
           <Text style={textStyle}>{count}</Text>
           <Pressable
             onPress={toggle}
@@ -1002,7 +977,7 @@ function ThreadGroupSection({
           </Pressable>
         </View>
       ),
-    [chevronStyle, count, group.key, group.title, open, pinned, textStyle, toggle],
+    [chevronStyle, count, group.key, group.title, headingStatus, open, pinned, textStyle, toggle],
   );
   const shown = pinned || open;
   return (
@@ -1078,23 +1053,8 @@ function rowIcon(row: SidebarRowView<ChildThread>, t: ChildThread): string {
   if (row.note?.status === "確認待ち") return "CircleCheck"; // 旧語彙のノート(移行中だけ)
   if (row.statusLabel === "判断待ち") return "CircleHelp";
   if (row.statusLabel === "実装中" && t.status === "完了") return "Loader";
-  // 帯と同じ判断で選ぶ(登録簿に載らないスレは「待機中」= idle のアイコンになる)。
-  return ICON[kindOfStatusLabel(row.statusLabel, t.machineState)];
-}
-
-/**
- * 状態の帯の色(上段は実装ノートの status が正なので、その語彙で色を選ぶ)。
- * `closed` は行末の印(箱)と揃える(`shared/thread-status-label` の `displayStatus` と同じ規則。
- * 出口レビュー round3 指摘1)。
- */
-function kindOfStatusLabel(label: NoteStatus | "待機中", _machineState: string | null): StatusKind {
-  // 帯の文字は実装ノートの status なので、色も機械状態(closed)で上書きせず文字の語彙で選ぶ
-  // (上書きすると「判断待ち」「実装中」の文字が灰色の帯になり、同じ状態で色が割れる)。
-  if (label === "待機中") return "idle";
-  if (label === "完了") return "done";
-  if (label === "判断待ち" || label === "構想") return "waiting";
-  if (label === "確認待ち") return "done"; // 旧語彙のノート(移行中だけ)
-  return "running";
+  // 帯と同じ判断で選ぶ(登録簿に載らないスレは「待機中」= idle、閉じたスレは「終了」のアイコン)。
+  return ICON[rowStatusKind(row.statusLabel, t.machineState)];
 }
 
 /**
@@ -1109,9 +1069,12 @@ function StatusCountChips({
   rows: readonly SidebarRowView<ChildThread>[];
   openScreen: (input: { screenId: string; params?: Record<string, string> }) => void;
 }) {
-  const { judgment, running, coordinator, idle } = useMemo(() => countStatusLabels(rows), [rows]);
+  const { judgment, running, coordinator, idle, closed } = useMemo(
+    () => countStatusLabels(rows),
+    [rows],
+  );
   const openJudgment = useCallback(() => openScreen({ screenId: BOX_TAB_SCREEN_ID }), [openScreen]);
-  if (judgment + running + coordinator + idle === 0) return null;
+  if (judgment + running + coordinator + idle + closed === 0) return null;
   return (
     <View style={styles.chips} testID="status-count-chips">
       {judgment > 0 ? (
@@ -1135,6 +1098,9 @@ function StatusCountChips({
       {idle > 0 ? (
         <StatusBadge text={`待機中 ${idle}`} kind="idle" testID="status-count-idle" />
       ) : null}
+      {closed > 0 ? (
+        <StatusBadge text={`終了 ${closed}`} kind="closed" testID="status-count-closed" />
+      ) : null}
     </View>
   );
 }
@@ -1154,10 +1120,12 @@ function threadStatusOf(
   const stale = state.failed ? "(古い表示)" : "";
   if (row.thread.access === "workspace-archived") return { text: "要復元", kind: "closed" };
   if (state.unread) return { text: `未読あり${stale}`, kind: "done" };
-  return {
-    text: `${row.statusLabel}${stale}`,
-    kind: kindOfStatusLabel(row.statusLabel, row.thread.machineState),
-  };
+  // 表示はノート(正)のまま。閉じたスレの「実装中」だけ「終了」にする(規則は共有側の1か所)。
+  const base = rowStatusText(row.statusLabel, row.thread.machineState);
+  // 登録簿とノートの状態が食い違うときは、登録簿側の語も添える(2026-10-27 指摘6・12a)。
+  // どちらが正か決めない・表示を片方に寄せない(食い違いを見えるようにするだけ)。
+  const conflict = row.conflict?.registry != null ? `(登録簿:${row.conflict.registry})` : "";
+  return { text: `${base.text}${conflict}${stale}`, kind: base.kind };
 }
 
 function ThreadRow({

@@ -70,3 +70,30 @@ export function displayStatus(
   if (status === "ユーザー判断待ち") return { text: `判断待ち${stale}`, kind: "waiting" };
   return { text: `実装中${stale}`, kind: "running" };
 }
+
+/**
+ * 行末の状態の文字と色(一覧の行が使う規則の1か所。`shared/sidebar-rows.ts` の `rowStatusText` と
+ * 同じ判断。閉じたスレ= `closed` の「実装中」だけ「終了」にする。2026-10-27、通し検証B 指摘2)。
+ *
+ * `判断待ち` は機械状態が idle/closed でも残す(返事待ちの印。動いていないことは色で示す)。
+ */
+export function rowStatusText(label: string, machineState: string | null | undefined): StatusLabel {
+  if (label === "実装中" && statusKindOfMachine(machineState ?? null) === "closed") {
+    return { text: "終了", kind: "closed" };
+  }
+  return { text: label, kind: statusKindOfLabel(label) };
+}
+
+/** 行末の帯の色だけ(文字は呼び出し元の語彙のまま。行末の印の選び方に使う)。 */
+export function rowStatusKind(label: string, machineState: string | null | undefined): StatusKind {
+  return rowStatusText(label, machineState).kind;
+}
+
+/** ノート語彙の状態 → 帯の色(閉じたスレの「終了」も含めた1か所の定義)。 */
+function statusKindOfLabel(label: string): StatusKind {
+  if (label === "待機中") return "idle";
+  if (label === "完了" || label === "終了") return label === "完了" ? "done" : "closed";
+  if (label === "判断待ち" || label === "構想") return "waiting";
+  if (label === "確認待ち") return "done"; // 旧語彙のノート(移行中だけ)
+  return "running";
+}

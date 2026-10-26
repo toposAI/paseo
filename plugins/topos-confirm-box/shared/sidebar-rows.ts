@@ -12,6 +12,7 @@
 import { LOWER_TIER_STATUSES, UPPER_TIER_STATUSES } from "./notes.js";
 import type { NoteStatus, SidebarNote } from "./notes.js";
 import type { StateDotKind } from "./state-dot.js";
+import { rowStatusText } from "./thread-status-label.js";
 
 /**
  * 子スレ一覧側の status。登録簿の行は `shared/child-threads.ts` の3語彙、登録簿に載らない
@@ -39,6 +40,13 @@ export interface RowThread {
   summaryAcked?: boolean;
   /** 完了まとめのカードを作らない運用の行か(`ChildThread.nocard`)。表示の判定には使わない。 */
   nocard?: boolean;
+  /**
+   * 子を持つ親(子司令塔)の行か。この行は子の行の**グループ見出し**になる(`ChildThread.groupingParent`)。
+   * 上段に出すのは子の行より後ろ(見出しとして)で、子の行は「自分の見出しの先頭」に来る。
+   */
+  groupingParent?: boolean;
+  /** Paseo の機械状態(行末の「終了」の判定に使う。閉じたスレの「実装中」を出さない)。 */
+  machineState?: string | null;
 }
 
 export interface SidebarRowView<T> {
@@ -49,9 +57,16 @@ export interface SidebarRowView<T> {
    * 行右端の状態文字。`待機中` はノート語彙の外にある(登録簿に載らないスレの機械状態から導く。
    * ノート語彙を増やすと、ノートの frontmatter 側にまで語彙が漏れるため別扱いにする)。
    */
-  statusLabel: NoteStatus | "待機中";
+  statusLabel: NoteStatus | "待機中" | "終了";
   /** この行に対応する実装ノート(無ければ null)。 */
   note: SidebarNote | null;
+  /**
+   * 登録簿(スレ側)の状態と実装ノートの状態が食い違う行の、両方の表示語(2026-10-27、通し検証B 指摘6・
+   * 判断12a)。`note` はノートの語彙・`registry` はスレ側の語彙(ノートが引けないときは null)。
+   * **表示はノート(正)のまま変えない**。食い違いは別の項目で添えるだけ(黙って片方に寄せない)。
+   * 遡りノート(`zone: "later"`。整理のための参照用)は食い違いに数えない。
+   */
+  conflict: { note: NoteStatus; registry: NoteStatus | "待機中" | null } | null;
   /**
    * 行の左端の点の種類(純正 Paseo と同じ意味。`shared/state-dot.ts`)。
    * 材料が無い行は null(点を出さない)。
@@ -120,13 +135,14 @@ export function coordinatorIdSet(
  * 「司令塔」の値は `sidebar-section-mode.ts` が持つ(見出しの押下の通しテストと共有)。
  */
 export function visibleGroupKeyOf(
-  t: { agentId: string; parentAgentId: string | null; coordinator?: boolean },
+  t: { agentId: string; parentAgentId?: string | null; coordinator?: boolean },
   coordinatorIds: ReadonlySet<string>,
   coordinatorGroup: string,
 ): string {
+  const parent = t.parentAgentId ?? null;
   const underCoordinator =
-    t.coordinator === true || (t.parentAgentId !== null && coordinatorIds.has(t.parentAgentId));
-  return underCoordinator ? coordinatorGroup : (t.parentAgentId ?? "");
+    t.coordinator === true || (parent !== null && coordinatorIds.has(parent));
+  return underCoordinator ? coordinatorGroup : (parent ?? "");
 }
 
 /**
@@ -136,13 +152,96 @@ export function visibleGroupKeyOf(
  * `groupRows`(描画)・`onReorderGroup`・挿入時の整列がすべてこれを通す。
  */
 export function rowGroupKeyOf(
-  t: { agentId: string; parentAgentId: string | null; coordinator?: boolean; pinned?: boolean },
+  t: { agentId: string; parentAgentId?: string | null; coordinator?: boolean; pinned?: boolean },
   coordinatorIds: ReadonlySet<string>,
   coordinatorGroup: string,
   pinnedGroup: string,
 ): string {
   if (t.pinned === true && t.coordinator !== true) return pinnedGroup;
   return visibleGroupKeyOf(t, coordinatorIds, coordinatorGroup);
+}
+
+/** グループ割りに要る行の項目(画面の行と、テストの緩い行の両方を受ける)。 */
+export interface GroupableThread {
+  agentId: string;
+  parentAgentId?: string | null;
+  parentTitle?: string | null;
+  machineState?: string | null;
+  coordinator?: boolean;
+  pinned?: boolean;
+}
+
+/** 画面に出す1グループ(見出し + 行)。 */
+export interface ThreadGroup<T> {
+  key: string;
+  title: string;
+  rows: SidebarRowView<T>[];
+  /**
+   * 見出しの状態(子の親 = 子司令塔の行。`groupingParent`)。見出しの件数の隣に出す。
+   * 親の行が上段に無い(完了・ノート違い)ときは null(見出しは題名だけ)。
+   */
+  heading: SidebarRowView<T> | null;
+}
+
+/**
+ * サーバーの並び(グループ単位でまとまっている)を出現順のままグループへ割る。
+ *
+ * - 行のキーは `rowGroupKeyOf`(1か所の定義)。並べ替えの当たり判定と同じキーになる。
+ * - `groupingParent` の行(子司令塔)は**行として並べず**、自分の id のグループの見出しにする
+ *   (2026-10-27、通し検証B 指摘1)。子の行が上段に居ないグループは見出しだけ残らないので、
+ *   その行は普通の行として出す(判断待ちの見落としを作らない)。
+ * - ピン止め → 司令塔 → その他(出現順)。空のグループは出さない。
+ */
+export function groupThreadRows<T extends GroupableThread>(
+  rows: readonly SidebarRowView<T>[],
+  coordinatorIds: ReadonlySet<string>,
+  coordinatorGroup: string,
+  pinnedGroup: string,
+  pinnedLabel: string,
+  otherLabel: string,
+): ThreadGroup<T>[] {
+  const groups = new Map<string, ThreadGroup<T>>();
+  const fixedTitle = (key: string): string => {
+    if (key === coordinatorGroup) return "司令塔";
+    if (key === pinnedGroup) return pinnedLabel;
+    return "";
+  };
+  const ensure = (key: string, title: string): ThreadGroup<T> => {
+    let g = groups.get(key);
+    if (!g) {
+      g = { key, title: fixedTitle(key) || title, rows: [], heading: null };
+      groups.set(key, g);
+    }
+    return g;
+  };
+  const headings: SidebarRowView<T>[] = [];
+  for (const r of rows) {
+    if ((r.thread as { groupingParent?: boolean }).groupingParent === true) {
+      headings.push(r);
+      continue;
+    }
+    const key = rowGroupKeyOf(r.thread, coordinatorIds, coordinatorGroup, pinnedGroup);
+    ensure(key, r.thread.parentTitle || otherLabel).rows.push(r);
+  }
+  // 親は「自分の id のグループ(子の行の見出し)」があればその見出しになる。無ければ普通の行。
+  for (const h of headings) {
+    const own = groups.get(h.thread.agentId);
+    if (own) {
+      own.heading = h;
+      continue;
+    }
+    const key = rowGroupKeyOf(h.thread, coordinatorIds, coordinatorGroup, pinnedGroup);
+    ensure(key, h.thread.parentTitle || otherLabel).rows.push(h);
+  }
+  const ordered: ThreadGroup<T>[] = [];
+  for (const key of [pinnedGroup, coordinatorGroup]) {
+    const g = groups.get(key);
+    if (g) ordered.push(g);
+  }
+  for (const g of groups.values()) {
+    if (g.key !== pinnedGroup && g.key !== coordinatorGroup) ordered.push(g);
+  }
+  return ordered.filter((g) => g.rows.length > 0 || g.heading !== null);
 }
 
 /** グループ見出しを押したときの動作。 */
@@ -198,23 +297,51 @@ export function buildUpperRows<T extends RowThread>(
   for (const t of threads) {
     const note = implByThread.get(t.agentId) ?? null;
     const dot = dotOf(t);
+    const registryLabel = labelOfThreadStatus(t.status);
+    // 登録簿とノートの食い違い(12a)。遡りノート(参照用)は対象外。
+    const conflict =
+      note && note.zone !== "later" && note.status !== registryLabel
+        ? { note: note.status, registry: registryLabel }
+        : null;
     // 2026-10-26: 「完了待ち」(ユーザーの確認待ち)は廃止した。完了は確認を待たずに畳まれるので、
     // 行はノートの status(実装中・判断待ち)か、ノートの無い行の機械状態だけで決める。
     if (note) {
       if (!isUpperStatus(note.status)) continue;
-      rows.push({ thread: t, title: note.title || t.title, statusLabel: note.status, note, dot });
+      rows.push({
+        thread: t,
+        title: note.title || t.title,
+        // ノートが正。ただし閉じたスレの「実装中」は「終了」にする(表示の規則は1か所)
+        statusLabel: rowStatusText(note.status, t.machineState).text as
+          | NoteStatus
+          | "待機中"
+          | "終了",
+        note,
+        dot,
+        conflict,
+      });
       continue;
     }
-    if (!keepsWithoutNote(t.status)) continue;
+    // グループ見出しになる親(子司令塔)は、完了でも**残す**(子の行はこの見出しの下に並ぶため。
+    // 親の状態は見出しの帯に出す。2026-10-27 通し検証B 指摘1)。
+    if (!keepsWithoutNote(t.status) && t.groupingParent !== true) continue;
     rows.push({
       thread: t,
       title: t.title,
-      statusLabel: labelOfThreadStatus(t.status),
+      statusLabel: rowStatusText(registryLabel, t.machineState).text as
+        | NoteStatus
+        | "待機中"
+        | "終了",
       note: null,
       dot,
+      conflict: null,
     });
   }
-  return rows;
+  // 親の行は子の行より後ろへ。子の行は自分の見出しの**先頭**に来るので、`groupRows` が親の行に
+  // 見出しを付けると「見出し→子の行」の順で並ぶ(親が子の間や先頭に混ざる二重表示をしない)。
+  // 並びはそれ以外(pin 先頭・グループ単位の出現順)を保つ。
+  const isHeading = (r: SidebarRowView<T>) =>
+    (r.thread as { groupingParent?: boolean }).groupingParent === true;
+  return [...rows.filter((r) => !isHeading(r)), ...rows.filter(isHeading)];
 }
 
 /** 上段の行を状態ごとに数える(一覧の上の件数チップ用。下部バーの件数とは別集計)。司令塔は実装中に含めず別に数える。 */
@@ -223,13 +350,16 @@ export function countStatusLabels(rows: readonly { statusLabel: string; thread: 
   running: number;
   coordinator: number;
   idle: number;
+  /** 閉じたスレ(=「終了」と出している行)。`実装中` に混ぜない(2026-10-27、通し検証B 指摘2)。 */
+  closed: number;
 } {
-  const c = { judgment: 0, running: 0, coordinator: 0, idle: 0 };
+  const c = { judgment: 0, running: 0, coordinator: 0, idle: 0, closed: 0 };
   for (const r of rows) {
     if (r.thread.coordinator === true) c.coordinator += 1;
     else if (r.statusLabel === "判断待ち") c.judgment += 1;
     else if (r.statusLabel === "実装中") c.running += 1;
     else if (r.statusLabel === "待機中") c.idle += 1;
+    else if (r.statusLabel === "終了") c.closed += 1;
   }
   return c;
 }
