@@ -34,9 +34,10 @@ test("PC 幅では「スレを開く」に placement: right を渡す", () => {
 
 test("右カラムの指定は幅(wide)で切り替え、狭い幅では従来どおり遷移する", () => {
   const body = openPaneThreadBody(confirmBoxSource);
-  assert.match(body, /\bwide\b/, "幅の判定(wide)で分岐する");
-  assert.doesNotMatch(body, /placement:\s*"right"\s*[},]/, "無条件に右カラムを指定しない");
-  assert.match(body, /wide\s*&&\s*!?promotes\s*\?/, "wide のときだけ右カラムを足す");
+  assert.match(body, /wide\s*\?\s*\{\s*placement:\s*"right"/, "wide のときだけ右カラムを足す");
+  // 同じ相手なら主ペイン化(畳む)は、実際に開いた宛先で `open-pane-thread.ts` が判定する
+  // (URL の相手から先に決めると、宛先が振り替わったときに誤って畳む)。
+  assert.doesNotMatch(body, /promotes/, "呼び出し側では先に畳むと決めない");
 });
 
 test("依存配列に幅の判定を入れて、幅が変わったら作り直す", () => {

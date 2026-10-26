@@ -57,6 +57,25 @@ test("狭い幅(右カラム指定なし)では畳む判定をしない", async 
   assert.equal(folded, 0);
 });
 
+test("投函元が無く次点(この欄に答えるスレ)を開くときも、ペインの相手と同じなら畳む", async () => {
+  // 畳むかは URL の相手ではなく**実際に開いた宛先**で決める。ペインが親 B を出していて、開く宛先が
+  // 決まらず次点の B を開くなら、右に B をもう1枚並べず主ペインにする。
+  const calls: unknown[] = [];
+  let folded = 0;
+  await openThreadInPane({
+    serverId,
+    target: null,
+    destination: "B",
+    context: { placement: "right", currentPane: { kind: "thread", id: "B" } },
+    open: async (input) => void calls.push(input),
+    onFold: () => {
+      folded += 1;
+    },
+  });
+  assert.deepEqual(calls, [{ agentId: "B" }]);
+  assert.equal(folded, 1, "開いた宛先がペインと同じなら畳む");
+});
+
 test("カードは「同じカード」ではなく「同じ相手を出しているか」で判定する", () => {
   const card = { kind: "card", id: "c1" } as const;
   assert.equal(showsSameThread(card, "A", "A"), true);

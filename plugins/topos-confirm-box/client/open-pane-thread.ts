@@ -116,7 +116,8 @@ export async function openThreadInPane(input: {
   /** 決まった宛先を開く。確認箱のペインが同じ相手を出しているなら主ペイン化する。 */
   const openThread = async (agentId: string) => {
     // 右に同じ相手が2枚並ばないよう、確認箱のペインを外して主ペインで開く(2026-10-27)。
-    if (context.placement && showsSameThread(context.currentPane, agentId, destination)) {
+    const samePane = showsSameThread(context.currentPane, agentId, destination);
+    if (context.placement && samePane) {
       onFold?.();
       await open({ agentId });
       return;

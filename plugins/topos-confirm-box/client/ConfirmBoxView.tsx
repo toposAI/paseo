@@ -37,7 +37,7 @@ import { NotificationsView } from "./NotificationsView.js";
 import { BellIcon, BugIcon, InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import { CardChatPane } from "./CardChatPane.js";
-import { openThreadInPane, showsSameThread } from "./open-pane-thread.js";
+import { openThreadInPane } from "./open-pane-thread.js";
 import { resolveOpenThreadId } from "./thread-target.js";
 import { useCoordinatorTargets } from "./useCoordinatorTargets.js";
 import { shouldSwitchPaneOnCardPress } from "../shared/card-pane.js";
@@ -934,9 +934,6 @@ function usePaneOpenThread({
   const notice = useCallback((text: string) => void onNotice(text), [onNotice]);
   return useMemo(() => {
     if ((!agentId && !destination) || !openAgent) return undefined;
-    // 同じ相手を主ペインで開き直す (=確認箱のペインを外す) か。右に同じ相手を2枚並べない。
-    const promotes =
-      wide && showsSameThread(currentPane, agentId ?? destination ?? "", destination);
     const input = {
       serverId: hosts.find((h) => h.status === "online")?.serverId ?? "",
       target: agentId,
@@ -944,7 +941,9 @@ function usePaneOpenThread({
       ...(destination && destination !== agentId ? { destination } : {}),
       context: {
         currentPane,
-        ...(wide && !promotes ? { placement: "right" as const } : {}),
+        // 同じ相手なら主ペイン化するかは、**実際に開いた後**の宛先で判定する(`open-pane-thread.ts`)。
+        // ここで URL の相手から先に決めると、宛先が振り替わったときに誤って畳む。
+        ...(wide ? { placement: "right" as const } : {}),
         title: item !== null ? (item.subject ?? threadTitle) : null,
         coordinatorId: coordinators?.agentId ?? null,
         hubIds: coordinators?.hubIds,
