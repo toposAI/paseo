@@ -123,6 +123,11 @@ export function resolveThreadTarget(input: ThreadTargetInput): ThreadTargetResul
 
 /** 決まった宛先を開く。振り替えた/開けないときは理由を1行だけコンソールにも残す(実画面の切り分け用)。 */
 export function reportThreadTarget(result: ThreadTargetResult): void {
-  if (result.reason === "resolved") return;
+  // `resolved` でも残す: 一覧には居るがアプリが置き場所を決められず全画面へ落ちる経路(2026-10-27 実測)の
+  // 切り分けに「宛先が解決された」こと自体が要る。
+  if (result.reason === "resolved") {
+    console.info("[Plugins] Confirm box thread target: resolved");
+    return;
+  }
   console.warn(`[Plugins] Confirm box thread target: ${result.reason}`);
 }

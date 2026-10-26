@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 // クライアント側の純関数(`client/` は描画を持たない .ts だけをここから検査する)。
-import { resolveThreadTarget } from "../client/thread-target.js";
+import { reportThreadTarget, resolveThreadTarget } from "../client/thread-target.js";
 
 const GENERAL_DEAD = "1800e2f7-63a5-40b7-9f5f-52e0ba24bb49";
 const BACKOFFICE = "b09d1682-3e1f-49de-a1ce-d55b78431bc1";
@@ -106,5 +106,27 @@ describe("resolveThreadTarget", () => {
     });
     assert.equal(r.agentId, BACKOFFICE);
     assert.equal(r.reason, "general-coordinator");
+  });
+});
+
+describe("reportThreadTarget", () => {
+  test("振り替え・全画面は warn、そのまま開く場合は info を1行だけ出す", () => {
+    const calls: string[] = [];
+    const saved = { warn: console.warn, info: console.info };
+    console.warn = (m?: unknown) => void calls.push(`w:${String(m)}`);
+    console.info = (m?: unknown) => void calls.push(`i:${String(m)}`);
+    try {
+      reportThreadTarget({ agentId: BACKOFFICE, reason: "resolved", notice: null });
+      reportThreadTarget({ agentId: BACKOFFICE, reason: "live-coordinator", notice: "x" });
+      reportThreadTarget({ agentId: null, reason: "no-live-thread", notice: "x" });
+    } finally {
+      console.warn = saved.warn;
+      console.info = saved.info;
+    }
+    assert.deepEqual(calls, [
+      "i:[Plugins] Confirm box thread target: resolved",
+      "w:[Plugins] Confirm box thread target: live-coordinator",
+      "w:[Plugins] Confirm box thread target: no-live-thread",
+    ]);
   });
 });
