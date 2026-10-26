@@ -233,6 +233,66 @@ describe("planOpenAgentInRightColumn", () => {
     );
     expect(plan?.paneId).toBe("right");
   });
+
+  it("右側が同じ向きの横分割で入れ子になっていても、いちばん右を選ぶ", () => {
+    const pane = (id: string) => ({
+      kind: "pane" as const,
+      pane: { id, tabIds: [], focusedTabId: null },
+    });
+    const layout: WorkspaceLayout = {
+      root: {
+        kind: "group",
+        group: {
+          id: "outer",
+          direction: "horizontal",
+          children: [
+            pane("left"),
+            {
+              kind: "group",
+              group: {
+                id: "inner",
+                direction: "horizontal",
+                children: [pane("mid"), pane("far-right")],
+                sizes: [0.5, 0.5],
+              },
+            },
+          ],
+          sizes: [0.3, 0.7],
+        },
+      },
+      focusedPaneId: "left",
+    };
+    const plan = planOpenAgentInRightColumn(
+      { serverId: SERVER_ID, agentId: "a" },
+      baseDeps({ readLayout: () => layout }),
+    );
+    expect(plan?.paneId).toBe("far-right");
+  });
+
+  it("右側が全部隠れていれば、左のペインへは開かず新しく右カラムを作らせる", () => {
+    const pane = (id: string, hidden?: boolean) => ({
+      kind: "pane" as const,
+      pane: { id, tabIds: [], focusedTabId: null, ...(hidden ? { hidden } : {}) },
+    });
+    const layout: WorkspaceLayout = {
+      root: {
+        kind: "group",
+        group: {
+          id: "outer",
+          direction: "horizontal",
+          children: [pane("left"), pane("old-side", true)],
+          sizes: [0.8, 0.2],
+        },
+      },
+      focusedPaneId: "left",
+    };
+    const plan = planOpenAgentInRightColumn(
+      { serverId: SERVER_ID, agentId: "a" },
+      baseDeps({ readLayout: () => layout, readSidePaneId: () => "old-side" }),
+    );
+    expect(plan?.paneId).toBeNull();
+    expect(plan?.paneId).not.toBe("left");
+  });
 });
 
 describe("openAgentInRightColumn", () => {

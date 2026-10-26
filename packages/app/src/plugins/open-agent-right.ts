@@ -36,25 +36,42 @@ export interface OpenAgentRightDeps {
  * 右端のペイン。左右の区別は水平分割でしか付かないので、一番上の分割が縦なら
  * `null`(=右カラムはまだ無い)。水平分割の右側がさらに縦に積まれている場合は、
  * その中の先頭のペインを返す(どの段も x 座標は同じ)。
+ *
+ * 一番左の子は見ない。そこまで右へ戻るのは「画面のほぼ全部が隠れていて、
+ * 残っているのが元のメインペインだけ」という場合で、そこへ開くと押した人の
+ * 作業中のペインを置き換えてしまう。そのときは `null` を返して右カラムを作らせる。
  */
 function rightmostPaneId(node: SplitNode, excludePaneId: string): string | null {
   if (node.kind === "pane") return visiblePaneId(node.pane, excludePaneId);
   // 一番上が横並びでなければ「最も右」という単位が無い(上下のペインは同じ x)。
   if (node.group.direction !== "horizontal") return null;
   const { children } = node.group;
-  for (let i = children.length - 1; i >= 0; i -= 1) {
+  for (let i = children.length - 1; i >= 1; i -= 1) {
     const child = children[i];
-    const found = child ? firstVisiblePaneId(child, excludePaneId) : null;
+    const found = child ? deepestRightPaneId(child, excludePaneId) : null;
     if (found) return found;
   }
   return null;
 }
 
-/** 右側の子がさらに上下に積まれている場合は、その中の先頭の可視ペインを使う。 */
-function firstVisiblePaneId(node: SplitNode, excludePaneId: string): string | null {
+/**
+ * 右側の子の中で、いちばん右にある可視ペイン。右側が縦積みなら先頭(=一番上)、
+ * 横積みなら末尾(=一番右)。同じ向きの入れ子は本来作られないが、保存された
+ * レイアウトに残っていても右端を取り違えないよう向きで辿る。
+ */
+function deepestRightPaneId(node: SplitNode, excludePaneId: string): string | null {
   if (node.kind === "pane") return visiblePaneId(node.pane, excludePaneId);
-  for (const child of node.group.children) {
-    const found = firstVisiblePaneId(child, excludePaneId);
+  const { children, direction } = node.group;
+  if (direction === "horizontal") {
+    for (let i = children.length - 1; i >= 0; i -= 1) {
+      const child = children[i];
+      const found = child ? deepestRightPaneId(child, excludePaneId) : null;
+      if (found) return found;
+    }
+    return null;
+  }
+  for (const child of children) {
+    const found = deepestRightPaneId(child, excludePaneId);
     if (found) return found;
   }
   return null;
@@ -95,7 +112,11 @@ export function planOpenAgentInRightColumn(
   // ここで除外しないとホバー表示したエクスプローラが右端と誤認される。
   const explorerPaneId = deps.readExplorerSidebarPaneId(workspaceKey) ?? EXPLORER_SIDEBAR_PANE_ID;
   const sidePaneId = deps.readSidePaneId(workspaceKey) ?? null;
-  const panes = collectAllPanes(layout.root).filter((pane) => pane.id !== explorerPaneId);
+  // 隠れているペインは数に入れない。右側が全部隠れているだけなのを「右側がある」と
+  // 誤認して左のペインへ開くと、押した人の作業中のペインが置き換わる。
+  const panes = collectAllPanes(layout.root).filter(
+    (pane) => pane.id !== explorerPaneId && pane.hidden !== true,
+  );
 
   // 隠れているペイン(旧エクスプローラ等)は使い回さない。右端の判定と同じ扱いに揃える。
   if (sidePaneId && panes.some((pane) => pane.id === sidePaneId && pane.hidden !== true)) {
