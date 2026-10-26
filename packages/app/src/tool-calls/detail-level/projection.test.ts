@@ -227,6 +227,18 @@ describe("tool call detail-level projection", () => {
     expect(grouped.historyGroupUpdatesByHostId.get("1")?.run.items).toEqual([lone, tool]);
   });
 
+  it("gives a lone tool call the same badge as the same call inside a run", () => {
+    // A one-item run keeps the item as its host, so a lone call is drawn by the badge too:
+    // it reads as one row until pressed, instead of being the only bare row in a thread.
+    const lone = project({
+      level: "overview",
+      tail: [toolCall("1", { type: "shell", command: "ls" })],
+    });
+
+    expect(lone.tail.map((item) => item.id)).toEqual(["1"]);
+    expect(lone.groupsByHostId.get("1")?.run.items).toHaveLength(1);
+  });
+
   it("updates a history-hosted lone thought even when history already has a group", () => {
     // The revision must not depend on the history's group map being empty: a row that was
     // an ordinary thought can only become a host while the history already has badges.
