@@ -88,6 +88,9 @@ export function applyWindowUnread(
   const unread = isUnreadWindow(agent);
   return rows.map((t) => {
     if (!t.agentId.startsWith(key)) return t;
+    // 承認待ち(橙)と失敗(赤)は別の軸。窓口が質問で止まっている間は触らない
+    // (橙は判断待ち専用という決定を、この上書きで壊さない)。
+    if (t.stateDot === "needs_input" || t.stateDot === "failed") return t;
     const status: ChildThread["status"] = t.status === "完了" ? t.status : "待機中";
     const stateDot = unread ? ("attention" as const) : (t.stateDot ?? null);
     if (t.unread === unread && t.status === status && t.stateDot === stateDot) return t;

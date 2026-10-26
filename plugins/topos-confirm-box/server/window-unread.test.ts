@@ -130,6 +130,17 @@ test("報告を書いている最中(running)と、窓口が一覧に居ない�
   assert.equal(applyWindowUnread(rows, [{ id: WINDOW, status: "idle" }], null)[0], rows[0]);
 });
 
+test("承認待ち(橙)と失敗(赤)の行は触らない(橙は判断待ち専用を壊さない)", () => {
+  const rows = [row(WINDOW, { status: "ユーザー判断待ち", stateDot: "needs_input" })];
+  const out = applyWindowUnread(rows, [{ id: WINDOW, status: "idle" }], "03aeafd");
+  assert.equal(out[0], rows[0]);
+  const failed = [row(WINDOW, { stateDot: "failed" })];
+  assert.equal(
+    applyWindowUnread(failed, [{ id: WINDOW, status: "idle" }], "03aeafd")[0],
+    failed[0],
+  );
+});
+
 test("完了の行は「待機中」へ下げない(終わった窓口を動いているようにも見せない)", () => {
   const [done] = applyWindowUnread(
     [row(WINDOW, { status: "完了" })],
