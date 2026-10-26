@@ -190,6 +190,56 @@ test("指摘5: 壊れた文字列の updatedAt は0に落とし、落ちない",
   assert.equal(result.rows[0]?.updatedAt, 0);
 });
 
+// ---- 2026-10-27 実測: 完了した見出しの親が「待機中」で復活する ----
+
+test("登録簿に載っているスレは、行に出ていなくても未登録として足さない(12b4eab)", () => {
+  // 実測の形: 親(判断窓口スレ2本を作る)は登録簿で完了・自身は畳み済み。直下の常駐の子は生きている。
+  // 子の行がある間は `parents` で読み飛ばされるが、子が全部畳まれると行も消え、`parents` からも外れる。
+  // その時に機械状態(idle)だけで「待機中」の行が足されていた(完了の自己申告が消える)。
+  const childRow = row("winb", { parentAgentId: "parent" });
+  const withChild = mergeUnregisteredThreads(
+    [childRow],
+    [{ id: "parent", title: "判断窓口スレ2本を作る", status: "idle" }],
+    [],
+    new Set(),
+    new Set(),
+    new Set(["parent", "winb"]),
+  );
+  assert.deepEqual(
+    withChild.rows.map((t) => t.agentId),
+    ["winb"],
+  );
+  assert.equal(withChild.skipped.parent, 1);
+
+  // 子が全部畳まれ、行にも親にも出てこない形。ここが本題(登録簿に載っているので足さない)。
+  const noChild = mergeUnregisteredThreads(
+    [],
+    [{ id: "parent", title: "判断窓口スレ2本を作る", status: "idle" }],
+    [],
+    new Set(),
+    new Set(),
+    new Set(["parent"]),
+  );
+  assert.deepEqual(noChild.rows, []);
+  assert.equal(noChild.skipped.inRegistry, 1);
+});
+
+test("登録簿に載っている id でも、ピン止めした親は従来どおり行として拾う", () => {
+  // ピン止めした親は見出しでなく普通の行として返る(`server/child-threads.ts`)。行に無ければ足す。
+  const result = mergeUnregisteredThreads(
+    [],
+    [{ id: "pinned-parent", title: "ピン止めした親", status: "idle" }],
+    [],
+    new Set(["pinned-parent"]),
+    new Set(),
+    new Set(["other"]),
+  );
+  assert.deepEqual(
+    result.rows.map((t) => t.agentId),
+    ["pinned-parent"],
+  );
+});
+
 test("指摘4: 登録簿で畳み済み(archived)のスレは、一覧に残っていても未登録の行として足さない", () => {
   // agent のアーカイブが失敗し、Paseo 側にだけ残っているもの。登録簿 archivable() が見失っている
   // その1本を `retryListedArchivedIds` で拾って渡す。

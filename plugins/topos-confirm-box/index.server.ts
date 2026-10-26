@@ -75,6 +75,7 @@ import {
   readChildThreadOrder,
   readChildThreadPins,
   readArchivedChildThreadIds,
+  readKnownChildThreadIds,
   readChildThreads,
   writeChildThreadOrder,
   writeChildThreadPin,
@@ -298,6 +299,9 @@ export default function contribute(server: PluginServerContext) {
             // 畳み済みなのに Paseo に残っている1本を「未登録の新しいスレ」として復活させない
             // (2026-10-27 通し検証B 指摘4。畳み直しは登録簿の `retry_listed_archives` が行う)
             readArchivedChildThreadIds(dir),
+            // 登録簿に載っているスレは、行に出ていなくても「未登録」ではない(2026-10-27 実測の
+            // `12b4eab`。畳み済みの自分+見出しになる常駐の子の組は下の2つの弾きをすり抜けていた)
+            readKnownChildThreadIds(dir),
           ).rows;
         }
       } catch {

@@ -230,6 +230,33 @@ export function readArchivedChildThreadIds(dir: string): Set<string> {
   }
 }
 
+/**
+ * 登録簿(`child_threads.json`)に載っている agent id の**全部**(畳み済みも、子の見出しになった親も含む)。
+ *
+ * なぜ要るか(2026-10-27 実測): 畳み済みの自分・未アーカイブの常駐の子(見出しになる)の組は、
+ * 自身が行に出ず親としても読み飛ばされるため、Paseo の一覧から機械状態だけで「待機中」の行を
+ * 足していた(`12b4eab`)。登録簿に載っている=未登録ではないので、行に無くても足さない。
+ * `readArchivedChildThreadIds` は畳み済みの再取り込み防止だけを見るので、こちらは別に読む。
+ * 読めなければ空(取り込みを止めない=消す側に倒さない)。
+ */
+export function readKnownChildThreadIds(dir: string): Set<string> {
+  try {
+    const raw: unknown = JSON.parse(fs.readFileSync(path.join(dir, CHILD_THREADS_FILE), "utf8"));
+    const list =
+      raw && typeof raw === "object" ? (raw as { threads?: unknown }).threads : undefined;
+    if (!Array.isArray(list)) return new Set();
+    const ids = new Set<string>();
+    for (const r of list) {
+      if (!r || typeof r !== "object") continue;
+      const id = str((r as Record<string, unknown>).agent_id).slice(0, 200);
+      if (id) ids.add(id);
+    }
+    return ids;
+  } catch {
+    return new Set();
+  }
+}
+
 /** ピン止めの保存が読めなかったときの理由(存在しないだけなら null)。一覧を止めずに記録だけ返す。 */
 export function childThreadPinsReadError(dir: string): string | null {
   const file = path.join(dir, CHILD_THREAD_PINS_FILE);

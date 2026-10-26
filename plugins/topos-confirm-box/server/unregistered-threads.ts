@@ -119,7 +119,9 @@ export type SkippedReason =
   /** 子の見出しになっている親(`groupingParent`)。行として足さない(2026-10-27 指摘1)。 */
   | "parent"
   /** 登録簿で畳み済み(archived)なのに Paseo 側に残っている(アーカイブ失敗の再試行待ち。指摘4)。 */
-  | "archivedRegistry";
+  | "archivedRegistry"
+  /** 登録簿に載っている(行に出ていなくても未登録ではない。2026-10-27 実測: `12b4eab`)。 */
+  | "inRegistry";
 
 export interface UnregisteredThreads {
   /** 登録簿の行の後ろに、未登録のスレを足したもの(登録簿の行自体は変えない)。 */
@@ -143,6 +145,11 @@ export function mergeUnregisteredThreads(
    * (`retryListedArchivedIds`。アーカイブ失敗の再試行前に、行として復活させない)。
    */
   registryArchivedIds: ReadonlySet<string> = new Set(),
+  /**
+   * 登録簿に載っている agent id の**全部**(畳み済み・子の見出しになった親も含む。`readKnownChildThreadIds`)。
+   * ここに入っているスレは「未登録」ではないので、行に無くても足さない(2026-10-27 実測: `12b4eab`)。
+   */
+  registryKnownIds: ReadonlySet<string> = new Set(),
 ): UnregisteredThreads {
   const listed = new Set(rows.map((t) => t.agentId));
   const coordinators = new Set(coordinatorIds);
@@ -164,6 +171,7 @@ export function mergeUnregisteredThreads(
     duplicate: 0,
     parent: 0,
     archivedRegistry: 0,
+    inRegistry: 0,
   };
   const added: ChildThread[] = [];
   const seen = new Set<string>(listed);
@@ -184,6 +192,14 @@ export function mergeUnregisteredThreads(
     }
     if (registryArchivedIds.has(agentId)) {
       skipped.archivedRegistry += 1;
+      continue;
+    }
+    // 登録簿に載っているスレは、行に出ていなくても「未登録の新しいスレ」ではない(2026-10-27 実測の
+    // `12b4eab`「判断窓口スレ2本を作る」: 本人は `[STATUS] 完了`・台帳も完了・自身はアーカイブ済みだが、
+    // 直下の常駐の子(窓口B・判断窓口A)が未アーカイブなので親として読み飛ばされ、Paseo 側は idle のまま
+    // 残っているため、機械状態だけで「待機中」の行が足されていた。完了の自己申告を失い、直す手段も無い)。
+    if (registryKnownIds.has(agentId)) {
+      skipped.inRegistry += 1;
       continue;
     }
     if (seen.has(agentId)) {
