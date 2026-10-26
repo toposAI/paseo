@@ -108,7 +108,29 @@ export const FEEDBACK_TEXT_MAX = 4000;
 export const FEEDBACK_TITLE_MAX = 200;
 export const FEEDBACK_REPLY_MAX = 2000;
 
-/** 未対応(=まだ誰も着手していない)報告の件数。バッジに使う。 */
+/** 未対応(=まだ誰も着手していない)報告の件数。一覧の見出し(「うち受付N件」)に使う。 */
 export function countNewReports(reports: readonly FeedbackReport[]): number {
   return reports.filter((r) => r.status === "new").length;
+}
+
+/** 家族版の報告ステータスのうち「終わった」もの(`archived` と同じ意味)。 */
+export const FEEDBACK_DONE_STATUSES = ["done", "rejected"] as const;
+
+/**
+ * その報告が終わっているか。`progress`(サーバーが台帳から導出)を正とし、
+ * 台帳が無い古い応答だけ status で代用する。
+ */
+export function isReportComplete(r: FeedbackReport): boolean {
+  if (r.progress) return r.progress.archived;
+  return (FEEDBACK_DONE_STATUSES as readonly string[]).includes(r.status);
+}
+
+/**
+ * バッジ=**まだ終わっていない**報告の数(2026-10-26 ユーザー判断
+ * 「完了してないバグ報告の数を表示して」)。完了(対応済み・見送り)は数えない。
+ * 一覧は「完了だが家族が返信をまだ読んでいない」行だけ既定でも残すが、それは
+ * 管理者の仕事が残っているわけではないのでバッジには数えない(数えるのは未完了だけ)。
+ */
+export function countOpenReports(reports: readonly FeedbackReport[]): number {
+  return reports.filter((r) => !isReportComplete(r)).length;
 }

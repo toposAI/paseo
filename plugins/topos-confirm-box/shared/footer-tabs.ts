@@ -46,7 +46,8 @@ export function confirmBoxTabs<T extends { id: string }>(all: readonly T[]): rea
 }
 
 /**
- * 確認箱の「バグ報告」タブのバッジ=未対応のバグ報告の数。
+ * 確認箱の「バグ報告」タブのバッジ=**まだ終わっていない**報告の数(定義は
+ * `shared/feedback.ts` の `countOpenReports`)。
  * 通知の未読は下部バーに出さない(箱の中の通知タブにバッジが出る)。
  */
 export function bugBadgeCount(counts: Partial<Record<string, number>>): number {
