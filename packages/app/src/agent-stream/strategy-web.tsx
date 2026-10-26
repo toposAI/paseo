@@ -708,7 +708,10 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
       onReadingPositionChange(null);
       return;
     }
-    onReadingPositionChange(readingAnchor.getReadingRowId(scrollContainer.scrollTop));
+    onReadingPositionChange(
+      readingAnchor.getReadingRowId(scrollContainer.scrollTop),
+      readingAnchor.getLastFullyVisibleRowId(scrollContainer.scrollTop, scrollContainer.clientHeight),
+    );
   });
 
   const updateScrollMetrics = useCallback(() => {
