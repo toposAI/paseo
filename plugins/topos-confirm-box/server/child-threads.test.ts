@@ -87,6 +87,20 @@ test("実カードの行は nocard=false のまま(表示・件数は従来ど�
   assert.equal(isCardDone(t), true);
 });
 
+test("目印の id が ack 済みに入っていても確認済みにしない・nocard 未指定はカードあり扱い", () => {
+  // 目印は箱の項目ではないので、ack イベントに同じ文字列があっても「確認済み」にしない。
+  const [t] = normalizeChildThreads(
+    { threads: [row({ status: "完了", summary_item_id: "nocard:abc" })] },
+    [],
+    new Set(["nocard:abc"]),
+  );
+  assert.equal(t.summaryAcked, false);
+  // 古い形(契約に nocard が無い)は「カードがある」として従来どおり扱う(後方互換)。
+  assert.equal(isCardDone({ status: "完了" }), true);
+  assert.equal(isCardDone({ status: "完了", nocard: true }), false);
+  assert.equal(isCardDone({ status: "実装中" }), false);
+});
+
 test("バッジの完了待ち件数はカードの無い行(nocard)を数えない", () => {
   const threads = normalizeChildThreads(
     {

@@ -346,9 +346,16 @@ test("nocard 行はノートの状態をそのまま使う(実装中は実装中
   const impl = new Map([
     ["work", note({ path: "/v/w.md", status: "実装中", title: "ノートW" })],
     ["judge", note({ path: "/v/j.md", status: "判断待ち", title: "ノートJ" })],
+    // 子スレが完了すると実装ノートは「確認待ち」に写される(一番よく起きる形)。
+    // これはノート自身の状態なので、カードの有無に関わらず上段に「確認待ち」で残す。
+    ["check", note({ path: "/v/c.md", status: "確認待ち", title: "ノートC" })],
   ]);
   const rows = buildUpperRows(
-    [doneUnconfirmed("work", { nocard: true }), doneUnconfirmed("judge", { nocard: true })],
+    [
+      doneUnconfirmed("work", { nocard: true }),
+      doneUnconfirmed("judge", { nocard: true }),
+      doneUnconfirmed("check", { nocard: true }),
+    ],
     impl,
   );
   assert.deepEqual(
@@ -356,6 +363,7 @@ test("nocard 行はノートの状態をそのまま使う(実装中は実装中
     [
       ["work", "実装中"],
       ["judge", "判断待ち"],
+      ["check", "確認待ち"],
     ],
   );
   const counts = countStatusLabels(rows);
