@@ -4,6 +4,7 @@ import {
   EXPLORER_SIDEBAR_PANE_ID,
   collectAllPanes,
   type SplitNode,
+  type SplitPane,
 } from "@/stores/workspace-layout-actions";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
@@ -37,20 +38,33 @@ export interface OpenAgentRightDeps {
  * その中の先頭のペインを返す(どの段も x 座標は同じ)。
  */
 function rightmostPaneId(node: SplitNode, excludePaneId: string): string | null {
-  if (node.kind === "pane") {
-    const { pane } = node;
-    return pane.hidden === true || pane.id === excludePaneId ? null : pane.id;
-  }
-  // 横並びでなければ「最も右のペイン」という単位が無い(上下に積まれたペインは同じ x)。
+  if (node.kind === "pane") return visiblePaneId(node.pane, excludePaneId);
+  // 一番上が横並びでなければ「最も右」という単位が無い(上下のペインは同じ x)。
   if (node.group.direction !== "horizontal") return null;
   const { children } = node.group;
   for (let i = children.length - 1; i >= 0; i -= 1) {
     const child = children[i];
-    const found = child ? rightmostPaneId(child, excludePaneId) : null;
+    const found = child ? firstVisiblePaneId(child, excludePaneId) : null;
     if (found) return found;
   }
   return null;
 }
+
+/** 右側の子がさらに上下に積まれている場合は、その中の先頭の可視ペインを使う。 */
+function firstVisiblePaneId(node: SplitNode, excludePaneId: string): string | null {
+  if (node.kind === "pane") return visiblePaneId(node.pane, excludePaneId);
+  for (const child of node.group.children) {
+    const found = firstVisiblePaneId(child, excludePaneId);
+    if (found) return found;
+  }
+  return null;
+}
+
+function visiblePaneId(pane: SplitPane, excludePaneId: string): string | null {
+  return pane.hidden === true || pane.id === excludePaneId ? null : pane.id;
+}
+
+let warnedBeforeHydration = false;
 
 /**
  * エージェントを右カラムで開くときの置き場所を決める。2026-10-25、確認箱の「スレを開く」用。
@@ -83,7 +97,8 @@ export function planOpenAgentInRightColumn(
   const sidePaneId = deps.readSidePaneId(workspaceKey) ?? null;
   const panes = collectAllPanes(layout.root).filter((pane) => pane.id !== explorerPaneId);
 
-  if (sidePaneId && panes.some((pane) => pane.id === sidePaneId)) {
+  // 隠れているペイン(旧エクスプローラ等)は使い回さない。右端の判定と同じ扱いに揃える。
+  if (sidePaneId && panes.some((pane) => pane.id === sidePaneId && pane.hidden !== true)) {
     return { workspaceId, workspaceKey, paneId: sidePaneId };
   }
   // ペインが1枚(エクスプローラを除く)なら右側がまだ無い。そのときは呼び出し側に作らせる。
@@ -102,7 +117,14 @@ export function planOpenAgentInRightColumn(
 export function openAgentInRightColumn(input: { serverId: string; agentId: string }): boolean {
   // 未読み込みだと `navigateToWorkspace` が配置を捨てて通常遷移に落ちる。ここで書き込むと
   // 空の右カラムだけが残るので、先に false を返して呼び出し側の通常遷移に任せる。
-  if (!useWorkspaceLayoutStore.persist.hasHydrated()) return false;
+  if (!useWorkspaceLayoutStore.persist.hasHydrated()) {
+    // 読み込みが失敗したまま戻らないと右カラムが黙って効かなくなるので、一度だけ記録する。
+    if (!warnedBeforeHydration) {
+      warnedBeforeHydration = true;
+      console.warn("[Plugins] Layout not loaded yet; opening agents without the right column");
+    }
+    return false;
+  }
   const sessions = useSessionStore.getState().sessions;
   const store = useWorkspaceLayoutStore.getState();
   const plan = planOpenAgentInRightColumn(input, {

@@ -173,6 +173,66 @@ describe("planOpenAgentInRightColumn", () => {
     );
     expect(plan?.paneId).toBeNull();
   });
+
+  it("右側が上下に積まれていても、左のペインへは戻らない(右側の先頭を使う)", () => {
+    const pane = (id: string) => ({
+      kind: "pane" as const,
+      pane: { id, tabIds: [], focusedTabId: null },
+    });
+    const layout: WorkspaceLayout = {
+      root: {
+        kind: "group",
+        group: {
+          id: "outer",
+          direction: "horizontal",
+          children: [
+            pane("left"),
+            {
+              kind: "group",
+              group: {
+                id: "right-stack",
+                direction: "vertical",
+                children: [pane("right-top"), pane("right-bottom")],
+                sizes: [0.5, 0.5],
+              },
+            },
+          ],
+          sizes: [0.5, 0.5],
+        },
+      },
+      focusedPaneId: "left",
+    };
+    const plan = planOpenAgentInRightColumn(
+      { serverId: SERVER_ID, agentId: "a" },
+      baseDeps({ readLayout: () => layout }),
+    );
+    expect(plan?.paneId).toBe("right-top");
+    expect(plan?.paneId).not.toBe("left");
+  });
+
+  it("隠れたサイドペインの記録は使い回さない", () => {
+    const pane = (id: string, hidden?: boolean) => ({
+      kind: "pane" as const,
+      pane: { id, tabIds: [], focusedTabId: null, ...(hidden ? { hidden } : {}) },
+    });
+    const layout: WorkspaceLayout = {
+      root: {
+        kind: "group",
+        group: {
+          id: "outer",
+          direction: "horizontal",
+          children: [pane("left"), pane("old-side", true), pane("right")],
+          sizes: [0.4, 0.2, 0.4],
+        },
+      },
+      focusedPaneId: "left",
+    };
+    const plan = planOpenAgentInRightColumn(
+      { serverId: SERVER_ID, agentId: "a" },
+      baseDeps({ readLayout: () => layout, readSidePaneId: () => "old-side" }),
+    );
+    expect(plan?.paneId).toBe("right");
+  });
 });
 
 describe("openAgentInRightColumn", () => {
