@@ -91,7 +91,11 @@ export function applyWindowUnread(
     // 承認待ち(橙)と失敗(赤)は別の軸。窓口が質問で止まっている間は触らない
     // (橙は判断待ち専用という決定を、この上書きで壊さない)。
     if (t.stateDot === "needs_input" || t.stateDot === "failed") return t;
-    const status: ChildThread["status"] = t.status === "完了" ? t.status : "待機中";
+    const reason = str(agent.attentionReason);
+    if (reason === "permission" || reason === "error") return t;
+    // 帯を書き換えるのは、登録簿の語彙外の値(`待機` を `実装中` と読み替えた行)だけ。
+    // `ユーザー判断待ち` のような意味のある語彙は上書きしない(出口レビュー第2ラウンド指摘7)。
+    const status: ChildThread["status"] = t.status === "実装中" ? "待機中" : t.status;
     const stateDot = unread ? ("attention" as const) : (t.stateDot ?? null);
     if (t.unread === unread && t.status === status && t.stateDot === stateDot) return t;
     return { ...t, unread, status, stateDot };

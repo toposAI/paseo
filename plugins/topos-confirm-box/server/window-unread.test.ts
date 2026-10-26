@@ -149,3 +149,25 @@ test("完了の行は「待機中」へ下げない(終わった窓口を動い�
   );
   assert.equal(done?.status, "完了");
 });
+
+test("意味のある語彙は上書きしない(語彙外の「実装中」だけ「待機中」に直す)", () => {
+  // 登録簿の正規語彙。帯を勝手に「待機中」へ書き換えない(出口レビュー第2ラウンド指摘7)
+  const [waiting] = applyWindowUnread(
+    [row(WINDOW, { status: "ユーザー判断待ち" })],
+    [{ id: WINDOW, status: "idle", requiresAttention: true }],
+    "03aeafd",
+  );
+  assert.equal(waiting?.status, "ユーザー判断待ち");
+  assert.equal(waiting?.unread, true); // 未読の印そのものは付く
+
+  // エラー・承認待ちの窓口は、点が取れていなくても帯を触らない(赤字・橙字を隠さない)
+  for (const reason of ["error", "permission"]) {
+    const rows = [row(WINDOW, { status: "実装中" })];
+    const out = applyWindowUnread(
+      rows,
+      [{ id: WINDOW, status: "idle", requiresAttention: true, attentionReason: reason }],
+      "03aeafd",
+    );
+    assert.equal(out[0], rows[0]);
+  }
+});
