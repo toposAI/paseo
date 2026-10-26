@@ -40,6 +40,16 @@ import {
   REJECT_CHOICE,
 } from "./shared/contract.js";
 import { appendAck } from "./server/ack.js";
+import {
+  readPositionEnableRpc,
+  readPositionGetRpc,
+  readPositionSetRpc,
+} from "./shared/read-position.js";
+import {
+  getPosition,
+  setEnabled as setReadPositionEnabled,
+  setPosition,
+} from "./server/read-position.js";
 import { feedbackReportsListRpc, countNewReports } from "./shared/feedback.js";
 import { readFeedbackReports } from "./server/feedback.js";
 import { loadProgressContext } from "./server/feedback-progress.js";
@@ -720,6 +730,40 @@ export default function contribute(server: PluginServerContext) {
       return sayToLedger(resolveConfirmBoxDir(), input.text);
     } catch (error) {
       return { ok: false, message: `送れません: ${(error as Error).message}` };
+    }
+  });
+
+  // 読んだ位置(端末をまたいで同じ位置で開き直す)。取得失敗は「記録しない」側に倒し、画面は止めない。
+  server.handle(readPositionGetRpc, async (input) => {
+    try {
+      return getPosition(resolveConfirmBoxDir(), input.agentId, input.title);
+    } catch {
+      return { enabled: false, seq: null, epoch: null, updatedAt: null };
+    }
+  });
+  server.handle(readPositionSetRpc, async (input) => {
+    try {
+      return setPosition(
+        resolveConfirmBoxDir(),
+        input.agentId,
+        input.title,
+        input.seq,
+        input.epoch,
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        seq: null,
+        message: `読んだ位置を保存できません: ${(error as Error).message}`,
+      };
+    }
+  });
+  server.handle(readPositionEnableRpc, async (input) => {
+    try {
+      setReadPositionEnabled(resolveConfirmBoxDir(), input.agentId, input.enabled);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: `切り替えを保存できません: ${(error as Error).message}` };
     }
   });
 
