@@ -6,6 +6,8 @@ const DIRECT_SEARCH_TOOL_SUFFIX_PATTERN = /(?:^|[_.:/])(?:web_search|llm_context
 
 export interface OverviewSummary {
   thinkingCount: number;
+  /** True only while reasoning is still arriving; a running tool is not "thinking". */
+  isThinkingActive: boolean;
   editedFileCount: number;
   commandCount: number;
   readFileCount: number;
@@ -38,6 +40,7 @@ export function buildOverviewGroup(run: ActivityRun): OverviewToolCallGroup {
   let searchCount = 0;
   let otherToolCount = 0;
   let paseoCallCount = 0;
+  const latest = run.latest;
 
   for (const item of run.items) {
     if (item.kind === "thought") {
@@ -65,6 +68,7 @@ export function buildOverviewGroup(run: ActivityRun): OverviewToolCallGroup {
 
   const summary = {
     thinkingCount,
+    isThinkingActive: latest?.kind === "thought" && latest.status !== "ready",
     editedFileCount: editedFiles.size,
     commandCount,
     readFileCount: readFiles.size,

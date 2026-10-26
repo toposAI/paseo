@@ -34,15 +34,16 @@ function joinSummaryParts(parts: string[], conjunction: string): string {
 
 /**
  * Reasoning and tool calls share one row, so the label leads with what the reader used to
- * see as a separate Thinking row. While the run is live the leading part says so, which is
- * the only row that moves during streaming.
+ * see as a separate Thinking row. It says "thinking" only while reasoning is still
+ * arriving: a run that is busy running tools is not thinking, and the badge keeps its
+ * spinner from `isLoading` either way.
  */
-function useOverviewSummary(summary: OverviewSummary, isLoading: boolean): string {
+function useOverviewSummary(summary: OverviewSummary): string {
   const { t } = useTranslation();
   return useMemo(() => {
     const thinkingLabel =
       summary.thinkingCount > 0
-        ? t(isLoading ? "toolCallGroup.thinkingActive" : "toolCallGroup.thinking")
+        ? t(summary.isThinkingActive ? "toolCallGroup.thinkingActive" : "toolCallGroup.thinking")
         : "";
     const parts: string[] = [];
     const entries = [
@@ -62,7 +63,7 @@ function useOverviewSummary(summary: OverviewSummary, isLoading: boolean): strin
     return [thinkingLabel, toolsLabel]
       .filter((part) => part.length > 0)
       .join(t("toolCallGroup.summarySeparator"));
-  }, [isLoading, summary, t]);
+  }, [summary, t]);
 }
 
 function useOverviewIcon(summary: OverviewSummary) {
@@ -86,7 +87,7 @@ export const OverviewToolCallGroupView = memo(function OverviewToolCallGroupView
 }: OverviewGroupProps) {
   const scrollRef = useRef<ScrollView>(null);
   const isCompact = useIsCompactFormFactor();
-  const aggregateSummary = useOverviewSummary(group.summary, group.isLoading);
+  const aggregateSummary = useOverviewSummary(group.summary);
   const GroupIcon = useOverviewIcon(group.summary);
   const scrollToLatest = useCallback(() => {
     scrollRef.current?.scrollToEnd({ animated: false });

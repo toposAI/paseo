@@ -83,6 +83,22 @@ export function isGroupableActivityItem(item: StreamItem): item is ActivityItem 
   return item.kind === "thought" || isGroupableToolCall(item);
 }
 
+/**
+ * A row of nothing but reasoning is still an ordinary Thinking row: folding it would hide
+ * its text behind a second press and would leave `autoExpandReasoning` with nothing to
+ * expand. So a lone thought is never a group; the row turns into one only once a tool call
+ * joins it, which keeps the same id and therefore the same place in the stream.
+ */
+function isLoneThought(items: readonly ActivityItem[]): boolean {
+  return items.length === 1 && items[0]!.kind === "thought";
+}
+
+/** Turns are never merged across, the same rule adjacent thoughts already follow. */
+function startsNewRun(pending: readonly ActivityItem[], item: ActivityItem): boolean {
+  const last = pending.at(-1);
+  return last !== undefined && last.turnId !== item.turnId;
+}
+
 function createRun(items: readonly ActivityItem[], isSealed: boolean): ActivityRun {
   const first = items[0];
   const latest = items.at(-1);
@@ -124,6 +140,10 @@ function appendRun<TGroup>(input: {
   if (input.items.length === 0) {
     return;
   }
+  if (isLoneThought(input.items)) {
+    input.output.push(input.items[0]!);
+    return;
+  }
   const run = createRun(input.items, input.isSealed);
   const host = createHost(run);
   input.output.push(host);
@@ -140,6 +160,16 @@ export function prepareGroupedHistory<TGroup>(input: {
 
   for (const item of input.tail) {
     if (isGroupableActivityItem(item)) {
+      if (startsNewRun(pending, item)) {
+        appendRun({
+          items: pending,
+          isSealed: true,
+          output,
+          groups,
+          buildGroup: input.buildGroup,
+        });
+        pending = [];
+      }
       pending.push(item);
       continue;
     }
@@ -177,6 +207,10 @@ export function groupLiveToolCalls<TGroup>(input: {
 }): GroupedToolCalls<TGroup> {
   const head: StreamItem[] = [];
   const liveGroups = new Map<string, TGroup>();
+  // History rows that are hosted by a run growing in the head. A history row can become a
+  // host without already having a group (it started as a lone thought), so this is tracked
+  // as the run is flushed rather than derived from the history's group map.
+  const historyGroupUpdates = new Map<string, TGroup>();
   let pending = [...input.history.pendingCalls];
   let hostPlacement: "history" | "head" | null = pending.length > 0 ? "history" : null;
   let pendingIncludesHead = false;
@@ -185,12 +219,16 @@ export function groupLiveToolCalls<TGroup>(input: {
     if (pending.length === 0) {
       return;
     }
-    const run = createRun(pending, isSealed);
+    const run = isLoneThought(pending) ? null : createRun(pending, isSealed);
     if (hostPlacement === "head") {
-      head.push(createHost(run));
+      head.push(run ? createHost(run) : pending[0]!);
     }
-    if (hostPlacement === "head" || pendingIncludesHead || !isSealed) {
-      liveGroups.set(run.id, input.buildGroup(run));
+    if (run && (hostPlacement === "head" || pendingIncludesHead || !isSealed)) {
+      const group = input.buildGroup(run);
+      liveGroups.set(run.id, group);
+      if (hostPlacement === "history") {
+        historyGroupUpdates.set(run.id, group);
+      }
     }
     pending = [];
     hostPlacement = null;
@@ -200,6 +238,9 @@ export function groupLiveToolCalls<TGroup>(input: {
   for (const item of input.head) {
     if (isGroupableActivityItem(item)) {
       if (pending.length === 0) {
+        hostPlacement = "head";
+      } else if (startsNewRun(pending, item)) {
+        flush(true);
         hostPlacement = "head";
       }
       pending.push(item);
@@ -230,22 +271,21 @@ export function groupLiveToolCalls<TGroup>(input: {
       tail: input.history.tail,
       head,
       groupsByHostId: liveGroups,
-      historyGroupUpdatesByHostId: EMPTY_GROUPS,
+      historyGroupUpdatesByHostId:
+        historyGroupUpdates.size > 0 ? historyGroupUpdates : EMPTY_GROUPS,
     };
   }
   const groupsByHostId = new Map(input.history.groupsByHostId);
-  let historyGroupUpdatesByHostId: Map<string, TGroup> | null = null;
   for (const [id, group] of liveGroups) {
     groupsByHostId.set(id, group);
     if (input.history.groupsByHostId.has(id)) {
-      historyGroupUpdatesByHostId ??= new Map();
-      historyGroupUpdatesByHostId.set(id, group);
+      historyGroupUpdates.set(id, group);
     }
   }
   return {
     tail: input.history.tail,
     head,
     groupsByHostId,
-    historyGroupUpdatesByHostId: historyGroupUpdatesByHostId ?? EMPTY_GROUPS,
+    historyGroupUpdatesByHostId: historyGroupUpdates.size > 0 ? historyGroupUpdates : EMPTY_GROUPS,
   };
 }
