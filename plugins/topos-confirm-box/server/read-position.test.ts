@@ -14,6 +14,15 @@ test("題名に完了箱Cを含むスレだけ既定で記録する", () => {
   assert.equal(getPosition(d, "a").enabled, false);
 });
 
+test("常駐の窓口スレ(判断窓口A/A'・窓口B)も既定で記録する", () => {
+  const d = tmp();
+  assert.equal(getPosition(d, "a", "判断窓口A").enabled, true);
+  assert.equal(getPosition(d, "a", "判断窓口A'").enabled, true);
+  assert.equal(getPosition(d, "a", "窓口B").enabled, true);
+  // 読み手自身が入力する通常のスレは対象外。
+  assert.equal(getPosition(d, "a", "窓口の話").enabled, false);
+});
+
 test("対象外のスレには書かない", () => {
   const d = tmp();
   assert.deepEqual(setPosition(d, "a", "別のスレ", 5, "e1"), {

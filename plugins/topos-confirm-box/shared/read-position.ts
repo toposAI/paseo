@@ -8,12 +8,18 @@
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
 
-/** 既定で記録するスレの題名の目印(完了報告だけを流し続けるスレ)。 */
-export const READ_POSITION_DEFAULT_TITLE_MARK = "完了箱C";
+/**
+ * 既定で記録するスレの題名の目印。常駐の窓口スレ(完了箱C・判断窓口A/A'・窓口B)は同じ理由で
+ * 報告や質問を流し続けるので、まとめて対象にする(2026-10-27 ユーザー依頼「少なくともこれらの
+ * 窓口スレで」)。読み手自身が入力する通常のスレは対象外(「そのほかの全スレも」は要判断として記録)。
+ */
+export const READ_POSITION_DEFAULT_TITLE_MARKS = ["完了箱C", "判断窓口", "窓口B"] as const;
 
-/** 設定で上書きされていないスレを記録対象にするか(題名に目印を含むスレだけ)。 */
+/** 設定で上書きされていないスレを記録対象にするか(題名に目印を含む窓口スレだけ)。 */
 export function isReadPositionDefaultOn(title: string | undefined): boolean {
-  return typeof title === "string" && title.includes(READ_POSITION_DEFAULT_TITLE_MARK);
+  return (
+    typeof title === "string" && READ_POSITION_DEFAULT_TITLE_MARKS.some((mark) => title.includes(mark))
+  );
 }
 
 export const readPositionGetRpc = defineRpc({

@@ -4,7 +4,12 @@ import { useStableEvent } from "@/hooks/use-stable-event";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
 import type { StreamItem } from "@/types/stream";
-import { nextHighWater, pickRestoreSeq, type StoredReadPosition } from "./read-position-sync";
+import {
+  nextHighWater,
+  pickResume,
+  shouldDismissUnreadDivider,
+  type StoredReadPosition,
+} from "./read-position-sync";
 
 // The daemon-side store lives in the topos-confirm-box plugin (plugins/topos-confirm-box/shared/read-position.ts).
 // Any failure (plugin missing or disabled, offline) leaves the chat exactly as it was without the sync.
@@ -37,18 +42,38 @@ function parseStored(v: unknown): StoredReadPosition | null {
   };
 }
 
-/** Returns the callback the viewport feeds with the seq of the last fully visible row. */
-export function useReadPositionSync(input: Input): (viewedSeq: number | null) => void {
+export interface ReadPositionSync {
+  /** Feed from the viewport: the seq of the last fully visible row. */
+  reportViewedSeq: (viewedSeq: number | null) => void;
+  /** The seq of the first row the reader had not seen when the chat opened; the divider goes above it. */
+  unreadFromSeq: number | null;
+}
+
+/** Resumes the chat where the reader stopped, and keeps the daemon-side record up to date. */
+export function useReadPositionSync(input: Input): ReadPositionSync {
   const { serverId, agentId, timelineEpoch, items, jumpToSeq } = input;
   const title = useSessionStore(
     (state) => state.sessions[serverId]?.agents.get(agentId)?.title ?? null,
   );
+  // Rows from another history epoch carry a seq that means nothing here: keep only this epoch's.
   const loadedSeqs = useMemo(
-    () => items.flatMap((item) => (item.timelineCursor ? [item.timelineCursor.seq] : [])),
-    [items],
+    () =>
+      items.flatMap((item) =>
+        item.timelineCursor && item.timelineCursor.epoch === timelineEpoch
+          ? [item.timelineCursor.seq]
+          : [],
+      ),
+    [items, timelineEpoch],
   );
   const [stored, setStored] = useState<StoredReadPosition | null>(null);
   const [fetchedFor, setFetchedFor] = useState<string | null>(null);
+  // The "ここから未読" divider: dropped once the reader has seen everything that existed at open.
+  const [unreadFrom, setUnreadFrom] = useState<{ key: string; seq: number } | null>(null);
+  const dismissAtRef = useRef<number | null>(null);
+  // While the unread stretch below the divider is still on screen, the reader may not move their
+  // record into it by scrolling (a long line grows as it streams and drops out of view). Cleared by
+  // reaching the divider or the newest row.
+  const blockedUntilRef = useRef<{ key: string; markerSeq: number; readSeq: number } | null>(null);
   const restoredRef = useRef(false);
   const awaitingLandingRef = useRef(false);
   const quietUntilRef = useRef(0);
@@ -67,13 +92,24 @@ export function useReadPositionSync(input: Input): (viewedSeq: number | null) =>
   currentKeyRef.current = key;
   const titleReady = title !== null;
 
+  /** The chat the position was asked for; a late answer must not land on the next chat. */
+  const keyRef = useRef("");
+  keyRef.current = key;
+
   // Sends the not-yet-sent position of the epoch it was seen under; also used when leaving.
   const sendPending = useStableEvent(
-    (target: { serverId: string; agentId: string; epoch: string | null }) => {
+    (target: { serverId: string; agentId: string; epoch: string | null; atKey: string }) => {
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = null;
-      const seq = pendingRef.current;
+      // Lines that kept streaming while the reader was still below them are not read yet.
+      const blocked = blockedUntilRef.current;
+      let seq = pendingRef.current;
       pendingRef.current = null;
+      if (blocked && blocked.key === target.atKey) {
+        // Keep the blocked position (never smaller than what it already was) instead of the unread rows.
+        if (seq === null || seq >= blocked.markerSeq) seq = blocked.readSeq;
+        blockedUntilRef.current = null;
+      }
       if (seq === null || target.epoch === null) return;
       void invoke(target.serverId, "topos.readpos.set", {
         agentId: target.agentId,
@@ -92,10 +128,13 @@ export function useReadPositionSync(input: Input): (viewedSeq: number | null) =>
     highWaterRef.current = null;
     pendingRef.current = null;
     fetchStartedForRef.current = null;
+    dismissAtRef.current = null;
+    blockedUntilRef.current = null;
     setStored(null);
     setFetchedFor(null);
+    setUnreadFrom(null);
     if (!isWeb) return;
-    const target = { serverId, agentId, epoch: latestRef.current.epoch };
+    const target = { serverId, agentId, epoch: latestRef.current.epoch, atKey: key };
     const onHidden = () => {
       if (document.visibilityState === "hidden") {
         sendPending({ ...target, epoch: latestRef.current.epoch });
@@ -112,11 +151,11 @@ export function useReadPositionSync(input: Input): (viewedSeq: number | null) =>
   useEffect(() => {
     const epochAtRender = timelineEpoch;
     return () => {
-      sendPending({ serverId, agentId, epoch: epochAtRender });
+      sendPending({ serverId, agentId, epoch: epochAtRender, atKey: key });
       highWaterRef.current = null;
       restoredRef.current = false;
     };
-  }, [timelineEpoch, serverId, agentId, sendPending]);
+  }, [timelineEpoch, serverId, agentId, key, sendPending]);
 
   // The default-on rule reads the title, so ask once it is known (and only once per chat).
   useEffect(() => {
@@ -146,18 +185,29 @@ export function useReadPositionSync(input: Input): (viewedSeq: number | null) =>
     if (stored?.enabled && stored.epoch === timelineEpoch && stored.seq !== null) {
       highWaterRef.current = stored.seq;
     }
-    const seq = pickRestoreSeq({ stored, timelineEpoch, loadedSeqs });
-    if (seq === null) return;
+    const pick = pickResume({ stored, timelineEpoch, loadedSeqs });
+    if (pick === null) return;
     awaitingLandingRef.current = true;
     quietUntilRef.current = Date.now() + POST_RESTORE_QUIET_MS;
-    jump(seq);
+    dismissAtRef.current = pick.newestSeq;
+    if (stored?.seq !== null && stored?.seq !== undefined) {
+      blockedUntilRef.current = {
+        key,
+        markerSeq: pick.firstUnreadSeq,
+        readSeq: stored.seq,
+      };
+    }
+    setUnreadFrom({ key, seq: pick.firstUnreadSeq });
+    jump(pick.restoreSeq);
   }, [fetchedFor, key, loadedSeqs, stored, timelineEpoch, jump]);
 
   const flush = useStableEvent(() => {
-    sendPending({ serverId, agentId, epoch: latestRef.current.epoch });
+    sendPending({ serverId, agentId, epoch: latestRef.current.epoch, atKey: key });
   });
 
-  return useCallback(
+  const unreadFromSeqRef = useRef<number | null>(null);
+
+  const reportViewedSeq = useCallback(
     (viewedSeq: number | null) => {
       // Until the stored record has been applied, the bottom of the chat would overwrite it.
       if (!isWeb || !restoredRef.current || !stored?.enabled) return;
@@ -168,12 +218,31 @@ export function useReadPositionSync(input: Input): (viewedSeq: number | null) =>
         if (viewedSeq === null || viewedSeq >= latestRef.current.newest) return;
         awaitingLandingRef.current = false;
       }
+      if (viewedSeq !== null && viewedSeq >= (dismissAtRef.current ?? Number.POSITIVE_INFINITY)) {
+        // Everything that existed at open has been seen: nothing left to protect.
+        blockedUntilRef.current = null;
+      } else if (
+        viewedSeq !== null &&
+        viewedSeq >= (unreadFromSeqRef.current ?? Number.POSITIVE_INFINITY)
+      ) {
+        // The reader reached the divider; from here on the rows they pass are read.
+        blockedUntilRef.current = null;
+      }
       const next = nextHighWater(highWaterRef.current, viewedSeq);
       if (next === null) return;
       highWaterRef.current = next;
+      if (shouldDismissUnreadDivider(next, dismissAtRef.current)) {
+        setUnreadFrom((current) => (current?.key === key ? null : current));
+      }
       pendingRef.current = next;
       if (!timerRef.current) timerRef.current = setTimeout(flush, REPORT_DEBOUNCE_MS);
     },
-    [flush, stored],
+    [flush, stored, key],
   );
+
+  // Only the active chat's divider counts; a divider remembered from a previous chat must not show.
+  const unreadFromSeq = unreadFrom?.key === key ? unreadFrom.seq : null;
+  unreadFromSeqRef.current = unreadFromSeq;
+
+  return useMemo(() => ({ reportViewedSeq, unreadFromSeq }), [reportViewedSeq, unreadFromSeq]);
 }

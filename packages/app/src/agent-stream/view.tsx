@@ -78,6 +78,7 @@ import { type StreamSegmentRenderers, type StreamViewportHandle } from "./strate
 import { ChatOutlineRail } from "@/agent-stream/chat-outline/rail";
 import { useChatOutline } from "@/agent-stream/chat-outline/use-chat-outline";
 import { useReadPositionSync } from "@/agent-stream/use-read-position-sync";
+import { UnreadDivider } from "./unread-divider";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
 import {
@@ -668,7 +669,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       () => [...effectiveStreamItems, ...(effectiveStreamHead ?? [])],
       [effectiveStreamItems, effectiveStreamHead],
     );
-    const reportViewedSeq = useReadPositionSync({
+    const readPosition = useReadPositionSync({
       serverId: resolvedServerId,
       agentId,
       timelineEpoch,
@@ -1143,20 +1144,43 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           ? (layoutHistoryItemById.get(viewedRowId) ?? layoutLiveHeadItemById.get(viewedRowId))
               ?.item.timelineCursor
           : undefined;
-        reportViewedSeq(
+        readPosition.reportViewedSeq(
           viewedCursor && viewedCursor.epoch === timelineEpoch ? viewedCursor.seq : null,
         );
       },
     );
 
+    // The first turn the reader had not seen when the chat opened gets the "ここから未読" line above it.
+    const unreadFromItemId =
+      readPosition.unreadFromSeq === null
+        ? null
+        : ([...streamLayout.history, ...streamLayout.liveHead].find(
+            (row) =>
+              row.item.timelineCursor?.seq === readPosition.unreadFromSeq &&
+              row.item.timelineCursor?.epoch === timelineEpoch,
+          )?.item.id ?? null);
+    const historyRowHasDivider = useCallback(
+      (item: StreamItem) => item.id === unreadFromItemId,
+      [unreadFromItemId],
+    );
+
     const renderHistoryRow = useCallback(
-      (item: StreamItem) =>
-        renderHistoryStreamItem({
+      (item: StreamItem) => {
+        const row = renderHistoryStreamItem({
           item,
           layoutItemById: layoutHistoryItemById,
           renderStreamItem,
-        }),
-      [layoutHistoryItemById, renderStreamItem],
+        });
+        return historyRowHasDivider(item) ? (
+          <>
+            <UnreadDivider />
+            {row}
+          </>
+        ) : (
+          row
+        );
+      },
+      [historyRowHasDivider, layoutHistoryItemById, renderStreamItem],
     );
 
     const renderHistoryVirtualizedRow = useCallback<
@@ -1166,18 +1190,29 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       (item) => renderHistoryRow(item),
       [renderHistoryRow],
     );
+    const renderLiveHeadRowWithDivider = useCallback<StreamSegmentRenderers["renderLiveHeadRow"]>(
+      (item: StreamItem) => {
+        const row = renderLiveHeadStreamItem({
+          item,
+          layoutItemById: layoutLiveHeadItemById,
+          renderStreamItem,
+        });
+        return historyRowHasDivider(item) ? (
+          <>
+            <UnreadDivider />
+            {row}
+          </>
+        ) : (
+          row
+        );
+      },
+      [historyRowHasDivider, layoutLiveHeadItemById, renderStreamItem],
+    );
     // useStableEvent keeps the function reference stable across flushes.
     // layoutLiveHeadItemById and renderStreamItem are read from the ref at call time,
     // so the live-head render always uses the latest layout without causing renderers
     // to be a new object on every text-chunk flush.
-    const renderLiveHeadRow: StreamSegmentRenderers["renderLiveHeadRow"] = useStableEvent(
-      (item: StreamItem) =>
-        renderLiveHeadStreamItem({
-          item,
-          layoutItemById: layoutLiveHeadItemById,
-          renderStreamItem,
-        }),
-    );
+    const renderLiveHeadRow = useStableEvent(renderLiveHeadRowWithDivider);
     const renderLiveAuxiliary = useCallback<StreamSegmentRenderers["renderLiveAuxiliary"]>(() => {
       const existingTailSpacing =
         auxiliary.turnFooter && !auxiliary.pendingPermissions ? TURN_FOOTER_BOTTOM_SPACING : 0;
