@@ -56,10 +56,16 @@ export const KIND_LABEL: Record<ConfirmBoxKind, string> = {
 
 // ---------------------------------------------------------------- 項目
 
-export const ConfirmBoxOptionSchema = z.object({ id: z.string(), label: z.string() });
+export const ConfirmBoxOptionSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+});
 export type ConfirmBoxOption = z.infer<typeof ConfirmBoxOptionSchema>;
 
-export const ConfirmBoxThreadRefSchema = z.object({ kind: z.string(), id: z.string() });
+export const ConfirmBoxThreadRefSchema = z.object({
+  kind: z.string(),
+  id: z.string(),
+});
 export type ConfirmBoxThreadRef = z.infer<typeof ConfirmBoxThreadRefSchema>;
 
 /**
@@ -97,6 +103,14 @@ export const ConfirmBoxItemSchema = z.object({
   background: z.string(),
   source: z.string(),
   threadRef: ConfirmBoxThreadRefSchema.nullable(),
+  /**
+   * 投函した側が名指ししたスレ(箱の行 `{"t":"item",…,"thread_id":…}`)。「スレを開く」の宛先はこれを
+   * 最優先する(`threadRef` はサーバが投函元の親を組み立てたものなので、親が閉じていると開けない)。
+   * 無い行は null。
+   */
+  threadId: z.string().nullable().optional(),
+  /** 判断ノートの `threads:`(1本目が投函元)。判断ノート由来のカードだけ入る。 */
+  threadCandidates: z.array(z.string()).optional(),
   /** 「この欄に答えるスレ」の表示(短ID+題名。未登録の投函元は明示)。判断ノート由来のカードだけ入る。 */
   answerLabel: z.string().optional(),
   stoppedCount: z.number().int(),
@@ -338,7 +352,10 @@ export const prioritySayRpc = defineRpc({
 
 /** どの項目への質問か。箱の項目は `key` を持たないことがあるので `id` を正とする
  * (2026-10-22: 返事を箱のイベント列 `t:"reply"` に出すようになり、id で突き合わせる)。 */
-const cardChatTarget = { id: z.string(), key: z.string().nullable().optional() };
+const cardChatTarget = {
+  id: z.string(),
+  key: z.string().nullable().optional(),
+};
 
 /** カード単位のチャット。質問を追記し、即時の受領返答を1行返す(プラグインUI経由の質問に限る)。
  * 本回答は別プロセス(応答ワーカー)が箱の `t:"reply"` 行として書く。 */
@@ -389,7 +406,11 @@ export const coordinatorTargetRpc = defineRpc({
 export const cardChatAskRpc = defineRpc({
   name: "topos.confirmbox.cardchat.ask",
   input: z.object({ ...cardChatTarget, text: z.string(), target: z.string() }),
-  output: z.object({ ok: z.boolean(), message: z.string(), replyId: z.string().optional() }),
+  output: z.object({
+    ok: z.boolean(),
+    message: z.string(),
+    replyId: z.string().optional(),
+  }),
 });
 
 /** ペインの送信が失敗した質問を取り消す(待ち表示・催促・集計から外す)。 */

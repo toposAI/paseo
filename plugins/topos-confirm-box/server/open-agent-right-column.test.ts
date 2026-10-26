@@ -36,7 +36,7 @@ test("右カラムの指定は幅(wide)で切り替え、狭い幅では従来�
   const body = openPaneThreadBody(confirmBoxSource);
   assert.match(body, /\bwide\b/, "幅の判定(wide)で分岐する");
   assert.doesNotMatch(body, /placement:\s*"right"\s*[},]/, "無条件に右カラムを指定しない");
-  assert.match(body, /\.\.\.\(\s*wide\s*\?/, "wide のときだけ右カラムを足す");
+  assert.match(body, /wide\s*&&\s*!?promotes\s*\?/, "wide のときだけ右カラムを足す");
 });
 
 test("依存配列に幅の判定を入れて、幅が変わったら作り直す", () => {

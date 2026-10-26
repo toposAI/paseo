@@ -19,6 +19,11 @@ export const LIST_FAILED_NOTICE = "スレの一覧を引けなかったので、
 export interface OpenThreadContext {
   /** 右カラムで開く配置(PC幅で「スレを開く」を押したとき)。無ければ従来どおり遷移。 */
   placement?: "right";
+  /**
+   * 確認箱自身のペインに今出ている相手(`?card=`/`?thread=`)。開くスレと同じなら、右カラムへもう1枚
+   * 並べずに**確認箱のペインを外して主ペインにする**(同じ相手が2枚並ぶのを防ぐ。2026-10-27)。
+   */
+  currentPane?: { kind: "card" | "thread"; id: string } | null;
   /** 開くカードの題名(管轄の推測に使う)。 */
   title?: string | null;
   /** サーバが返す総司令塔のID(取得前・失敗は undefined)。 */
@@ -53,7 +58,11 @@ export async function listDirectory(serverId: string): Promise<DirectoryAgent[] 
         deadline,
       ]);
       for (const entry of res.entries) {
-        const agent = entry.agent as { id?: unknown; archivedAt?: unknown; status?: unknown };
+        const agent = entry.agent as {
+          id?: unknown;
+          archivedAt?: unknown;
+          status?: unknown;
+        };
         if (typeof agent.id === "string") {
           out.push({
             id: agent.id,
@@ -74,30 +83,75 @@ export async function listDirectory(serverId: string): Promise<DirectoryAgent[] 
   }
 }
 
+/**
+ * 確認箱のペインに今出ている相手が `agentId` と同じか。カードは「そこに出す相手」=`answerId` で判定する
+ * (`?card=` はカードIDなので、同じカードでも答えの宛先が別スレなら同じではない)。
+ */
+export function showsSameThread(
+  current: { kind: "card" | "thread"; id: string } | null | undefined,
+  agentId: string,
+  answerId?: string | null,
+): boolean {
+  if (!current) return false;
+  if (current.kind === "thread") return current.id === agentId;
+  return agentId === (answerId ?? agentId);
+}
+
 /** 「スレを開く」を押したときの処理。決まった宛先を1回だけ開く。 */
 export async function openThreadInPane(input: {
   serverId: string;
+  /** 開くスレ(投函の `thread_id`)。null なら `destination` を開く。 */
   target: string | null;
+  /** 開くスレが閉じているときの次点(この欄に答えるスレ)。 */
+  destination?: string | null;
   context: OpenThreadContext;
   open: (input: { agentId: string; placement?: "right" }) => Promise<void>;
+  /** 確認箱のペインを外す(内側のカードチャットを畳む)。主ペイン化するときに呼ぶ。 */
+  onFold?: () => void;
   /** 振り替え/開けない理由の表示先(画面の1行)。 */
   onNotice?: (notice: string) => void;
 }): Promise<ThreadTargetResult | null> {
-  const { serverId, target, context, open, onNotice } = input;
+  const { serverId, context, open, onFold, onNotice } = input;
+
+  /** 決まった宛先を開く。確認箱のペインが同じ相手を出しているなら主ペイン化する。 */
+  const openThread = async (agentId: string) => {
+    // 右に同じ相手が2枚並ばないよう、確認箱のペインを外して主ペインで開く(2026-10-27)。
+    if (context.placement && showsSameThread(context.currentPane, agentId, destination)) {
+      onFold?.();
+      await open({ agentId });
+      return;
+    }
+    await open({
+      agentId,
+      ...(context.placement ? { placement: context.placement } : {}),
+    });
+  };
+
+  const target = input.target ?? input.destination ?? null;
+  const destination = input.destination ?? null;
   if (!target) return null;
   if (!serverId) {
     // 接続先が分からない。確認はできないので従来どおり開く(理由だけ出す)。
     onNotice?.(LIST_FAILED_NOTICE);
     console.warn("[Plugins] Confirm box thread target: host-unavailable");
-    await open({ agentId: target });
-    return { agentId: target, reason: "no-live-thread", notice: LIST_FAILED_NOTICE };
+    await openThread(target);
+    return {
+      agentId: target,
+      reason: "no-live-thread",
+      notice: LIST_FAILED_NOTICE,
+    };
   }
   const directory = await listDirectory(serverId);
   const result: ThreadTargetResult =
     directory === null
-      ? { agentId: target, reason: "no-live-thread", notice: LIST_FAILED_NOTICE }
+      ? {
+          agentId: target,
+          reason: "no-live-thread",
+          notice: LIST_FAILED_NOTICE,
+        }
       : resolveThreadTarget({
           target,
+          destination,
           title: context.direct === true ? null : (context.title ?? null),
           coordinatorId: context.coordinatorId,
           hubIds: context.hubIds,
@@ -108,9 +162,6 @@ export async function openThreadInPane(input: {
   reportThreadTarget(result);
   if (result.notice) onNotice?.(result.notice);
   if (!result.agentId) return result;
-  await open({
-    agentId: result.agentId,
-    ...(context.placement ? { placement: context.placement } : {}),
-  });
+  await openThread(result.agentId);
   return result;
 }

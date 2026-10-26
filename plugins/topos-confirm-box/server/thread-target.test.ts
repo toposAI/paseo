@@ -9,7 +9,11 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 // クライアント側の純関数(`client/` は描画を持たない .ts だけをここから検査する)。
-import { reportThreadTarget, resolveThreadTarget } from "../client/thread-target.js";
+import {
+  reportThreadTarget,
+  resolveOpenThreadId,
+  resolveThreadTarget,
+} from "../client/thread-target.js";
 
 const GENERAL_DEAD = "1800e2f7-63a5-40b7-9f5f-52e0ba24bb49";
 const BACKOFFICE = "b09d1682-3e1f-49de-a1ce-d55b78431bc1";
@@ -19,7 +23,11 @@ const TOPOS_DEV = "5a226b97-90e8-40f3-831b-72c251deb3d7";
 const live = { id: BACKOFFICE, archivedAt: null, status: "running" };
 const f80 = { id: F80, archivedAt: null, status: "running" };
 const toposDev = { id: TOPOS_DEV, archivedAt: null, status: "running" };
-const archived = { id: GENERAL_DEAD, archivedAt: "2026-10-26T10:51:00Z", status: "closed" };
+const archived = {
+  id: GENERAL_DEAD,
+  archivedAt: "2026-10-26T10:51:00Z",
+  status: "closed",
+};
 
 const inferDomain = (text: string): string | null => {
   if (/f-?80/i.test(text)) return "f80";
@@ -109,6 +117,72 @@ describe("resolveThreadTarget", () => {
   });
 });
 
+describe("resolveOpenThreadId", () => {
+  test("投函の thread_id をそのまま使う(thread_ref=親 があっても優先)", () => {
+    const id = resolveOpenThreadId({
+      threadId: BACKOFFICE,
+      threadRef: { kind: "paseo_agent", id: F80 },
+      agentId: null,
+    });
+    assert.equal(id, BACKOFFICE);
+  });
+
+  test("thread_id が無ければ従来どおり thread_ref(paseo_agent)", () => {
+    assert.equal(resolveOpenThreadId({ threadRef: { kind: "paseo_agent", id: F80 } }), F80);
+  });
+
+  test("paseo_agent 以外の thread_ref は使わず、承認待ちの agentId に落ちる", () => {
+    assert.equal(
+      resolveOpenThreadId({
+        threadRef: { kind: "vault", id: "note.md" },
+        agentId: TOPOS_DEV,
+      }),
+      TOPOS_DEV,
+    );
+  });
+
+  test("何も無ければ null(宛先を決めない)", () => {
+    assert.equal(resolveOpenThreadId(null), null);
+    assert.equal(resolveOpenThreadId({ threadId: "  ", threadRef: null, agentId: null }), null);
+  });
+});
+
+describe("resolveThreadTarget: destination(この欄に答えるスレ)", () => {
+  test("topic = 投函元、destination = 親。投函元が閉じていれば親へ戻す", () => {
+    const r = resolveThreadTarget({
+      target: F80,
+      destination: BACKOFFICE,
+      directory: [{ id: F80, archivedAt: "2026-10-27T00:00:00Z", status: "closed" }, live],
+    });
+    assert.equal(r.agentId, BACKOFFICE);
+    assert.equal(r.reason, "destination");
+    assert.match(r.notice ?? "", /閉じている/);
+  });
+
+  test("topic が生きていれば親へは戻さない", () => {
+    const r = resolveThreadTarget({
+      target: F80,
+      destination: BACKOFFICE,
+      directory: [f80, live],
+    });
+    assert.equal(r.agentId, F80);
+    assert.equal(r.reason, "resolved");
+  });
+
+  test("題名から管轄が分かるなら、親より領域司令塔を先に選ぶ(従来順を変えない)", () => {
+    const r = resolveThreadTarget({
+      target: "old-id",
+      destination: BACKOFFICE,
+      title: "F-80 まとめノートの続き",
+      directory: [live, f80],
+      inferDomain,
+      domainCoordinators: { f80: F80 },
+    });
+    assert.equal(r.agentId, F80);
+    assert.equal(r.reason, "domain-coordinator");
+  });
+});
+
 describe("reportThreadTarget", () => {
   test("振り替え・全画面は warn、そのまま開く場合は info を1行だけ出す", () => {
     const calls: string[] = [];
@@ -116,9 +190,21 @@ describe("reportThreadTarget", () => {
     console.warn = (m?: unknown) => void calls.push(`w:${String(m)}`);
     console.info = (m?: unknown) => void calls.push(`i:${String(m)}`);
     try {
-      reportThreadTarget({ agentId: BACKOFFICE, reason: "resolved", notice: null });
-      reportThreadTarget({ agentId: BACKOFFICE, reason: "domain-coordinator", notice: "x" });
-      reportThreadTarget({ agentId: null, reason: "no-live-thread", notice: "x" });
+      reportThreadTarget({
+        agentId: BACKOFFICE,
+        reason: "resolved",
+        notice: null,
+      });
+      reportThreadTarget({
+        agentId: BACKOFFICE,
+        reason: "domain-coordinator",
+        notice: "x",
+      });
+      reportThreadTarget({
+        agentId: null,
+        reason: "no-live-thread",
+        notice: "x",
+      });
     } finally {
       console.warn = saved.warn;
       console.info = saved.info;

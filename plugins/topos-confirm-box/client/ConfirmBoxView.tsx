@@ -37,7 +37,8 @@ import { NotificationsView } from "./NotificationsView.js";
 import { BellIcon, BugIcon, InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import { CardChatPane } from "./CardChatPane.js";
-import { openThreadInPane } from "./open-pane-thread.js";
+import { openThreadInPane, showsSameThread } from "./open-pane-thread.js";
+import { resolveOpenThreadId } from "./thread-target.js";
 import { useCoordinatorTargets } from "./useCoordinatorTargets.js";
 import { shouldSwitchPaneOnCardPress } from "../shared/card-pane.js";
 import { useCardPaneRoute } from "./useCardPaneRoute.js";
@@ -147,7 +148,7 @@ export function ConfirmBoxView({
   // ヘッダのポップオーバーも幅<720なので、ペインは全画面スライドとして重なる。
   // ペインの相手は2種: カードの投函元スレ(💬)と、優先順位の行の担当スレ(行タップ)。
   // どちらも同じペイン・同じURL面(`?card=` / `?thread=`)を使う(2026-10-23 ユーザー指示)。
-  const { pane, open: openPane, close: closePane } = useCardPaneRoute(true);
+  const { pane, open: openPane, close: closePane, fold: foldPane } = useCardPaneRoute(true);
   const {
     paneCardId,
     paneThreadId,
@@ -188,15 +189,31 @@ export function ConfirmBoxView({
         padding: 9,
         gap: 6,
       },
-      subject: { color: c.foreground, fontSize: 15, fontWeight: "600" as const },
+      subject: {
+        color: c.foreground,
+        fontSize: 15,
+        fontWeight: "600" as const,
+      },
       muted: { color: c.foregroundMuted, fontSize: 12 },
       text: { color: c.foreground, fontSize: 13 },
       badge: { color: c.accent, fontSize: 11 },
-      link: { color: c.accent, fontSize: 13, textDecorationLine: "underline" as const },
-      row: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: touch ? 8 : 6 },
+      link: {
+        color: c.accent,
+        fontSize: 13,
+        textDecorationLine: "underline" as const,
+      },
+      row: {
+        flexDirection: "row" as const,
+        flexWrap: "wrap" as const,
+        gap: touch ? 8 : 6,
+      },
       plainBlock: { gap: 6 },
       plainSymbol: { color: c.accent, fontWeight: "700" as const },
-      reporter: { color: c.foreground, fontSize: 13, fontWeight: "600" as const },
+      reporter: {
+        color: c.foreground,
+        fontSize: 13,
+        fontWeight: "600" as const,
+      },
       // サブ操作(背景・💬・元スレ)は小さめ。最下行は必ず1行に収める。
       footBtn: { paddingVertical: 4, paddingHorizontal: 4 },
       footBtnOff: { paddingVertical: 4, paddingHorizontal: 4, opacity: 0.45 },
@@ -263,7 +280,11 @@ export function ConfirmBoxView({
         alignItems: "center" as const,
         justifyContent: "center" as const,
       },
-      badgeText: { color: c.accentForeground, fontSize: 10, fontWeight: "700" as const },
+      badgeText: {
+        color: c.accentForeground,
+        fontSize: 10,
+        fontWeight: "700" as const,
+      },
       btn: {
         backgroundColor: c.surface2,
         borderRadius: 6,
@@ -311,7 +332,11 @@ export function ConfirmBoxView({
       try {
         if (item.kind === "permit" && item.agentId) {
           const requestId = item.id.split(":").slice(2).join(":");
-          const r = await permit({ agentId: item.agentId, requestId, actionId: optionId });
+          const r = await permit({
+            agentId: item.agentId,
+            requestId,
+            actionId: optionId,
+          });
           setNotice(r.message);
         } else if (item.key) {
           const r = await decide({
@@ -426,10 +451,13 @@ export function ConfirmBoxView({
 
   // 幅で置き場所が変わる(右に並べる/全画面で重ねる)ので、SplitLayout へ要素ごと渡す。
   // ペインの相手は投函元スレ(2026-10-22 ユーザー決定)。まだ一覧に来ていないカードは null。
-  const paneAgentId = paneItem ? threadAgentId(paneItem) : paneThreadId;
+  const { answer: paneAgentId, open: openTarget } = paneTargets(paneItem, paneThreadId);
   const openPaneThread = usePaneOpenThread({
-    agentId: paneAgentId,
+    agentId: openTarget,
     item: paneItem,
+    destination: paneItem ? paneAgentId : null,
+    currentPane: pane,
+    onFold: foldPane,
     threadTitle: paneThreadTitle,
     wide,
     hosts,
@@ -877,14 +905,24 @@ function summarizeFilter({
 function usePaneOpenThread({
   agentId,
   item,
+  destination,
+  currentPane,
+  onFold,
   threadTitle,
   wide,
   hosts,
   openAgent,
   onNotice,
 }: {
+  /** 開くスレ(投函に `thread_id` があれば投函元そのもの)。無ければ宛先決めが持ち主へ振り替える。 */
   agentId: string | null;
   item: ConfirmBoxItem | null;
+  /** この欄に答えるスレ。開くスレが閉じていて宛先が決まらないときの次点。 */
+  destination: string | null;
+  /** 確認箱のペインに今出ている相手(URL の `?card=`/`?thread=`)。スレを開くとこれと同じなら主ペイン化。 */
+  currentPane: ReturnType<typeof useCardPaneRoute>["pane"];
+  /** 同じ相手を主ペインで開き直すとき、確認箱のペインを外す。 */
+  onFold: () => void;
   threadTitle: string | null;
   wide: boolean;
   hosts: ReturnType<typeof useHosts>;
@@ -895,25 +933,63 @@ function usePaneOpenThread({
   const coordinators = useCoordinatorTargets(item !== null);
   const notice = useCallback((text: string) => void onNotice(text), [onNotice]);
   return useMemo(() => {
-    if (!agentId || !openAgent) return undefined;
+    if ((!agentId && !destination) || !openAgent) return undefined;
+    // 同じ相手を主ペインで開き直す (=確認箱のペインを外す) か。右に同じ相手を2枚並べない。
+    const promotes =
+      wide && showsSameThread(currentPane, agentId ?? destination ?? "", destination);
     const input = {
       serverId: hosts.find((h) => h.status === "online")?.serverId ?? "",
       target: agentId,
+      // 開くスレが閉じていて宛先が決まらないときの次点(この欄に答えるスレ)。
+      ...(destination && destination !== agentId ? { destination } : {}),
       context: {
-        ...(wide ? { placement: "right" as const } : {}),
+        currentPane,
+        ...(wide && !promotes ? { placement: "right" as const } : {}),
         title: item !== null ? (item.subject ?? threadTitle) : null,
         coordinatorId: coordinators?.agentId ?? null,
         hubIds: coordinators?.hubIds,
         direct: item === null,
       },
       open: openAgent,
+      onFold,
       onNotice: notice,
     };
     return () => void openThreadInPane(input);
-  }, [agentId, openAgent, wide, item, threadTitle, coordinators, hosts, notice]);
+  }, [
+    agentId,
+    destination,
+    currentPane,
+    onFold,
+    openAgent,
+    wide,
+    item,
+    threadTitle,
+    coordinators,
+    hosts,
+    notice,
+  ]);
 }
 
-/** 元スレの agent ID。投函の thread_ref(paseo_agent)優先、無ければ承認待ちの agentId。 */
+/**
+ * ペインに出す2つの相手。カードが無い(スレ直接)ときはどちらも URL のスレそのもの。
+ * - `answer` … この欄に答えるスレ(チャットの送り先)。
+ * - `open`   … 「スレを開く」の宛先(投函元)。答えるスレ(親)は、開くスレが閉じているときの次点。
+ */
+function paneTargets(
+  paneItem: ConfirmBoxItem | null,
+  paneThreadId: string | null,
+): { answer: string | null; open: string | null } {
+  if (!paneItem) return { answer: paneThreadId, open: paneThreadId };
+  return {
+    answer: threadAgentId(paneItem),
+    open: resolveOpenThreadId(paneItem),
+  };
+}
+
+/**
+ * この欄に答えるスレ(=チャットの送り先)。サーバが決めた `threadRef`(投函元の親)を使う。
+ * 「スレを開く」の宛先は別(`resolveOpenThreadId` = 投函に `thread_id` があれば投函元そのもの)。
+ */
 function threadAgentId(item: ConfirmBoxItem): string | null {
   if (item.threadRef?.kind === "paseo_agent") return item.threadRef.id;
   return item.agentId;

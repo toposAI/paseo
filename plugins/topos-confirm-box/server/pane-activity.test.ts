@@ -1,18 +1,27 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { nextPaneActivity } from "../shared/pane-activity.js";
+import { nextPaneActivity, paneActivityLabel } from "../shared/pane-activity.js";
 import { clampPaneWidth, defaultPaneWidth, parseStoredPaneWidth } from "../shared/pane-width.js";
 
 test("送信→考え中→圧縮中→完了→返信→idleで解除", () => {
   let s = nextPaneActivity(null, { kind: "sent" });
   assert.equal(s, "sent");
   s = nextPaneActivity(s, { kind: "agent-status", status: "running" });
-  assert.equal(s, "sent");
+  // 内部は「送信済み+実行中」。画面には従来どおり「送信済み」を出す。
+  assert.equal(paneActivityLabel(s), "sent");
   s = nextPaneActivity(s, { kind: "item", itemType: "reasoning" });
   assert.equal(s, "thinking");
-  s = nextPaneActivity(s, { kind: "item", itemType: "compaction", status: "loading" });
+  s = nextPaneActivity(s, {
+    kind: "item",
+    itemType: "compaction",
+    status: "loading",
+  });
   assert.equal(s, "compacting");
-  s = nextPaneActivity(s, { kind: "item", itemType: "compaction", status: "completed" });
+  s = nextPaneActivity(s, {
+    kind: "item",
+    itemType: "compaction",
+    status: "completed",
+  });
   assert.equal(s, "thinking");
   s = nextPaneActivity(s, { kind: "item", itemType: "assistant_message" });
   assert.equal(s, "replying");
@@ -29,4 +38,69 @@ test("幅の範囲と保存値", () => {
   assert.equal(clampPaneWidth(Number.NaN, 1000), defaultPaneWidth(1000));
   assert.equal(parseStoredPaneWidth("abc"), null);
   assert.equal(parseStoredPaneWidth("400"), 400);
+});
+
+// 2026-10-27 本番: 右カラムの本文が「ツールを実行中…」のまま9分止まり、リロード後は空だった。
+// 原因は2つで、どちらもここで固定する:
+// - 購読は接続直後に過去の書き込みを `tool_call` として届けるので、送信前でも「実行中」になる。
+// - スレの状態(running/idle)を送った後に一度も見ていないので、`tool_call` を受けると手が止まっても戻らない。
+
+test("(2) 送信前の古い書き込み(tool_call)では「実行中」を出さない", () => {
+  const idle = nextPaneActivity(null, { kind: "agent-status", status: "idle" });
+  assert.equal(idle, null);
+  assert.equal(
+    nextPaneActivity(idle, {
+      kind: "item",
+      itemType: "tool_call",
+      status: "completed",
+    }),
+    null,
+  );
+  assert.equal(nextPaneActivity(idle, { kind: "item", itemType: "tool_call" }), null);
+  assert.equal(nextPaneActivity(idle, { kind: "item", itemType: "reasoning" }), null);
+});
+
+test("(2) スレが実行中になってから開いた作業は「実行中」を出す", () => {
+  const running = nextPaneActivity(null, {
+    kind: "agent-status",
+    status: "running",
+  });
+  assert.equal(nextPaneActivity(running, { kind: "item", itemType: "tool_call" }), "working");
+  assert.equal(nextPaneActivity(running, { kind: "item", itemType: "reasoning" }), "thinking");
+});
+
+test("(2) 実行中に始まった作業は、スレが止まったら「実行中」を消す", () => {
+  const running = nextPaneActivity(null, {
+    kind: "agent-status",
+    status: "running",
+  });
+  const working = nextPaneActivity(running, {
+    kind: "item",
+    itemType: "tool_call",
+  });
+  assert.equal(working, "working");
+  assert.equal(nextPaneActivity(working, { kind: "agent-status", status: "idle" }), null);
+});
+
+test("送信直後は、止まっていても「送信済み」を残す(反応待ちを嘘にしない)", () => {
+  assert.equal(nextPaneActivity(null, { kind: "sent" }), "sent");
+  assert.equal(nextPaneActivity("sent", { kind: "agent-status", status: "idle" }), "sent");
+  assert.equal(
+    nextPaneActivity("sent", { kind: "agent-status", status: "running" }),
+    "sent-running",
+  );
+  assert.equal(nextPaneActivity("sent-running", { kind: "agent-status", status: "idle" }), "sent");
+  assert.equal(
+    nextPaneActivity("sent", {
+      kind: "item",
+      itemType: "tool_call",
+      status: "completed",
+    }),
+    "sent",
+  );
+  const running = nextPaneActivity("sent", {
+    kind: "agent-status",
+    status: "running",
+  });
+  assert.equal(nextPaneActivity(running, { kind: "item", itemType: "tool_call" }), "working");
 });

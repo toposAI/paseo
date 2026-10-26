@@ -17,6 +17,8 @@ export type ThreadTargetReason =
   | "domain-coordinator"
   /** 宛先が一覧に無く、起こしデーモンが指す総司令塔に振り替えた。 */
   | "general-coordinator"
+  /** 宛先(投函元)が閉じているので、この欄に答えるスレ(親)へ戻した(2026-10-27 あとから追加)。 */
+  | "destination"
   /** 宛先が一覧に無く、振り替え先も無い(全画面で開く)。 */
   | "no-live-thread";
 
@@ -28,8 +30,10 @@ export interface DirectoryAgent {
 }
 
 export interface ThreadTargetInput {
-  /** カードが指す宛先(`threadAgentId(item)` の結果)。 */
+  /** 開くスレ(投函の `thread_id`。無ければサーバが決めた `threadRef`)。`resolveOpenThreadId` の結果。 */
   target: string | null;
+  /** 開くスレが閉じていて代わりが決まらないときの次点(この欄に答えるスレ=親)。 */
+  destination?: string | null;
   /** 開くカードの題名(領域の推測に使う。無ければ推測しない)。 */
   title?: string | null;
   /** サーバが返す総司令塔のID(起こしデーモンの正本。古いことがある)。 */
@@ -65,6 +69,8 @@ function noticeFor(reason: ThreadTargetReason, agentId: string | null): string |
   switch (reason) {
     case "domain-coordinator":
       return `カードのスレが一覧に無いので、この話題の司令塔(${who})を開きます`;
+    case "destination":
+      return `カードのスレが閉じているので、このカードに答えるスレ(${who})を開きます`;
     case "general-coordinator":
       return `カードのスレが一覧に無いので、総司令塔(${who})を開きます`;
     case "no-live-thread":
@@ -80,7 +86,9 @@ function pick(agentId: string, reason: ThreadTargetReason): ThreadTargetResult {
 
 /**
  * 開くスレを決める。宛先が一覧に居ればそのまま(振り替えない)。居なければ:
- * 題名の管轄の領域司令塔 → 総司令塔(デーモンが指すID) → あきらめる。
+ * 題名の管轄の領域司令塔 → このカードに答えるスレ(親) → 総司令塔(デーモンが指すID) → あきらめる。
+ * 親を領域司令塔より後に置くのは、題名から管轄が分かるカードでは領域司令塔の方が近いため
+ * (答えるスレは、司令塔が閉じていた時の振り替え先としてサーバが選んだもの)。
  * どれが持ち主か分からないときは推測しない(別の話題のスレへ飛ばさない)。特に「動いている司令塔が
  * 1本だけだからそこへ」はやめた — 2026-10-27 本番で、題名と無関係の裏方スレへ飛んだ。
  */
@@ -92,6 +100,10 @@ export function resolveThreadTarget(input: ThreadTargetInput): ThreadTargetResul
   const domain = input.title ? (input.inferDomain?.(input.title) ?? null) : null;
   const domainId = domain ? input.domainCoordinators?.[domain] : undefined;
   if (domainId && isOpen(byId.get(domainId))) return pick(domainId, "domain-coordinator");
+  const destination = input.destination ?? null;
+  if (destination && destination !== input.target && isOpen(byId.get(destination))) {
+    return pick(destination, "destination");
+  }
   if (input.coordinatorId && isOpen(byId.get(input.coordinatorId))) {
     return pick(input.coordinatorId, "general-coordinator");
   }
@@ -101,6 +113,38 @@ export function resolveThreadTarget(input: ThreadTargetInput): ThreadTargetResul
     reason: "no-live-thread",
     notice: noticeFor("no-live-thread", input.target),
   };
+}
+
+/** 投函データから読む分だけ緩く持つ(`ConfirmBoxItem` と生の行のどちらでも渡せる)。 */
+export interface ThreadIdLike {
+  threadRef?: { kind?: string | null; id?: string | null } | null;
+  /** 投函した側が名指ししたスレ(サーバの `ConfirmBoxItem.threadId`)。 */
+  threadId?: string | null;
+  /** 承認待ち項目のエージェント。 */
+  agentId?: string | null;
+  /** 判断ノートの `threads:`。1本目が投函元のスレ。 */
+  threadCandidates?: readonly string[] | null;
+}
+
+const trimmed = (v: unknown): string | null =>
+  typeof v === "string" && v.trim() ? v.trim() : null;
+
+/**
+ * 「スレを開く」の宛先用のスレID。**投函に `thread_id` があればそれをそのまま使う**
+ * (2026-10-27: 従来は `thread_ref` しか見ておらず、サーバが登録簿 `child_threads.json` から
+ * 「投函元の親」を組み立てた `thread_ref` を開いていた。親がアーカイブ済みだと開けなかった)。
+ * 無いときは従来どおり `thread_ref`(paseo_agent)→ 承認待ちの `agentId`。
+ *
+ * `threadId` はサーバが `thread_id`(箱の行・中間形式)か、判断ノートの `thread_id:` / `threads:` の
+ * 1本目(=投函元。書き手 `judgment_notes.create_from_deposit` は `thread_id` をここへ書く)から入れる。
+ * `threadCandidates` の先頭を「投函元」とみなすのは、投函元を名指ししない旧ノートでは空だから。
+ */
+export function resolveOpenThreadId(item: ThreadIdLike | null | undefined): string | null {
+  if (!item) return null;
+  const direct = trimmed(item.threadId) ?? trimmed(item.threadCandidates?.[0]);
+  if (direct) return direct;
+  if (item.threadRef?.kind === "paseo_agent") return trimmed(item.threadRef.id);
+  return trimmed(item.agentId);
 }
 
 /** 決まった宛先を開く。振り替えた/開けないときは理由を1行だけコンソールにも残す(実画面の切り分け用)。 */

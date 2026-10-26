@@ -182,9 +182,28 @@ test("hide イベントで隠れ、unhide で戻る", () => {
 });
 
 test("同一 source+内容の未読通知を束ね、既読と別内容は束ねない", () => {
-  const a1 = item({ id: "1", ts: 1, source: "w", subject: "停止", summary: "m" });
-  const a2 = item({ id: "2", ts: 3, source: "w", subject: "停止", summary: "m" });
-  const a3 = item({ id: "3", ts: 2, source: "w", subject: "停止", summary: "m", state: "read" });
+  const a1 = item({
+    id: "1",
+    ts: 1,
+    source: "w",
+    subject: "停止",
+    summary: "m",
+  });
+  const a2 = item({
+    id: "2",
+    ts: 3,
+    source: "w",
+    subject: "停止",
+    summary: "m",
+  });
+  const a3 = item({
+    id: "3",
+    ts: 2,
+    source: "w",
+    subject: "停止",
+    summary: "m",
+    state: "read",
+  });
   const b = item({ id: "4", ts: 4, source: "w", subject: "別", summary: "m" });
   const out = bundleNotifications([a1, a2, a3, b], isNotificationItem);
   assert.deepEqual(out.map((i) => i.id).sort(), ["2", "3", "4"]);
@@ -195,7 +214,11 @@ test("同一 source+内容の未読通知を束ね、既読と別内容は束ね
 
 test("切替後に投函された judgment 行と、Vault 読取失敗時の旧行は隠さない", () => {
   const old = item({ id: "old", judgment: true, ts: 1 });
-  const fresh = item({ id: "fresh", judgment: true, ts: LEGACY_CUTOVER_MS + 1 });
+  const fresh = item({
+    id: "fresh",
+    judgment: true,
+    ts: LEGACY_CUTOVER_MS + 1,
+  });
   assert.deepEqual(
     applyVaultSource([old, fresh], []).items.map((i) => i.id),
     ["fresh"],
@@ -301,7 +324,12 @@ test("シンボリックリンクのノートには書かない / 選択の改�
   fs.rmSync(path.join(dir, "j-1.md"));
   fs.writeFileSync(path.join(dir, "j-1.md"), NOTE("j-1", "open"));
   answerVaultDecision(
-    { key: "vault:j-1", chosenId: "a", chosenLabel: null, reason: "x\n## 乗っ取り" },
+    {
+      key: "vault:j-1",
+      chosenId: "a",
+      chosenLabel: null,
+      reason: "x\n## 乗っ取り",
+    },
     new Date(),
     env,
   );
@@ -337,6 +365,27 @@ test("チャット宛先: 登録簿の親スレを threadRef にし、答える�
     id: "afe8d176-d92c-4cb2-933b-8dfe790d3c20",
   });
   assert.equal(parsed.answerLabel, "afe8d17 F-80司令塔");
+});
+
+test("スレを開く宛先: threads の1本目(=投函元)を threadId に入れる(thread_ref=親 とは別)", () => {
+  const parsed = parseDecisionNote(WITH_THREADS(["e7fd88de"]), 1, ROUTING) as ConfirmBoxItem;
+  assert.equal(parsed.threadId, "e7fd88de");
+  // この欄に答えるスレ(親)は従来どおり。
+  assert.equal(parsed.threadRef?.id, "afe8d176-d92c-4cb2-933b-8dfe790d3c20");
+});
+
+test("スレを開く宛先: 単一キー thread_id: があれば threads より優先する", () => {
+  const text = NOTE("j-t3", "open").replace(
+    "legacy_keys: []",
+    "thread_id: 3fa4a61a-0000-4000-8000-000000000000\nlegacy_keys: []",
+  );
+  const parsed = parseDecisionNote(text, 1, ROUTING) as ConfirmBoxItem;
+  assert.equal(parsed.threadId, "3fa4a61a-0000-4000-8000-000000000000");
+});
+
+test("スレを開く宛先: threads も thread_id も無い旧ノートは threadId が null(従来の宛先へ落ちる)", () => {
+  const parsed = parseDecisionNote(NOTE("j-t4", "open"), 1, ROUTING) as ConfirmBoxItem;
+  assert.equal(parsed.threadId, null);
 });
 
 test("チャット宛先: threads が無いノートは総司令塔(未登録と明示)", () => {
@@ -379,7 +428,13 @@ test("却下: コメントが空(空白だけ含む)なら拒否しノートは�
     assert.throws(
       () =>
         answerVaultDecision(
-          { key: "vault:j-1", chosenId: null, chosenLabel: null, reason, reject: true },
+          {
+            key: "vault:j-1",
+            chosenId: null,
+            chosenLabel: null,
+            reason,
+            reject: true,
+          },
           new Date(),
           env,
         ),
@@ -395,7 +450,13 @@ test("却下: すでに答え済みのノートは上書きしない", () => {
   assert.throws(
     () =>
       answerVaultDecision(
-        { key: "vault:j-1", chosenId: null, chosenLabel: null, reason: "理由", reject: true },
+        {
+          key: "vault:j-1",
+          chosenId: null,
+          chosenLabel: null,
+          reason: "理由",
+          reject: true,
+        },
         new Date(),
         { TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir },
       ),

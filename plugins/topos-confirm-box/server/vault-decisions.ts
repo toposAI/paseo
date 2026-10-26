@@ -96,6 +96,18 @@ export function parseOptions(text: string): {
   return { options, recommended };
 }
 
+/** frontmatter の単一キー `thread_id:` / `thread:` / `agent_id:`(投函側が名指ししたスレ)。無ければ null。 */
+export function parseThreadId(text: string): string | null {
+  const m = /^---\n([\s\S]*?)\n---/.exec(text.replace(/^﻿/, "").replace(/\r\n/g, "\n"));
+  if (!m) return null;
+  for (const key of ["thread_id", "thread", "agent_id"]) {
+    const line = new RegExp(`^${key}:\\s*(\\S+)\\s*$`, "m").exec(m[1]);
+    const value = line?.[1]?.replace(/^(["'])(.*)\1$/, "$2");
+    if (value && value !== "null") return value;
+  }
+  return null;
+}
+
 /** frontmatter の `threads:` リスト(`- <agent id>`)。 */
 export function parseThreads(text: string): string[] {
   const m = /^---\n([\s\S]*?)\n---/.exec(text.replace(/^﻿/, "").replace(/\r\n/g, "\n"));
@@ -166,8 +178,9 @@ export function parseDecisionNote(
     ? `【材料待ち】${materials || "材料が揃うのを待っています"}`
     : summaryBase;
   const key = `${VAULT_KEY_PREFIX}${id}`;
+  const threads = parseThreads(text);
   const destination = resolveCardDestination(
-    parseThreads(text),
+    threads,
     `${id} ${title} ${parseLegacyKeys(text).join(" ")}`,
     routing,
   );
@@ -182,6 +195,8 @@ export function parseDecisionNote(
     background: background.slice(0, BACKGROUND_MAX),
     source: VAULT_DECISION_SOURCE,
     threadRef: destination.id ? { kind: "paseo_agent", id: destination.id } : null,
+    // 投函元のスレが分かっているノートだけ、「スレを開く」を投函元へ向ける(`threadRef` は答えるスレ=親)。
+    threadId: parseThreadId(text) ?? threads[0] ?? null,
     answerLabel: destination.label,
     stoppedCount: 0,
     options,
@@ -291,7 +306,14 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
         skipped.push({ name, reason: "読めない" });
       }
     }
-    return { items, error: null, dir, skipped, waiting, claimedKeys: [...claimed] };
+    return {
+      items,
+      error: null,
+      dir,
+      skipped,
+      waiting,
+      claimedKeys: [...claimed],
+    };
   } catch (error) {
     return {
       items: [],
@@ -350,7 +372,9 @@ function stamp(now: Date): { date: string; iso: string } {
   const off = -now.getTimezoneOffset();
   const sign = off >= 0 ? "+" : "-";
   const abs = Math.abs(off);
-  const date = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  const date = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(
+    now.getDate(),
+  )} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
   return {
     date,
     iso: `${date}:${pad2(now.getSeconds())}${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`,
@@ -375,7 +399,9 @@ function rewriteFrontmatter(fm: string[], date: string, iso: string, reject = fa
     setKey("route", "chat");
   }
   // 履歴行は常に二重引用符で包む(「: 」入りの文言でも YAML が壊れない。壊れると整形処理が全キーを消す)
-  const entry = `- ${JSON.stringify(reject ? `${date} (user: 確認箱で却下)` : `${date} (user: 確認箱で回答)`)}`;
+  const entry = `- ${JSON.stringify(
+    reject ? `${date} (user: 確認箱で却下)` : `${date} (user: 確認箱で回答)`,
+  )}`;
   const hi = out.findIndex((l) => l.startsWith("modified_history:"));
   if (hi < 0) return [...out, "modified_history:", entry];
   if (/^modified_history:\s*\[\s*\]\s*$/.test(out[hi])) out[hi] = "modified_history:";

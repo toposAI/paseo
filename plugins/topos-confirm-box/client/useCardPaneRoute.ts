@@ -33,6 +33,8 @@ export function useCardPaneRoute(enabled: boolean): {
   /** 開く。既に同じ相手が開いていれば畳む(💬 のトグル)。 */
   open: (target: PaneTarget) => void;
   close: () => void;
+  /** 履歴を動かさずに外す(同じ相手を主ペインで開き直すとき。戻るで元に戻さない)。 */
+  fold: () => void;
 } {
   const [pane, setPane] = useState<PaneTarget | null>(() => (enabled ? currentPane() : null));
   // このセッションで push した履歴を持っているか(close で back するかの判定)。
@@ -131,5 +133,18 @@ export function useCardPaneRoute(enabled: boolean): {
     [enabled, pane, drop],
   );
 
-  return { pane, open, close: drop };
+  /** 外すが履歴は動かさない(直後の遷移を「戻る」で巻き戻さないため)。 */
+  const fold = useCallback(() => {
+    setPane(null);
+    openRef.current = false;
+    pushed.current = false;
+    if (!enabled || !isWeb || typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const next = searchWithPane(url.search, NO_PANE);
+    if (next === url.search) return;
+    url.search = next;
+    window.history.replaceState(window.history.state, "", url.toString());
+  }, [enabled]);
+
+  return { pane, open, close: drop, fold };
 }
