@@ -194,6 +194,24 @@ describe("tool call detail-level projection", () => {
     expect(result.groupsByHostId.get("1")).toBeUndefined();
   });
 
+  it("keeps two thoughts that meet at the head from folding into a badge", () => {
+    // The tail and the head are merged separately, so the last thought of one refresh and
+    // the first thought of the next arrive here as two thoughts. Folding them would make
+    // the row flick between a Thinking row and a badge as the stream settles.
+    const prepared = prepareToolCallHistory("overview", [thought("1", "First half.")]);
+    const streaming = thought("2", "Second half.", "loading");
+
+    const result = project({
+      level: "overview",
+      head: [streaming],
+      isTurnActive: true,
+      preparedHistory: prepared,
+    });
+
+    expect(result.head.map((item) => item.id)).toEqual(["2"]);
+    expect(result.groupsByHostId.get("1")).toBeUndefined();
+  });
+
   it("turns a lone thought into a group once a tool call joins it", () => {
     const lone = thought("1", "Thinking.");
     const prepared = prepareToolCallHistory("overview", [lone]);
@@ -207,6 +225,47 @@ describe("tool call detail-level projection", () => {
     });
 
     expect(grouped.historyGroupUpdatesByHostId.get("1")?.run.items).toEqual([lone, tool]);
+  });
+
+  it("updates a history-hosted lone thought even when history already has a group", () => {
+    // The revision must not depend on the history's group map being empty: a row that was
+    // an ordinary thought can only become a host while the history already has badges.
+    const prepared = prepareToolCallHistory("overview", [
+      thought("1", "First look."),
+      toolCall("2", { type: "shell", command: "ls" }),
+      assistant("said something"),
+      thought("3", "Second look."),
+    ])!;
+    expect(prepared.grouped.groupsByHostId.get("1")).toBeDefined();
+
+    const grouped = project({
+      level: "overview",
+      head: [toolCall("4", { type: "shell", command: "pwd" })],
+      isTurnActive: true,
+      preparedHistory: prepared,
+    });
+
+    expect(grouped.historyGroupUpdatesByHostId.get("3")?.run.items).toEqual([
+      prepared.grouped.pendingCalls[0],
+      expect.objectContaining({ id: "4" }),
+    ]);
+    expect(grouped.groupsByHostId.get("3")).toBeDefined();
+    // The history row carries the new items, so the head must not repeat them.
+    expect(grouped.head).toEqual([]);
+  });
+
+  it("does not split a run when only one side carries a turn id", () => {
+    // Old daemons and persisted rows have no turn ids; treating a missing id as a
+    // different turn would cut a single response into two badges.
+    const head: StreamItem[] = [
+      thought("1", "First.", "ready", "turn-a"),
+      toolCall("2", { type: "shell", command: "ls" }),
+    ];
+
+    const result = project({ level: "overview", head, isTurnActive: true });
+
+    expect(result.head.map((item) => item.id)).toEqual(["1"]);
+    expect(result.groupsByHostId.get("1")?.run.items).toEqual(head);
   });
 
   it("does not fold reasoning from two turns into one row", () => {
@@ -259,6 +318,17 @@ describe("tool call detail-level projection", () => {
     expect(group?.summary.isThinkingActive).toBe(false);
     // The badge still spins: something in the run is running.
     expect(group?.isLoading).toBe(true);
+  });
+
+  it("stops saying thinking for a sealed run left loading by an interruption", () => {
+    const timeline: StreamItem[] = [
+      toolCall("1", { type: "shell", command: "one" }),
+      thought("2", "Cut off mid-sentence.", "loading"),
+    ];
+
+    const group = project({ level: "overview", tail: timeline }).groupsByHostId.get("1");
+
+    expect(group?.summary.isThinkingActive).toBe(false);
   });
 
   it("keeps an activity row live while its trailing thought streams", () => {

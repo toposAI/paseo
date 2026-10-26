@@ -2015,7 +2015,7 @@ export const ja: TranslationResources = {
   },
   toolCallGroup: {
     thinking: "思考",
-    thinkingActive: "考え中",
+    thinkingActive: "考え中…",
     summarySeparator: "・",
     editedFiles: {
       one: "{{count}}個のファイルを編集",

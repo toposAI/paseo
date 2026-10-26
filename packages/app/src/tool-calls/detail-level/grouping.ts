@@ -1,4 +1,5 @@
 import type { ToolCallDetail } from "@getpaseo/protocol/agent-types";
+import { continuesTurn } from "@/agent-stream/turn-membership";
 import type { StreamItem, ThoughtItem, ToolCallItem } from "@/types/stream";
 
 export interface ToolCallDescriptor {
@@ -86,17 +87,24 @@ export function isGroupableActivityItem(item: StreamItem): item is ActivityItem 
 /**
  * A row of nothing but reasoning is still an ordinary Thinking row: folding it would hide
  * its text behind a second press and would leave `autoExpandReasoning` with nothing to
- * expand. So a lone thought is never a group; the row turns into one only once a tool call
- * joins it, which keeps the same id and therefore the same place in the stream.
+ * expand. The tail and the head are merged separately, so the last thought of a turn and
+ * the first thought of the next refresh arrive here as two thoughts with no tool call
+ * between them; folding those would make the row flip between a Thinking row and a badge.
+ * A run therefore becomes a group only once a tool call joins it, and it keeps the first
+ * item's id, so the row stays in the same place in the stream.
  */
-function isLoneThought(items: readonly ActivityItem[]): boolean {
-  return items.length === 1 && items[0]!.kind === "thought";
+function isThoughtsOnly(items: readonly ActivityItem[]): boolean {
+  return items.every((item) => item.kind === "thought");
 }
 
-/** Turns are never merged across, the same rule adjacent thoughts already follow. */
+/**
+ * Turns are never merged across, following the canonical turn rule rather than comparing
+ * turn ids here: a timeline without turn ids (old daemons, persisted rows) has no boundary
+ * to compare, and treating a missing id as a different turn would cut one response in two.
+ */
 function startsNewRun(pending: readonly ActivityItem[], item: ActivityItem): boolean {
   const last = pending.at(-1);
-  return last !== undefined && last.turnId !== item.turnId;
+  return last !== undefined && !continuesTurn(last, item);
 }
 
 function createRun(items: readonly ActivityItem[], isSealed: boolean): ActivityRun {
@@ -130,6 +138,16 @@ function isRunningItem(item: ActivityItem): boolean {
   return item.kind === "thought" ? item.status !== "ready" : isRunning(item);
 }
 
+/**
+ * A running tool keeps a history-hosted run live, because tool calls settle in retained
+ * tail while the streaming head moves on. A thought does not: by the time it is in the
+ * history with nothing new behind it, the stream has moved past it, so a thought still
+ * loading there was left behind by an interruption.
+ */
+function isStaleThought(items: readonly ActivityItem[]): boolean {
+  return items.some((item) => item.kind === "thought" && item.status !== "ready");
+}
+
 function appendRun<TGroup>(input: {
   items: readonly ActivityItem[];
   isSealed: boolean;
@@ -140,8 +158,8 @@ function appendRun<TGroup>(input: {
   if (input.items.length === 0) {
     return;
   }
-  if (isLoneThought(input.items)) {
-    input.output.push(input.items[0]!);
+  if (isThoughtsOnly(input.items)) {
+    input.output.push(...input.items);
     return;
   }
   const run = createRun(input.items, input.isSealed);
@@ -214,25 +232,41 @@ export function groupLiveToolCalls<TGroup>(input: {
   let pending = [...input.history.pendingCalls];
   let hostPlacement: "history" | "head" | null = pending.length > 0 ? "history" : null;
   let pendingIncludesHead = false;
+  // The history items at the front of `pending` are already drawn as part of the tail, so a
+  // run that ends up ungrouped must only re-emit the items that came from the head.
+  let historyCount = pending.length;
 
   const flush = (isSealed: boolean) => {
     if (pending.length === 0) {
       return;
     }
-    const run = isLoneThought(pending) ? null : createRun(pending, isSealed);
-    if (hostPlacement === "head") {
-      head.push(run ? createHost(run) : pending[0]!);
-    }
-    if (run && (hostPlacement === "head" || pendingIncludesHead || !isSealed)) {
-      const group = input.buildGroup(run);
-      liveGroups.set(run.id, group);
-      if (hostPlacement === "history") {
-        historyGroupUpdates.set(run.id, group);
+    // A run hosted by the history with nothing new in the head is not live: whatever is
+    // still loading there was left behind by an interruption, so it stays sealed. Its
+    // spinner still follows the item statuses; only the "still thinking" claim is dropped.
+    const isHistoryOnly = hostPlacement === "history" && !pendingIncludesHead;
+    const run = isThoughtsOnly(pending)
+      ? null
+      : createRun(pending, isSealed || (isHistoryOnly && isStaleThought(pending)));
+    if (run) {
+      if (hostPlacement === "head") {
+        head.push(createHost(run));
+      }
+      if (hostPlacement === "head" || pendingIncludesHead || !isSealed) {
+        const group = input.buildGroup(run);
+        liveGroups.set(run.id, group);
+        if (hostPlacement === "history") {
+          historyGroupUpdates.set(run.id, group);
+        }
+      }
+    } else {
+      for (const item of pending.slice(historyCount)) {
+        head.push(item);
       }
     }
     pending = [];
     hostPlacement = null;
     pendingIncludesHead = false;
+    historyCount = 0;
   };
 
   for (const item of input.head) {

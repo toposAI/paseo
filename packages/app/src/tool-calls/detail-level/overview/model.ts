@@ -6,7 +6,7 @@ const DIRECT_SEARCH_TOOL_SUFFIX_PATTERN = /(?:^|[_.:/])(?:web_search|llm_context
 
 export interface OverviewSummary {
   thinkingCount: number;
-  /** True only while reasoning is still arriving; a running tool is not "thinking". */
+  /** True only while reasoning is still arriving on an open run; a running tool is not "thinking". */
   isThinkingActive: boolean;
   editedFileCount: number;
   commandCount: number;
@@ -68,7 +68,9 @@ export function buildOverviewGroup(run: ActivityRun): OverviewToolCallGroup {
 
   const summary = {
     thinkingCount,
-    isThinkingActive: latest?.kind === "thought" && latest.status !== "ready",
+    // A sealed run is finished history: a thought left loading by an interruption stays
+    // that way forever, so the label must not claim reasoning is still arriving.
+    isThinkingActive: latest?.kind === "thought" && latest.status !== "ready" && !run.isSealed,
     editedFileCount: editedFiles.size,
     commandCount,
     readFileCount: readFiles.size,
