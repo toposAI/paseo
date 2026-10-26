@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
-import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
+import { useHosts, useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import {
   KIND_LABEL,
@@ -37,6 +37,8 @@ import { NotificationsView } from "./NotificationsView.js";
 import { BellIcon, BugIcon, InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import { CardChatPane } from "./CardChatPane.js";
+import { openThreadInPane } from "./open-pane-thread.js";
+import { useCoordinatorTargets } from "./useCoordinatorTargets.js";
 import { shouldSwitchPaneOnCardPress } from "../shared/card-pane.js";
 import { useCardPaneRoute } from "./useCardPaneRoute.js";
 import { useConfirmBoxPane } from "./useConfirmBoxPane.js";
@@ -53,7 +55,7 @@ const REFRESH_MS = 30_000;
 
 export function ConfirmBoxView({
   theme,
-  navigation,
+  openAgent,
   containerWidth,
   mode = "box",
   layout,
@@ -66,7 +68,11 @@ export function ConfirmBoxView({
   initialTab?: "bugs" | "notify" | "priority";
   /** ホストの `layout`。省略時(ポップオーバー)は幅・高さだけで判定する。 */
   layout?: PluginHostProps["layout"];
-  navigation?: { openAgent: (input: { agentId: string; serverId?: string }) => void };
+  /**
+   * スレを開く関数(ホストの `navigation.openAgent`。`placement: "right"` で右カラム)。
+   * 全画面・「ユーザー判断」の画面では渡され、ポップオーバーでは渡されない(=「スレを開く」を出さない)。
+   */
+  openAgent?: (input: { agentId: string; placement?: "right" }) => Promise<void>;
   /** 描画先の箱の幅。省略時は窓幅。ポップオーバーは窓が広くても箱が狭いので実測値を渡す。 */
   containerWidth?: number;
   /**
@@ -123,6 +129,8 @@ export function ConfirmBoxView({
   }, [reload]);
 
   const c = theme.colors;
+  // 開くスレの一覧を引く先のホスト(直接開いた画面は navigation を受け取らないので自前で探す)。
+  const hosts = useHosts();
   // タッチ幅(iPhone等)ではタップ領域を44pt以上・間隔8pxに広げる。PC幅は従来の大きさ。
   const windowSize = useWindowDimensions();
   // 幅の判定は「描画されている箱」基準。ポップオーバーは窓が広くても箱は最大420pxなので、
@@ -419,15 +427,15 @@ export function ConfirmBoxView({
   // 幅で置き場所が変わる(右に並べる/全画面で重ねる)ので、SplitLayout へ要素ごと渡す。
   // ペインの相手は投函元スレ(2026-10-22 ユーザー決定)。まだ一覧に来ていないカードは null。
   const paneAgentId = paneItem ? threadAgentId(paneItem) : paneThreadId;
-  const openPaneThread = useMemo(() => {
-    if (!paneAgentId || !navigation) return undefined;
-    // PC幅(wide)は右に新しいカラムで開く(2026-10-25 ユーザー指示)。狭い幅は従来どおり遷移。
-    return () =>
-      navigation.openAgent({
-        agentId: paneAgentId,
-        ...(wide ? { placement: "right" as const } : {}),
-      });
-  }, [paneAgentId, navigation, wide]);
+  const openPaneThread = usePaneOpenThread({
+    agentId: paneAgentId,
+    item: paneItem,
+    threadTitle: paneThreadTitle,
+    wide,
+    hosts,
+    openAgent,
+    onNotice: setNotice,
+  });
   // eslint-disable-next-line eslint-plugin-react-perf/jsx-no-jsx-as-prop -- 同一レンダーの子として一度だけ置く
   const paneEl = pane ? (
     <CardChatPane
@@ -859,6 +867,50 @@ function summarizeFilter({
     `${count}件`,
   ];
   return parts.filter(Boolean).join(" · ");
+}
+
+/**
+ * ペイン見出しの「スレを開く」のハンドラ。PC幅(wide)は右カラムで、狭い幅は従来どおり遷移で開く
+ * (2026-10-25 ユーザー指示)。2026-10-27: 宛先を一覧で確かめ、無ければ持ち主のスレへ振り替える
+ * (`openThreadInPane`)。開けなかった/振り替えた理由は画面の1行(`onNotice`)に出す。
+ */
+function usePaneOpenThread({
+  agentId,
+  item,
+  threadTitle,
+  wide,
+  hosts,
+  openAgent,
+  onNotice,
+}: {
+  agentId: string | null;
+  item: ConfirmBoxItem | null;
+  threadTitle: string | null;
+  wide: boolean;
+  hosts: ReturnType<typeof useHosts>;
+  openAgent: ((input: { agentId: string; placement?: "right" }) => Promise<void>) | undefined;
+  onNotice: (text: string) => void;
+}): (() => void) | undefined {
+  // 宛先の検証に使う司令塔のID。カードを開いている間だけ引く(スレ直接=カード無しでは不要)。
+  const coordinators = useCoordinatorTargets(item !== null);
+  const notice = useCallback((text: string) => void onNotice(text), [onNotice]);
+  return useMemo(() => {
+    if (!agentId || !openAgent) return undefined;
+    const input = {
+      serverId: hosts.find((h) => h.status === "online")?.serverId ?? "",
+      target: agentId,
+      context: {
+        ...(wide ? { placement: "right" as const } : {}),
+        title: item !== null ? (item.subject ?? threadTitle) : null,
+        coordinatorId: coordinators?.agentId ?? null,
+        hubIds: coordinators?.hubIds,
+        direct: item === null,
+      },
+      open: openAgent,
+      onNotice: notice,
+    };
+    return () => void openThreadInPane(input);
+  }, [agentId, openAgent, wide, item, threadTitle, coordinators, hosts, notice]);
 }
 
 /** 元スレの agent ID。投函の thread_ref(paseo_agent)優先、無ければ承認待ちの agentId。 */

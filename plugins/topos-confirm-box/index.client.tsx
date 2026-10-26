@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { Linking, Text, View, type LayoutChangeEvent } from "react-native";
 import {
   getPaseoClient,
@@ -241,6 +241,25 @@ function openBoxScreen(input: { screenId: string; params?: Record<string, string
   client?.openScreen(input);
 }
 
+/**
+ * スレを、ホストの画面遷移の受け口(`navigation.openAgent`)で開く関数。確認箱の「スレを開く」は
+ * 右カラムの配置(`placement`)を自分で選ぶので、`navigation` そのものではなくこの関数を受け取る。
+ * スクリーン(全画面)と「ユーザー判断」の両方で同じものを使う。
+ */
+function useOpenAgent(
+  navigation: PluginScreenProps["navigation"],
+): ((input: { agentId: string; placement?: "right" }) => Promise<void>) | undefined {
+  return useMemo(
+    () =>
+      navigation
+        ? async (input: { agentId: string; placement?: "right" }) => {
+            navigation.openAgent(input);
+          }
+        : undefined,
+    [navigation],
+  );
+}
+
 /** 確認箱の `?tab=`。不正な値はバグ報告に倒す(下部バーから開いたときの既定)。 */
 function boxInitialTab(param: string | undefined): "bugs" | "notify" | "priority" {
   return param === "notify" || param === "priority" ? param : "bugs";
@@ -248,11 +267,12 @@ function boxInitialTab(param: string | undefined): "bugs" | "notify" | "priority
 
 function Screen({ theme, navigation, layout, params }: PluginScreenProps) {
   const tab = boxInitialTab(params.tab);
+  const openAgent = useOpenAgent(navigation);
   return (
     <ConfirmBoxView
       key={tab}
       theme={theme}
-      navigation={navigation}
+      openAgent={openAgent}
       layout={layout}
       openScreen={openBoxScreen}
       initialTab={tab}
@@ -265,11 +285,12 @@ function Screen({ theme, navigation, layout, params }: PluginScreenProps) {
  * タブごとに状態(絞り込み・並び)を持ち越さないよう `key` で作り直す。
  */
 function BoxTabScreen({ theme, navigation, layout }: PluginScreenProps) {
+  const openAgent = useOpenAgent(navigation);
   return (
     <ConfirmBoxView
       key="items"
       theme={theme}
-      navigation={navigation}
+      openAgent={openAgent}
       layout={layout}
       mode="items"
       openScreen={openBoxScreen}

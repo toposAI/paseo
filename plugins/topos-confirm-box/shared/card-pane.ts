@@ -131,6 +131,22 @@ export function shouldSwitchPaneOnCardPress(anyPaneOpen: boolean, thisCardShown:
   return anyPaneOpen && !thisCardShown;
 }
 
+/**
+ * 題名・キーから管轄領域を推測する(サーバの宛先判定 `server/card-destination.ts` と同じ語)。
+ * 確認箱の「スレを開く」が、宛先のスレを一覧から引けないときに開くスレを決めるために使う。
+ * 語を増やすときは両方を揃えること。
+ */
+const DOMAIN_HINTS: readonly (readonly [string, RegExp])[] = [
+  ["f80", /f-?80/i],
+  ["topos_dev", /topos[-_ ]?dev/i],
+  ["paseo_ui", /paseo|確認箱|サイドバー/i],
+];
+
+export function inferDomain(hint: string): string | null {
+  for (const [domain, re] of DOMAIN_HINTS) if (re.test(hint)) return domain;
+  return null;
+}
+
 // ---------------------------------------------------------------- 優先順位ページの吹き出し(ChatDock)の宛先
 
 /** 吹き出し会話が総司令塔へ落ちた時に送信文の先頭へ付ける目印(総司令塔が出どころを判別できるように)。 */
