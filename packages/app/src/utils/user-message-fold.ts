@@ -32,7 +32,7 @@ interface FoldUserMessageInput {
  * The settings `foldUserMessage` reads, kept apart so the view selects them in a single hook
  * instead of adding conditions to the component itself.
  */
-function selectRelayFoldSettings(settings: {
+export function selectRelayFoldSettings(settings: {
   relayFolding: RelayFolding;
   relayTitleMark: string;
 }): { relayFolding: RelayFolding; relayTitleMark: string } {
