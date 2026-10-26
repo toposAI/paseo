@@ -117,7 +117,7 @@ describe("reportThreadTarget", () => {
     console.info = (m?: unknown) => void calls.push(`i:${String(m)}`);
     try {
       reportThreadTarget({ agentId: BACKOFFICE, reason: "resolved", notice: null });
-      reportThreadTarget({ agentId: BACKOFFICE, reason: "live-coordinator", notice: "x" });
+      reportThreadTarget({ agentId: BACKOFFICE, reason: "domain-coordinator", notice: "x" });
       reportThreadTarget({ agentId: null, reason: "no-live-thread", notice: "x" });
     } finally {
       console.warn = saved.warn;
@@ -125,7 +125,7 @@ describe("reportThreadTarget", () => {
     }
     assert.deepEqual(calls, [
       "i:[Plugins] Confirm box thread target: resolved",
-      "w:[Plugins] Confirm box thread target: live-coordinator",
+      "w:[Plugins] Confirm box thread target: domain-coordinator",
       "w:[Plugins] Confirm box thread target: no-live-thread",
     ]);
   });
