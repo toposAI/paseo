@@ -17,8 +17,6 @@ export type ThreadTargetReason =
   | "domain-coordinator"
   /** 宛先が一覧に無く、起こしデーモンが指す総司令塔に振り替えた。 */
   | "general-coordinator"
-  /** 宛先が一覧に無く、開ける司令塔が1本だけだったそのスレに振り替えた。 */
-  | "live-coordinator"
   /** 宛先が一覧に無く、振り替え先も無い(全画面で開く)。 */
   | "no-live-thread";
 
@@ -69,8 +67,6 @@ function noticeFor(reason: ThreadTargetReason, agentId: string | null): string |
       return `カードのスレが一覧に無いので、この話題の司令塔(${who})を開きます`;
     case "general-coordinator":
       return `カードのスレが一覧に無いので、総司令塔(${who})を開きます`;
-    case "live-coordinator":
-      return `カードのスレが一覧に無いので、動いている司令塔(${who})を開きます`;
     case "no-live-thread":
       return "カードのスレが一覧に無く、代わりのスレも見つからないので全画面で開きます";
     default:
@@ -82,22 +78,11 @@ function pick(agentId: string, reason: ThreadTargetReason): ThreadTargetResult {
   return { agentId, reason, notice: noticeFor(reason, agentId) };
 }
 
-/** 開ける司令塔のID(重複は畳む。並びは ハブ → 総司令塔)。 */
-function openCoordinators(
-  input: ThreadTargetInput,
-  byId: ReadonlyMap<string, DirectoryAgent>,
-): string[] {
-  const out: string[] = [];
-  for (const id of [...(input.hubIds ?? []), input.coordinatorId ?? null]) {
-    if (id && isOpen(byId.get(id)) && !out.includes(id)) out.push(id);
-  }
-  return out;
-}
-
 /**
  * 開くスレを決める。宛先が一覧に居ればそのまま(振り替えない)。居なければ:
- * 題名の管轄の司令塔 → 総司令塔(デーモンが指すID) → 開ける司令塔が1本だけならそのスレ → あきらめる。
- * 2本以上あってどれが持ち主か分からないときは推測しない(別の話題のスレへ飛ばさない)。
+ * 題名の管轄の領域司令塔 → 総司令塔(デーモンが指すID) → あきらめる。
+ * どれが持ち主か分からないときは推測しない(別の話題のスレへ飛ばさない)。特に「動いている司令塔が
+ * 1本だけだからそこへ」はやめた — 2026-10-27 本番で、題名と無関係の裏方スレへ飛んだ。
  */
 export function resolveThreadTarget(input: ThreadTargetInput): ThreadTargetResult {
   const byId = new Map(input.directory.map((a) => [a.id, a]));
@@ -110,9 +95,6 @@ export function resolveThreadTarget(input: ThreadTargetInput): ThreadTargetResul
   if (input.coordinatorId && isOpen(byId.get(input.coordinatorId))) {
     return pick(input.coordinatorId, "general-coordinator");
   }
-  const coordinators = openCoordinators(input, byId);
-  if (coordinators.length === 1 && coordinators[0])
-    return pick(coordinators[0], "live-coordinator");
   // 宛先が無い(投函元も thread_ref も無い)なら、開くスレは決まらない。
   return {
     agentId: input.target,

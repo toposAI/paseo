@@ -35,8 +35,9 @@ describe("resolveThreadTarget", () => {
     assert.equal(r.notice, null);
   });
 
-  test("本番の失敗: アーカイブ済みの総司令塔宛でも、開けるスレを選んで全画面へ落とさない", () => {
-    // 題名に領域が無く、開ける司令塔が1本だけ → その1本。
+  test("本番(2026-10-27): 総司令塔が閉じているカードは、推測せずそのまま全画面にする", () => {
+    // 以前は「開ける司令塔が1本だけなら寄せる」で coordinator_backstage へ寄せていたが、
+    // 寄せ先は題名と無関係の裏方スレだった(本番実測)。司令塔の束への推測寄せはやめた。
     const r = resolveThreadTarget({
       target: GENERAL_DEAD,
       title: "critique 3巡の打ち切り",
@@ -44,10 +45,9 @@ describe("resolveThreadTarget", () => {
       hubIds: [GENERAL_DEAD, BACKOFFICE],
       directory: [archived, live],
     });
-    assert.notEqual(r.agentId, GENERAL_DEAD);
-    assert.equal(r.agentId, BACKOFFICE);
-    assert.equal(r.reason, "live-coordinator");
-    assert.match(r.notice ?? "", /一覧に無い/);
+    assert.equal(r.agentId, GENERAL_DEAD, "宛先はそのまま(全画面で開く)");
+    assert.equal(r.reason, "no-live-thread");
+    assert.match(r.notice ?? "", /全画面/);
   });
 
   test("題名から管轄が分かれば、その領域の司令塔へ振り替える", () => {
