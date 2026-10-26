@@ -4,7 +4,9 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StreamItem } from "@/types/stream";
 
-type RpcReply = { ok: boolean } | { enabled: boolean; seq: number | null; epoch: string | null; updatedAt?: number };
+type RpcReply =
+  | { ok: boolean }
+  | { enabled: boolean; seq: number | null; epoch: string | null; updatedAt?: number };
 const rpc = vi.hoisted(() => ({
   invokePluginRpc: vi.fn(
     async (_pluginId: string, _method: string, _input?: unknown): Promise<RpcReply | null> => null,

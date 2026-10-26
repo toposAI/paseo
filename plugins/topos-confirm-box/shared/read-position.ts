@@ -18,7 +18,8 @@ export const READ_POSITION_DEFAULT_TITLE_MARKS = ["完了箱C", "判断窓口", 
 /** 設定で上書きされていないスレを記録対象にするか(題名に目印を含む窓口スレだけ)。 */
 export function isReadPositionDefaultOn(title: string | undefined): boolean {
   return (
-    typeof title === "string" && READ_POSITION_DEFAULT_TITLE_MARKS.some((mark) => title.includes(mark))
+    typeof title === "string" &&
+    READ_POSITION_DEFAULT_TITLE_MARKS.some((mark) => title.includes(mark))
   );
 }
 
