@@ -27,7 +27,6 @@ import { confirmBoxTabs, isWideLayout } from "../shared/footer-tabs.js";
 import { onBoxChanged, notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
 import { BugReportsView } from "./BugReportsView.js";
-import { ChildDoneView } from "./ChildDoneView.js";
 import {
   HeaderIconBar,
   type HeaderTabId,
@@ -35,7 +34,7 @@ import {
   type ToggleInfo,
 } from "./HeaderIconBar.js";
 import { NotificationsView } from "./NotificationsView.js";
-import { BellIcon, BugIcon, CheckCircleIcon, InboxIcon, ListIcon } from "./Icons.js";
+import { BellIcon, BugIcon, InboxIcon, ListIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import { CardChatPane } from "./CardChatPane.js";
 import { shouldSwitchPaneOnCardPress } from "../shared/card-pane.js";
@@ -72,9 +71,9 @@ export function ConfirmBoxView({
   containerWidth?: number;
   /**
    * 開き方。`box`=確認箱そのもの(下部バー:「バグ報告」等から開く。中は バグ報告・通知・優先順位 の3枚)、
-   * `items`/`childdone`=下部バーの「ユーザー判断」「子スレ完了」から開いた画面(そのタブだけ)。
+   * `items`=下部バーの「ユーザー判断」から開いた画面(そのタブだけ)。
    */
-  mode?: "box" | "items" | "childdone";
+  mode?: "box" | "items";
 }) {
   const list = useRpc(confirmBoxListRpc);
   const decide = useRpc(confirmBoxDecideRpc);
@@ -130,8 +129,8 @@ export function ConfirmBoxView({
   // 窓幅で判定すると一覧とチャットペインが同じ狭い箱に横並びで押し込まれる。
   const width = layoutWidth(containerWidth, windowSize.width);
   const touch = width < 600;
-  // 「ユーザー判断」「子スレ完了」は下部バーへ出したので、確認箱の中は PC も iPhone も3枚
-  // (バグ報告・通知・優先順位)。下部バーから開いた画面はそのタブだけ。
+  // 「ユーザー判断」は下部バーへ出した。「子スレ完了」は 2026-10-26 に撤去したので、確認箱の中は
+  // PC も iPhone も3枚(バグ報告・通知・優先順位)。下部バーから開いた画面はそのタブだけ。
   // 幅の判定は一覧とチャットの並べ方にだけ使う(PC幅なら横並び、狭い幅は全画面で重ねる)。
   const wide = isBoxWide(containerWidth, windowSize, layout);
   const compact = !wide;
@@ -451,15 +450,6 @@ export function ConfirmBoxView({
     content = (
       <BugReportsView theme={theme} showArchived={showAll.bugs} onToggleInfo={setToggleInfo} />
     );
-  } else if (shownTab === "childdone") {
-    content = (
-      <ChildDoneView
-        theme={theme}
-        navigation={navigation}
-        showAcked={showAll.childdone}
-        onToggleInfo={setToggleInfo}
-      />
-    );
   } else if (shownTab === "notify") {
     content = <NotificationsView theme={theme} />;
   } else {
@@ -601,8 +591,8 @@ function isBoxWide(
 }
 
 /**
- * 最上部のアイコン列の動き。押した画面へ移る(今の画面なら何もしない): ユーザー判断・子スレ完了は下部バーと同じ
- * `box-tab` 画面(`?mode=`)、それ以外は確認箱(`main`)の `?tab=`。
+ * 最上部のアイコン列の動き。押した画面へ移る(今の画面なら何もしない): ユーザー判断は下部バーと同じ
+ * `box-tab` 画面、それ以外は確認箱(`main`)の `?tab=`。
  * 更新: 判断一覧は取り直しの成否を返す。他の画面は各画面が開いた時に取り直すので、作り直して取らせる。
  */
 function useHeaderNav({
@@ -617,8 +607,8 @@ function useHeaderNav({
   const selectFromHeader = useCallback(
     (id: HeaderTabId) => {
       if (!openScreen || id === shownTab) return;
-      if (id === "items" || id === "childdone") {
-        openScreen({ screenId: "box-tab", params: { mode: id } });
+      if (id === "items") {
+        openScreen({ screenId: "box-tab" });
       } else {
         openScreen({ screenId: "main", params: { tab: id } });
       }
@@ -636,15 +626,15 @@ function useHeaderNav({
 }
 
 /**
- * 子スレ完了(確認済み)・バグ報告(完了済み)の「も表示」切替。ボタンはアイコン列の更新ボタンの左に置くので、
- * 出す/隠すの状態はここで持ち、各画面は表示の有無とラベルだけを `setToggleInfo` で知らせる。
+ * バグ報告(完了済み)の「も表示」切替。ボタンはアイコン列の更新ボタンの左に置くので、
+ * 出す/隠すの状態はここで持ち、画面は表示の有無とラベルだけを `setToggleInfo` で知らせる。
  */
 function useHeaderToggle(shownTab: TabId) {
-  const [showAll, setShowAll] = useState({ bugs: false, childdone: false });
+  const [showAll, setShowAll] = useState({ bugs: false });
   const [toggleInfo, setToggleInfo] = useState<ToggleInfo | null>(null);
   const onPress = useCallback(() => {
-    if (shownTab === "bugs" || shownTab === "childdone") {
-      setShowAll((v) => ({ ...v, [shownTab]: !v[shownTab] }));
+    if (shownTab === "bugs") {
+      setShowAll((v) => ({ ...v, bugs: !v.bugs }));
     }
   }, [shownTab]);
   const headerToggle = useMemo<HeaderToggle | null>(
@@ -673,7 +663,7 @@ function InlineToggle({
 }
 
 /** アイコン列を出す画面では、下の並び(TabStrip)は要らない(`items` を渡すと何も描かない)。 */
-function stripMode(mode: "box" | "items" | "childdone", hasHeader: boolean) {
+function stripMode(mode: "box" | "items", hasHeader: boolean) {
   return hasHeader ? "items" : mode;
 }
 
@@ -681,16 +671,16 @@ function HeaderSlot({ show, ...props }: { show: boolean } & ComponentProps<typeo
   return show ? <HeaderIconBar {...props} /> : null;
 }
 
-type TabId = "items" | "bugs" | "childdone" | "notify" | "priority";
+type TabId = "items" | "bugs" | "notify" | "priority";
 
 /**
  * 出すタブの並びと現在のタブ。
- * - `box`: 確認箱そのもの。下部バーへ移した2枚(ユーザー判断/子スレ完了)を外した3枚(PC も iPhone も同じ)
- * - `items`/`childdone`: 下部バーから開いた画面。そのタブだけを出す(並びは出さない)
+ * - `box`: 確認箱そのもの。下部バーへ移した1枚(ユーザー判断)を外した3枚(PC も iPhone も同じ)
+ * - `items`: 下部バーから開いた画面。そのタブだけを出す(並びは出さない)
  * 初期タブは、開いた画面ならそのタブ、確認箱ならバグ報告。
  */
 function useBoxTabs(
-  mode: "box" | "items" | "childdone",
+  mode: "box" | "items",
   initialTab: "bugs" | "notify" | "priority" = "bugs",
 ): {
   shownTab: TabId;
@@ -718,7 +708,7 @@ function TabStrip({
   styles: s,
   colors: c,
 }: {
-  mode: "box" | "items" | "childdone";
+  mode: "box" | "items";
   tabs: readonly (typeof TABS)[number][];
   shownTab: TabId;
   counts: Partial<Record<TabId, number>>;
@@ -755,7 +745,6 @@ function TabStrip({
 const TABS: { id: TabId; label: string; Icon: typeof InboxIcon }[] = [
   { id: "items", label: "判断待ち", Icon: InboxIcon },
   { id: "bugs", label: "Toposバグ報告", Icon: BugIcon },
-  { id: "childdone", label: "子スレ完了", Icon: CheckCircleIcon },
   { id: "notify", label: "通知", Icon: BellIcon },
   { id: "priority", label: "優先順位", Icon: ListIcon },
 ];
@@ -773,7 +762,6 @@ function useBadgeCounts(): Partial<Record<TabId, number>> {
           setN({
             items: r.open,
             bugs: r.bugs,
-            childdone: r.childDone,
             notify: r.notifications,
           });
         }

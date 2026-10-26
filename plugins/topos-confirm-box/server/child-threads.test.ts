@@ -5,7 +5,6 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   applyChildThreadOrder,
-  countDoneAwaitingCard,
   normalizeChildThreadOrder,
   normalizeChildThreads,
   readChildThreadOrder,
@@ -64,8 +63,8 @@ test("完了まとめは箱の項目から引く(summary_item_id 一致)", () =>
   assert.equal(t.summaryState, "read");
 });
 
-test("カードを作らない運用の目印(nocard:)は箱を引かず、確認待ちに数えない", () => {
-  // 目印は箱に実在しない id。summaryItemId に載せると「確認待ち」として出て件数が水増しされる。
+test("カードを作らない運用の目印(nocard:)は箱を引かず、完了の実カードとして扱わない", () => {
+  // 目印は箱に実在しない id。summaryItemId に載せると、押しても効かない確認として出てしまう。
   const [t] = normalizeChildThreads(
     { threads: [row({ agent_id: "nc", status: "完了", summary_item_id: "nocard:abc" })] },
     [{ id: "nocard:abc", background: "箱に在るはずのない本文", state: "read" }],
@@ -101,23 +100,14 @@ test("目印の id が ack 済みに入っていても確認済みにしない�
   assert.equal(isCardDone({ status: "実装中" }), false);
 });
 
-test("バッジの完了待ち件数はカードの無い行(nocard)を数えない", () => {
-  const threads = normalizeChildThreads(
-    {
-      threads: [
-        row({ agent_id: "nc", status: "完了", summary_item_id: "nocard:k" }),
-        row({ agent_id: "wait", status: "完了", summary_item_id: "i1" }),
-        row({ agent_id: "done", status: "完了", summary_item_id: "i2" }),
-        row({ agent_id: "work", status: "実装中" }),
-      ],
-    },
-    [
-      { id: "i1", background: "未確認", state: "read" },
-      { id: "i2", background: "確認済み", state: "approved" },
-    ],
-    new Set(["i2"]),
-  );
-  assert.equal(countDoneAwaitingCard(threads), 1);
+test("常駐の窓口の status『待機』は行の『待機中』になり、完了として数えない", () => {
+  // 登録簿(Python)は常駐の窓口を『待機』で書く。行の語彙へ寄せないと enum で落ちるか
+  // 既定の『実装中』に化けて、動いていない窓口が動いて見える(2026-10-26)。
+  const [t] = normalizeChildThreads({
+    threads: [row({ agent_id: "waitwin", status: "待機", title: "判断窓口A'" })],
+  });
+  assert.equal(t.status, "待機中");
+  assert.equal(isCardDone(t), false);
 });
 
 test("ファイルが無ければ空配列、あれば読む", () => {
@@ -254,14 +244,14 @@ test("確認済みは個別 ack のときだけ(すべて既読=ackall では真
   assert.equal(byId.get("a2")?.summaryState, "read");
 });
 
-test("確認待ちの文言は箱の決定印(承認済み扱い)では減らない — 個別 ack だけが確認", () => {
+test("完了まとめの個別 ack は箱の決定印(承認済み扱い)では立たない — 記録用に区別する", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-"));
   fs.writeFileSync(
     path.join(dir, "child_threads.json"),
     JSON.stringify({ threads: [row({ agent_id: "a1", status: "完了", summary_item_id: "bx" })] }),
   );
   // 別機能(自由記述の決定行)で key が決定済みになった項目は箱側で approved になるが、
-  // 「子スレ完了」タブの確認待ちはそれを確認と見なさない(ユーザーが明示的に畳んだ時だけ)。
+  // 完了まとめの ack は個別の ack だけで立てる(2026-10-26: 表示の条件ではなく記録用)。
   const [t] = readChildThreads(dir, [{ id: "bx", background: "s", state: "approved" as const }]);
   assert.equal(t.summaryAcked, false);
 });

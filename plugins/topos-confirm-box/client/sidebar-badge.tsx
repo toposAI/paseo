@@ -65,6 +65,25 @@ export function StatusBadge({ text, kind, testID, onPress }: StatusLabelProps) {
   );
 }
 
+/**
+ * 行末の「⋯」ボタン。ピン止め・アーカイブのメニューを開く常時見えるボタン
+ * (帯を押さないとメニューが出ないのは気づけない、という指摘: 台帳 ui-abf449bfaa)。
+ */
+export function MenuButton({ testID, onPress }: { testID?: string; onPress: () => void }) {
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel="ピン止め・アーカイブのメニューを開く"
+      onPress={onPress}
+      hitSlop={6}
+      style={styles.menuButton}
+    >
+      <Text style={styles.menuGlyph}>⋯</Text>
+    </Pressable>
+  );
+}
+
 /** `Pressable` の style プロパティ用(押下中だけ薄くする)。 */
 function usePressableStyle(base: object): (state: { pressed: boolean }) => object | object[] {
   return useMemo(() => (state) => (state.pressed ? [base, styles.pressed] : base), [base]);
@@ -73,14 +92,27 @@ function usePressableStyle(base: object): (state: { pressed: boolean }) => objec
 const styles = StyleSheet.create({
   badge: {
     borderRadius: 999,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
     // 状態名が長くても行末で抑え、題名の幅を食い尽くさない
-    maxWidth: 96,
+    maxWidth: 110,
   },
   text: {
-    fontSize: 11,
-    fontWeight: "600",
+    // 11pxでは読めないという指摘が3回(台帳 ui-be238b34bf)。13pxに上げる。
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  menuButton: {
+    minWidth: 24,
+    minHeight: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 6,
+  },
+  menuGlyph: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#52525b",
   },
   pressed: {
     opacity: 0.6,
