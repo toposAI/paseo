@@ -6,6 +6,11 @@ const QUOTE_PREFIX_PATTERN = /^[\s>]*/;
 const BULLET_LINE_PATTERN = /^-\s/;
 const ENVIRONMENT_UPDATE_PATTERN = /#\s*Environment update\b/;
 const TOOL_RECORD_PREFIX = "Called the ";
+// Claude Code hands hook output back as the turn's text, one `<Event>[:<matcher>] hook ...:`
+// header per hook (`SessionStart:compact hook success: ...`, `SessionStart hook additional
+// context: ...`). After a compaction or resume this makes the whole turn hook output.
+const HOOK_OUTPUT_HEADER_PATTERN =
+  /^(?:SessionStart|UserPromptSubmit|PostToolUse|PreToolUse|Stop|SubagentStop|PreCompact)(?::[\w.-]+)? hook (?:success|additional context|blocking error|error|stopped continuation)\b/;
 
 function readLineText(line: string): string {
   // System reminders reach the transcript as blockquote lines, which may escape `_` as `\_`.
@@ -23,6 +28,12 @@ function isBlankLine(line: string): boolean {
  * so a message that only quotes such a block can still be expanded.
  */
 export function isHarnessContextOnlyMessage(text: string): boolean {
+  // Hook output carries free-form lines (healthchecks, quoted earlier requests), so it is
+  // recognized by its header: a turn that opens with one is the harness's, never the user's.
+  const firstLine = text.split("\n").find((line) => !isBlankLine(line));
+  if (firstLine !== undefined && HOOK_OUTPUT_HEADER_PATTERN.test(readLineText(firstLine).trim())) {
+    return true;
+  }
   const withoutReminders = text.replace(SYSTEM_REMINDER_BLOCK_PATTERN, "");
   const sawReminder = withoutReminders !== text;
   const lines = withoutReminders.split("\n");

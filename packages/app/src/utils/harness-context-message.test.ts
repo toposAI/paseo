@@ -63,4 +63,23 @@ describe("isHarnessContextOnlyMessage", () => {
     expect(isHarnessContextOnlyMessage("このスレ、今日どうする?")).toBe(false);
     expect(isHarnessContextOnlyMessage("")).toBe(false);
   });
+
+  it("folds a turn made of SessionStart hook output after compaction", () => {
+    const turn = `SessionStart:compact hook success: [cloud_setup.sh] apt-get not found
+
+SessionStart:compact hook success: [HookHealthcheck] OK: all registered hook scripts present.
+
+SessionStart hook additional context: このセッションはメインworking treeで直接起動されています。
+[compact_context] ★未処理の依頼★ 次のユーザー発言は圧縮の直前に届きました。`;
+    expect(isHarnessContextOnlyMessage(turn)).toBe(true);
+    expect(isHarnessContextOnlyMessage(`> ${turn.split("\n").join("\n> ")}`)).toBe(true);
+    expect(isHarnessContextOnlyMessage("UserPromptSubmit hook additional context: x")).toBe(true);
+  });
+
+  it("keeps a message that only mentions hook output", () => {
+    expect(isHarnessContextOnlyMessage("SessionStart hookの出力が見える件")).toBe(false);
+    expect(isHarnessContextOnlyMessage("これ見て\nSessionStart:compact hook success: foo")).toBe(
+      false,
+    );
+  });
 });
