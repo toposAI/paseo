@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { usePluginHostNavigation } from "./host-navigation";
+import { openAgentInRightColumn } from "./open-agent-right";
 
 vi.mock("@/utils/navigate-to-agent", () => ({
   navigateToAgent: vi.fn(),
@@ -13,14 +14,52 @@ vi.mock("@/utils/navigate-to-agent", () => ({
 vi.mock("@/stores/navigation-active-workspace-store", () => ({
   navigateToWorkspace: vi.fn(),
 }));
+vi.mock("./open-agent-right", () => ({
+  openAgentInRightColumn: vi.fn(),
+}));
 
 const navigateToAgentMock = vi.mocked(navigateToAgent);
 const navigateToWorkspaceMock = vi.mocked(navigateToWorkspace);
+const openAgentInRightColumnMock = vi.mocked(openAgentInRightColumn);
 
 describe("usePluginHostNavigation", () => {
   beforeEach(() => {
     navigateToAgentMock.mockReset();
     navigateToWorkspaceMock.mockReset();
+    openAgentInRightColumnMock.mockReset();
+  });
+
+  it("opens to the right column when the host can, without a normal navigation", () => {
+    openAgentInRightColumnMock.mockReturnValue(true);
+    const { result } = renderHook(() => usePluginHostNavigation("host-1"));
+
+    act(() => result.current.openAgent({ agentId: "agent-1", placement: "right" }));
+
+    expect(openAgentInRightColumnMock).toHaveBeenCalledWith({ serverId: "host-1", agentId: "agent-1" });
+    expect(navigateToAgentMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the normal open when the right column fails", () => {
+    openAgentInRightColumnMock.mockImplementation(() => {
+      throw new Error("cannot split");
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { result } = renderHook(() => usePluginHostNavigation("host-1"));
+
+    act(() => result.current.openAgent({ agentId: "agent-1", placement: "right" }));
+
+    expect(navigateToAgentMock).toHaveBeenCalledWith({ serverId: "host-1", agentId: "agent-1" });
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("never asks for a right column without the placement", () => {
+    const { result } = renderHook(() => usePluginHostNavigation("host-1"));
+
+    act(() => result.current.openAgent({ agentId: "agent-1" }));
+
+    expect(openAgentInRightColumnMock).not.toHaveBeenCalled();
+    expect(navigateToAgentMock).toHaveBeenCalledWith({ serverId: "host-1", agentId: "agent-1" });
   });
 
   it("opens agents and workspaces on the rendering host", () => {

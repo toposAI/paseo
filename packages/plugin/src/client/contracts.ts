@@ -42,7 +42,11 @@ interface PluginNavigableHostProps extends PluginHostProps {
     readonly openAgent: (input: {
       readonly agentId: string;
       readonly serverId?: string;
-      /** "right": open in a new column to the right of the focused pane (desktop split). Hosts that cannot split fall back to the normal open. */
+      /**
+       * "right": open in the split pane on the right-hand side of the agent's workspace (creating
+       * that pane when it does not exist yet). Hosts that cannot split, or that have not loaded the
+       * saved layout yet, fall back to the normal open.
+       */
       readonly placement?: "right";
     }) => void;
     readonly openWorkspace: (input: {

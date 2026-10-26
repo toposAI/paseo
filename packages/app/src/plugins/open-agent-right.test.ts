@@ -2,8 +2,8 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EXPLORER_SIDEBAR_PANE_ID } from "@/stores/workspace-layout-actions";
 import {
-  collectAllPanes,
   createWorkspaceLayoutStore,
   createWorkspaceLayoutWithExplorerSidebar,
   useWorkspaceLayoutStore,
@@ -21,9 +21,7 @@ const navigateToWorkspaceMock = vi.mocked(navigateToWorkspace);
 const SERVER_ID = "host-1";
 const WORKSPACE_ID = "ws-main";
 const WORKSPACE_KEY = `${SERVER_ID}:${WORKSPACE_ID}`;
-// 初期レイアウトのエクスプローラペインは非表示なので collectAllPanes には出ないが、
-// 記録側のIDとの突き合わせを確かめるために固定値を使う。
-const EXPLORER_SIDEBAR_PANE_ID = "explorer";
+const DEFAULT_PANE_ID = "main";
 
 function createLayoutStore() {
   let index = 0;
@@ -145,6 +143,36 @@ describe("planOpenAgentInRightColumn", () => {
     expect(plan?.paneId).toBe(rightmostPaneId);
     expect(plan?.paneId).not.toBe(EXPLORER_SIDEBAR_PANE_ID);
   });
+
+  it("エクスプローラを表示していても、エクスプローラを右カラムと間違えない", () => {
+    const layout = createWorkspaceLayoutWithExplorerSidebar();
+    const plan = planOpenAgentInRightColumn(
+      { serverId: SERVER_ID, agentId: "a" },
+      baseDeps({
+        readLayout: () => layout,
+        readExplorerSidebarPaneId: () => null,
+      }),
+    );
+    expect(plan?.paneId).toBeNull();
+    expect(plan?.paneId).not.toBe(EXPLORER_SIDEBAR_PANE_ID);
+  });
+
+  it("上下分割だけなら右カラムは無い(paneId: null)", () => {
+    const upper = { kind: "pane" as const, pane: { id: DEFAULT_PANE_ID, tabIds: [], focusedTabId: null } };
+    const lower = { kind: "pane" as const, pane: { id: "lower", tabIds: [], focusedTabId: null } };
+    const layout: WorkspaceLayout = {
+      root: {
+        kind: "group",
+        group: { id: "top", direction: "vertical", children: [upper, lower], sizes: [0.5, 0.5] },
+      },
+      focusedPaneId: DEFAULT_PANE_ID,
+    };
+    const plan = planOpenAgentInRightColumn(
+      { serverId: SERVER_ID, agentId: "a" },
+      baseDeps({ readLayout: () => layout }),
+    );
+    expect(plan?.paneId).toBeNull();
+  });
 });
 
 describe("openAgentInRightColumn", () => {
@@ -190,6 +218,13 @@ describe("openAgentInRightColumn", () => {
       target: { kind: "agent", agentId: "agent-1" },
       placement: { mode: "pane", paneId },
     });
+  });
+
+  it("保存済みレイアウトの読み込み前は false を返し、右カラムを勝手に作らない", () => {
+    vi.spyOn(useWorkspaceLayoutStore.persist, "hasHydrated").mockReturnValue(false);
+    expect(openAgentInRightColumn({ serverId: SERVER_ID, agentId: "agent-1" })).toBe(false);
+    expect(layoutStore.getState().sidePaneIdByWorkspace[WORKSPACE_KEY]).toBeUndefined();
+    expect(navigateToWorkspaceMock).not.toHaveBeenCalled();
   });
 
   it("エージェントが見つからなければ false を返し、呼び出し側が通常遷移へ落とせる", () => {

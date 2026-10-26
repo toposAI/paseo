@@ -18,7 +18,14 @@ export function usePluginHostNavigation(
       createPluginHostNavigation(serverId, {
         browserAvailable: getIsElectron(),
         openAgent: ({ placement, ...input }) => {
-          if (placement === "right" && openAgentInRightColumn(input)) return;
+          if (placement === "right") {
+            try {
+              if (openAgentInRightColumn(input)) return;
+            } catch (error) {
+              // 右カラムの都合で開けないだけなので、通常遷移へ落とす(黙って握りつぶさず記録する)。
+              console.warn("[Plugins] Failed to open the agent in the right column", error);
+            }
+          }
           navigateToAgent(input);
         },
         openWorkspace: navigateToWorkspace,

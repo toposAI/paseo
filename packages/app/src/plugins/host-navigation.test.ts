@@ -20,6 +20,14 @@ describe("plugin host navigation", () => {
     return { navigation, destinations, browsers, workspaces };
   }
 
+  it("passes the right-column placement through to the host", () => {
+    const { navigation, destinations } = setup();
+    navigation.openAgent({ agentId: "agent-1", placement: "right" });
+    expect(destinations).toEqual([
+      { serverId: "selected", agentId: "agent-1", placement: "right" },
+    ]);
+  });
+
   it("creates and focuses a local browser in the selected or explicit host workspace", () => {
     const { navigation, destinations, browsers } = setup();
     navigation.openBrowser!({ url: "https://example.com/one", workspaceId: "one" });

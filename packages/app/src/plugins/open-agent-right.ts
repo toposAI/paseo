@@ -1,6 +1,10 @@
 import { useSessionStore } from "@/stores/session-store";
 import { useWorkspaceLayoutStore, type WorkspaceLayout } from "@/stores/workspace-layout-store";
-import { collectAllPanes } from "@/stores/workspace-layout-actions";
+import {
+  EXPLORER_SIDEBAR_PANE_ID,
+  collectAllPanes,
+  type SplitNode,
+} from "@/stores/workspace-layout-actions";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import {
@@ -22,8 +26,30 @@ export interface OpenAgentRightDeps {
     workspaceId: string;
   }) => string | null;
   readLayout: (workspaceKey: string) => WorkspaceLayout | null;
+  /** 保存済みのエクスプローラID。未記録なら既定のエクスプローラIDに倒す。 */
   readExplorerSidebarPaneId: (workspaceKey: string) => string | null | undefined;
   readSidePaneId: (workspaceKey: string) => string | null | undefined;
+}
+
+/**
+ * 右端のペイン。左右の区別は水平分割でしか付かないので、一番上の分割が縦なら
+ * `null`(=右カラムはまだ無い)。水平分割の右側がさらに縦に積まれている場合は、
+ * その中の先頭のペインを返す(どの段も x 座標は同じ)。
+ */
+function rightmostPaneId(node: SplitNode, excludePaneId: string): string | null {
+  if (node.kind === "pane") {
+    const { pane } = node;
+    return pane.hidden === true || pane.id === excludePaneId ? null : pane.id;
+  }
+  // 横並びでなければ「最も右のペイン」という単位が無い(上下に積まれたペインは同じ x)。
+  if (node.group.direction !== "horizontal") return null;
+  const { children } = node.group;
+  for (let i = children.length - 1; i >= 0; i -= 1) {
+    const child = children[i];
+    const found = child ? rightmostPaneId(child, excludePaneId) : null;
+    if (found) return found;
+  }
+  return null;
 }
 
 /**
@@ -51,18 +77,22 @@ export function planOpenAgentInRightColumn(
   const layout = deps.readLayout(workspaceKey);
   if (!layout) return { workspaceId, workspaceKey, paneId: null };
 
-  const explorerPaneId = deps.readExplorerSidebarPaneId(workspaceKey) ?? null;
+  // 未記録は「エクスプローラ無し」ではなく既定ID。後者は非表示でも `panes` から外れないため、
+  // ここで除外しないとホバー表示したエクスプローラが右端と誤認される。
+  const explorerPaneId = deps.readExplorerSidebarPaneId(workspaceKey) ?? EXPLORER_SIDEBAR_PANE_ID;
   const sidePaneId = deps.readSidePaneId(workspaceKey) ?? null;
-  const panes = collectAllPanes(layout.root).filter(
-    (pane) => pane.id !== explorerPaneId && pane.hidden !== true,
-  );
+  const panes = collectAllPanes(layout.root).filter((pane) => pane.id !== explorerPaneId);
 
   if (sidePaneId && panes.some((pane) => pane.id === sidePaneId)) {
     return { workspaceId, workspaceKey, paneId: sidePaneId };
   }
   // ペインが1枚(エクスプローラを除く)なら右側がまだ無い。そのときは呼び出し側に作らせる。
   if (panes.length < 2) return { workspaceId, workspaceKey, paneId: null };
-  return { workspaceId, workspaceKey, paneId: panes[panes.length - 1]?.id ?? null };
+  return {
+    workspaceId,
+    workspaceKey,
+    paneId: rightmostPaneId(layout.root, explorerPaneId),
+  };
 }
 
 /**
@@ -70,6 +100,9 @@ export function planOpenAgentInRightColumn(
  * わからない・右カラムを作れない)ときは `false` を返し、呼び出し側が通常遷移へ落とす。
  */
 export function openAgentInRightColumn(input: { serverId: string; agentId: string }): boolean {
+  // 未読み込みだと `navigateToWorkspace` が配置を捨てて通常遷移に落ちる。ここで書き込むと
+  // 空の右カラムだけが残るので、先に false を返して呼び出し側の通常遷移に任せる。
+  if (!useWorkspaceLayoutStore.persist.hasHydrated()) return false;
   const sessions = useSessionStore.getState().sessions;
   const store = useWorkspaceLayoutStore.getState();
   const plan = planOpenAgentInRightColumn(input, {
