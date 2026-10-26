@@ -1031,23 +1031,30 @@ export async function createPaseoDaemon(
   const detachAgentTitleSummarizer = titleSummarizer.start();
   // 既存スレの一括付け直し(`paseo.title-retitle=1`)。起動の邪魔をしないよう少し待って1回だけ走る。
   // 閉じているスレは履歴がメモリに無いので、1本ずつ読み込み→付け直し→閉じる(直列)。
-  const titleBackfillTimer = setTimeout(() => {
+  // 戻し手順を短くするための逃げ道: `PASEO_DISABLE_TITLE_BACKFILL=1` で一括付け直しを止める。
+  const runTitleBackfillOnce = () => {
     void runTitleBackfill({
       listStored: () => agentStorage.list(),
       isLoaded: (agentId) => agentManager.getAgent(agentId) !== null,
+      isBusy: (agentId) => agentManager.hasInFlightRun(agentId),
       ensureLoaded: async (agentId) => {
         await ensureUnarchivedAgentLoaded(agentId, { agentManager, agentStorage, logger });
       },
       close: (agentId) => agentManager.closeAgent(agentId),
-      retitle: (agentId) => titleSummarizer.retitle(agentId),
+      // 一括処理の間に人が題名を固定したら手を出さない。
+      retitle: (agentId) => titleSummarizer.retitle(agentId, { preserveUser: true }),
       markDone: (agentId) =>
         agentManager.updateAgentMetadata(agentId, {
           labels: { [TITLE_RETITLE_LABEL]: TITLE_RETITLE_DONE },
         }),
       logger,
     }).catch((error) => logger.warn({ err: error }, "agent title backfill failed"));
-  }, TITLE_BACKFILL_DELAY_MS);
-  titleBackfillTimer.unref();
+  };
+  const titleBackfillTimer =
+    process.env.PASEO_DISABLE_TITLE_BACKFILL === "1"
+      ? null
+      : setTimeout(runTitleBackfillOnce, TITLE_BACKFILL_DELAY_MS);
+  titleBackfillTimer?.unref();
   await bootstrapWorkspaceRegistries({
     serverId,
     paseoHome: config.paseoHome,

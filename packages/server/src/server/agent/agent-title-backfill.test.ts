@@ -24,9 +24,13 @@ function record(id: string, labels: Record<string, string>, extra?: { archivedAt
 function setup(input: {
   records: StoredAgentRecord[];
   loaded?: string[];
+  busy?: string[];
+  /** retitle の途中で呼ばれる(呼び出し中の状態変化を再現する)。 */
+  onRetitle?: (agentId: string) => void;
   retitleResult?: (agentId: string) => boolean | Error;
 }) {
   const loaded = new Set(input.loaded ?? []);
+  const busy = new Set(input.busy ?? []);
   const calls = {
     ensureLoaded: [] as string[],
     close: [] as string[],
@@ -36,6 +40,7 @@ function setup(input: {
   const deps: TitleBackfillDeps = {
     listStored: async () => input.records,
     isLoaded: (agentId) => loaded.has(agentId),
+    isBusy: (agentId) => busy.has(agentId),
     ensureLoaded: async (agentId) => {
       calls.ensureLoaded.push(agentId);
     },
@@ -44,6 +49,7 @@ function setup(input: {
     },
     retitle: async (agentId) => {
       calls.retitle.push(agentId);
+      input.onRetitle?.(agentId);
       const outcome = input.retitleResult?.(agentId) ?? true;
       if (outcome instanceof Error) throw outcome;
       return outcome;
@@ -53,7 +59,7 @@ function setup(input: {
     },
     logger: createTestLogger(),
   };
-  return { deps, calls };
+  return { deps, calls, busy };
 }
 
 describe("runTitleBackfill", () => {
@@ -73,7 +79,7 @@ describe("runTitleBackfill", () => {
       ],
     });
     const result = await runTitleBackfill(deps);
-    expect(result).toEqual({ marked: 1, retitled: 1, failed: 0, skipped: 0 });
+    expect(result).toEqual({ marked: 1, retitled: 1, failed: 0, skipped: 0, busy: 0 });
     expect(calls.retitle).toEqual(["a"]);
     expect(calls.markDone).toEqual(["a"]);
   });
@@ -100,7 +106,7 @@ describe("runTitleBackfill", () => {
       retitleResult: (agentId) => (agentId === "boom" ? new Error("boom") : false),
     });
     const result = await runTitleBackfill(deps);
-    expect(result).toEqual({ marked: 2, retitled: 0, failed: 1, skipped: 1 });
+    expect(result).toEqual({ marked: 2, retitled: 0, failed: 1, skipped: 1, busy: 0 });
     expect(calls.markDone).toEqual(["boom", "nogen"]);
     expect(calls.close).toEqual(["boom", "nogen"]);
   });
@@ -108,11 +114,37 @@ describe("runTitleBackfill", () => {
   test("does nothing (and logs nothing) when no agent is marked", async () => {
     const { deps, calls } = setup({ records: [record("a", {})] });
     const result = await runTitleBackfill(deps);
-    expect(result).toEqual({ marked: 0, retitled: 0, failed: 0, skipped: 0 });
+    expect(result).toEqual({ marked: 0, retitled: 0, failed: 0, skipped: 0, busy: 0 });
     expect(calls.retitle).toEqual([]);
   });
 
   test("the done mark is not `1`, so a second run does not repeat", async () => {
     expect(TITLE_RETITLE_DONE).not.toBe("1");
+  });
+
+  // 回帰: 実行中のスレを閉じるとターンごと中断してしまう(2026-10-27 出口レビュー指摘1)。
+  test("never touches an agent that is running when the pass reaches it", async () => {
+    const { deps, calls } = setup({
+      records: [record("running", { [TITLE_RETITLE_LABEL]: "1" })],
+      busy: ["running"],
+    });
+    const result = await runTitleBackfill(deps);
+    expect(result).toEqual({ marked: 1, retitled: 0, failed: 0, skipped: 0, busy: 1 });
+    expect(calls.retitle).toEqual([]);
+    expect(calls.close).toEqual([]);
+    // 印は残す: 触っていないのだから「済み」にしてはいけない。
+    expect(calls.markDone).toEqual([]);
+  });
+
+  // 回帰: 読み込んだ後に誰かが送り始めた場合も、閉じる直前に見直す(同 指摘1)。
+  test("leaves the agent open when it became busy while the title was being generated", async () => {
+    const { deps, calls, busy } = setup({
+      records: [record("late", { [TITLE_RETITLE_LABEL]: "1" })],
+      onRetitle: (agentId) => busy.add(agentId),
+    });
+    await runTitleBackfill(deps);
+    expect(calls.ensureLoaded).toEqual(["late"]);
+    expect(calls.close).toEqual([]);
+    expect(calls.markDone).toEqual(["late"]);
   });
 });

@@ -1,4 +1,5 @@
 import {
+  AGENT_TITLE_REGENERATE_LABEL,
   AGENT_TITLE_SOURCE_INITIAL,
   AGENT_TITLE_SOURCE_LABEL,
   AGENT_TITLE_SOURCE_USER,
@@ -22,6 +23,19 @@ export function withUserTitleSource(
   labels: Record<string, string> | undefined,
 ): Record<string, string> {
   if (labels?.[AGENT_TITLE_SOURCE_LABEL]) return { ...labels };
+  return { ...labels, [AGENT_TITLE_SOURCE_LABEL]: AGENT_TITLE_SOURCE_USER };
+}
+
+/**
+ * 改名コマンド用。題名を変えたなら `user` を付けるが、同じ呼び出しで
+ * `paseo.title-regenerate=1` を頼まれたときは付けない(その場で付け直させる意思表示なので、
+ * `user` を付けると自分で自分をブロックしてしまう)。
+ */
+export function withRenameTitleSource(
+  labels: Record<string, string> | undefined,
+): Record<string, string> {
+  if (labels?.[AGENT_TITLE_SOURCE_LABEL]) return { ...labels };
+  if (labels?.[AGENT_TITLE_REGENERATE_LABEL] === "1") return { ...labels };
   return { ...labels, [AGENT_TITLE_SOURCE_LABEL]: AGENT_TITLE_SOURCE_USER };
 }
 

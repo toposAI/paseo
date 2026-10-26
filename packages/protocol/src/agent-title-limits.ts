@@ -23,3 +23,9 @@ export const AGENT_TITLE_REGENERATE_LABEL = "paseo.title-regenerate";
 
 /** `1` を立てたスレは、デーモン起動時に**一度だけ**題名を付け直す(既存スレの一括付け直し用)。 */
 export const AGENT_TITLE_RETITLE_LABEL = "paseo.title-retitle";
+
+/**
+ * 付け直しの前に元の題名を退避しておくラベル(一括付け直しでだけ付く)。
+ * LLM の題名が気に入らなければ、この値へ戻せる(戻す手順は TOPOS_CUSTOMIZATIONS.md)。
+ */
+export const AGENT_TITLE_BEFORE_RETITLE_LABEL = "paseo.title-before-retitle";

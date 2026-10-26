@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { getParentAgentIdFromLabels, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
-import { AGENT_TITLE_SOURCE_LABEL } from "@getpaseo/protocol/agent-title-limits";
+import {
+  AGENT_TITLE_REGENERATE_LABEL,
+  AGENT_TITLE_RETITLE_LABEL as TITLE_RETITLE_LABEL,
+  AGENT_TITLE_SOURCE_LABEL,
+} from "@getpaseo/protocol/agent-title-limits";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import type { StoredAgentRecord } from "./agent-storage.js";
@@ -300,6 +304,47 @@ describe("agent lifecycle commands", () => {
           title: "Renamed agent",
           // 作成後の改名は「人が付けた題名」として自動要約から守る
           labels: { team: "infra", [AGENT_TITLE_SOURCE_LABEL]: "user" },
+        },
+      },
+    ]);
+  });
+
+  // 回帰: ラベルだけの更新(`paseo agent update <id> --label …`)にも `user` が付き、
+  // 題名を変えていないのに自動要約から外れていた(2026-10-27 出口レビュー指摘4)。
+  test("a labels-only update keeps the title source untouched", async () => {
+    const storage = new FakeLifecycleAgentStorage();
+    storage.records.set("agent-1", storedAgent("agent-1"));
+    const manager = new FakeLifecycleAgentManager(storage);
+
+    await updateAgentCommand(
+      { agentManager: manager },
+      { agentId: "agent-1", labels: { [TITLE_RETITLE_LABEL]: "1" } },
+    );
+
+    expect(manager.metadataUpdates).toEqual([
+      {
+        agentId: "agent-1",
+        updates: { labels: { [TITLE_RETITLE_LABEL]: "1" } },
+      },
+    ]);
+  });
+
+  test("a rename that also asks for a regenerate does not lock the title as user", async () => {
+    const storage = new FakeLifecycleAgentStorage();
+    storage.records.set("agent-1", storedAgent("agent-1"));
+    const manager = new FakeLifecycleAgentManager(storage);
+
+    await updateAgentCommand(
+      { agentManager: manager },
+      { agentId: "agent-1", name: "窓口B", labels: { [AGENT_TITLE_REGENERATE_LABEL]: "1" } },
+    );
+
+    expect(manager.metadataUpdates).toEqual([
+      {
+        agentId: "agent-1",
+        updates: {
+          title: "窓口B",
+          labels: { [AGENT_TITLE_REGENERATE_LABEL]: "1" },
         },
       },
     ]);
