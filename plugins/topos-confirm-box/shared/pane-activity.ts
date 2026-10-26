@@ -15,7 +15,12 @@
  * (本番で9分止まり)。そこで作業系の項目(`tool_call`/`reasoning`)は**スレが running と分かった後だけ**
  * 進め、止まった(idle 等)なら送信済み以外は消す。
  */
-export type PaneActivity = "sent" | "thinking" | "compacting" | "working" | "replying";
+export type PaneActivity =
+  | "sent"
+  | "thinking"
+  | "compacting"
+  | "working"
+  | "replying";
 
 /**
  * 内部の状態。画面に出す5つに加えて、次の2つの印を持つ:
@@ -24,7 +29,9 @@ export type PaneActivity = "sent" | "thinking" | "compacting" | "working" | "rep
  */
 export type PaneActivityState = PaneActivity | "running" | "sent-running";
 /** 画面に出す値。印(`running`)は何も出さない(`null`)。送信済みは出したままにする。 */
-export function paneActivityLabel(state: PaneActivityState | null): PaneActivity | null {
+export function paneActivityLabel(
+  state: PaneActivityState | null
+): PaneActivity | null {
   if (state === "running") return null;
   if (state === "sent-running") return "sent";
   return state;
@@ -38,7 +45,7 @@ export type PaneActivityEvent =
 
 export function nextPaneActivity(
   cur: PaneActivityState | null,
-  ev: PaneActivityEvent,
+  ev: PaneActivityEvent
 ): PaneActivityState | null {
   switch (ev.kind) {
     case "sent":
@@ -56,7 +63,7 @@ export function nextPaneActivity(
 
 function nextFromAgentStatus(
   cur: PaneActivityState | null,
-  status: string | undefined,
+  status: string | undefined
 ): PaneActivityState | null {
   // running 以外=手が止まった。送信済みだけは、「送ったのに相手は反応していない」という事実なので残す。
   if (status === "running") {
@@ -74,7 +81,7 @@ function nextFromAgentStatus(
 function nextFromItem(
   cur: PaneActivityState | null,
   itemType: string | undefined,
-  status: string | undefined,
+  status: string | undefined
 ): PaneActivityState | null {
   const t = itemType ?? "";
   // 過去の書き込みか今の作業かはスレの状態で判る。止まっている間(null/`sent`)は**何も進めない**
