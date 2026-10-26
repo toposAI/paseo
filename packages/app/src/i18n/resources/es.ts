@@ -2248,6 +2248,7 @@ export const es: TranslationResources = {
         description:
           "Los hilos cuyo título contiene «{{mark}}» muestran los mensajes largos recibidos en una sola línea; pulsa para leerlo entero",
         noMark: "(sin coincidencia en el título)",
+        suffix: 'Also fold when the title has a suffix such as "(2)"',
       },
       toposChatStyle: {
         label: "Topos-style chat",

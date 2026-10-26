@@ -2231,6 +2231,7 @@ export const ru: TranslationResources = {
         description:
           "В потоках, в названии которых есть «{{mark}}», длинные входящие сообщения показываются одной строкой; нажмите, чтобы прочитать целиком",
         noMark: "(нет совпадения в названии)",
+        suffix: 'Also fold when the title has a suffix such as "(2)"',
       },
       toposChatStyle: {
         label: "Topos-style chat",

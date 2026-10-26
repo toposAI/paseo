@@ -2208,6 +2208,7 @@ export const ko: TranslationResources = {
         description:
           "제목에 “{{mark}}”이(가) 포함된 스레드는 긴 수신 메시지를 한 줄로 표시합니다(누르면 전체)",
         noMark: "(제목 일치 없음)",
+        suffix: 'Also fold when the title has a suffix such as "(2)"',
       },
       toposChatStyle: {
         label: "Topos-style chat",

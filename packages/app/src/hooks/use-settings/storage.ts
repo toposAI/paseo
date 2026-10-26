@@ -276,7 +276,7 @@ const StoredAppSettingsSchema = z
     sidebarNavItems: z.array(z.object({ key: z.string(), visible: z.boolean() })).catch([]),
     sidebarFooterItems: z.array(z.object({ key: z.string(), visible: z.boolean() })).catch([]),
     usage: UsagePreferencesSchema,
-    relayFolding: z.enum(["off", "relay"]).catch("relay"),
+    relayFolding: z.enum(["off", "relay", "suffix"]).catch("relay"),
     relayTitleMark: z.string().trim().max(40).catch(DEFAULT_RELAY_TITLE_MARK),
     toposChatStyle: z.boolean().catch(true),
     composerOverflowMenu: z.boolean().catch(true),

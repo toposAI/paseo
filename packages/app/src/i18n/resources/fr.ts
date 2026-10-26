@@ -2245,6 +2245,7 @@ export const fr: TranslationResources = {
         description:
           "Les fils dont le titre contient « {{mark}} » affichent les longs messages reçus sur une seule ligne ; appuyez pour tout lire",
         noMark: "(aucune correspondance de titre)",
+        suffix: 'Also fold when the title has a suffix such as "(2)"',
       },
       toposChatStyle: {
         label: "Topos-style chat",

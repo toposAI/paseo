@@ -2318,8 +2318,9 @@ export const en = {
       relayFolding: {
         label: "Fold long messages in relay threads",
         description:
-          "Threads whose title contains '{{mark}}' show long incoming messages as one line; press it to read the whole message",
+          "Threads named '{{mark}}' show long incoming messages as one line (press to read the whole message); what you type yourself stays whole",
         noMark: "(no title match)",
+        suffix: 'Also fold when the title has a suffix such as "(2)"',
       },
       toposChatStyle: {
         label: "Topos-style chat",

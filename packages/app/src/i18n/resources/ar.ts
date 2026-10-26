@@ -2195,6 +2195,7 @@ export const ar: TranslationResources = {
         description:
           "تعرض الخيوط التي يحتوي عنوانها على «{{mark}}» الرسائل الطويلة الواردة في سطر واحد؛ اضغط لقراءتها كاملة",
         noMark: "(لا تطابق في العنوان)",
+        suffix: 'Also fold when the title has a suffix such as "(2)"',
       },
       toposChatStyle: {
         label: "Topos-style chat",
