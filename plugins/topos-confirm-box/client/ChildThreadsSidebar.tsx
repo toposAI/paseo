@@ -61,7 +61,7 @@ import { pickReadableText } from "../shared/contrast.js";
 import { menuCanArchive } from "../shared/thread-menu.js";
 import type { ThreadMenuIntent } from "../shared/thread-menu.js";
 import { ConceptNotesList, useSidebarNotes } from "./ConceptNotes.js";
-import { StatusBadge } from "./sidebar-badge.js";
+import { MenuButton, StatusBadge } from "./sidebar-badge.js";
 import { stateDotIcons } from "./StateDot.js";
 import type { StateDotIcon } from "./StateDot.js";
 import { appearanceOf } from "../shared/state-dot.js";
@@ -1198,9 +1198,10 @@ function ThreadRow({
     () => (
       <View ref={badgeRef} style={styles.trailing}>
         <StatusBadge text={badgeText} kind={badgeKind} testID={testID} onPress={pressBadge} />
+        <MenuButton testID={`child-thread-menu-button-${t.agentId}`} onPress={pressBadge} />
       </View>
     ),
-    [badgeKind, badgeText, pressBadge, testID],
+    [badgeKind, badgeText, pressBadge, testID, t.agentId],
   );
   // メニューは行の中に差し込まない(ホストのポップアップに出す)。行の高さは開いても変わらない。
   return (
