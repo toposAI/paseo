@@ -45,7 +45,7 @@ import {
   openableParentIds,
   rowGroupKeyOf,
 } from "../shared/sidebar-rows.js";
-import { BOX_TAB_MODE_PARAM, BOX_TAB_SCREEN_ID } from "../shared/footer-tabs.js";
+import { BOX_TAB_SCREEN_ID } from "../shared/footer-tabs.js";
 import {
   COORDINATOR_GROUP,
   PINNED_GROUP,
@@ -1075,7 +1075,7 @@ function rowIcon(row: SidebarRowView<ChildThread>, t: ChildThread): string {
   if (t.access === "workspace-archived") return ICON.closed;
   // 止まったスレは帯の語彙に関わらず「終了」の見た目にする(従来どおり)。
   if (t.machineState === "closed") return ICON.closed;
-  if (row.statusLabel === "完了待ち" || row.note?.status === "確認待ち") return "CircleCheck";
+  if (row.note?.status === "確認待ち") return "CircleCheck"; // 旧語彙のノート(移行中だけ)
   if (row.statusLabel === "判断待ち") return "CircleHelp";
   if (row.statusLabel === "実装中" && t.status === "完了") return "Loader";
   // 帯と同じ判断で選ぶ(登録簿に載らないスレは「待機中」= idle のアイコンになる)。
@@ -1087,22 +1087,20 @@ function rowIcon(row: SidebarRowView<ChildThread>, t: ChildThread): string {
  * `closed` は行末の印(箱)と揃える(`shared/thread-status-label` の `displayStatus` と同じ規則。
  * 出口レビュー round3 指摘1)。
  */
-function kindOfStatusLabel(
-  label: NoteStatus | "待機中" | "完了待ち",
-  _machineState: string | null,
-): StatusKind {
+function kindOfStatusLabel(label: NoteStatus | "待機中", _machineState: string | null): StatusKind {
   // 帯の文字は実装ノートの status なので、色も機械状態(closed)で上書きせず文字の語彙で選ぶ
   // (上書きすると「判断待ち」「実装中」の文字が灰色の帯になり、同じ状態で色が割れる)。
   if (label === "待機中") return "idle";
   if (label === "完了") return "done";
   if (label === "判断待ち" || label === "構想") return "waiting";
-  if (label === "確認待ち" || label === "完了待ち") return "done";
+  if (label === "確認待ち") return "done"; // 旧語彙のノート(移行中だけ)
   return "running";
 }
 
 /**
- * 一覧の上に出す「判断待ち N / 完了待ち M」。帯と同じ色(橙/緑)で、押すと下部バーと同じ画面
- * (ユーザー判断 / 子スレ完了)を開く。0件の状態は出さない(件数の無いチップは情報にならない)。
+ * 一覧の上に出す「判断待ち N」。帯と同じ色(橙)で、押すと下部バーと同じ画面(ユーザー判断)を開く。
+ * 2026-10-26 に「完了待ち」を廃止したので、完了待ちの件数チップは無い。
+ * 0件の状態は出さない(件数の無いチップは情報にならない)。
  */
 function StatusCountChips({
   rows,
@@ -1111,20 +1109,9 @@ function StatusCountChips({
   rows: readonly SidebarRowView<ChildThread>[];
   openScreen: (input: { screenId: string; params?: Record<string, string> }) => void;
 }) {
-  const { judgment, doneWait, running, coordinator, idle } = useMemo(
-    () => countStatusLabels(rows),
-    [rows],
-  );
-  const openJudgment = useCallback(
-    () => openScreen({ screenId: BOX_TAB_SCREEN_ID, params: { [BOX_TAB_MODE_PARAM]: "items" } }),
-    [openScreen],
-  );
-  const openDone = useCallback(
-    () =>
-      openScreen({ screenId: BOX_TAB_SCREEN_ID, params: { [BOX_TAB_MODE_PARAM]: "childdone" } }),
-    [openScreen],
-  );
-  if (judgment + doneWait + running + coordinator + idle === 0) return null;
+  const { judgment, running, coordinator, idle } = useMemo(() => countStatusLabels(rows), [rows]);
+  const openJudgment = useCallback(() => openScreen({ screenId: BOX_TAB_SCREEN_ID }), [openScreen]);
+  if (judgment + running + coordinator + idle === 0) return null;
   return (
     <View style={styles.chips} testID="status-count-chips">
       {judgment > 0 ? (
@@ -1133,14 +1120,6 @@ function StatusCountChips({
           kind="waiting"
           testID="status-count-judgment"
           onPress={openJudgment}
-        />
-      ) : null}
-      {doneWait > 0 ? (
-        <StatusBadge
-          text={`完了待ち ${doneWait}`}
-          kind="done"
-          testID="status-count-donewait"
-          onPress={openDone}
         />
       ) : null}
       {running > 0 ? (

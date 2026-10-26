@@ -14,7 +14,7 @@ import {
   CHILD_THREAD_ORDER_LIMIT,
   CHILD_THREAD_PINS_FILE,
   CHILD_THREAD_STATUSES,
-  isCardDone,
+  STANDBY_THREAD_STATUS,
   isNocardSummaryId,
   sortChildThreadsGrouped,
 } from "../shared/child-threads.js";
@@ -22,6 +22,17 @@ import type { ChildThread, ChildThreadStatus } from "../shared/child-threads.js"
 import type { ConfirmBoxItem } from "../shared/contract.js";
 import { parseJsonl } from "./normalize.js";
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
+
+/**
+ * 台帳の status を行の語彙へ寄せる。常駐の窓口が書く `待機` は `待機中` にする(2026-10-26)。
+ * ここを素通しすると schema の enum で落ちるか、既定の「実装中」に化けて一覧が動き続けて見える。
+ */
+function toThreadStatus(value: unknown): ChildThread["status"] {
+  const text = str(value);
+  if (text === STANDBY_THREAD_STATUS) return "待機中";
+  if ((CHILD_THREAD_STATUSES as readonly string[]).includes(text)) return text as ChildThreadStatus;
+  return "実装中";
+}
 
 export const CHILD_THREADS_FILE = "child_threads.json";
 
@@ -43,9 +54,7 @@ export function normalizeChildThreads(
     .flatMap((o) => {
       const agentId = str(o.agent_id).slice(0, 200);
       if (!agentId) return [];
-      const status = (CHILD_THREAD_STATUSES as readonly string[]).includes(o.status as string)
-        ? (o.status as ChildThreadStatus)
-        : "実装中";
+      const status = toThreadStatus(o.status);
       const rawSummaryItemId = str(o.summary_item_id).slice(0, 64);
       // 目印 `nocard:<key>` は箱に実在しない id。`summaryItemId` に載せると、箱を引けない行が
       // 「確認待ち」として出て件数まで水増しされる(2026-10-26)。印だけ別に立てて null にする。
@@ -91,14 +100,6 @@ export function normalizeChildThreads(
     else byParent.set(key, [t]);
   }
   return [...pinned, ...[...byParent.values()].flat()];
-}
-
-/**
- * 下部バーのバッジに出す「子スレ完了(確認待ち)」の件数。`isCardDone` を通すので、
- * 完了まとめのカードを作らない行(`nocard`)は数えない(箱に引く項目が無く、画面でも出さない)。
- */
-export function countDoneAwaitingCard(threads: readonly ChildThread[]): number {
-  return threads.filter((t) => isCardDone(t) && !t.summaryAcked).length;
 }
 
 /** ピン止めの保存(壊れた/無いファイルは空)。 */

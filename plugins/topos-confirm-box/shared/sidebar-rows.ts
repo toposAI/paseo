@@ -3,14 +3,14 @@
  *
  * - ノートの status が正(標準_サイドバーの表示ルール)。子スレ一覧の status(=古い語彙)は
  *   ノートが無いスレにだけ使う。
- * - 上段に出すのは status が 実装中/判断待ち/確認待ち の行(ノートがあるスレ)、または
+ * - 上段に出すのは status が 実装中/判断待ち/確認待ち(旧語彙・移行中) の行(ノートがあるスレ)、または
  *   ノートが無く子スレ一覧でも `完了` 以外の行(実装中/ユーザー判断待ち/承認待ち/待機中)。
- *   ノートがあるのに `完了` のスレは上段から外す(勝手に畳まない)。
+ *   ノートがあるのに `完了` のスレは上段から外す。2026-10-26 に完了の「確認待ち」表示は廃止した
+ *   (完了はユーザー確認を待たずに畳まれる)。
  * - 行の題名と状態文字はノート側を優先する(スレ側は古いことがあるため)。
  */
 import { LOWER_TIER_STATUSES, UPPER_TIER_STATUSES } from "./notes.js";
 import type { NoteStatus, SidebarNote } from "./notes.js";
-import { isCardDone } from "./child-threads.js";
 import type { StateDotKind } from "./state-dot.js";
 
 /**
@@ -33,14 +33,11 @@ export interface RowThread {
    */
   stateDot?: StateDotKind | null;
   /**
-   * 完了まとめを個別に確認済みか(`ChildThread.summaryAcked`)。`false` で status が `完了` なら
-   * 「完了待ち」(ユーザーの確認を待っている)。未指定は「分からない」として完了待ちにしない。
+   * 完了まとめを個別に確認済みか(`ChildThread.summaryAcked`)。2026-10-26 に「完了待ち」の判定を
+   * 廃止したので表示には使わない(データ形は互換のため残す)。
    */
   summaryAcked?: boolean;
-  /**
-   * 完了まとめの**カードを作らない**運用の行か(`ChildThread.nocard`)。箱に引く項目が無いので
-   * 確認待ち(=「完了待ち」)にしない。未指定は「カードがある」として従来どおり扱う。
-   */
+  /** 完了まとめのカードを作らない運用の行か(`ChildThread.nocard`)。表示の判定には使わない。 */
   nocard?: boolean;
 }
 
@@ -52,7 +49,7 @@ export interface SidebarRowView<T> {
    * 行右端の状態文字。`待機中` はノート語彙の外にある(登録簿に載らないスレの機械状態から導く。
    * ノート語彙を増やすと、ノートの frontmatter 側にまで語彙が漏れるため別扱いにする)。
    */
-  statusLabel: NoteStatus | "待機中" | "完了待ち";
+  statusLabel: NoteStatus | "待機中";
   /** この行に対応する実装ノート(無ければ null)。 */
   note: SidebarNote | null;
   /**
@@ -81,16 +78,6 @@ export function shouldShowDot(thread: RowThread): boolean {
 /** 行の左端に出す点の種類(出さない行は null)。 */
 export function dotOf(thread: RowThread): StateDotKind | null {
   return shouldShowDot(thread) ? (thread.stateDot ?? null) : null;
-}
-
-/**
- * 完了報告済みでユーザーの確認を待っている行か(司令塔は除く)。「判断待ち」(ユーザーの選択・返事が
- * 要る)とは別の状態で、確認→アーカイブの流れに乗る(子スレ完了タブの「確認待ち」と同じ集合)。
- * 完了まとめのカードを作らない運用(`nocard`)は箱に確認する項目が無いので、この状態にしない
- * (「完了待ち」の行・件数チップ・下部バッジのどれにも出さない)。
- */
-function isAwaitingConfirm(t: RowThread): boolean {
-  return isCardDone(t) && t.summaryAcked === false && t.coordinator !== true;
 }
 
 const isUpperStatus = (s: NoteStatus) => UPPER_TIER_STATUSES.includes(s);
@@ -211,12 +198,8 @@ export function buildUpperRows<T extends RowThread>(
   for (const t of threads) {
     const note = implByThread.get(t.agentId) ?? null;
     const dot = dotOf(t);
-    // 完了待ちはノートの status が古く「実装中」「確認待ち」のままでも優先する(実装中の青に埋もれさせない)。
-    // ノートが「判断待ち」ならユーザーの判断が残っているのでそのまま、「完了」「構想」等は従来どおり。
-    if (isAwaitingConfirm(t) && (!note || note.status === "実装中" || note.status === "確認待ち")) {
-      rows.push({ thread: t, title: note?.title || t.title, statusLabel: "完了待ち", note, dot });
-      continue;
-    }
+    // 2026-10-26: 「完了待ち」(ユーザーの確認待ち)は廃止した。完了は確認を待たずに畳まれるので、
+    // 行はノートの status(実装中・判断待ち)か、ノートの無い行の機械状態だけで決める。
     if (note) {
       if (!isUpperStatus(note.status)) continue;
       rows.push({ thread: t, title: note.title || t.title, statusLabel: note.status, note, dot });
@@ -237,16 +220,14 @@ export function buildUpperRows<T extends RowThread>(
 /** 上段の行を状態ごとに数える(一覧の上の件数チップ用。下部バーの件数とは別集計)。司令塔は実装中に含めず別に数える。 */
 export function countStatusLabels(rows: readonly { statusLabel: string; thread: RowThread }[]): {
   judgment: number;
-  doneWait: number;
   running: number;
   coordinator: number;
   idle: number;
 } {
-  const c = { judgment: 0, doneWait: 0, running: 0, coordinator: 0, idle: 0 };
+  const c = { judgment: 0, running: 0, coordinator: 0, idle: 0 };
   for (const r of rows) {
     if (r.thread.coordinator === true) c.coordinator += 1;
     else if (r.statusLabel === "判断待ち") c.judgment += 1;
-    else if (r.statusLabel === "完了待ち") c.doneWait += 1;
     else if (r.statusLabel === "実装中") c.running += 1;
     else if (r.statusLabel === "待機中") c.idle += 1;
   }

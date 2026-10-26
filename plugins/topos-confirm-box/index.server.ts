@@ -9,7 +9,6 @@
  * **読み取りはファイル直読み**。既存のサーバー側確認箱(`/api/confirm-box/*`)は通さない
  * (HTTPのポートと認証が要るうえ、同じディレクトリを別経路で読む意味が無い)。
  */
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -67,15 +66,12 @@ import {
   childThreadsArchiveRpc,
   childThreadsListRpc,
   childThreadsPinRpc,
-  childThreadsRevertRpc,
   childThreadsSetOrderRpc,
 } from "./shared/child-threads.js";
-import { buildRevertArgs, summarizeRevert } from "./server/child-revert.js";
 import type { ThreadAccess } from "./shared/child-threads.js";
 import {
   applyChildThreadOrder,
   childThreadPinsReadError,
-  countDoneAwaitingCard,
   readChildThreadOrder,
   readChildThreadPins,
   readChildThreads,
@@ -464,39 +460,6 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  // 完了カードの差し戻し。本体は登録簿の CLI(`revert`)で、自動取り下げと同じ後始末を走らせる。
-  // 司令塔は対象にしない(完了報告の取り下げは子スレだけの機構)。
-  server.handle(childThreadsRevertRpc, async (input) => {
-    if (readCoordinatorIds().includes(input.agentId)) {
-      return { ok: false, message: "司令塔のスレは差し戻せません" };
-    }
-    const script =
-      process.env.TOPOS_CHILD_REGISTRY_CLI ??
-      path.join(
-        os.homedir(),
-        "repos",
-        "ToposAI-Mini-Project",
-        "antigravity",
-        "utils",
-        "child_thread_registry.py",
-      );
-    const stdout = await new Promise<string>((resolve) => {
-      execFile(
-        "/usr/bin/python3",
-        buildRevertArgs(script, input.agentId, input.instruction),
-        { timeout: 40_000, maxBuffer: 1 << 20, env: process.env },
-        (error, out, err) => resolve(error ? `ERR:${err || error.message}` : out),
-      );
-    });
-    if (stdout.startsWith("ERR:")) {
-      return {
-        ok: false,
-        message: `差し戻しの結果を確認できませんでした(処理は途中まで走った可能性があります。一覧を更新して確かめてください): ${stdout.slice(4, 160)}`,
-      };
-    }
-    return summarizeRevert(stdout);
-  });
-
   // ピン止めの切り替え。保存先は `child_threads_pins.json` だけで、登録簿(`child_threads.json`)は触らない。
   server.handle(childThreadsPinRpc, async (input) => {
     try {
@@ -525,21 +488,12 @@ export default function contribute(server: PluginServerContext) {
     const { items, sources, generatedAt } = await collect(ctx);
     // 判断タブと同じ定義(SSOT は `isJudgmentItem`)。通知だけの項目は数えない。
     const open = items.filter((i) => isJudgmentItem(i) && i.state !== "approved");
-    const dir = resolveConfirmBoxDir();
     // バッジは失敗しても0で返す(件数が取れないだけで確認箱そのものは開けるようにする)
     let bugs = 0;
     try {
       bugs = countNewReports(readFeedbackReports().reports);
     } catch {
       bugs = 0;
-    }
-    let childDone = 0;
-    try {
-      // 画面の「確認待ち」と同じ定義(個別 ack が無い・完了まとめのカードを作らない行は数えない)。
-      // 一覧とバッジの数が食い違わないようにする。
-      childDone = countDoneAwaitingCard(readChildThreads(dir, items));
-    } catch {
-      childDone = 0;
     }
     return {
       open: open.length,
@@ -548,7 +502,6 @@ export default function contribute(server: PluginServerContext) {
       failedSources: sources.filter((src) => !src.ok).length,
       notifications: countUrgentUnreadNotifications(items),
       bugs,
-      childDone,
       generatedAt,
     };
   });

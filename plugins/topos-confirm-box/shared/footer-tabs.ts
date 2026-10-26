@@ -1,10 +1,14 @@
 /**
- * サイドバー下部バーの項目と、確認箱の中のタブの出し分け(2026-10-24 ユーザー指示・第2版)。
+ * サイドバー下部バーの項目と、確認箱の中のタブの出し分け(2026-10-24 ユーザー指示・第3版)。
  *
- * 下部バーは PC 幅も iPhone 幅も**同じ並び**にする(第1版の「iPhone は変更なし」は第2版で撤回):
- *   ユーザー判断 → 子スレ完了 → バグ報告 → スレ一覧 → 構想一覧 → メールUI
- * 「ユーザー判断」「子スレ完了」は確認箱の中から出して下部バーに並べる。確認箱そのものは
+ * 下部バーは PC 幅も iPhone 幅も**同じ並び**にする:
+ *   ユーザー判断 → バグ報告 → スレ一覧 → 構想一覧 → メールUI
+ * 「ユーザー判断」は確認箱の中から出して下部バーに並べる。確認箱そのものは
  * 下部バーの「バグ報告」から開く(中では バグ報告・通知・優先順位 の3枚タブ)。
+ *
+ * 第3版(2026-10-26 ユーザー指示): 「子スレ完了」の下部バー項目・確認箱のタブ・バッジを撤去した。
+ * 完了報告は完了箱C(スレ)へ一本化しており、確認箱で個別に確認する面を持たない
+ * (`.claude-memory/project_sidebar_improvement_20261021.md`)。
  *
  * 並びはホストが `addSidebarFooterItem` の**登録順**で決める(`sidebarFooterItems` の保存設定が
  * 空のときの既定)。保存設定が入っている場合はホストの設定が優先される(プラグインからは触らない)。
@@ -13,7 +17,6 @@
 /** 本プラグインの footer 項目。並びは登録順(= 保存設定が空のときの既定順)。 */
 export const FOOTER_TABS = [
   { id: "judgment", title: "ユーザー判断" },
-  { id: "childdone", title: "子スレ完了" },
   { id: "bugs", title: "バグ報告" },
   { id: "sidebar-threads", title: "スレ一覧" },
   { id: "sidebar-concepts", title: "構想一覧" },
@@ -28,15 +31,14 @@ export function footerTitle(id: FooterTabId): string {
   return tab ? tab.title : id;
 }
 
-/** 下部バーの2項目から開く画面の id。`?mode=` と同じ値。 */
+/** 下部バーの「ユーザー判断」から開く画面の id。 */
 export const BOX_TAB_SCREEN_ID = "box-tab";
-export const BOX_TAB_MODE_PARAM = "mode";
 
 /** 確認箱のタブのうち、下部バーへ移したもの(= 確認箱の中には出さない)。 */
-const MOVED_TAB_IDS = new Set<string>(["items", "childdone"]);
+const MOVED_TAB_IDS = new Set<string>(["items"]);
 
 /**
- * 確認箱の中に出すタブの並び。下部バーへ移した2枚(ユーザー判断・子スレ完了)は常に外す
+ * 確認箱の中に出すタブの並び。下部バーへ移した「ユーザー判断」は常に外す
  * (PC も iPhone も同じ3枚)。
  */
 export function confirmBoxTabs<T extends { id: string }>(all: readonly T[]): readonly T[] {
@@ -69,9 +71,4 @@ export const WIDE_MIN_HEIGHT = 480;
 export function isWideLayout(width: number, height: number | undefined, compact = false): boolean {
   if (compact) return false;
   return width >= WIDE_MIN_WIDTH && (height === undefined || height >= WIDE_MIN_HEIGHT);
-}
-
-/** 下部バーから開いた画面(`?mode=`)の値。不正な値は「ユーザー判断」に倒す。 */
-export function boxTabMode(param: string | undefined): "items" | "childdone" {
-  return param === "childdone" ? "childdone" : "items";
 }
