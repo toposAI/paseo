@@ -54,3 +54,10 @@ test("壊れたファイルは空として扱い、次の保存で作り直す",
   assert.equal(getPosition(d, "a", "完了箱C").seq, null);
   assert.equal(setPosition(d, "a", "完了箱C", 3, "e1").seq, 3);
 });
+
+test("一度記録した完了箱Cは、題名が変わっても記録が続く", () => {
+  const d = tmp();
+  setPosition(d, "a", "完了箱C", 5, "e1");
+  assert.equal(getPosition(d, "a", "名前を変えた").enabled, true);
+  assert.equal(setPosition(d, "a", undefined, 9, "e1").seq, 9);
+});

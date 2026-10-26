@@ -111,6 +111,8 @@ export function setPosition(
   const store = readStore(dir);
   if (!isEnabled(store, agentId, title))
     return { ok: true, seq: store.positions[agentId]?.seq ?? null };
+  // 題名の目印で初めて記録対象になったら固定する(あとで題名が変わっても記録が止まらない)。
+  if (typeof store.overrides[agentId] !== "boolean") store.overrides[agentId] = true;
   const cur = store.positions[agentId];
   if (cur && cur.epoch === epoch && cur.seq >= seq) return { ok: true, seq: cur.seq };
   store.positions[agentId] = { seq, epoch, updated_at: now };
