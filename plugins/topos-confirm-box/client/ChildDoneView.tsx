@@ -45,6 +45,15 @@ function confirmLabel(acked: boolean, busy: boolean): string {
   return "完了にする";
 }
 
+/** 一覧が空のときの文言(読み込み中/エラーは `describe` が受け持つ)。 */
+function emptyMessage(done: number, nocardDone: number): string {
+  if (done > 0) return "確認待ちの完了報告はありません";
+  if (nocardDone > 0) {
+    return "確認箱で確認する完了報告はありません(完了まとめのカードを作らない運用の完了はここに出しません)";
+  }
+  return "完了した子スレはありません";
+}
+
 export function ChildDoneView({
   theme,
   navigation,
@@ -248,13 +257,7 @@ export function ChildDoneView({
         </View>
       ))}
       {data && visible.length === 0 && !error ? (
-        <Text style={s.meta}>
-          {done.length > 0
-            ? "確認待ちの完了報告はありません"
-            : nocardDone > 0
-              ? "確認箱で確認する完了報告はありません(完了まとめのカードを作らない運用の完了はここに出しません)"
-              : "完了した子スレはありません"}
-        </Text>
+        <Text style={s.meta}>{emptyMessage(done.length, nocardDone)}</Text>
       ) : null}
       {unconfirmed > 0 ? (
         <Text style={s.meta}>
