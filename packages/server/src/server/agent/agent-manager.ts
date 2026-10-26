@@ -82,7 +82,7 @@ import { invokeRewindCapability, type RewindMode } from "./rewind/rewind.js";
 import { projectAgentMessage } from "./agent-messages/index.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
 import { stripInternalPaseoMcpServer, withRuntimePaseoMcpServer } from "./runtime-mcp-config.js";
-import { resolveCreateAgentTitles } from "./create-agent-title.js";
+import { resolveCreateAgentTitles, withInitialTitleSource } from "./create-agent-title.js";
 import type { PaseoToolCatalogFactory } from "./tools/types.js";
 import { isPaseoToolPolicyEnabled } from "./paseo-tool-policy.js";
 import {
@@ -1348,7 +1348,9 @@ export class AgentManager {
     const session = await client.createSession(providerLaunchConfig, launchContext, createOptions);
     await this.requireExternalMcpSupport(session, storedConfig);
     const agent = await this.registerSession(session, storedConfig, resolvedAgentId, {
-      labels: options.labels,
+      // 作成時の題名は LLM の自動要約で置き換えてよい(サイドバーは生成名を出す)。
+      // 呼び出し側が title-source を明示していればそれを尊重する(`--title-locked` は user)。
+      labels: withInitialTitleSource(options.labels),
       initialTitle: options.initialTitle,
       workspaceId: options.workspaceId,
       owner: options.owner,

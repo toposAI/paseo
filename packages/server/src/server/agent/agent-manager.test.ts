@@ -23,6 +23,7 @@ import { InMemoryAgentTimelineStore } from "./agent-timeline-store.js";
 import { toAgentPayload } from "./agent-projections.js";
 import { projectTimelineRows } from "./timeline-projection.js";
 import { getOpenAgentTabLabel, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import { AGENT_TITLE_SOURCE_LABEL } from "@getpaseo/protocol/agent-title-limits";
 import { startAgentRun } from "./agent-prompt.js";
 import { StaleProviderSessionError } from "./stale-provider-session-error.js";
 import { ensureAgentLoaded, ensureUnarchivedAgentLoaded } from "./agent-loading.js";
@@ -5326,6 +5327,8 @@ test("setLabels merges and persists labels", async () => {
   expect(persisted?.labels).toEqual({
     surface: "mobile",
     phase: "1a",
+    // 作成時の題名は自動要約で置き換えてよい、という印が付く
+    [AGENT_TITLE_SOURCE_LABEL]: "initial",
   });
 });
 
@@ -5383,10 +5386,11 @@ test("detachAgent removes relationship lifecycle labels from a live agent and em
 
   expect(result.previousParentAgentId).toBe(parent.id);
   expect(result.live).toBe(true);
-  expect(result.record.labels).toEqual({ team: "infra" });
-  expect(manager.getAgent(child.id)?.labels).toEqual({ team: "infra" });
-  expect((await storage.get(child.id))?.labels).toEqual({ team: "infra" });
-  expect(emittedLabels).toContainEqual({ team: "infra" });
+  const kept = { team: "infra", [AGENT_TITLE_SOURCE_LABEL]: "initial" };
+  expect(result.record.labels).toEqual(kept);
+  expect(manager.getAgent(child.id)?.labels).toEqual(kept);
+  expect((await storage.get(child.id))?.labels).toEqual(kept);
+  expect(emittedLabels).toContainEqual(kept);
 });
 
 test("detachAgent removes relationship lifecycle labels from a stored-only agent", async () => {
@@ -5433,8 +5437,9 @@ test("detachAgent removes relationship lifecycle labels from a stored-only agent
 
   expect(result.previousParentAgentId).toBe(parent.id);
   expect(result.live).toBe(false);
-  expect(result.record.labels).toEqual({ role: "reviewer" });
-  expect((await storage.get(child.id))?.labels).toEqual({ role: "reviewer" });
+  const kept = { role: "reviewer", [AGENT_TITLE_SOURCE_LABEL]: "initial" };
+  expect(result.record.labels).toEqual(kept);
+  expect((await storage.get(child.id))?.labels).toEqual(kept);
 });
 
 test("archiveAgent does not cascade to a detached former child", async () => {
@@ -8809,7 +8814,11 @@ test("unarchiveSnapshot unarchives native provider storage before clearing archi
   expect(client.archivedAtDuringUnarchive).toEqual(expect.any(String));
   expect(stored?.archivedAt).toBeNull();
   expect(stored?.workspaceId).toBe("ws-restored");
-  expect(stored?.labels).toEqual({ retained: "yes", source: "reimport" });
+  expect(stored?.labels).toEqual({
+    retained: "yes",
+    source: "reimport",
+    [AGENT_TITLE_SOURCE_LABEL]: "initial",
+  });
 });
 
 test("unarchiveSnapshotByHandle unarchives native provider storage for the matched snapshot", async () => {
