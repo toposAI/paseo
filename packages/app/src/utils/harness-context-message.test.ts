@@ -82,4 +82,26 @@ SessionStart hook additional context: このセッションはメインworking t
       false,
     );
   });
+
+  it("keeps the user's own paragraph that follows pasted hook output", () => {
+    expect(
+      isHarnessContextOnlyMessage(
+        "SessionStart:compact hook success: [HookHealthcheck] OK\n\nこの表示を消したい",
+      ),
+    ).toBe(false);
+  });
+
+  it("folds hook output whose compaction block holds blank lines and quoted requests", () => {
+    expect(
+      isHarnessContextOnlyMessage(
+        "SessionStart hook additional context: x\n[compact_context] ★未処理の依頼★\n■ 最初の依頼:\n\n# 依頼: 直して\n\nお願いします",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a turn that carries only a compaction marker after the user's words", () => {
+    expect(isHarnessContextOnlyMessage("これ見て\n\n[compact_context] こういう表示が出る")).toBe(
+      false,
+    );
+  });
 });
