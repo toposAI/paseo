@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import type { AgentManagerEvent } from "./agent-manager.js";
 import type { AgentTimelineItem } from "./agent-sdk-types.js";
+import { AGENT_TITLE_BEFORE_RETITLE_LABEL } from "@getpaseo/protocol/agent-title-limits";
 import {
   TITLE_REGENERATE_LABEL,
   TITLE_SOURCE_AUTO,
@@ -29,6 +30,7 @@ function setup(options: {
   ];
   const updates: Array<{ title?: string; labels?: Record<string, string> }> = [];
   const generateCalls: string[] = [];
+  const hooks: { onGenerate?: () => void } = {};
   let listener: ((event: AgentManagerEvent) => void) | null = null;
   const summarizer = createAgentTitleSummarizer({
     subscribe: (cb) => {
@@ -46,6 +48,7 @@ function setup(options: {
     },
     generate: async ({ prompt }) => {
       generateCalls.push(prompt);
+      hooks.onGenerate?.();
       if (options.generated instanceof Error) throw options.generated;
       return { title: options.generated ?? "F-80 判定失敗の修正" };
     },
@@ -60,8 +63,9 @@ function setup(options: {
     });
     await summarizer.idle();
   };
-  const retitle = (agentId: string) => summarizer.retitle(agentId);
-  return { record, updates, generateCalls, finishTurn, retitle };
+  const retitle = (agentId: string, opts?: { preserveUser?: boolean }) =>
+    summarizer.retitle(agentId, opts);
+  return { record, updates, generateCalls, finishTurn, retitle, hooks };
 }
 
 describe("title helpers", () => {
@@ -160,6 +164,32 @@ describe("createAgentTitleSummarizer", () => {
     await s.retitle("a1");
     expect(s.record.title).toBe("F-80 判定失敗の修正");
     expect(s.record.labels[TITLE_SOURCE_LABEL]).toBe(TITLE_SOURCE_AUTO);
+  });
+
+  // 回帰: 付け直しは元の題名を残さずに上書きしていた(2026-10-27 出口レビュー指摘7)。
+  test("retitle keeps the previous title so it can be put back", async () => {
+    const s = setup({ title: "f80-complete-integration", labels: {} });
+    await s.retitle("a1", { preserveUser: true });
+    expect(s.record.labels[AGENT_TITLE_BEFORE_RETITLE_LABEL]).toBe("f80-complete-integration");
+  });
+
+  // 回帰: 一括処理の途中で人が題名を固定したのに、強制経路が上書きしていた(同 指摘3)。
+  test("retitle with preserveUser leaves a title locked while it was thinking alone", async () => {
+    const s = setup({ title: "窓口B", labels: { [TITLE_SOURCE_LABEL]: TITLE_SOURCE_USER } });
+    expect(await s.retitle("a1", { preserveUser: true })).toBe(false);
+    expect(s.generateCalls).toHaveLength(0);
+    expect(s.record.title).toBe("窓口B");
+  });
+
+  test("retitle with preserveUser re-checks after generation and keeps the newer user title", async () => {
+    const s = setup({ title: "f80-complete-integration", labels: {} });
+    s.hooks.onGenerate = () => {
+      s.record.title = "窓口B";
+      s.record.labels[TITLE_SOURCE_LABEL] = TITLE_SOURCE_USER;
+    };
+    expect(await s.retitle("a1", { preserveUser: true })).toBe(false);
+    expect(s.record.title).toBe("窓口B");
+    expect(s.record.labels[TITLE_SOURCE_LABEL]).toBe(TITLE_SOURCE_USER);
   });
 
   test("keeps the title when generation fails", async () => {

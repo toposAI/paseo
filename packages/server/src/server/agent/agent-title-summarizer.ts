@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Logger } from "pino";
 import {
+  AGENT_TITLE_BEFORE_RETITLE_LABEL,
   AGENT_TITLE_REGENERATE_LABEL,
   AGENT_TITLE_SOURCE_AUTO,
   AGENT_TITLE_SOURCE_INITIAL,
@@ -163,68 +164,85 @@ export function createAgentTitleSummarizer(deps: AgentTitleSummarizerDeps): {
   /** Resolves when the queued work is done (tests). */
   idle(): Promise<void>;
   /**
-   * 1本だけ今すぐ付け直す(既存スレの一括付け直し用)。人が付けた題名でも置き換える。
+   * 1本だけ今すぐ付け直す(既存スレの一括付け直し用)。
+   * `preserveUser` を渡すと、生成の前後で題名の出どころが `user` なら何もしない
+   * (一括処理が動いている間に人が改名した題名を消さない)。
    * 題名を書き換えたら true。材料が無い・生成に失敗したら false(題名はそのまま)。
    */
-  retitle(agentId: string): Promise<boolean>;
+  retitle(agentId: string, options?: { preserveUser?: boolean }): Promise<boolean>;
 } {
   const completedTurns = new Map<string, number>();
   let tail: Promise<void> = Promise.resolve();
 
-  async function summarize(agentId: string, forced: boolean): Promise<boolean> {
+  /** 一括処理の途中などで人が題名を固定したら、もう手を出さない。 */
+  const isLockedByUser = (labels: Record<string, string>, options: { preserveUser?: boolean }) =>
+    options.preserveUser === true && labels[TITLE_SOURCE_LABEL] === TITLE_SOURCE_USER;
+
+  function canWriteTitle(
+    current: { title: string | null; labels: Record<string, string> | undefined },
+    firstUserMessage: string | null,
+    forced: boolean,
+    options: { preserveUser?: boolean },
+  ): boolean {
+    const labels = current.labels ?? {};
+    if (isLockedByUser(labels, options)) return false;
+    if (forced) return true;
+    return isAutoOwnedTitle({ title: current.title, labels, firstUserMessage });
+  }
+
+  async function runGeneration(cwd: string, input: TitleSummaryInput): Promise<{ title: string }> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        deps.generate({
+          cwd,
+          prompt: buildTitleSummaryPrompt(input),
+          schema: TITLE_SCHEMA,
+          schemaName: "AgentTitle",
+          agentTitle: "Title generator",
+        }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("title generation timed out")),
+            GENERATION_TIMEOUT_MS,
+          );
+          timer.unref();
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  async function summarize(
+    agentId: string,
+    forced: boolean,
+    options: { preserveUser?: boolean } = {},
+  ): Promise<boolean> {
     const stored = await deps.getStoredAgent(agentId);
     if (!stored || stored.internal) return false;
-    const labels = stored.labels ?? {};
-    const timeline = deps.getTimeline(agentId);
-    const input = extractTitleSummaryInput(timeline, stored.title ?? null);
-    if (
-      !forced &&
-      !isAutoOwnedTitle({
-        title: input.currentTitle,
-        labels,
-        firstUserMessage: input.firstUserMessage,
-      })
-    ) {
-      return false;
-    }
+    const input = extractTitleSummaryInput(deps.getTimeline(agentId), stored.title ?? null);
     if (!input.firstUserMessage) return false;
+    if (!canWriteTitle(stored, input.firstUserMessage, forced, options)) return false;
 
-    const result = await Promise.race([
-      deps.generate({
-        cwd: stored.cwd,
-        prompt: buildTitleSummaryPrompt(input),
-        schema: TITLE_SCHEMA,
-        schemaName: "AgentTitle",
-        agentTitle: "Title generator",
-      }),
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("title generation timed out")),
-          GENERATION_TIMEOUT_MS,
-        ).unref(),
-      ),
-    ]);
-    const title = sanitizeSummaryTitle(result.title);
+    const title = sanitizeSummaryTitle((await runGeneration(stored.cwd, input)).title);
     if (!title) return false;
 
     // Re-check ownership: someone may have renamed the thread while the model was thinking.
     const fresh = await deps.getStoredAgent(agentId);
     if (!fresh) return false;
-    const freshLabels = fresh.labels ?? {};
-    if (
-      !forced &&
-      !isAutoOwnedTitle({
-        title: fresh.title ?? null,
-        labels: freshLabels,
-        firstUserMessage: input.firstUserMessage,
-      })
-    ) {
-      return false;
-    }
+    const { title: previousTitle } = fresh;
+    if (!canWriteTitle(fresh, input.firstUserMessage, forced, options)) return false;
+
     const labelUpdates: Record<string, string> = { [TITLE_SOURCE_LABEL]: TITLE_SOURCE_AUTO };
-    if (freshLabels[TITLE_REGENERATE_LABEL] === "1") labelUpdates[TITLE_REGENERATE_LABEL] = "done";
+    if (fresh.labels?.[TITLE_REGENERATE_LABEL] === "1")
+      labelUpdates[TITLE_REGENERATE_LABEL] = "done";
+    // 付け直しは元の題名を残さないので、戻せるように退避しておく。
+    if (forced && previousTitle && previousTitle !== title) {
+      labelUpdates[AGENT_TITLE_BEFORE_RETITLE_LABEL] = previousTitle;
+    }
     await deps.updateAgentMetadata(agentId, {
-      ...(title !== (fresh.title ?? null) ? { title } : {}),
+      ...(title !== previousTitle ? { title } : {}),
       labels: labelUpdates,
     });
     return true;
@@ -251,9 +269,9 @@ export function createAgentTitleSummarizer(deps: AgentTitleSummarizerDeps): {
       });
     },
     idle: () => tail,
-    async retitle(agentId) {
+    async retitle(agentId, options) {
       // 一括付け直しは並行度を上げない(1本ずつ・直列)。失敗は呼び出し側が数える。
-      const run = tail.then(() => summarize(agentId, true));
+      const run = tail.then(() => summarize(agentId, true, options));
       tail = run.then(
         () => undefined,
         () => undefined,
