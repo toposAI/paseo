@@ -21,6 +21,17 @@ export function createReadingAnchor() {
     getReadingRowId: (scrollTop: number) =>
       readingRow(scrollTop)?.id ?? geometry.at(-1)?.id ?? null,
     project,
+    // The last row whose whole body is on screen: how far the reader has seen, as opposed to
+    // where they are reading. Null when no row fits entirely (a row taller than the viewport).
+    getLastFullyVisibleRowId: (scrollTop: number, viewportHeight: number) => {
+      let last: string | null = null;
+      for (const row of geometry) {
+        if (row.top >= scrollTop - 1 && row.top + row.height <= scrollTop + viewportHeight + 1) {
+          last = row.id;
+        }
+      }
+      return last;
+    },
     reset() {
       anchor = null;
     },

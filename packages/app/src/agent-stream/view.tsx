@@ -73,6 +73,7 @@ import { resolveStreamRenderStrategy } from "./strategy-resolver";
 import { type StreamSegmentRenderers, type StreamViewportHandle } from "./strategy";
 import { ChatOutlineRail } from "@/agent-stream/chat-outline/rail";
 import { useChatOutline } from "@/agent-stream/chat-outline/use-chat-outline";
+import { useReadPositionSync } from "@/agent-stream/use-read-position-sync";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
 import {
@@ -655,6 +656,18 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       revealLoadedMessage: revealLoadedHistory,
     });
 
+    const findItemsForSync = useMemo(
+      () => [...effectiveStreamItems, ...(effectiveStreamHead ?? [])],
+      [effectiveStreamItems, effectiveStreamHead],
+    );
+    const reportViewedSeq = useReadPositionSync({
+      serverId: resolvedServerId,
+      agentId,
+      timelineEpoch,
+      items: findItemsForSync,
+      jumpToSeq: chatOutline.jumpToPrompt,
+    });
+
     useImperativeHandle(
       ref,
       () => ({
@@ -1059,13 +1072,22 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       return itemById;
     }, [streamLayout.liveHead]);
 
-    const handleReadingPositionChange = useStableEvent((rowId: string | null) => {
-      const row =
-        rowId === null
-          ? undefined
-          : (layoutHistoryItemById.get(rowId) ?? layoutLiveHeadItemById.get(rowId));
-      chatOutline.reportReadingPosition(row?.item.timelineCursor?.seq ?? null);
-    });
+    const handleReadingPositionChange = useStableEvent(
+      (rowId: string | null, viewedRowId?: string | null) => {
+        const row =
+          rowId === null
+            ? undefined
+            : (layoutHistoryItemById.get(rowId) ?? layoutLiveHeadItemById.get(rowId));
+        chatOutline.reportReadingPosition(row?.item.timelineCursor?.seq ?? null);
+        const viewedCursor = viewedRowId
+          ? (layoutHistoryItemById.get(viewedRowId) ?? layoutLiveHeadItemById.get(viewedRowId))
+              ?.item.timelineCursor
+          : undefined;
+        reportViewedSeq(
+          viewedCursor && viewedCursor.epoch === timelineEpoch ? viewedCursor.seq : null,
+        );
+      },
+    );
 
     const renderHistoryRow = useCallback(
       (item: StreamItem) =>
