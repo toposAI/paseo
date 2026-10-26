@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { getParentAgentIdFromLabels, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import { AGENT_TITLE_SOURCE_LABEL } from "@getpaseo/protocol/agent-title-limits";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import type { StoredAgentRecord } from "./agent-storage.js";
@@ -297,7 +298,8 @@ describe("agent lifecycle commands", () => {
         agentId: "agent-1",
         updates: {
           title: "Renamed agent",
-          labels: { team: "infra" },
+          // 作成後の改名は「人が付けた題名」として自動要約から守る
+          labels: { team: "infra", [AGENT_TITLE_SOURCE_LABEL]: "user" },
         },
       },
     ]);

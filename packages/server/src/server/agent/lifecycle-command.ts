@@ -7,6 +7,7 @@ import {
 } from "./agent-manager.js";
 import type { StoredAgentRecord } from "./agent-storage.js";
 import type { AgentProviderNotice } from "./agent-sdk-types.js";
+import { withUserTitleSource } from "./create-agent-title.js";
 
 export type LifecycleAgentSnapshot = Pick<ManagedAgent, "id" | "cwd" | "lifecycle" | "internal">;
 
@@ -180,7 +181,8 @@ export async function updateAgentCommand(
 
   await dependencies.agentManager.updateAgentMetadata(input.agentId, {
     ...(title ? { title } : {}),
-    ...(labels ? { labels } : {}),
+    // 人が付けた題名は自動要約で上書きしない(作成時の題名=initial とは区別する)。
+    ...(labels || title ? { labels: withUserTitleSource(labels) } : {}),
   });
 
   return {

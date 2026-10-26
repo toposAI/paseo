@@ -1,15 +1,28 @@
 import { z } from "zod";
 import type { Logger } from "pino";
-import { MAX_EXPLICIT_AGENT_TITLE_CHARS } from "@getpaseo/protocol/agent-title-limits";
+import {
+  AGENT_TITLE_REGENERATE_LABEL,
+  AGENT_TITLE_SOURCE_AUTO,
+  AGENT_TITLE_SOURCE_INITIAL,
+  AGENT_TITLE_SOURCE_LABEL,
+  AGENT_TITLE_SOURCE_USER,
+  MAX_EXPLICIT_AGENT_TITLE_CHARS,
+} from "@getpaseo/protocol/agent-title-limits";
 import type { AgentTimelineItem } from "./agent-sdk-types.js";
 import type { AgentManagerEvent } from "./agent-manager.js";
 import { resolveCreateAgentTitles } from "./create-agent-title.js";
 
-/** Titles written by this service carry this label; any other title is treated as user-owned. */
-export const TITLE_SOURCE_LABEL = "paseo.title-source";
-export const TITLE_SOURCE_AUTO = "auto";
+/**
+ * 題名の出どころを表すラベル。値の意味は protocol の `agent-title-limits.ts` が正本。
+ * `initial`=作成時の題名(置き換え可)、`auto`=自動要約が書いた題名(置き換え可)、
+ * `user`=作成後に人が付けた題名(触らない)。
+ */
+export const TITLE_SOURCE_LABEL = AGENT_TITLE_SOURCE_LABEL;
+export const TITLE_SOURCE_AUTO = AGENT_TITLE_SOURCE_AUTO;
+export const TITLE_SOURCE_INITIAL = AGENT_TITLE_SOURCE_INITIAL;
+export const TITLE_SOURCE_USER = AGENT_TITLE_SOURCE_USER;
 /** Set to "1" (e.g. `paseo agent update <id> --label paseo.title-regenerate=1`) to force a re-summary on the next finished turn. */
-export const TITLE_REGENERATE_LABEL = "paseo.title-regenerate";
+export const TITLE_REGENERATE_LABEL = AGENT_TITLE_REGENERATE_LABEL;
 
 const MAX_SUMMARY_TITLE_CHARS = 30;
 /** Finished-turn counts at which the title is (re)summarised; sparse on purpose so the sidebar stays calm. */
@@ -34,13 +47,21 @@ function clip(text: string, max: number): string {
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
-/** True when the title may be overwritten without clobbering a name a person or coordinator chose. */
+/**
+ * True when the title may be overwritten without clobbering a name a person chose.
+ *
+ * 作成時に付いた題名(`initial`。`paseo run --title` や最初のプロンプト由来)は**置き換えてよい**。
+ * サイドバーは LLM が生成した題名を出す、というユーザー決定(2026-10-26)による。
+ * 人が作成後に付けた題名(`user`)だけは触らない。
+ */
 export function isAutoOwnedTitle(input: {
   title: string | null;
   labels: Record<string, string>;
   firstUserMessage: string | null;
 }): boolean {
-  if (input.labels[TITLE_SOURCE_LABEL] === TITLE_SOURCE_AUTO) return true;
+  const source = input.labels[TITLE_SOURCE_LABEL];
+  if (source === TITLE_SOURCE_AUTO || source === TITLE_SOURCE_INITIAL) return true;
+  if (source === TITLE_SOURCE_USER) return false;
   if (!input.title) return true;
   // A title that is just the provisional first-prompt copy was never chosen by anyone.
   const provisional = input.firstUserMessage
@@ -58,6 +79,7 @@ export function buildTitleSummaryPrompt(input: TitleSummaryInput): string {
     "- 冒頭の依頼文・役割説明(「あなたは〜担当」「日本語で報告」「依頼元は〜」など)は題名にしない。スレが実際に取り組んでいる内容を書く。",
     "- スレが司令塔として他のスレを束ねている場合は、短く安定した役割名にする(例: 「Topos司令塔」「F-80司令塔」「総司令塔」)。",
     "- 現在の題名が今の内容をまだ正しく表しているなら、一字一句そのまま返す(頻繁に変えない)。役割や作業が明らかに変わったときだけ変える。",
+    "- ただし現在の題名が英字の識別名(例: f80-complete-integration, coordinator_backstage, worktree-…)なら、同じ内容を表す日本語の題名に必ず置き換える(そのまま返してはいけない)。",
     '- JSON だけを返す: {"title": "..."}',
     "",
     `現在の題名: ${input.currentTitle ?? "(なし)"}`,
@@ -140,13 +162,18 @@ export function createAgentTitleSummarizer(deps: AgentTitleSummarizerDeps): {
   start(): () => void;
   /** Resolves when the queued work is done (tests). */
   idle(): Promise<void>;
+  /**
+   * 1本だけ今すぐ付け直す(既存スレの一括付け直し用)。人が付けた題名でも置き換える。
+   * 題名を書き換えたら true。材料が無い・生成に失敗したら false(題名はそのまま)。
+   */
+  retitle(agentId: string): Promise<boolean>;
 } {
   const completedTurns = new Map<string, number>();
   let tail: Promise<void> = Promise.resolve();
 
-  async function summarize(agentId: string, forced: boolean): Promise<void> {
+  async function summarize(agentId: string, forced: boolean): Promise<boolean> {
     const stored = await deps.getStoredAgent(agentId);
-    if (!stored || stored.internal) return;
+    if (!stored || stored.internal) return false;
     const labels = stored.labels ?? {};
     const timeline = deps.getTimeline(agentId);
     const input = extractTitleSummaryInput(timeline, stored.title ?? null);
@@ -158,9 +185,9 @@ export function createAgentTitleSummarizer(deps: AgentTitleSummarizerDeps): {
         firstUserMessage: input.firstUserMessage,
       })
     ) {
-      return;
+      return false;
     }
-    if (!input.firstUserMessage) return;
+    if (!input.firstUserMessage) return false;
 
     const result = await Promise.race([
       deps.generate({
@@ -178,11 +205,11 @@ export function createAgentTitleSummarizer(deps: AgentTitleSummarizerDeps): {
       ),
     ]);
     const title = sanitizeSummaryTitle(result.title);
-    if (!title) return;
+    if (!title) return false;
 
     // Re-check ownership: someone may have renamed the thread while the model was thinking.
     const fresh = await deps.getStoredAgent(agentId);
-    if (!fresh) return;
+    if (!fresh) return false;
     const freshLabels = fresh.labels ?? {};
     if (
       !forced &&
@@ -192,7 +219,7 @@ export function createAgentTitleSummarizer(deps: AgentTitleSummarizerDeps): {
         firstUserMessage: input.firstUserMessage,
       })
     ) {
-      return;
+      return false;
     }
     const labelUpdates: Record<string, string> = { [TITLE_SOURCE_LABEL]: TITLE_SOURCE_AUTO };
     if (freshLabels[TITLE_REGENERATE_LABEL] === "1") labelUpdates[TITLE_REGENERATE_LABEL] = "done";
@@ -200,6 +227,7 @@ export function createAgentTitleSummarizer(deps: AgentTitleSummarizerDeps): {
       ...(title !== (fresh.title ?? null) ? { title } : {}),
       labels: labelUpdates,
     });
+    return true;
   }
 
   return {
@@ -223,5 +251,14 @@ export function createAgentTitleSummarizer(deps: AgentTitleSummarizerDeps): {
       });
     },
     idle: () => tail,
+    async retitle(agentId) {
+      // 一括付け直しは並行度を上げない(1本ずつ・直列)。失敗は呼び出し側が数える。
+      const run = tail.then(() => summarize(agentId, true));
+      tail = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    },
   };
 }

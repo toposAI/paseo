@@ -13,6 +13,7 @@ import { OWNER_PERMISSIONS } from "./authorization/index.js";
 import { createTestPaseoDaemon } from "./test-utils/paseo-daemon.js";
 import { asInternals, createStub } from "./test-utils/class-mocks.js";
 import { createProviderSnapshotManagerStub } from "./test-utils/session-stubs.js";
+import { AGENT_TITLE_SOURCE_LABEL } from "@getpaseo/protocol/agent-title-limits";
 
 interface SessionInternals {
   archiveAgentForClose(agentId: string): Promise<{ archivedAt: string }>;
@@ -167,7 +168,7 @@ describe("snapshot mutation ownership boundary", () => {
     );
     expect(updateAgentMetadata).toHaveBeenCalledWith("agent-1", {
       title: "Renamed agent",
-      labels: { lane: "phase-1a" },
+      labels: { lane: "phase-1a", [AGENT_TITLE_SOURCE_LABEL]: "user" },
     });
     expect(onMessage).toHaveBeenCalledWith({
       type: "update_agent_response",
