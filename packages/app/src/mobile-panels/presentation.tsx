@@ -1,4 +1,4 @@
-import { useMemo, useRef, type ComponentProps, type ReactNode } from "react";
+import { useMemo, type ComponentProps, type ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { GestureDetector, type GestureType } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
@@ -28,8 +28,7 @@ export function MobilePanelOverlay({
   const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
   const isOpen = useIsMobilePanelActive(panel);
   const isLeft = panel === "agent-list";
-  const hostRef = useRef<View>(null);
-  useWebLeftSwipeDirectionLock(hostRef, isWeb && isLeft && isOpen);
+  useWebLeftSwipeDirectionLock(`${panel}-gesture-host`, isWeb && isLeft && isOpen);
 
   const sidebarAnimatedStyle = useAnimatedStyle(() => {
     const frame = getMobilePanelFrame(position.value, windowWidth);
@@ -87,7 +86,6 @@ export function MobilePanelOverlay({
         collapsable={false}
         importantForAccessibility={isOpen ? "auto" : "no-hide-descendants"}
         nativeID={`${panel}-gesture-host`}
-        ref={hostRef}
         pointerEvents={overlayPointerEvents}
         style={styles.overlay}
       >

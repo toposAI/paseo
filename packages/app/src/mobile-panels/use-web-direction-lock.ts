@@ -1,5 +1,5 @@
-import { useEffect, type RefObject } from "react";
-import { decideDirectionLock } from "./direction-lock";
+import { useEffect } from "react";
+import { decideDirectionLock, shouldReleaseLock } from "./direction-lock";
 
 function isInsideHorizontalScroller(target: EventTarget | null, root: HTMLElement): boolean {
   let node = target instanceof HTMLElement ? target : null;
@@ -44,6 +44,9 @@ export function attachLeftSwipeDirectionLock(root: HTMLElement): () => void {
       }
       state = decision === "lock_horizontal" && deltaX < 0 && !skipLock ? "locked" : "released";
     }
+    if (state === "locked" && shouldReleaseLock(touch.clientX - start.x, touch.clientY - start.y)) {
+      state = "released";
+    }
     if (state === "locked" && event.cancelable) {
       event.preventDefault();
     }
@@ -68,12 +71,13 @@ export function attachLeftSwipeDirectionLock(root: HTMLElement): () => void {
 // Mobile web: the panel keeps `touch-action: pan-y` so its lists scroll natively, but iOS then
 // cancels the touch as soon as it commits to a vertical scroll. Lock a leftward-horizontal start
 // by preventing default on the remaining moves (needs a non-passive listener on the element).
-export function useWebLeftSwipeDirectionLock(ref: RefObject<unknown>, enabled: boolean): void {
+// The host is looked up by id because GestureDetector's web wrapper overrides a child's ref.
+export function useWebLeftSwipeDirectionLock(hostId: string, enabled: boolean): void {
   useEffect(() => {
-    const root = ref.current;
-    if (!enabled || !(root instanceof HTMLElement)) {
+    const root = enabled ? document.getElementById(hostId) : null;
+    if (!root) {
       return;
     }
     return attachLeftSwipeDirectionLock(root);
-  }, [ref, enabled]);
+  }, [hostId, enabled]);
 }

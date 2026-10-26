@@ -36,6 +36,13 @@ test("a leftward-horizontal start keeps being prevented even after vertical drif
   touch(list, "touchend", 170, 140);
 });
 
+test("a locked touch is handed back to native scrolling when it turns clearly vertical", () => {
+  const list = setup();
+  touch(list, "touchstart", 200, 100);
+  expect(touch(list, "touchmove", 190, 102).defaultPrevented).toBe(true);
+  expect(touch(list, "touchmove", 188, 150).defaultPrevented).toBe(false);
+});
+
 test("a vertical start is left to native scrolling for the whole touch", () => {
   const list = setup();
   touch(list, "touchstart", 200, 100);

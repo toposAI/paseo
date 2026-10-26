@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decideDirectionLock } from "./direction-lock";
+import { decideDirectionLock, shouldReleaseLock } from "./direction-lock";
 
 describe("decideDirectionLock", () => {
   it("waits until the finger has moved past the slop", () => {
@@ -15,7 +15,16 @@ describe("decideDirectionLock", () => {
     expect(decideDirectionLock({ deltaX: -3, deltaY: 14 })).toBe("release");
   });
 
-  it("releases an ambiguous diagonal so list scrolling stays easy", () => {
-    expect(decideDirectionLock({ deltaX: -10, deltaY: 10 })).toBe("release");
+  it("locks a mild diagonal that the panel gesture would still accept", () => {
+    expect(decideDirectionLock({ deltaX: -10, deltaY: 10 })).toBe("lock_horizontal");
+  });
+
+  it("releases a clearly steeper diagonal", () => {
+    expect(decideDirectionLock({ deltaX: -7, deltaY: 12 })).toBe("release");
+  });
+
+  it("hands a locked touch back once it is clearly vertical", () => {
+    expect(shouldReleaseLock(-12, 40)).toBe(true);
+    expect(shouldReleaseLock(-40, 20)).toBe(false);
   });
 });
