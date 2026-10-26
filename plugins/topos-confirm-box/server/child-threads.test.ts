@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   applyChildThreadOrder,
+  countDoneAwaitingCard,
   normalizeChildThreadOrder,
   normalizeChildThreads,
   readChildThreadOrder,
@@ -13,6 +14,7 @@ import {
   writeChildThreadOrder,
   writeChildThreadPin,
 } from "./child-threads.js";
+import { isCardDone } from "../shared/child-threads.js";
 import type { ChildThread } from "../shared/child-threads.js";
 import { buildUpperRows, coordinatorIdSet, visibleGroupKeyOf } from "../shared/sidebar-rows.js";
 import { COORDINATOR_GROUP } from "../shared/sidebar-section-mode.js";
@@ -60,6 +62,48 @@ test("完了まとめは箱の項目から引く(summary_item_id 一致)", () =>
   ]);
   assert.equal(t.summary, "## 結論\nX");
   assert.equal(t.summaryState, "read");
+});
+
+test("カードを作らない運用の目印(nocard:)は箱を引かず、確認待ちに数えない", () => {
+  // 目印は箱に実在しない id。summaryItemId に載せると「確認待ち」として出て件数が水増しされる。
+  const [t] = normalizeChildThreads(
+    { threads: [row({ agent_id: "nc", status: "完了", summary_item_id: "nocard:abc" })] },
+    [{ id: "nocard:abc", background: "箱に在るはずのない本文", state: "read" }],
+  );
+  assert.equal(t.summaryItemId, null);
+  assert.equal(t.summary, null);
+  assert.equal(t.summaryState, null);
+  assert.equal(t.nocard, true);
+  assert.equal(t.summaryAcked, false);
+  assert.equal(isCardDone(t), false);
+});
+
+test("実カードの行は nocard=false のまま(表示・件数は従来どおり)", () => {
+  const [t] = normalizeChildThreads({ threads: [row({ status: "完了", summary_item_id: "i1" })] }, [
+    { id: "i1", background: "X", state: "read" },
+  ]);
+  assert.equal(t.nocard, false);
+  assert.equal(t.summaryItemId, "i1");
+  assert.equal(isCardDone(t), true);
+});
+
+test("バッジの完了待ち件数はカードの無い行(nocard)を数えない", () => {
+  const threads = normalizeChildThreads(
+    {
+      threads: [
+        row({ agent_id: "nc", status: "完了", summary_item_id: "nocard:k" }),
+        row({ agent_id: "wait", status: "完了", summary_item_id: "i1" }),
+        row({ agent_id: "done", status: "完了", summary_item_id: "i2" }),
+        row({ agent_id: "work", status: "実装中" }),
+      ],
+    },
+    [
+      { id: "i1", background: "未確認", state: "read" },
+      { id: "i2", background: "確認済み", state: "approved" },
+    ],
+    new Set(["i2"]),
+  );
+  assert.equal(countDoneAwaitingCard(threads), 1);
 });
 
 test("ファイルが無ければ空配列、あれば読む", () => {
@@ -253,6 +297,7 @@ test("司令塔の行が手動順の末尾にあっても、司令塔グルー�
     machineState: null,
     request: "",
     summaryItemId: null,
+    nocard: false,
     summary: null,
     summaryState: null,
     summaryAcked: false,

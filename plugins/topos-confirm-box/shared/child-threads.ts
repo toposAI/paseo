@@ -39,6 +39,12 @@ export const ChildThreadSchema = z.object({
   request: z.string(),
   /** 完了まとめを投函した確認箱 item の id。未完了なら null。 */
   summaryItemId: z.string().nullable(),
+  /**
+   * 完了まとめの**カードを作らない**運用の行か(登録簿の `summary_item_id` が目印 `nocard:<key>`)。
+   * 目印の id は箱に存在しないので `summaryItemId` は null になる。箱に引く項目が無い以上、
+   * 確認待ち・件数には数えない(`isCardDone`)。
+   */
+  nocard: z.boolean().default(false),
   /** 完了まとめの本文(箱の item の background)。箱から引けなければ null。 */
   summary: z.string().nullable(),
   /** 完了まとめの確認状態(箱の state)。表示用(既読=read を含む)。 */
@@ -72,6 +78,26 @@ export const ChildThreadSchema = z.object({
   access: z.enum(["open", "workspace-archived", "thread-archived"]).nullable().default(null),
 });
 export type ChildThread = z.infer<typeof ChildThreadSchema>;
+
+/**
+ * 完了まとめのカードを作らない運用の目印(正本は `antigravity/utils/child_thread_registry.py` の
+ * `NOCARD_PREFIX`)。箱に実在しない id なので、`summaryItemId` としては使わない。
+ */
+export const NOCARD_PREFIX = "nocard:";
+
+/** 登録簿の `summary_item_id` がカードを作らない運用の目印か。 */
+export function isNocardSummaryId(value: string): boolean {
+  return value.startsWith(NOCARD_PREFIX);
+}
+
+/**
+ * 完了まとめを**箱の項目**で確認する運用の完了行か(カードを作らない `nocard` の行は false)。
+ * 「完了待ち」の判定(`shared/sidebar-rows.ts`)・このタブの一覧・バッジの件数は必ずこれを通す:
+ * 箱に引く項目が無い行を確認待ちとして出すと、押しても効かない確認と水増しの件数になる。
+ */
+export function isCardDone(t: { status: string; nocard?: boolean }): boolean {
+  return t.status === "完了" && t.nocard !== true;
+}
 
 /** 開けるかの印。 */
 export type ThreadAccess = NonNullable<ChildThread["access"]>;

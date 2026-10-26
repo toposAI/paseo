@@ -65,6 +65,7 @@ import type { ThreadAccess } from "./shared/child-threads.js";
 import {
   applyChildThreadOrder,
   childThreadPinsReadError,
+  countDoneAwaitingCard,
   readChildThreadOrder,
   readChildThreadPins,
   readChildThreads,
@@ -524,10 +525,9 @@ export default function contribute(server: PluginServerContext) {
     }
     let childDone = 0;
     try {
-      // 画面の「確認待ち」と同じ定義(個別 ack が無い)。一覧とバッジの数が食い違わないようにする。
-      childDone = readChildThreads(dir, items).filter(
-        (t) => t.status === "完了" && !t.summaryAcked,
-      ).length;
+      // 画面の「確認待ち」と同じ定義(個別 ack が無い・完了まとめのカードを作らない行は数えない)。
+      // 一覧とバッジの数が食い違わないようにする。
+      childDone = countDoneAwaitingCard(readChildThreads(dir, items));
     } catch {
       childDone = 0;
     }

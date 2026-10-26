@@ -14,6 +14,8 @@ import {
   CHILD_THREAD_ORDER_LIMIT,
   CHILD_THREAD_PINS_FILE,
   CHILD_THREAD_STATUSES,
+  isCardDone,
+  isNocardSummaryId,
   sortChildThreadsGrouped,
 } from "../shared/child-threads.js";
 import type { ChildThread, ChildThreadStatus } from "../shared/child-threads.js";
@@ -44,7 +46,11 @@ export function normalizeChildThreads(
       const status = (CHILD_THREAD_STATUSES as readonly string[]).includes(o.status as string)
         ? (o.status as ChildThreadStatus)
         : "実装中";
-      const summaryItemId = str(o.summary_item_id).slice(0, 64) || null;
+      const rawSummaryItemId = str(o.summary_item_id).slice(0, 64);
+      // 目印 `nocard:<key>` は箱に実在しない id。`summaryItemId` に載せると、箱を引けない行が
+      // 「確認待ち」として出て件数まで水増しされる(2026-10-26)。印だけ別に立てて null にする。
+      const nocard = isNocardSummaryId(rawSummaryItemId);
+      const summaryItemId = nocard ? null : rawSummaryItemId || null;
       const item = summaryItemId ? byId.get(summaryItemId) : undefined;
       return [
         {
@@ -54,6 +60,7 @@ export function normalizeChildThreads(
           machineState: str(o.machine_state).slice(0, 40) || null,
           request: str(o.request).slice(0, 300),
           summaryItemId,
+          nocard,
           summary: item ? item.background : null,
           summaryState: item ? item.state : null,
           summaryAcked: summaryItemId !== null && ackedIds.has(summaryItemId),
@@ -84,6 +91,14 @@ export function normalizeChildThreads(
     else byParent.set(key, [t]);
   }
   return [...pinned, ...[...byParent.values()].flat()];
+}
+
+/**
+ * 下部バーのバッジに出す「子スレ完了(確認待ち)」の件数。`isCardDone` を通すので、
+ * 完了まとめのカードを作らない行(`nocard`)は数えない(箱に引く項目が無く、画面でも出さない)。
+ */
+export function countDoneAwaitingCard(threads: readonly ChildThread[]): number {
+  return threads.filter((t) => isCardDone(t) && !t.summaryAcked).length;
 }
 
 /** ピン止めの保存(壊れた/無いファイルは空)。 */

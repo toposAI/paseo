@@ -1,6 +1,7 @@
 /**
  * 「子スレ完了」タブ。**既存の** `child_threads.json` / `childThreadsListRpc` をそのまま使い、
  * `status === "完了"`(=レジストリの確認待ち)の子スレと完了まとめ本文を並べる(新しい一覧を作らない)。
+ * 完了まとめのカードを作らない運用(`nocard`)の行は箱に確認する項目が無いので出さない(`isCardDone`)。
  *
  * 「完了にする」は完了まとめの箱項目を `ack(approve)` するだけ。ユーザーが子スレに直接「完了」と伝えた
  * 場合も同じ確認として扱われる(2026-10-23 ユーザー決定)。実際のアーカイブは既存の
@@ -11,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
-import { childThreadsListRpc, childThreadsRevertRpc } from "../shared/child-threads.js";
+import { childThreadsListRpc, childThreadsRevertRpc, isCardDone } from "../shared/child-threads.js";
 import type { ChildThread, ChildThreadsListOutput } from "../shared/child-threads.js";
 import { confirmBoxAckRpc, boxSignalRpc } from "../shared/contract.js";
 import type { ToggleInfo } from "./HeaderIconBar.js";
@@ -159,7 +160,12 @@ export function ChildDoneView({
     [c],
   );
 
-  const done = useMemo(() => (data?.threads ?? []).filter((t) => t.status === "完了"), [data]);
+  const done = useMemo(
+    // 完了まとめのカードを作らない運用(`nocard`)の行は、箱に確認する項目が無いのでこのタブに出さない
+    // (「完了にする」が押せない行・確認待ちの件数から外す)。
+    () => (data?.threads ?? []).filter(isCardDone),
+    [data],
+  );
   // 「確認済み」は**個別の ack** で判定する(アーカイブ条件と同じ)。「すべて既読」ではアーカイブされないため。
   const isAcked = (t: ChildThread) => t.summaryAcked;
   const visible = showAcked ? done : done.filter((t) => !isAcked(t));

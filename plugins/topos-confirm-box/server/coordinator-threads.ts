@@ -123,6 +123,7 @@ export function coordinatorRows(
       machineState: str(agent.status) || null,
       request: "司令塔スレ(常時表示)",
       summaryItemId: null,
+      nocard: false,
       summary: null,
       summaryState: null,
       summaryAcked: false,

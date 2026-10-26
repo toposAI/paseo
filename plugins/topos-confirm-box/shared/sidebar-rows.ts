@@ -10,6 +10,7 @@
  */
 import { LOWER_TIER_STATUSES, UPPER_TIER_STATUSES } from "./notes.js";
 import type { NoteStatus, SidebarNote } from "./notes.js";
+import { isCardDone } from "./child-threads.js";
 import type { StateDotKind } from "./state-dot.js";
 
 /**
@@ -36,6 +37,11 @@ export interface RowThread {
    * 「完了待ち」(ユーザーの確認を待っている)。未指定は「分からない」として完了待ちにしない。
    */
   summaryAcked?: boolean;
+  /**
+   * 完了まとめの**カードを作らない**運用の行か(`ChildThread.nocard`)。箱に引く項目が無いので
+   * 確認待ち(=「完了待ち」)にしない。未指定は「カードがある」として従来どおり扱う。
+   */
+  nocard?: boolean;
 }
 
 export interface SidebarRowView<T> {
@@ -80,9 +86,11 @@ export function dotOf(thread: RowThread): StateDotKind | null {
 /**
  * 完了報告済みでユーザーの確認を待っている行か(司令塔は除く)。「判断待ち」(ユーザーの選択・返事が
  * 要る)とは別の状態で、確認→アーカイブの流れに乗る(子スレ完了タブの「確認待ち」と同じ集合)。
+ * 完了まとめのカードを作らない運用(`nocard`)は箱に確認する項目が無いので、この状態にしない
+ * (「完了待ち」の行・件数チップ・下部バッジのどれにも出さない)。
  */
 function isAwaitingConfirm(t: RowThread): boolean {
-  return t.status === "完了" && t.summaryAcked === false && t.coordinator !== true;
+  return isCardDone(t) && t.summaryAcked === false && t.coordinator !== true;
 }
 
 const isUpperStatus = (s: NoteStatus) => UPPER_TIER_STATUSES.includes(s);

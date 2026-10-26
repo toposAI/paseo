@@ -19,6 +19,7 @@ function row(agentId: string, over: Partial<ChildThread> = {}): ChildThread {
     machineState: "idle",
     request: "依頼",
     summaryItemId: null,
+    nocard: false,
     summary: null,
     summaryState: null,
     summaryAcked: false,

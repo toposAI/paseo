@@ -328,6 +328,42 @@ test("完了待ちにならないもの: 確認済み・ノートが判断待ち
   );
 });
 
+test("nocard(完了まとめのカードを作らない)行は『完了待ち』にせず、件数にも入れない", () => {
+  // 箱に確認する項目が無い行。押しても効かない確認を出さず、件数チップ/下部バッジも水増ししない。
+  const rows = buildUpperRows(
+    [doneUnconfirmed("nc", { nocard: true }), doneUnconfirmed("card")],
+    new Map(),
+  );
+  // ノートの無い nocard 行は上段から外れる。実カードの行だけ完了待ち。
+  assert.deepEqual(
+    rows.map((r) => [r.thread.agentId, r.statusLabel]),
+    [["card", "完了待ち"]],
+  );
+  assert.equal(countStatusLabels(rows).doneWait, 1);
+});
+
+test("nocard 行はノートの状態をそのまま使う(実装中は実装中、判断待ちは判断待ち)", () => {
+  const impl = new Map([
+    ["work", note({ path: "/v/w.md", status: "実装中", title: "ノートW" })],
+    ["judge", note({ path: "/v/j.md", status: "判断待ち", title: "ノートJ" })],
+  ]);
+  const rows = buildUpperRows(
+    [doneUnconfirmed("work", { nocard: true }), doneUnconfirmed("judge", { nocard: true })],
+    impl,
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.thread.agentId, r.statusLabel]),
+    [
+      ["work", "実装中"],
+      ["judge", "判断待ち"],
+    ],
+  );
+  const counts = countStatusLabels(rows);
+  assert.equal(counts.doneWait, 0);
+  assert.equal(counts.judgment, 1);
+  assert.equal(counts.running, 1);
+});
+
 test("countStatusLabels は判断待ちと完了待ちを別々に数える", () => {
   const rows = buildUpperRows(
     [

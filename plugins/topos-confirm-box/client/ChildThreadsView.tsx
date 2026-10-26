@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
-import { childThreadsListRpc } from "../shared/child-threads.js";
+import { childThreadsListRpc, isCardDone } from "../shared/child-threads.js";
 import type { ChildThreadsListOutput } from "../shared/child-threads.js";
 
 const REFRESH_MS = 30_000;
@@ -19,14 +19,15 @@ function describe(error: string | null, data: ChildThreadsListOutput | null): st
 
 /**
  * 完了まとめの確認状態。**個別 ack** で判定する(アーカイブ条件と同じ定義)。
- * 状態が取れない/未完了なら何も出さない。
+ * 状態が取れない/未完了/カードを作らない運用(`nocard`)なら何も出さない。
  */
 function summaryNote(thread: {
   status: string;
+  nocard: boolean;
   summaryItemId: string | null;
   summaryAcked: boolean;
 }): string {
-  if (thread.status !== "完了" || !thread.summaryItemId) return "";
+  if (!isCardDone(thread) || !thread.summaryItemId) return "";
   return thread.summaryAcked ? " ・ 確認済み" : " ・ 確認待ち(勝手に畳みません)";
 }
 
@@ -89,7 +90,11 @@ export function ChildThreadsView({
             </Text>
             {t.request ? <Text style={s.text}>{t.request}</Text> : null}
             {t.status === "完了" ? (
-              <Text style={s.text}>{t.summary ?? "(完了まとめを確認箱から引けません)"}</Text>
+              <Text style={s.text}>
+                {t.nocard
+                  ? "この運用では完了まとめのカードを作りません(確認箱の子スレ完了には出しません)。会話に完了報告が残っています。"
+                  : (t.summary ?? "(完了まとめを確認箱から引けません)")}
+              </Text>
             ) : null}
           </View>
         ))}
