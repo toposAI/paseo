@@ -178,6 +178,11 @@ export function createAgentTitleSummarizer(deps: AgentTitleSummarizerDeps): {
   const isLockedByUser = (labels: Record<string, string>, options: { preserveUser?: boolean }) =>
     options.preserveUser === true && labels[TITLE_SOURCE_LABEL] === TITLE_SOURCE_USER;
 
+  /** 保存レコードの title は未設定なら undefined なので、題名判定の入力形へ揃える。 */
+  function toTitleState(record: { title?: string | null; labels?: Record<string, string> }) {
+    return { title: record.title ?? null, labels: record.labels };
+  }
+
   function canWriteTitle(
     current: { title: string | null; labels: Record<string, string> | undefined },
     firstUserMessage: string | null,
@@ -223,7 +228,7 @@ export function createAgentTitleSummarizer(deps: AgentTitleSummarizerDeps): {
     if (!stored || stored.internal) return false;
     const input = extractTitleSummaryInput(deps.getTimeline(agentId), stored.title ?? null);
     if (!input.firstUserMessage) return false;
-    if (!canWriteTitle(stored, input.firstUserMessage, forced, options)) return false;
+    if (!canWriteTitle(toTitleState(stored), input.firstUserMessage, forced, options)) return false;
 
     const title = sanitizeSummaryTitle((await runGeneration(stored.cwd, input)).title);
     if (!title) return false;
@@ -232,7 +237,7 @@ export function createAgentTitleSummarizer(deps: AgentTitleSummarizerDeps): {
     const fresh = await deps.getStoredAgent(agentId);
     if (!fresh) return false;
     const { title: previousTitle } = fresh;
-    if (!canWriteTitle(fresh, input.firstUserMessage, forced, options)) return false;
+    if (!canWriteTitle(toTitleState(fresh), input.firstUserMessage, forced, options)) return false;
 
     const labelUpdates: Record<string, string> = { [TITLE_SOURCE_LABEL]: TITLE_SOURCE_AUTO };
     if (fresh.labels?.[TITLE_REGENERATE_LABEL] === "1")

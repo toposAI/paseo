@@ -192,6 +192,15 @@ describe("createAgentTitleSummarizer", () => {
     expect(s.record.labels[TITLE_SOURCE_LABEL]).toBe(TITLE_SOURCE_USER);
   });
 
+  // 回帰: 保存レコードの title は未設定なら undefined。題名判定がそれを弾くのを型で通すように戻す
+  // (2026-10-27 統合ブランチで型エラー2件として表面化)。
+  test("retitle works on a record whose title was never set", async () => {
+    const s = setup({ title: undefined as unknown as null, labels: {} });
+    expect(await s.retitle("a1", { preserveUser: true })).toBe(true);
+    expect(s.record.title).toBe("F-80 判定失敗の修正");
+    expect(s.record.labels[TITLE_SOURCE_LABEL]).toBe(TITLE_SOURCE_AUTO);
+  });
+
   test("keeps the title when generation fails", async () => {
     const s = setup({
       title: "あなたは調査担当です。日本語で報告。",
