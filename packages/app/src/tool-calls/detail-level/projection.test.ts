@@ -188,8 +188,8 @@ describe("tool call detail-level projection", () => {
 
     const result = project({ level: "overview", tail: timeline });
 
-    // Folding a single thought would hide its text behind a second press and would leave
-    // `autoExpandReasoning` with nothing to expand, so it stays the plain row it was.
+    // Folding a single thought would cost the reader a second press for the same text, so it
+    // stays the plain row it was.
     expect(result.tail[1]).toBe(timeline[1]);
     expect(result.groupsByHostId.get("1")).toBeUndefined();
   });

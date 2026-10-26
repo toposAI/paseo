@@ -2165,10 +2165,6 @@ export const zhCN: TranslationResources = {
         description: "内置终端缓冲区保留的行数",
         accessibilityLabel: "终端回滚行数",
       },
-      autoExpandReasoning: {
-        label: "始终展开推理过程",
-        description: "默认情况下完全展开 AI 的思考和推理过程",
-      },
       relayFolding: {
         label: "将中转线程中的长消息折叠为一行",
         description: "标题包含“{{mark}}”的线程中，收到的长消息只显示一行(点击查看全文)",

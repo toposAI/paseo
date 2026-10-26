@@ -2240,10 +2240,6 @@ export const fr: TranslationResources = {
         description: "Lignes conservées dans le tampon du terminal intégré",
         accessibilityLabel: "Lignes d’historique du terminal",
       },
-      autoExpandReasoning: {
-        label: "Toujours afficher le raisonnement",
-        description: "Afficher par défaut le raisonnement de l’agent entièrement déplié",
-      },
       relayFolding: {
         label: "Replier les longs messages dans les fils de relais",
         description:

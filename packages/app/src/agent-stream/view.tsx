@@ -357,7 +357,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     ref,
   ) {
     const { t } = useTranslation();
-    const autoExpandReasoning = useSettings((settings) => settings.autoExpandReasoning);
     const toolCallDetailLevel = useSettings((settings) => settings.toolCallDetailLevel);
     const chatOutlineEnabled = useSettings((settings) => settings.chatOutlineEnabled);
     const contentMaxWidth = useSettings(resolveContentMaxWidth);
@@ -834,6 +833,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         isLastInSequence: boolean,
         status: Extract<StreamItem, { kind: "thought" }>["status"],
       ) => {
+        // Thinking stays one collapsed row in every thread; the text is one press away (2026-10-27).
         return (
           <ThoughtSlot
             itemId={item.id}
@@ -841,11 +841,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             text={item.text}
             status={status}
             isLastInSequence={isLastInSequence}
-            defaultExpanded={autoExpandReasoning}
+            defaultExpanded={false}
           />
         );
       },
-      [autoExpandReasoning, setInlineDetailsExpanded],
+      [setInlineDetailsExpanded],
     );
 
     const renderSingleToolCallItem = useCallback(

@@ -2225,11 +2225,6 @@ export const ptBR: TranslationResources = {
         description: "Linhas mantidas no buffer do terminal integrado",
         accessibilityLabel: "Linhas do scrollback do terminal",
       },
-      autoExpandReasoning: {
-        label: "Sempre expandir raciocínio",
-        description:
-          "Mostrar os blocos de pensamento e raciocínio do agente totalmente expandidos por padrão",
-      },
       relayFolding: {
         label: "Recolher mensagens longas em threads de retransmissão",
         description:

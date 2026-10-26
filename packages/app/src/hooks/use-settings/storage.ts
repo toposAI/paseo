@@ -112,7 +112,6 @@ export interface AppSettings {
   sidebarFooterItems: SidebarNavPreference[];
   /** How usage reads and which windows the sidebar summary shows. */
   usage: UsagePreferences;
-  autoExpandReasoning: boolean;
   /** Fold long incoming turns to one line in relay threads (完了箱C and the like). */
   relayFolding: RelayFolding;
   /** Thread-title substring that marks a relay thread; empty turns the fold off. */
@@ -179,7 +178,6 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   sidebarNavItems: [],
   sidebarFooterItems: [],
   usage: DEFAULT_USAGE_PREFERENCES,
-  autoExpandReasoning: false,
   relayFolding: "relay",
   relayTitleMark: DEFAULT_RELAY_TITLE_MARK,
   toposChatStyle: true,
@@ -278,7 +276,6 @@ const StoredAppSettingsSchema = z
     sidebarNavItems: z.array(z.object({ key: z.string(), visible: z.boolean() })).catch([]),
     sidebarFooterItems: z.array(z.object({ key: z.string(), visible: z.boolean() })).catch([]),
     usage: UsagePreferencesSchema,
-    autoExpandReasoning: z.boolean().catch(false),
     relayFolding: z.enum(["off", "relay"]).catch("relay"),
     relayTitleMark: z.string().trim().max(40).catch(DEFAULT_RELAY_TITLE_MARK),
     toposChatStyle: z.boolean().catch(true),

@@ -2243,11 +2243,6 @@ export const es: TranslationResources = {
         description: "Líneas mantenidas en el búfer de terminal incorporado",
         accessibilityLabel: "Líneas del historial de terminal",
       },
-      autoExpandReasoning: {
-        label: "Siempre expandir razonamiento",
-        description:
-          "Mostrar los bloques de pensamiento y razonamiento del agente totalmente expandidos de forma predeterminada",
-      },
       relayFolding: {
         label: "Plegar los mensajes largos en los hilos de retransmisión",
         description:
