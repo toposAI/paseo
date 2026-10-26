@@ -11,3 +11,4 @@ export const LEGACY_SETTINGS_KEY = "@paseo:settings";
  * a schema change.
  */
 export const SETTINGS_MIGRATIONS_KEY = "@paseo:settings-migrations";
+export const TOPOS_TOOL_OVERVIEW_APPLIED_KEY = "@paseo:topos-tool-overview-applied";
