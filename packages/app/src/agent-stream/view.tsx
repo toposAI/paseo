@@ -656,22 +656,15 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       revealLoadedMessage: revealLoadedHistory,
     });
 
-    const agentTitle = useSessionStore(
-      (state) => state.sessions[resolvedServerId]?.agents.get(agentId)?.title ?? null,
-    );
-    const loadedSeqs = useMemo(
-      () =>
-        [...effectiveStreamItems, ...(effectiveStreamHead ?? [])].flatMap((item) =>
-          item.timelineCursor ? [item.timelineCursor.seq] : [],
-        ),
+    const findItemsForSync = useMemo(
+      () => [...effectiveStreamItems, ...(effectiveStreamHead ?? [])],
       [effectiveStreamItems, effectiveStreamHead],
     );
     const reportViewedSeq = useReadPositionSync({
       serverId: resolvedServerId,
       agentId,
-      title: agentTitle,
       timelineEpoch,
-      loadedSeqs,
+      items: findItemsForSync,
       jumpToSeq: chatOutline.jumpToPrompt,
     });
 

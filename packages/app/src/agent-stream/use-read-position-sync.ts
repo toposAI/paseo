@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isWeb } from "@/constants/platform";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
+import { useSessionStore } from "@/stores/session-store";
+import type { StreamItem } from "@/types/stream";
 import { nextHighWater, pickRestoreSeq, type StoredReadPosition } from "./read-position-sync";
 
 // The daemon-side store lives in the topos-confirm-box plugin (plugins/topos-confirm-box/shared/read-position.ts).
@@ -14,9 +16,8 @@ const POST_RESTORE_QUIET_MS = 2500;
 interface Input {
   serverId: string;
   agentId: string;
-  title: string | null;
   timelineEpoch: string | null;
-  loadedSeqs: readonly number[];
+  items: readonly StreamItem[];
   jumpToSeq: (seq: number) => void;
 }
 
@@ -38,7 +39,14 @@ function parseStored(v: unknown): StoredReadPosition | null {
 
 /** Returns the callback the viewport feeds with the seq of the last fully visible row. */
 export function useReadPositionSync(input: Input): (viewedSeq: number | null) => void {
-  const { serverId, agentId, title, timelineEpoch, loadedSeqs, jumpToSeq } = input;
+  const { serverId, agentId, timelineEpoch, items, jumpToSeq } = input;
+  const title = useSessionStore(
+    (state) => state.sessions[serverId]?.agents.get(agentId)?.title ?? null,
+  );
+  const loadedSeqs = useMemo(
+    () => items.flatMap((item) => (item.timelineCursor ? [item.timelineCursor.seq] : [])),
+    [items],
+  );
   const [stored, setStored] = useState<StoredReadPosition | null>(null);
   const [fetchedFor, setFetchedFor] = useState<string | null>(null);
   const restoredRef = useRef(false);
@@ -62,9 +70,10 @@ export function useReadPositionSync(input: Input): (viewedSeq: number | null) =>
       title: title ?? undefined,
     })
       .then((out) => {
-        if (!alive) return;
+        if (!alive) return false;
         setStored(parseStored(out));
         setFetchedFor(key);
+        return true;
       })
       .catch(() => {
         if (alive) setFetchedFor(key);
