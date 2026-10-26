@@ -290,30 +290,23 @@ export function groupPressAction(
 }
 
 /**
- * 上段の行を作る。ノートの無いスレは `完了` 以外を残す(`keepsWithoutNote`)。
- * 並びは入力の順を保つ(ドラッグ並びを壊さない)。
- */
-/**
  * 並べ替えの置換先になる行の id。**グループの行**だけで、見出しになる行は除く
  * (見出しはグループの行ではないので、置換先にすると1つずれて隣の id が書き戻される。
  * 出口レビュー round1 R1-4)。
  *
- * 見出しになる条件は `groupThreadRows` と同じ「親の印があり、ピン止めでない」。ピン止めした親は
- * 普通の行として出る(`groupThreadRows` がピン止めグループへ入れる)ので、置換先に含める。
+ * 判定は `groupThreadRows` の**出力そのもの**から作る。行の条件を別に書き写すと、子が上段に無くて
+ * 見出しにならなかった親(普通の行として出る)まで外れて並びがずれる(出口レビュー round2 R2-1)。
  */
-export function reorderableIds<T extends RowThread>(
-  rows: readonly SidebarRowView<T>[],
+export function reorderableIds<T extends GroupableThread>(
+  groups: readonly ThreadGroup<T>[],
 ): Set<string> {
-  return new Set(
-    rows
-      .filter((r) => {
-        const t = r.thread as { groupingParent?: boolean; pinned?: boolean };
-        return !(t.groupingParent === true && t.pinned !== true);
-      })
-      .map((r) => r.thread.agentId),
-  );
+  return new Set(groups.flatMap((g) => g.rows.map((r) => r.thread.agentId)));
 }
 
+/**
+ * 上段の行を作る。ノートの無いスレは `完了` 以外を残す(`keepsWithoutNote`)。
+ * 並びは入力の順を保つ(ドラッグ並びを壊さない)。
+ */
 export function buildUpperRows<T extends RowThread>(
   threads: readonly T[],
   implByThread: ReadonlyMap<string, SidebarNote>,

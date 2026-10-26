@@ -226,3 +226,28 @@ test("R1-10: 0・負の数値は0(一覧の先頭へ来させない)", () => {
   assert.equal(timestampOf(0), 0);
   assert.equal(timestampOf(-5), 0);
 });
+
+// ---- 2026-10-27 出口レビュー round2 R2-5 ----
+
+test("R2-5: ピン止めした親は行として1回だけ出て、未登録として足し直されない", () => {
+  // サーバー(child-threads.ts)はピン止めした親を行として返す。子も上段に居る状態。
+  const rows = [
+    row("pk", { pinned: true }),
+    row("kid", { parentAgentId: "pk", parentTitle: "登録済み pk" }),
+  ];
+  const result = mergeUnregisteredThreads(
+    rows,
+    [
+      { id: "pk", title: "登録済み pk", status: "idle", updatedAt: 10 },
+      { id: "kid", title: "登録済み kid", status: "idle", updatedAt: 9 },
+    ],
+    [],
+    new Set(["pk"]),
+  );
+  assert.deepEqual(
+    result.rows.map((t) => t.agentId),
+    ["pk", "kid"],
+  );
+  assert.equal(result.skipped.listed, 2);
+  assert.equal(result.skipped.parent, 0);
+});

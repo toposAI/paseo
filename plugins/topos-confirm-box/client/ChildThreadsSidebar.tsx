@@ -257,8 +257,21 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   // 絞り込みで隠れている行を詰めて並べ替えると、隠れた行の順序まで動いてしまうため、
   // 画面に出ている行だけを keys で置き換える。グループの割り方は画面と同じ `rowGroupKeyOf`。
   // ピン止めグループの並べ替えも全体順への書き戻しなので、変わるのはピン同士の順だけ。
-  // 並べ替えの置換先はグループの行だけ(見出しは除く。出口レビュー round1 R1-4)。
-  const reorderable = useMemo(() => reorderableIds(rows), [rows]);
+  // 並べ替えの置換先は描画と同じグループ分けの出力から作る(見出しになる行は含まない。
+  // 出口レビュー round1 R1-4 / round2 R2-1)。
+  const groups = useMemo(
+    () =>
+      groupThreadRows(
+        rows,
+        coordinatorIds,
+        COORDINATOR_GROUP,
+        PINNED_GROUP,
+        PINNED_GROUP_LABEL,
+        OTHER_LABEL,
+      ),
+    [rows, coordinatorIds],
+  );
+  const reorderable = useMemo(() => reorderableIds(groups), [groups]);
   const onReorderGroup = useCallback(
     (groupKey: string, keys: string[]) => {
       const queue = [...keys];

@@ -186,9 +186,10 @@ export function markOpenableParents(
     // 逆に自分が閉じていても親が動いていると「実装中」のまま残る(軸のすり替え)。
     // 状態(`status`)は登録簿/宣言の語彙なので**書き換えない**(書き換えると偽の「判断待ち」が
     // チップに乗り、登録簿との食い違い表示も実在しない差になる)。
+    // 機械状態が空文字で返る版があるので `??` ではなく `||`(空で上書きしない。round2 R2-6)。
     const machineState =
       t.groupingParent === true && t.coordinator !== true
-        ? (aliveState.get(t.agentId) ?? t.machineState)
+        ? aliveState.get(t.agentId) || t.machineState
         : t.machineState;
     const next = machineState === t.machineState ? t : { ...t, machineState };
     if (parent === null || title === undefined) {

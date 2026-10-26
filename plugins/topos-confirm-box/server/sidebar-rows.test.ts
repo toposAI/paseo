@@ -758,10 +758,47 @@ test("R1-4: 並べ替えの置換先から見出しを除く(ピン止めした�
       new Map(),
     ),
   );
-  const ids = reorderableIds(rows);
+  const ids = reorderableIds(
+    groupThreadRows(rows, new Set(), COORDINATOR_GROUP, PINNED_GROUP, PINNED_GROUP_LABEL, "その他"),
+  );
   assert.equal(ids.has("cc"), false, "見出しは置換先にしない");
   assert.equal(ids.has("pk"), true, "ピン止めした親は普通の行");
   assert.equal(ids.has("k1"), true);
+});
+
+test("R2-1: 子が上段に無い親(親だけの行)は置換先に含める — 置換先の数と画面の行の数が一致する", () => {
+  // 「親だけの行」= 親の印はあるが、自分の id のグループ(=子の行)が上段に無い。
+  // 画面は普通の行として描くので、置換先から外すとドラッグで位置が1つずれる(round2 指摘)。
+  const rows = sortHeadingsLast(
+    buildUpperRows(
+      [
+        parentRow("lonely", { status: "実装中" }),
+        parentRow("withkid", { status: "実装中" }),
+        { agentId: "k1", title: "k1", status: "実装中" as const, parentAgentId: "withkid" },
+      ],
+      new Map(),
+    ),
+  );
+  const groups = groupThreadRows(
+    rows,
+    new Set(),
+    COORDINATOR_GROUP,
+    PINNED_GROUP,
+    PINNED_GROUP_LABEL,
+    "その他",
+  );
+  const rendered = groups.flatMap((g) => [
+    ...(g.heading ? [g.heading.thread.agentId] : []),
+    ...g.rows.map((r) => r.thread.agentId),
+  ]);
+  const reorderable = reorderableIds(groups);
+  assert.equal(reorderable.has("lonely"), true, "親だけの行は普通の行として並べ替えられる");
+  assert.equal(reorderable.has("withkid"), false, "見出しになった親は置換先にしない");
+  assert.deepEqual(
+    [...reorderable].sort(),
+    rendered.filter((id) => id !== "withkid").sort(),
+    "置換先は画面の行から見出しだけを除いた集合と一致する",
+  );
 });
 
 test("R1-6: ピン止めした親は見出しにならず、ピン止めグループの行として出る", () => {
@@ -855,4 +892,49 @@ test("受け入れ1: 子司令塔の判断待ちがチップに出て、行は�
     idle: 0,
     closed: 0,
   });
+});
+
+test("受け入れ1(R2-7): 閉じた子司令塔の未完の行は上段に残り、その帯は「終了」(子が動いていても行自身の状態で出す)", () => {
+  // 閉じた親でも状態が未完(実装中/待機)なら行として上段に残り、見出しの帯は「終了」を出す。
+  // 状態(登録簿の語彙)は書き換えない(書き換えると偽の「判断待ち」がチップに乗る。round1 R1-1)。
+  const registry = {
+    threads: [
+      {
+        agent_id: "cc",
+        title: "子司令塔",
+        status: "実装中",
+        machine_state: "closed",
+        updated_at: 2,
+      },
+      {
+        agent_id: "kid",
+        title: "子",
+        status: "実装中",
+        machine_state: "running",
+        updated_at: 1,
+        parent_agent_id: "cc",
+        parent_title: "子司令塔",
+      },
+    ],
+  };
+  const threads = markOpenableParents(
+    normalizeChildThreads(registry),
+    [
+      { id: "cc", title: "子司令塔", status: "closed" },
+      { id: "kid", title: "子", status: "running" },
+    ],
+    new Map(),
+  );
+  const groups = groupThreadRows(
+    buildUpperRows(threads, new Map()),
+    coordinatorIdSet(threads),
+    COORDINATOR_GROUP,
+    PINNED_GROUP,
+    PINNED_GROUP_LABEL,
+    "その他",
+  );
+  const ccGroup = groups.find((g) => g.heading?.thread.agentId === "cc");
+  assert.equal(ccGroup?.heading?.statusLabel, "終了");
+  assert.equal(ccGroup?.heading?.thread.status, "実装中", "状態(登録簿の語彙)は書き換えない");
+  assert.equal(ccGroup?.heading?.thread.machineState, "closed");
 });
