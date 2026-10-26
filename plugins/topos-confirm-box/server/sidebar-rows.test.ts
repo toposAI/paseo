@@ -799,6 +799,10 @@ test("R2-1: 子が上段に無い親(親だけの行)は置換先に含める �
     rendered.filter((id) => id !== "withkid").sort(),
     "置換先は画面の行から見出しだけを除いた集合と一致する",
   );
+  // 親だけの行は画面の並びのうえでは常にグループ末尾に置かれる(`buildUpperRows` が末尾へ回す)。
+  // ドラッグで先頭へ移しても他の行の順は崩れず、次に描画したときは末尾へ戻る(round3 指摘5: 仕様)。
+  const only = groups.find((g) => g.rows.some((r) => r.thread.agentId === "lonely"));
+  assert.equal(only?.rows[only.rows.length - 1]?.thread.agentId, "lonely");
 });
 
 test("R1-6: ピン止めした親は見出しにならず、ピン止めグループの行として出る", () => {
