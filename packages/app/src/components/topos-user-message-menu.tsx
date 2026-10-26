@@ -36,6 +36,7 @@ export const ToposUserMessageMenu = memo(function ToposUserMessageMenu({
   const bubbleRef = useRef<View>(null);
   const [anchor, setAnchor] = useState<PopupAnchor | null>(null);
   const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -55,6 +56,7 @@ export const ToposUserMessageMenu = memo(function ToposUserMessageMenu({
   const handleClose = useCallback(() => {
     setAnchor(null);
     setCopied(false);
+    setFailed(false);
   }, []);
 
   const handleCopy = useCallback(async () => {
@@ -63,15 +65,21 @@ export const ToposUserMessageMenu = memo(function ToposUserMessageMenu({
     try {
       await writeMarkdownToRichClipboard(content, getDefaultMarkdownClipboardEnvironment());
     } catch {
-      // Copy failed: keep the popup open without the check mark so the failure is visible.
+      setFailed(true);
       return;
     }
+    setFailed(false);
     setCopied(true);
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
     closeTimerRef.current = setTimeout(() => {
       closeTimerRef.current = null;
       handleClose();
     }, 700);
   }, [getContent, handleClose]);
+
+  let copyLabel = t("message.actions.copyText");
+  if (copied) copyLabel = t("message.actions.copied");
+  else if (failed) copyLabel = t("workspace.tabs.toasts.copyFailed");
 
   return (
     <>
@@ -110,9 +118,7 @@ export const ToposUserMessageMenu = memo(function ToposUserMessageMenu({
                     ) : (
                       <Copy size={ICON_SIZE.md} color={styles.icon.color} />
                     )}
-                    <Text style={styles.actionText}>
-                      {copied ? t("message.actions.copied") : t("message.actions.copyText")}
-                    </Text>
+                    <Text style={styles.actionText}>{copyLabel}</Text>
                   </View>
                 )}
               </Pressable>

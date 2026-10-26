@@ -31,7 +31,8 @@ function execCommandCopy(text: string): boolean {
   field.style.left = "0";
   field.style.opacity = "0";
   field.style.fontSize = "16px";
-  const container = resolveCopyContainer();
+  const previouslyFocused = document.activeElement;
+  const container = resolveCopyContainer(previouslyFocused);
   container.appendChild(field);
   try {
     field.focus();
@@ -42,16 +43,28 @@ function execCommandCopy(text: string): boolean {
     return false;
   } finally {
     container.removeChild(field);
+    if (previouslyFocused && previouslyFocused !== document.body) {
+      (previouslyFocused as HTMLElement).focus?.();
+    }
   }
 }
 
+const NON_CONTAINER_TAGS = new Set(["BUTTON", "INPUT", "TEXTAREA", "SELECT"]);
+
+/**
+ * Inside a modal the focused element is inside the focus trap, so the field goes into it (or next
+ * to it when it cannot hold children). Anywhere else, or with nothing focused, it goes to the body.
+ */
 export function resolveCopyContainer(
   active: Element | null = typeof document === "undefined" ? null : document.activeElement,
   body: HTMLElement = document.body,
 ): HTMLElement {
-  const parent = active?.parentElement;
-  if (!parent || active === body || parent === document.documentElement) {
+  if (!active || active === body || active === document.documentElement) {
     return body;
   }
-  return parent;
+  if (!NON_CONTAINER_TAGS.has(active.tagName)) {
+    return active as HTMLElement;
+  }
+  const parent = active.parentElement;
+  return parent && parent !== document.documentElement ? parent : body;
 }

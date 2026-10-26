@@ -12,6 +12,7 @@ function node(parent: FakeNode | null = null): FakeNode {
     children: [],
     parentElement: parent,
     style: {},
+    tagName: "DIV",
     appendChild(child: FakeNode) {
       child.parentElement = created;
       created.children.push(child);
@@ -52,11 +53,21 @@ afterEach(() => {
 });
 
 describe("resolveCopyContainer", () => {
-  it("uses the parent of the focused element so the field stays inside a modal focus trap", () => {
+  it("uses the focused element itself so the field stays inside a modal focus trap", () => {
+    const html = node();
+    const body = node(html);
+    const modal = node(body);
+    const pressed = node(modal);
+    stubDocument(pressed, body, html);
+    expect(resolveCopyContainer()).toBe(pressed);
+  });
+
+  it("uses the parent when the focused element cannot hold children", () => {
     const html = node();
     const body = node(html);
     const modal = node(body);
     const button = node(modal);
+    button.tagName = "BUTTON";
     stubDocument(button, body, html);
     expect(resolveCopyContainer()).toBe(modal);
   });
@@ -77,10 +88,11 @@ describe("copyPlainTextWeb", () => {
     const button = node(modal);
     const doc = stubDocument(button, body, html);
     const appended: FakeNode[] = [];
-    const original = modal.appendChild as (child: FakeNode) => void;
+    const original = button.appendChild as (child: FakeNode) => void;
+    button.tagName = "BUTTON";
     modal.appendChild = (child: FakeNode) => {
       appended.push(child);
-      original(child);
+      original.call(modal, child);
     };
     await copyPlainTextWeb("hello");
     expect(appended).toHaveLength(1);
