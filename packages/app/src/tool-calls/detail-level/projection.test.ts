@@ -326,9 +326,17 @@ describe("tool call detail-level projection", () => {
       thought("2", "Cut off mid-sentence.", "loading"),
     ];
 
-    const group = project({ level: "overview", tail: timeline }).groupsByHostId.get("1");
+    const prepared = prepareToolCallHistory("overview", timeline)!;
+    const group = project({
+      level: "overview",
+      tail: timeline,
+      preparedHistory: prepared,
+    }).groupsByHostId.get("1");
 
     expect(group?.summary.isThinkingActive).toBe(false);
+    // The history already built this group; rebuilding it every frame would re-render
+    // the row for a run that cannot change any more.
+    expect(group).toBe(prepared.grouped.groupsByHostId.get("1"));
   });
 
   it("keeps an activity row live while its trailing thought streams", () => {

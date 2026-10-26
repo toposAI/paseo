@@ -242,16 +242,16 @@ export function groupLiveToolCalls<TGroup>(input: {
     }
     // A run hosted by the history with nothing new in the head is not live: whatever is
     // still loading there was left behind by an interruption, so it stays sealed. Its
-    // spinner still follows the item statuses; only the "still thinking" claim is dropped.
+    // spinner still follows the item statuses; only the "still thinking" claim is dropped,
+    // and the history's own group is kept instead of being rebuilt on every frame.
     const isHistoryOnly = hostPlacement === "history" && !pendingIncludesHead;
-    const run = isThoughtsOnly(pending)
-      ? null
-      : createRun(pending, isSealed || (isHistoryOnly && isStaleThought(pending)));
+    const isStale = isHistoryOnly && isStaleThought(pending);
+    const run = isThoughtsOnly(pending) ? null : createRun(pending, isSealed || isStale);
     if (run) {
       if (hostPlacement === "head") {
         head.push(createHost(run));
       }
-      if (hostPlacement === "head" || pendingIncludesHead || !isSealed) {
+      if (hostPlacement === "head" || pendingIncludesHead || (!isSealed && !isStale)) {
         const group = input.buildGroup(run);
         liveGroups.set(run.id, group);
         if (hostPlacement === "history") {
