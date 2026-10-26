@@ -223,3 +223,39 @@ test("印が workspace-archived の親は開ける親にしない(印が直接�
   );
   assert.equal(rows[0].parentOpenable, false);
 });
+
+// ---- 2026-10-27 通し検証B 出口レビュー round1 R1-1 ----
+
+test("R1-1: 子司令塔の見出しは自分の機械状態で出す(閉じたら終了・親の状態を写さない)", () => {
+  const rows = markOpenableParents(
+    [
+      thread({ agentId: "cc", groupingParent: true, machineState: "running" }),
+      thread({ agentId: "kid", parentAgentId: "cc", machineState: "running" }),
+    ],
+    [
+      { id: "cc", title: "子司令塔", status: "closed" },
+      { id: "kid", title: "子", status: "idle" },
+    ],
+  );
+  const cc = rows.find((t) => t.agentId === "cc");
+  assert.equal(cc?.machineState, "closed");
+  // 状態(status)は登録簿の語彙のまま書き換えない(偽の「判断待ち」をチップに乗せない)
+  assert.equal(cc?.status, "実装中");
+});
+
+test("R1-1: 親(司令塔)が閉じても、子の行の機械状態・状態は変えない(子ごとに別のスレ)", () => {
+  const rows = markOpenableParents(
+    [thread({ agentId: "kid", parentAgentId: "boss", machineState: "idle" })],
+    [{ id: "boss", title: "司令塔", status: "closed" }],
+  );
+  assert.equal(rows[0]?.machineState, "idle");
+  assert.equal(rows[0]?.status, "実装中");
+});
+
+test("R1-1: 完了の行は完了のまま(見出しの印で「判断待ち」に化けない)", () => {
+  const rows = markOpenableParents(
+    [thread({ agentId: "done", status: "完了", machineState: "closed" })],
+    [{ id: "done", title: "完了した", status: "closed" }],
+  );
+  assert.equal(rows[0]?.status, "完了");
+});

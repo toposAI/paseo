@@ -180,12 +180,18 @@ export function markOpenableParents(
   return rows.map((t) => {
     const parent = t.parentAgentId;
     const title = parent === null ? undefined : alive.get(parent);
-    // 見出しの帯(2026-10-27 通し検証B 指摘1): 閉じた親は「終了」。司令塔(「司令塔」グループ)は
-    // 帯を別に出すので触らない。
+    // 見出し(子司令塔)の帯は**その行自身**の機械状態で出す。閉じたら「終了」、動いていれば「実装中」は
+    // `rowStatusText` が決める(2026-10-27 通し検証B 指摘1。出口レビュー round1 R1-1)。
+    // 親(司令塔)の状態を写すと、司令塔が閉じただけで配下の見出しが一斉に「終了」になり、
+    // 逆に自分が閉じていても親が動いていると「実装中」のまま残る(軸のすり替え)。
+    // 状態(`status`)は登録簿/宣言の語彙なので**書き換えない**(書き換えると偽の「判断待ち」が
+    // チップに乗り、登録簿との食い違い表示も実在しない差になる)。
+    // 機械状態が空文字で返る版があるので `??` ではなく `||`(空で上書きしない。round2 R2-6)。
     const machineState =
-      t.coordinator === true || parent === null ? t.machineState : (aliveState.get(parent) ?? null);
-    const next =
-      t.coordinator === true ? t : { ...t, machineState, status: headingStatusOf(t, machineState) };
+      t.groupingParent === true && t.coordinator !== true
+        ? aliveState.get(t.agentId) || t.machineState
+        : t.machineState;
+    const next = machineState === t.machineState ? t : { ...t, machineState };
     if (parent === null || title === undefined) {
       return next.parentOpenable ? { ...next, parentOpenable: false } : next;
     }
@@ -195,15 +201,6 @@ export function markOpenableParents(
       parentTitle: title.trim() || t.parentTitle,
     };
   });
-}
-
-/**
- * 見出し(親)の行の状態。閉じた親は「終了」(行末の帯は `closed` を見て終了にする)。完了の見出しは、
- * 子が未完で残っている間は「未完」(子の行だけが残って見出しが消えないように)。他の状態は変えない。
- */
-function headingStatusOf(t: ChildThread, machineState: string | null): ChildThread["status"] {
-  if (machineState === "closed" || t.status === "完了") return "ユーザー判断待ち";
-  return t.status;
 }
 
 /**

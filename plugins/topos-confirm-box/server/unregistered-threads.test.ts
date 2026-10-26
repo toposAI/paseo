@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeUnregisteredThreads } from "./unregistered-threads.js";
+import { mergeUnregisteredThreads, timestampOf } from "./unregistered-threads.js";
 import type { ChildThread } from "../shared/child-threads.js";
 
 function row(agentId: string, over: Partial<ChildThread> = {}): ChildThread {
@@ -202,4 +202,52 @@ test("指摘4: 登録簿で畳み済み(archived)のスレは、一覧に残っ�
   );
   assert.deepEqual(result.rows, []);
   assert.equal(result.skipped.archivedRegistry, 1);
+});
+
+// ---- 2026-10-27 出口レビュー round1 R1-10 ----
+
+test("R1-10: 秒単位の数値も ms に揃えて並べる(秒と ms が混ざっても逆転しない)", () => {
+  const result = mergeUnregisteredThreads(
+    [],
+    [
+      { id: "ms", title: "ms", updatedAt: Date.parse("2026-10-26T01:00:00.000Z") },
+      { id: "sec", title: "秒", updatedAt: Date.parse("2026-10-26T02:00:00.000Z") / 1000 },
+      { id: "old", title: "古い", updatedAt: 1 },
+    ],
+  );
+  assert.deepEqual(
+    result.rows.map((t) => t.agentId),
+    ["sec", "ms", "old"],
+  );
+  assert.equal(result.rows[0]?.updatedAt, Date.parse("2026-10-26T02:00:00.000Z"));
+});
+
+test("R1-10: 0・負の数値は0(一覧の先頭へ来させない)", () => {
+  assert.equal(timestampOf(0), 0);
+  assert.equal(timestampOf(-5), 0);
+});
+
+// ---- 2026-10-27 出口レビュー round2 R2-5 ----
+
+test("R2-5: ピン止めした親は行として1回だけ出て、未登録として足し直されない", () => {
+  // サーバー(child-threads.ts)はピン止めした親を行として返す。子も上段に居る状態。
+  const rows = [
+    row("pk", { pinned: true }),
+    row("kid", { parentAgentId: "pk", parentTitle: "登録済み pk" }),
+  ];
+  const result = mergeUnregisteredThreads(
+    rows,
+    [
+      { id: "pk", title: "登録済み pk", status: "idle", updatedAt: 10 },
+      { id: "kid", title: "登録済み kid", status: "idle", updatedAt: 9 },
+    ],
+    [],
+    new Set(["pk"]),
+  );
+  assert.deepEqual(
+    result.rows.map((t) => t.agentId),
+    ["pk", "kid"],
+  );
+  assert.equal(result.skipped.listed, 2);
+  assert.equal(result.skipped.parent, 0);
 });

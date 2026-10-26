@@ -216,7 +216,11 @@ export function groupThreadRows<T extends GroupableThread>(
   };
   const headings: SidebarRowView<T>[] = [];
   for (const r of rows) {
-    if ((r.thread as { groupingParent?: boolean }).groupingParent === true) {
+    // ピン止めした親は見出しにしない(ピン止めグループの普通の行として出す。R1-6)。
+    if (
+      (r.thread as { groupingParent?: boolean }).groupingParent === true &&
+      (r.thread as { pinned?: boolean }).pinned !== true
+    ) {
       headings.push(r);
       continue;
     }
@@ -283,6 +287,20 @@ export function groupPressAction(
 ): GroupPress {
   if (!key || key === coordinatorGroup || !openableParents.has(key)) return "toggle";
   return "open";
+}
+
+/**
+ * 並べ替えの置換先になる行の id。**グループの行**だけで、見出しになる行は除く
+ * (見出しはグループの行ではないので、置換先にすると1つずれて隣の id が書き戻される。
+ * 出口レビュー round1 R1-4)。
+ *
+ * 判定は `groupThreadRows` の**出力そのもの**から作る。行の条件を別に書き写すと、子が上段に無くて
+ * 見出しにならなかった親(普通の行として出る)まで外れて並びがずれる(出口レビュー round2 R2-1)。
+ */
+export function reorderableIds<T extends GroupableThread>(
+  groups: readonly ThreadGroup<T>[],
+): Set<string> {
+  return new Set(groups.flatMap((g) => g.rows.map((r) => r.thread.agentId)));
 }
 
 /**

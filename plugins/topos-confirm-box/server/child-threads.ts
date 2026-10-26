@@ -110,8 +110,10 @@ export function normalizeChildThreads(
   }
   // 見出しになる親は、未完の行(ノートの無いスレとして上段に残るもの)だけ後ろへ置く。
   // 完了・アーカイブ側へ進んだ親は上段に出ない(見出しは子の行が担う)ので、並びに足さない。
+  // ピン止めした親は見出しにせず普通の行として残す(見出しから外すと一覧から消える。
+  // 出口レビュー round1 R1-6)。
   const headings = marked.filter(
-    (t) => t.groupingParent && !t.pinned && t.status !== "完了" && !t.coordinator,
+    (t) => t.groupingParent && !t.coordinator && (t.pinned || t.status !== "完了"),
   );
   return [...pinned, ...[...byParent.values()].flat(), ...headings];
 }

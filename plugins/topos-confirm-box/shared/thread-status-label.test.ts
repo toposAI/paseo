@@ -22,3 +22,13 @@ test("ノート由来の他の語彙は従来どおり(確認待ちは done、�
   assert.deepEqual(rowStatusText("待機中", "idle"), { text: "待機中", kind: "idle" });
   assert.deepEqual(rowStatusText("完了", "idle"), { text: "完了", kind: "done" });
 });
+
+// ---- 2026-10-27 出口レビュー round1 R1-7 ----
+
+test("R1-7: 閉じたスレの「待機中」(未登録の closed 行)も「終了」", () => {
+  const r = rowStatusText("待機中", "closed");
+  assert.equal(r.text, "終了");
+  assert.equal(r.kind, "closed");
+  // 閉じていなければ「待機中」のまま
+  assert.equal(rowStatusText("待機中", "idle").text, "待機中");
+});
