@@ -1,5 +1,29 @@
-import { MAX_EXPLICIT_AGENT_TITLE_CHARS } from "@getpaseo/protocol/agent-title-limits";
+import {
+  AGENT_TITLE_SOURCE_INITIAL,
+  AGENT_TITLE_SOURCE_LABEL,
+  AGENT_TITLE_SOURCE_USER,
+  MAX_EXPLICIT_AGENT_TITLE_CHARS,
+} from "@getpaseo/protocol/agent-title-limits";
 import type { FirstAgentContext } from "@getpaseo/protocol/messages";
+
+/**
+ * 作成時の題名に付けるラベル。呼び出し側が title-source を明示していればそれを尊重する
+ * (`--title-locked` は `user` を渡してくるので、そのまま通す)。
+ */
+export function withInitialTitleSource(
+  labels: Record<string, string> | undefined,
+): Record<string, string> {
+  if (labels?.[AGENT_TITLE_SOURCE_LABEL]) return { ...labels };
+  return { ...labels, [AGENT_TITLE_SOURCE_LABEL]: AGENT_TITLE_SOURCE_INITIAL };
+}
+
+/** 作成**後**の名前変更に付けるラベル。呼び出し側が title-source を指定していればそちらを優先。 */
+export function withUserTitleSource(
+  labels: Record<string, string> | undefined,
+): Record<string, string> {
+  if (labels?.[AGENT_TITLE_SOURCE_LABEL]) return { ...labels };
+  return { ...labels, [AGENT_TITLE_SOURCE_LABEL]: AGENT_TITLE_SOURCE_USER };
+}
 
 const MAX_INITIAL_AGENT_TITLE_CHARS = Math.min(60, MAX_EXPLICIT_AGENT_TITLE_CHARS);
 

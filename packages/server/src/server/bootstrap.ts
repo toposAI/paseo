@@ -134,6 +134,12 @@ import { createSpeechService } from "./speech/speech-runtime.js";
 import { AgentManager } from "./agent/agent-manager.js";
 import { AgentStorage } from "./agent/agent-storage.js";
 import { createAgentTitleSummarizer } from "./agent/agent-title-summarizer.js";
+import {
+  TITLE_RETITLE_DONE,
+  TITLE_RETITLE_LABEL,
+  runTitleBackfill,
+} from "./agent/agent-title-backfill.js";
+import { ensureUnarchivedAgentLoaded } from "./agent/agent-loading.js";
 import { createAgentStructuredTextGeneration } from "./session/checkout/git-metadata-generator.js";
 import { attachAgentStoragePersistence } from "./persistence-hooks.js";
 import { createAgentMcpServer } from "./agent/mcp-server.js";
@@ -1009,7 +1015,7 @@ export async function createPaseoDaemon(
   await agentStorage.initialize();
   logger.info({ elapsed: elapsed() }, "Agent storage initialized");
   // Keeps sidebar titles meaningful (summarises what a thread is doing). Failures never touch the agent.
-  const detachAgentTitleSummarizer = createAgentTitleSummarizer({
+  const titleSummarizer = createAgentTitleSummarizer({
     subscribe: (callback) => agentManager.subscribe(callback, { replayState: false }),
     getTimeline: (agentId) => agentManager.getTimeline(agentId),
     getStoredAgent: (agentId) => agentStorage.get(agentId),
@@ -1021,7 +1027,27 @@ export async function createPaseoDaemon(
       getFocusedSelection: () => undefined,
     }).generate,
     logger,
-  }).start();
+  });
+  const detachAgentTitleSummarizer = titleSummarizer.start();
+  // 既存スレの一括付け直し(`paseo.title-retitle=1`)。起動の邪魔をしないよう少し待って1回だけ走る。
+  // 閉じているスレは履歴がメモリに無いので、1本ずつ読み込み→付け直し→閉じる(直列)。
+  const titleBackfillTimer = setTimeout(() => {
+    void runTitleBackfill({
+      listStored: () => agentStorage.list(),
+      isLoaded: (agentId) => agentManager.getAgent(agentId) !== null,
+      ensureLoaded: async (agentId) => {
+        await ensureUnarchivedAgentLoaded(agentId, { agentManager, agentStorage, logger });
+      },
+      close: (agentId) => agentManager.closeAgent(agentId),
+      retitle: (agentId) => titleSummarizer.retitle(agentId),
+      markDone: (agentId) =>
+        agentManager.updateAgentMetadata(agentId, {
+          labels: { [TITLE_RETITLE_LABEL]: TITLE_RETITLE_DONE },
+        }),
+      logger,
+    }).catch((error) => logger.warn({ err: error }, "agent title backfill failed"));
+  }, TITLE_BACKFILL_DELAY_MS);
+  titleBackfillTimer.unref();
   await bootstrapWorkspaceRegistries({
     serverId,
     paseoHome: config.paseoHome,
@@ -1948,6 +1974,8 @@ function projectConfirmBoxTimeline(items: readonly AgentTimelineItem[]): Confirm
  * shutdown runs next and rejects the request that was still pending.
  */
 const AGENT_CLOSE_TIMEOUT_MS = 5_000;
+/** 既存スレの題名の一括付け直しを始めるまでの待ち(起動直後の仕事を邪魔しない)。 */
+const TITLE_BACKFILL_DELAY_MS = 60_000;
 async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promise<void> {
   const agents = agentManager.listAgents({ includeInternal: true });
   await Promise.all(
