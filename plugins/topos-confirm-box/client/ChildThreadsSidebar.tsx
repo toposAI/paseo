@@ -1160,6 +1160,27 @@ function StatusCountChips({
   );
 }
 
+/**
+ * 行末の帯の文字と色。
+ *
+ * - 開けない行は状態より先に「要復元」を出す(押しても会話に着かないことが行末で分かる)。
+ * - 完了箱C(完了報告の窓口)は、読んでいない報告があるあいだ「未読あり」にする
+ *   (2026-10-26 ユーザー依頼)。橙は判断待ち専用なので、点と同じ新着の緑を使う。
+ *   既読になったらサーバーが印を外し、帯は「待機中」に戻る(`server/window-unread.ts`)。
+ */
+function threadStatusOf(
+  row: SidebarRowView<ChildThread>,
+  state: { failed: boolean; unread: boolean },
+): { text: string; kind: StatusKind } {
+  const stale = state.failed ? "(古い表示)" : "";
+  if (row.thread.access === "workspace-archived") return { text: "要復元", kind: "closed" };
+  if (state.unread) return { text: `未読あり${stale}`, kind: "done" };
+  return {
+    text: `${row.statusLabel}${stale}`,
+    kind: kindOfStatusLabel(row.statusLabel, row.thread.machineState),
+  };
+}
+
 function ThreadRow({
   row,
   failed,
@@ -1183,14 +1204,7 @@ function ThreadRow({
 }) {
   const t = row.thread;
   const onPress = useCallback(() => onOpen(t.agentId, t.access), [onOpen, t.agentId, t.access]);
-  // 開けない行は状態より先に「要復元」を出す(押しても会話に着かないことが行末で分かる)。
-  const status: { text: string; kind: StatusKind } =
-    t.access === "workspace-archived"
-      ? { text: "要復元", kind: "closed" }
-      : {
-          text: failed ? `${row.statusLabel}(古い表示)` : row.statusLabel,
-          kind: kindOfStatusLabel(row.statusLabel, t.machineState),
-        };
+  const status = threadStatusOf(row, { failed, unread: t.unread === true });
   const testID = `child-thread-status-${t.agentId}`;
   // 状態の帯を押すとメニュー(ピン止め/アーカイブ/スレを開く)が開く。司令塔の行も例外にしない:
   // 旧実装では司令塔の行にもピン/アーカイブのボタンがあったので、外すと機能の退行になる

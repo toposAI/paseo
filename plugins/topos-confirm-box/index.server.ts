@@ -98,6 +98,7 @@ import {
 } from "./server/thread-liveness.js";
 import { listAllAgents } from "./server/agent-pages.js";
 import { applyStateDots, stateDotsById } from "./server/agent-state-dots.js";
+import { applyWindowUnread, readWindowId } from "./server/window-unread.js";
 import { mergeUnregisteredThreads } from "./server/unregistered-threads.js";
 import type { ListedAgentLike } from "./server/unregistered-threads.js";
 import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
@@ -341,6 +342,14 @@ export default function contribute(server: PluginServerContext) {
       threads = applyStateDots(
         threads,
         stateDotsById([...finalAgents, ...forAccess.entries.map((e) => e.agent)]),
+      );
+      // 完了箱C(完了報告の窓口)の行だけ、読んでいない報告があるあいだ「未読あり」にする
+      // (2026-10-26 ユーザー依頼。橙は判断待ち専用なので緑=新着を使う)。既読は Paseo の
+      // attention が消えた時点で判る(`server/window-unread.ts`)。点を付けた後に重ねる。
+      threads = applyWindowUnread(
+        threads,
+        [...finalAgents, ...forAccess.entries.map((e) => e.agent)],
+        readWindowId(),
       );
       // 子を持つ親(=グループ見出し)のうち、一覧に生きていて開けるものを「開ける親」にする。
       // 子司令塔はデーモンの `coordinator_id` に載らないため、これが無いと見出しを押しても開けない

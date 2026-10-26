@@ -36,6 +36,12 @@ export const ChildThreadSchema = z.object({
    * 一覧に居ないスレ(アーカイブ済み等)は null(点を出さない=分からないものを推測しない)。
    */
   stateDot: z.enum(STATE_DOT_KINDS).nullable().optional(),
+  /**
+   * 完了箱C(完了報告の窓口)の行だけが持つ「新しい報告をまだ読んでいない」印
+   * (`server/window-unread.ts`。2026-10-26 ユーザー依頼)。未指定は「未読でない/対象外」。
+   * 既読の判定は Paseo の attention(読むと消える)をそのまま使う。
+   */
+  unread: z.boolean().optional(),
   request: z.string(),
   /** 完了まとめを投函した確認箱 item の id。未完了なら null。 */
   summaryItemId: z.string().nullable(),
