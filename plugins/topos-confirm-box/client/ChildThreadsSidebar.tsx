@@ -61,7 +61,7 @@ import { pickReadableText } from "../shared/contrast.js";
 import { menuCanArchive } from "../shared/thread-menu.js";
 import type { ThreadMenuIntent } from "../shared/thread-menu.js";
 import { ConceptNotesList, useSidebarNotes } from "./ConceptNotes.js";
-import { MenuButton, StatusBadge } from "./sidebar-badge.js";
+import { StatusBadge } from "./sidebar-badge.js";
 import { stateDotIcons } from "./StateDot.js";
 import type { StateDotIcon } from "./StateDot.js";
 import { appearanceOf } from "../shared/state-dot.js";
@@ -1194,14 +1194,15 @@ function ThreadRow({
   // (帯そのものに ref を渡すには `StatusBadge` の props を増やす必要がある)。
   const badgeRef = useRef<View | null>(null);
   const pressBadge = useCallback(() => onOpenMenu(row, badgeRef.current), [onOpenMenu, row]);
+  // 行末は状態の帯ひとつだけ。帯そのものがメニューの入口(2026-10-24 ユーザー指示)で、
+  // 行末に別のボタンを並べない(2026-10-26、⋯ を戻した後退の差し戻し)。
   const trailing = useMemo(
     () => (
       <View ref={badgeRef} style={styles.trailing}>
         <StatusBadge text={badgeText} kind={badgeKind} testID={testID} onPress={pressBadge} />
-        <MenuButton testID={`child-thread-menu-button-${t.agentId}`} onPress={pressBadge} />
       </View>
     ),
-    [badgeKind, badgeText, pressBadge, testID, t.agentId],
+    [badgeKind, badgeText, pressBadge, testID],
   );
   // メニューは行の中に差し込まない(ホストのポップアップに出す)。行の高さは開いても変わらない。
   return (
