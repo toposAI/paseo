@@ -1,5 +1,5 @@
 import type { ToolCallDetail } from "@getpaseo/protocol/agent-types";
-import type { StreamItem, ToolCallItem } from "@/types/stream";
+import type { StreamItem, ThoughtItem, ToolCallItem } from "@/types/stream";
 
 export interface ToolCallDescriptor {
   detail: ToolCallDetail;
@@ -9,17 +9,26 @@ export interface ToolCallDescriptor {
   metadata?: Record<string, unknown>;
 }
 
-export interface ToolCallRun {
+/**
+ * Reasoning and tool calls are the invisible work between two visible messages, so they
+ * share a run: a thought that sits between two tool calls must not split the run into
+ * three consecutive badges (one per segment). Anything the reader must see on its own —
+ * an assistant message, a todo list, a notification, a plan/approval call, `speak` —
+ * still ends the run.
+ */
+export type ActivityItem = ThoughtItem | ToolCallItem;
+
+export interface ActivityRun {
   id: string;
-  calls: readonly ToolCallItem[];
-  latest: ToolCallItem;
+  items: readonly ActivityItem[];
+  latest: ActivityItem;
   isSealed: boolean;
 }
 
 export interface GroupedHistory<TGroup> {
   tail: StreamItem[];
   groupsByHostId: Map<string, TGroup>;
-  pendingCalls: readonly ToolCallItem[];
+  pendingCalls: readonly ActivityItem[];
 }
 
 export interface GroupedToolCalls<TGroup> {
@@ -70,18 +79,27 @@ export function isGroupableToolCall(item: StreamItem): item is ToolCallItem {
   return descriptor.detail.type !== "plan" && descriptor.name.trim().toLowerCase() !== "speak";
 }
 
-function createRun(calls: readonly ToolCallItem[], isSealed: boolean): ToolCallRun {
-  const first = calls[0];
-  const latest = calls.at(-1);
-  if (!first || !latest) {
-    throw new Error("Cannot group an empty tool call run");
-  }
-  return { id: first.id, calls, latest, isSealed };
+export function isGroupableActivityItem(item: StreamItem): item is ActivityItem {
+  return item.kind === "thought" || isGroupableToolCall(item);
 }
 
-function createHost(run: ToolCallRun): ToolCallItem {
-  if (run.calls.length === 1) {
-    return run.latest;
+function createRun(items: readonly ActivityItem[], isSealed: boolean): ActivityRun {
+  const first = items[0];
+  const latest = items.at(-1);
+  if (!first || !latest) {
+    throw new Error("Cannot group an empty activity run");
+  }
+  return { id: first.id, items, latest, isSealed };
+}
+
+/**
+ * A run of one item is its own host, so a lone thought keeps its identity. A longer run
+ * is hosted by its latest item so the row carries the newest cursor/status, but it keeps
+ * the first item's id: the host must stay addressable while the run grows at its tail.
+ */
+function createHost(run: ActivityRun): StreamItem {
+  if (run.items.length === 1) {
+    return run.items[0]!;
   }
   return { ...run.latest, id: run.id };
 }
@@ -91,17 +109,22 @@ function isRunning(call: ToolCallItem): boolean {
   return status === "running" || status === "executing";
 }
 
+/** A thought is still streaming until its status settles, so it keeps the run active. */
+function isRunningItem(item: ActivityItem): boolean {
+  return item.kind === "thought" ? item.status !== "ready" : isRunning(item);
+}
+
 function appendRun<TGroup>(input: {
-  calls: readonly ToolCallItem[];
+  items: readonly ActivityItem[];
   isSealed: boolean;
   output: StreamItem[];
   groups: Map<string, TGroup>;
-  buildGroup: (run: ToolCallRun) => TGroup;
+  buildGroup: (run: ActivityRun) => TGroup;
 }): void {
-  if (input.calls.length === 0) {
+  if (input.items.length === 0) {
     return;
   }
-  const run = createRun(input.calls, input.isSealed);
+  const run = createRun(input.items, input.isSealed);
   const host = createHost(run);
   input.output.push(host);
   input.groups.set(host.id, input.buildGroup(run));
@@ -109,19 +132,19 @@ function appendRun<TGroup>(input: {
 
 export function prepareGroupedHistory<TGroup>(input: {
   tail: StreamItem[];
-  buildGroup: (run: ToolCallRun) => TGroup;
+  buildGroup: (run: ActivityRun) => TGroup;
 }): GroupedHistory<TGroup> {
   const output: StreamItem[] = [];
   const groups = new Map<string, TGroup>();
-  let pending: ToolCallItem[] = [];
+  let pending: ActivityItem[] = [];
 
   for (const item of input.tail) {
-    if (isGroupableToolCall(item)) {
+    if (isGroupableActivityItem(item)) {
       pending.push(item);
       continue;
     }
     appendRun({
-      calls: pending,
+      items: pending,
       isSealed: true,
       output,
       groups,
@@ -132,7 +155,7 @@ export function prepareGroupedHistory<TGroup>(input: {
   }
 
   appendRun({
-    calls: pending,
+    items: pending,
     isSealed: true,
     output,
     groups,
@@ -150,7 +173,7 @@ export function groupLiveToolCalls<TGroup>(input: {
   history: GroupedHistory<TGroup>;
   head: StreamItem[];
   isTurnActive: boolean;
-  buildGroup: (run: ToolCallRun) => TGroup;
+  buildGroup: (run: ActivityRun) => TGroup;
 }): GroupedToolCalls<TGroup> {
   const head: StreamItem[] = [];
   const liveGroups = new Map<string, TGroup>();
@@ -175,7 +198,7 @@ export function groupLiveToolCalls<TGroup>(input: {
   };
 
   for (const item of input.head) {
-    if (isGroupableToolCall(item)) {
+    if (isGroupableActivityItem(item)) {
       if (pending.length === 0) {
         hostPlacement = "head";
       }
@@ -191,7 +214,7 @@ export function groupLiveToolCalls<TGroup>(input: {
   // already running, so its direct timeline status is the authoritative start
   // signal. The lifecycle state continues to keep completed calls live between
   // sequential tool updates.
-  const trailingRunIsActive = input.isTurnActive || pending.some(isRunning);
+  const trailingRunIsActive = input.isTurnActive || pending.some(isRunningItem);
   flush(!trailingRunIsActive);
 
   if (liveGroups.size === 0) {

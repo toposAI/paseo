@@ -2014,6 +2014,9 @@ export const ja: TranslationResources = {
     output: "出力",
   },
   toolCallGroup: {
+    thinking: "思考",
+    thinkingActive: "考え中",
+    summarySeparator: "・",
     editedFiles: {
       one: "{{count}}個のファイルを編集",
       other: "{{count}}個のファイルを編集",

@@ -2004,6 +2004,9 @@ export const ko: TranslationResources = {
     output: "출력",
   },
   toolCallGroup: {
+    thinking: "생각",
+    thinkingActive: "생각 중…",
+    summarySeparator: " · ",
     editedFiles: {
       one: "{{count}} 파일을 편집했습니다.",
       other: "{{count}} 파일을 편집했습니다.",

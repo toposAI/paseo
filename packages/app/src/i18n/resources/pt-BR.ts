@@ -2026,6 +2026,9 @@ export const ptBR: TranslationResources = {
     output: "Saída",
   },
   toolCallGroup: {
+    thinking: "Pensamento",
+    thinkingActive: "Pensando…",
+    summarySeparator: " · ",
     editedFiles: {
       one: "editou {{count}} arquivo",
       other: "editou {{count}} arquivos",

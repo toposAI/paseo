@@ -36,6 +36,16 @@ function toolCall(
   };
 }
 
+function thought(id: string, text: string, status: "loading" | "ready" = "ready"): StreamItem {
+  return {
+    kind: "thought",
+    id,
+    text,
+    status,
+    timestamp: new Date(`2026-01-01T00:00:${id.padStart(2, "0")}.000Z`),
+  };
+}
+
 function assistant(id: string): AssistantMessageItem {
   return {
     kind: "assistant_message",
@@ -111,7 +121,7 @@ describe("tool call detail-level projection", () => {
     });
     expect(single.head).toEqual([firstCall]);
     expect(single.groupsByHostId.get(firstCall.id)?.run).toMatchObject({
-      calls: [firstCall],
+      items: [firstCall],
       latest: firstCall,
       isSealed: false,
     });
@@ -126,7 +136,7 @@ describe("tool call detail-level projection", () => {
       expect.objectContaining({ id: firstCall.id, timestamp: secondCall.timestamp }),
     ]);
     expect(grouped.groupsByHostId.get(firstCall.id)?.run).toMatchObject({
-      calls: [firstCall, secondCall],
+      items: [firstCall, secondCall],
       latest: secondCall,
       isSealed: false,
     });
@@ -140,6 +150,53 @@ describe("tool call detail-level projection", () => {
     const result = project({ level: "overview", head: calls, isTurnActive: true });
 
     expect(result.groupsByHostId.get("1")?.isLoading).toBe(true);
+  });
+
+  it("folds reasoning and tool calls between two messages into one activity row", () => {
+    const timeline: StreamItem[] = [
+      assistant("before"),
+      thought("1", "Let me look at the reducer."),
+      toolCall("2", { type: "shell", command: "rg reducer" }),
+      thought("3", "Now the call site."),
+      toolCall("4", { type: "read", filePath: "/repo/a.ts" }),
+      assistant("answer"),
+    ];
+
+    const result = project({ level: "overview", tail: timeline });
+
+    expect(result.tail).toEqual([timeline[0], expect.objectContaining({ id: "1" }), timeline[5]]);
+    const group = result.groupsByHostId.get("1");
+    expect(group?.run.items).toEqual([timeline[1], timeline[2], timeline[3], timeline[4]]);
+    expect(group?.summary).toMatchObject({
+      thinkingCount: 2,
+      commandCount: 1,
+      readFileCount: 1,
+    });
+    expect(group?.isLoading).toBe(false);
+  });
+
+  it("keeps a lone thought as its own row", () => {
+    const timeline: StreamItem[] = [assistant("before"), thought("1", "Thinking."), assistant("a")];
+
+    const result = project({ level: "overview", tail: timeline });
+
+    expect(result.tail[1]).toBe(timeline[1]);
+    expect(result.groupsByHostId.get("1")?.summary).toMatchObject({ thinkingCount: 1 });
+  });
+
+  it("keeps an activity row live while its trailing thought streams", () => {
+    const timeline: StreamItem[] = [
+      toolCall("1", { type: "shell", command: "one" }),
+      thought("2", "Reading the output.", "loading"),
+    ];
+
+    const result = project({ level: "overview", head: timeline, isTurnActive: true });
+
+    expect(result.head).toEqual([expect.objectContaining({ id: "1" })]);
+    expect(result.groupsByHostId.get("1")).toMatchObject({
+      isLoading: true,
+      run: { isSealed: false },
+    });
   });
 
   it("builds a loading aggregate for a one-call run", () => {
@@ -255,6 +312,7 @@ describe("tool call detail-level projection", () => {
       run: expect.any(Object),
       isLoading: false,
       summary: {
+        thinkingCount: 0,
         editedFileCount: 1,
         commandCount: 1,
         readFileCount: 2,
@@ -387,7 +445,7 @@ describe("tool call detail-level projection", () => {
     expect(second.groupsByHostId.get("1")).toBe(prepared.grouped.groupsByHostId.get("1"));
     expect(first.historyGroupUpdatesByHostId.size).toBe(0);
     expect(second.historyGroupUpdatesByHostId).toBe(first.historyGroupUpdatesByHostId);
-    expect(second.groupsByHostId.get("5")?.run.calls).toHaveLength(2);
+    expect(second.groupsByHostId.get("5")?.run.items).toHaveLength(2);
   });
 
   it("preserves projected history identity during assistant-only head updates", () => {
@@ -445,7 +503,7 @@ describe("tool call detail-level projection", () => {
     ]);
     expect(result.head).toEqual([]);
     expect(result.groupsByHostId.get("1")?.run).toMatchObject({
-      calls: [...tail.slice(1), ...head],
+      items: [...tail.slice(1), ...head],
       latest: head[1],
       isSealed: false,
     });
@@ -476,7 +534,7 @@ describe("tool call detail-level projection", () => {
     const result = project({ level: "overview", head: [singleCall, plan, speak] });
 
     expect(result.head).toEqual([singleCall, plan, speak]);
-    expect(result.groupsByHostId.get(singleCall.id)?.run.calls).toEqual([singleCall]);
+    expect(result.groupsByHostId.get(singleCall.id)?.run.items).toEqual([singleCall]);
     expect(result.groupsByHostId.size).toBe(1);
   });
 });

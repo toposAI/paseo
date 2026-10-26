@@ -1,10 +1,11 @@
 import { isPaseoToolName } from "@getpaseo/protocol/tool-name-normalization";
-import { describeToolCall, type ToolCallRun } from "../grouping";
+import { describeToolCall, type ActivityRun } from "../grouping";
 
 const DIRECT_PASEO_TOOL_PREFIX = "paseo_";
 const DIRECT_SEARCH_TOOL_SUFFIX_PATTERN = /(?:^|[_.:/])(?:web_search|llm_context)$/;
 
 export interface OverviewSummary {
+  thinkingCount: number;
   editedFileCount: number;
   commandCount: number;
   readFileCount: number;
@@ -15,7 +16,7 @@ export interface OverviewSummary {
 
 export interface OverviewToolCallGroup {
   mode: "overview";
-  run: ToolCallRun;
+  run: ActivityRun;
   summary: OverviewSummary;
   isLoading: boolean;
 }
@@ -28,17 +29,23 @@ function isSearchCall(name: string): boolean {
   return DIRECT_SEARCH_TOOL_SUFFIX_PATTERN.test(name);
 }
 
-export function buildOverviewGroup(run: ToolCallRun): OverviewToolCallGroup {
+export function buildOverviewGroup(run: ActivityRun): OverviewToolCallGroup {
   const editedFiles = new Set<string>();
   const readFiles = new Set<string>();
   let isLoading = false;
+  let thinkingCount = 0;
   let commandCount = 0;
   let searchCount = 0;
   let otherToolCount = 0;
   let paseoCallCount = 0;
 
-  for (const call of run.calls) {
-    const descriptor = describeToolCall(call);
+  for (const item of run.items) {
+    if (item.kind === "thought") {
+      thinkingCount += 1;
+      isLoading ||= item.status !== "ready";
+      continue;
+    }
+    const descriptor = describeToolCall(item);
     const normalizedName = descriptor.name.trim().toLowerCase();
     isLoading ||= descriptor.status === "running" || descriptor.status === "executing";
     if (isPaseoCall(descriptor.name, normalizedName)) {
@@ -57,6 +64,7 @@ export function buildOverviewGroup(run: ToolCallRun): OverviewToolCallGroup {
   }
 
   const summary = {
+    thinkingCount,
     editedFileCount: editedFiles.size,
     commandCount,
     readFileCount: readFiles.size,

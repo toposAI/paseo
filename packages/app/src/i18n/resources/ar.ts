@@ -1992,6 +1992,9 @@ export const ar: TranslationResources = {
     output: "الإخراج",
   },
   toolCallGroup: {
+    thinking: "تفكير",
+    thinkingActive: "جارٍ التفكير…",
+    summarySeparator: " · ",
     editedFiles: {
       one: "حرّر {{count}} ملفًا",
       other: "حرّر {{count}} ملفات",

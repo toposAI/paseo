@@ -2026,6 +2026,9 @@ export const ru: TranslationResources = {
     output: "Выходные данные",
   },
   toolCallGroup: {
+    thinking: "Размышление",
+    thinkingActive: "Размышляет…",
+    summarySeparator: " · ",
     editedFiles: {
       one: "изменён {{count}} файл",
       other: "изменены файлы ({{count}})",

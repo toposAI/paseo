@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { ScrollView } from "react-native";
 import { useTranslation } from "react-i18next";
-import { Wrench } from "lucide-react-native";
+import { Brain, Wrench } from "lucide-react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { ExpandableBadge } from "@/components/message";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -32,9 +32,18 @@ function joinSummaryParts(parts: string[], conjunction: string): string {
   return firstCharacter ? `${firstCharacter.toLocaleUpperCase()}${joined.slice(1)}` : joined;
 }
 
-function useOverviewSummary(summary: OverviewSummary): string {
+/**
+ * Reasoning and tool calls share one row, so the label leads with what the reader used to
+ * see as a separate Thinking row. While the run is live the leading part says so, which is
+ * the only row that moves during streaming.
+ */
+function useOverviewSummary(summary: OverviewSummary, isLoading: boolean): string {
   const { t } = useTranslation();
   return useMemo(() => {
+    const thinkingLabel =
+      summary.thinkingCount > 0
+        ? t(isLoading ? "toolCallGroup.thinkingActive" : "toolCallGroup.thinking")
+        : "";
     const parts: string[] = [];
     const entries = [
       [summary.editedFileCount, "toolCallGroup.editedFiles"],
@@ -49,8 +58,23 @@ function useOverviewSummary(summary: OverviewSummary): string {
         parts.push(t(`${key}.${count === 1 ? "one" : "other"}`, { count }));
       }
     }
-    return joinSummaryParts(parts, t("toolCallGroup.and"));
-  }, [summary, t]);
+    const toolsLabel = joinSummaryParts(parts, t("toolCallGroup.and"));
+    return [thinkingLabel, toolsLabel]
+      .filter((part) => part.length > 0)
+      .join(t("toolCallGroup.summarySeparator"));
+  }, [isLoading, summary, t]);
+}
+
+function useOverviewIcon(summary: OverviewSummary) {
+  const hasToolCalls =
+    summary.editedFileCount +
+      summary.commandCount +
+      summary.readFileCount +
+      summary.searchCount +
+      summary.otherToolCount +
+      summary.paseoCallCount >
+    0;
+  return hasToolCalls ? Wrench : Brain;
 }
 
 export const OverviewToolCallGroupView = memo(function OverviewToolCallGroupView({
@@ -62,7 +86,8 @@ export const OverviewToolCallGroupView = memo(function OverviewToolCallGroupView
 }: OverviewGroupProps) {
   const scrollRef = useRef<ScrollView>(null);
   const isCompact = useIsCompactFormFactor();
-  const aggregateSummary = useOverviewSummary(group.summary);
+  const aggregateSummary = useOverviewSummary(group.summary, group.isLoading);
+  const GroupIcon = useOverviewIcon(group.summary);
   const scrollToLatest = useCallback(() => {
     scrollRef.current?.scrollToEnd({ animated: false });
   }, []);
@@ -94,7 +119,7 @@ export const OverviewToolCallGroupView = memo(function OverviewToolCallGroupView
         <ExpandableBadge
           testID="tool-call-group"
           label={aggregateSummary}
-          icon={Wrench}
+          icon={GroupIcon}
           isLoading={group.isLoading}
           isExpanded={false}
           isLastInSequence={isLastInSequence}
@@ -111,7 +136,7 @@ export const OverviewToolCallGroupView = memo(function OverviewToolCallGroupView
     <ExpandableBadge
       testID="tool-call-group"
       label={aggregateSummary}
-      icon={Wrench}
+      icon={GroupIcon}
       isLoading={group.isLoading}
       isExpanded={expanded}
       isLastInSequence={isLastInSequence}

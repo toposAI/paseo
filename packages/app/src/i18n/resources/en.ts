@@ -2018,6 +2018,9 @@ export const en = {
     output: "Output",
   },
   toolCallGroup: {
+    thinking: "Thinking",
+    thinkingActive: "Thinking…",
+    summarySeparator: " · ",
     editedFiles: {
       one: "edited {{count}} file",
       other: "edited {{count}} files",
