@@ -6,7 +6,7 @@ ${"計画の本文をここに書く。".repeat(10)}`;
 const ONE_LINE_REPORT = "#29 /Users/user/.local/state/toposai/progress_window/reports/29.md";
 // What F-80's stale CLI actually delivered: no envelope, so no sender is recorded.
 const PLAIN_DIRECT_SEND = LONG_BODY;
-const ENVELOPED = `<paseo-system version="1" kind="agent-message" source-agent-id="afe8d176-0000-4000-8000-000000000000" source-agent-title="F-80司令塔" message-id="m1">\n${LONG_BODY}\n</paseo-system>`;
+const ENVELOPED = `<paseo-system version="1" kind="agent-message" source-agent-id="afe8d176-0000-4000-8000-000000000000" message-id="m1" source-agent-title="F-80司令塔">\n${LONG_BODY}\n</paseo-system>`;
 
 const RELAY = {
   agentTitle: "完了箱C",
@@ -71,6 +71,39 @@ describe("foldUserMessage", () => {
   it("leaves harness-only turns to the harness row", () => {
     const harnessTurn = `<system-reminder>${"x".repeat(200)}</system-reminder>`;
     expect(foldUserMessage({ ...RELAY, text: harnessTurn })).toEqual({ kind: "full" });
+  });
+
+  it("keeps what the reader typed themselves whole", () => {
+    expect(foldUserMessage({ ...RELAY, isOwnSend: true, text: PLAIN_DIRECT_SEND })).toEqual({
+      kind: "full",
+    });
+  });
+
+  it("only folds the relay thread itself, not threads that talk about it", () => {
+    expect(
+      foldUserMessage({ ...RELAY, agentTitle: "完了箱Cの畳み修正", text: PLAIN_DIRECT_SEND }),
+    ).toEqual({ kind: "full" });
+  });
+
+  it("folds a relay title that carries a suffix only when allowed", () => {
+    const suffixed = { ...RELAY, agentTitle: "完了箱C (2)", text: PLAIN_DIRECT_SEND };
+    expect(foldUserMessage(suffixed)).toEqual({ kind: "full" });
+    expect(foldUserMessage({ ...suffixed, relayFolding: "suffix" }).kind).toBe("folded");
+  });
+
+  it("counts characters, not UTF-16 units, for the threshold", () => {
+    const emoji = "😀".repeat(RELAY_FOLD_MIN_CHARS);
+    expect(Array.from(emoji)).toHaveLength(RELAY_FOLD_MIN_CHARS);
+    expect(foldUserMessage({ ...RELAY, text: emoji }).kind).toBe("folded");
+  });
+
+  it("shows the body of an envelope without a sender", () => {
+    const fold = foldUserMessage({
+      ...RELAY,
+      text: `<paseo-system>\n${LONG_BODY}\n</paseo-system>`,
+    });
+    expect(fold).toMatchObject({ kind: "folded", sender: null });
+    if (fold.kind === "folded") expect(fold.preview.startsWith("[F-80司令塔")).toBe(true);
   });
 
   it("truncates a very long first line", () => {

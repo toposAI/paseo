@@ -33,8 +33,9 @@ export function ChatSection() {
       void updateSettings({ toolCallDetailLevel }),
     [updateSettings],
   );
-  const changeRelayFolding = useCallback(
-    (enabled: boolean) => void updateSettings({ relayFolding: enabled ? "relay" : "off" }),
+  // Trailing "(n)" on the relay's title ("完了箱C (2)") stays folded; "off" shows every turn whole.
+  const changeRelaySuffixFolding = useCallback(
+    (enabled: boolean) => void updateSettings({ relayFolding: enabled ? "suffix" : "relay" }),
     [updateSettings],
   );
   const changeToposChatStyle = useCallback(
@@ -59,8 +60,8 @@ export function ChatSection() {
             hint={t("settings.general.relayFolding.description", {
               mark: settings.relayTitleMark || t("settings.general.relayFolding.noMark"),
             })}
-            value={settings.relayFolding === "relay"}
-            onValueChange={changeRelayFolding}
+            value={settings.relayFolding === "suffix"}
+            onValueChange={changeRelaySuffixFolding}
           />
           <SettingsSwitch
             label={t("settings.general.toposChatStyle.label")}

@@ -2169,6 +2169,7 @@ export const zhCN: TranslationResources = {
         label: "将中转线程中的长消息折叠为一行",
         description: "标题包含“{{mark}}”的线程中，收到的长消息只显示一行(点击查看全文)",
         noMark: "(标题不匹配)",
+        suffix: 'Also fold when the title has a suffix such as "(2)"',
       },
       toposChatStyle: {
         label: "Topos-style chat",

@@ -2230,6 +2230,7 @@ export const ptBR: TranslationResources = {
         description:
           "Threads cujo título contém '{{mark}}' mostram mensagens longas recebidas em uma linha; toque para ler tudo",
         noMark: "(sem correspondência no título)",
+        suffix: 'Also fold when the title has a suffix such as "(2)"',
       },
       toposChatStyle: {
         label: "Topos-style chat",
