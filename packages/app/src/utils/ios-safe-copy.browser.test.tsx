@@ -31,22 +31,21 @@ function bodyOnlyCopy(text: string): boolean {
   }
 }
 
+function handlePress() {
+  if (useBodyField) {
+    result = bodyOnlyCopy("hello iphone") ? "ok" : "failed";
+    return;
+  }
+  copyPlainTextWeb("hello iphone").then(
+    () => (result = "ok"),
+    () => (result = "failed"),
+  );
+}
+
 function Menu() {
   return (
     <Modal visible transparent>
-      <Pressable
-        testID="copy-button"
-        onPress={() => {
-          if (useBodyField) {
-            result = bodyOnlyCopy("hello iphone") ? "ok" : "failed";
-            return;
-          }
-          copyPlainTextWeb("hello iphone").then(
-            () => (result = "ok"),
-            () => (result = "failed"),
-          );
-        }}
-      >
+      <Pressable testID="copy-button" onPress={handlePress}>
         <Text>copy</Text>
       </Pressable>
     </Modal>
