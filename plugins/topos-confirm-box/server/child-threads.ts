@@ -80,14 +80,23 @@ export function normalizeChildThreads(
           // 登録簿の行は子スレ。司令塔そのものの行は `coordinator-threads.ts` が作る。
           coordinator: false,
           parentOpenable: false,
+          groupingParent: false,
           // 開けるかは Paseo に聞いてから付ける(`thread-liveness.ts`)。ここでは未判定。
           access: null,
         },
       ];
     });
-  // 子を持つ行(司令塔)はグループ見出しになるので行としては出さない(固定済みと二重に出ない)。
+  // 子を持つ行(子司令塔)はグループ見出しになる。行としては消さず、`groupingParent` の印を付けて
+  // 残す(2026-10-27、通し検証B 指摘1)。消すと `mergeUnregisteredThreads` が「行に無い=未登録」と
+  // 読んで機械状態だけの行を足し、登録簿の状態(判断待ち等)がチップから消える(二重表示の原因)。
+  // 画面は印の行を子の見出しとして出し、未完の行(ノートの無いスレ)は子の行の後ろに置く。
   const parents = new Set(out.map((t) => t.parentAgentId).filter((id) => id !== null));
-  const rows = sortChildThreadsGrouped(out.filter((t) => !parents.has(t.agentId)));
+  const marked = out.map((t) => {
+    if (!parents.has(t.agentId)) return t;
+    // 親(子司令塔)は捨てずに印だけ付ける(見出しとして1行だけ出す)。
+    return Object.assign({}, t, { groupingParent: true });
+  });
+  const rows = sortChildThreadsGrouped(marked.filter((t) => !t.groupingParent));
   // ピン止めした行は先頭に集める(出現順のまま。画面では「ピン止め」グループとして司令塔の外に出る)。
   // 残りは親(グループ)単位の出現順を保つ。クライアントの挿入処理(`pinFirstGrouped`)と同義。
   const pinned = rows.filter((t) => t.pinned);
@@ -99,7 +108,12 @@ export function normalizeChildThreads(
     if (g) g.push(t);
     else byParent.set(key, [t]);
   }
-  return [...pinned, ...[...byParent.values()].flat()];
+  // 見出しになる親は、未完の行(ノートの無いスレとして上段に残るもの)だけ後ろへ置く。
+  // 完了・アーカイブ側へ進んだ親は上段に出ない(見出しは子の行が担う)ので、並びに足さない。
+  const headings = marked.filter(
+    (t) => t.groupingParent && !t.pinned && t.status !== "完了" && !t.coordinator,
+  );
+  return [...pinned, ...[...byParent.values()].flat(), ...headings];
 }
 
 /** ピン止めの保存(壊れた/無いファイルは空)。 */
@@ -184,6 +198,33 @@ export function readChildThreads(
     );
   } catch {
     return [];
+  }
+}
+
+/**
+ * 登録簿で畳み済み(`archived: true`)の agent id。
+ *
+ * なぜ要るか(2026-10-27 通し検証B 指摘4): `normalizeChildThreads` は畳んだ行を一覧から外すので、
+ * agent のアーカイブに失敗して Paseo 側に残った1本は「新しい未登録スレ」として復活していた。
+ * 未登録の取り込みからこの集合を外す(登録簿側は `sync` の `retry_listed_archives` が畳み直す)。
+ * 読めなければ空(取り込みを止めない=消す側に倒さない)。
+ */
+export function readArchivedChildThreadIds(dir: string): Set<string> {
+  try {
+    const raw: unknown = JSON.parse(fs.readFileSync(path.join(dir, CHILD_THREADS_FILE), "utf8"));
+    const list =
+      raw && typeof raw === "object" ? (raw as { threads?: unknown }).threads : undefined;
+    if (!Array.isArray(list)) return new Set();
+    const ids = new Set<string>();
+    for (const r of list) {
+      if (!r || typeof r !== "object") continue;
+      const o = r as Record<string, unknown>;
+      const id = str(o.agent_id).slice(0, 200);
+      if (o.archived === true && id) ids.add(id);
+    }
+    return ids;
+  } catch {
+    return new Set();
   }
 }
 

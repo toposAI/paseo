@@ -48,6 +48,21 @@ export interface ListedAgentLike {
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
+/**
+ * `updatedAt` をミリ秒へ。契約(`packages/plugin/src/contracts.ts` の `AgentSnapshot` は
+ * `updatedAt: string`)は **ISO 8601 の文字列**なので、数値だけ採ると未登録スレが全部 0 になり
+ * id 順に並ぶ(2026-10-27 通し検証B 指摘5)。数値はそのまま(既存の入力とテスト)。
+ * 壊れた値は 0(落ちない)。
+ */
+export function timestampOf(v: unknown): number {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  if (typeof v === "string") {
+    const t = Date.parse(v);
+    return Number.isFinite(t) ? t : 0;
+  }
+  return 0;
+}
+
 /** 一覧の1件から、行の左端の点の種類を決める(`shared/state-dot.ts` の判定をそのまま使う)。 */
 export function stateDotOf(a: ListedAgentLike): StateDotKind {
   const pending = Array.isArray(a.pendingPermissions) ? a.pendingPermissions.length : 0;
@@ -95,7 +110,11 @@ export type SkippedReason =
   | "internal"
   | "archived"
   | "untitled"
-  | "duplicate";
+  | "duplicate"
+  /** 子の見出しになっている親(`groupingParent`)。行として足さない(2026-10-27 指摘1)。 */
+  | "parent"
+  /** 登録簿で畳み済み(archived)なのに Paseo 側に残っている(アーカイブ失敗の再試行待ち。指摘4)。 */
+  | "archivedRegistry";
 
 export interface UnregisteredThreads {
   /** 登録簿の行の後ろに、未登録のスレを足したもの(登録簿の行自体は変えない)。 */
@@ -114,9 +133,18 @@ export function mergeUnregisteredThreads(
   coordinatorIds: Iterable<string> = [],
   /** ピン止め済みの agent id(保存値。`readChildThreadPins` の結果)。 */
   pinnedIds: ReadonlySet<string> = new Set(),
+  /**
+   * 登録簿で畳み済み(`archived`)なのに Paseo の一覧に残っている agent id
+   * (`retryListedArchivedIds`。アーカイブ失敗の再試行前に、行として復活させない)。
+   */
+  registryArchivedIds: ReadonlySet<string> = new Set(),
 ): UnregisteredThreads {
   const listed = new Set(rows.map((t) => t.agentId));
   const coordinators = new Set(coordinatorIds);
+  // 子の見出しになっている親は「行に無い」が未登録ではない(登録簿に載っている。2026-10-27 指摘1)
+  const parents = new Set(
+    rows.map((t) => t.parentAgentId).filter((id): id is string => id !== null),
+  );
   const skipped: Record<SkippedReason, number> = {
     listed: 0,
     coordinator: 0,
@@ -124,6 +152,8 @@ export function mergeUnregisteredThreads(
     archived: 0,
     untitled: 0,
     duplicate: 0,
+    parent: 0,
+    archivedRegistry: 0,
   };
   const added: ChildThread[] = [];
   const seen = new Set<string>(listed);
@@ -136,6 +166,14 @@ export function mergeUnregisteredThreads(
     }
     if (coordinators.has(agentId)) {
       skipped.coordinator += 1;
+      continue;
+    }
+    if (parents.has(agentId)) {
+      skipped.parent += 1;
+      continue;
+    }
+    if (registryArchivedIds.has(agentId)) {
+      skipped.archivedRegistry += 1;
       continue;
     }
     if (seen.has(agentId)) {
@@ -172,7 +210,7 @@ export function mergeUnregisteredThreads(
       summary: null,
       summaryState: null,
       summaryAcked: false,
-      updatedAt: typeof a.updatedAt === "number" ? a.updatedAt : 0,
+      updatedAt: timestampOf(a.updatedAt),
       parentAgentId: null,
       parentTitle: null,
       pinned: pinnedIds.has(agentId),

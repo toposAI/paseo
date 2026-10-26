@@ -132,6 +132,7 @@ export function coordinatorRows(
       parentTitle: null,
       pinned: false,
       coordinator: true,
+      groupingParent: false,
       parentOpenable: false,
       access: null,
     });
@@ -165,9 +166,13 @@ export function markOpenableParents(
   access: ReadonlyMap<string, ThreadAccess> = new Map(),
 ): ChildThread[] {
   const alive = new Map<string, string>();
+  // 全ての親の機械状態(アーカイブ済み・closed も。見出しの帯のため)
+  const aliveState = new Map<string, string>();
   for (const a of agents) {
     const id = str(a.id);
-    if (!id || a.archivedAt != null || str(a.status) === "closed") continue;
+    if (!id) continue;
+    aliveState.set(id, str(a.status));
+    if (a.archivedAt != null || str(a.status) === "closed") continue;
     const canOpen = access.get(id);
     if (canOpen === "workspace-archived" || canOpen === "thread-archived") continue;
     alive.set(id, str(a.title));
@@ -175,15 +180,30 @@ export function markOpenableParents(
   return rows.map((t) => {
     const parent = t.parentAgentId;
     const title = parent === null ? undefined : alive.get(parent);
+    // 見出しの帯(2026-10-27 通し検証B 指摘1): 閉じた親は「終了」。司令塔(「司令塔」グループ)は
+    // 帯を別に出すので触らない。
+    const machineState =
+      t.coordinator === true || parent === null ? t.machineState : (aliveState.get(parent) ?? null);
+    const next =
+      t.coordinator === true ? t : { ...t, machineState, status: headingStatusOf(t, machineState) };
     if (parent === null || title === undefined) {
-      return t.parentOpenable ? { ...t, parentOpenable: false } : t;
+      return next.parentOpenable ? { ...next, parentOpenable: false } : next;
     }
     return {
-      ...t,
+      ...next,
       parentOpenable: true,
       parentTitle: title.trim() || t.parentTitle,
     };
   });
+}
+
+/**
+ * 見出し(親)の行の状態。閉じた親は「終了」(行末の帯は `closed` を見て終了にする)。完了の見出しは、
+ * 子が未完で残っている間は「未完」(子の行だけが残って見出しが消えないように)。他の状態は変えない。
+ */
+function headingStatusOf(t: ChildThread, machineState: string | null): ChildThread["status"] {
+  if (machineState === "closed" || t.status === "完了") return "ユーザー判断待ち";
+  return t.status;
 }
 
 /**

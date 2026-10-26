@@ -74,6 +74,7 @@ import {
   childThreadPinsReadError,
   readChildThreadOrder,
   readChildThreadPins,
+  readArchivedChildThreadIds,
   readChildThreads,
   writeChildThreadOrder,
   writeChildThreadPin,
@@ -294,6 +295,9 @@ export default function contribute(server: PluginServerContext) {
             unregistered.agents,
             ids,
             new Set(readChildThreadPins(dir)),
+            // 畳み済みなのに Paseo に残っている1本を「未登録の新しいスレ」として復活させない
+            // (2026-10-27 通し検証B 指摘4。畳み直しは登録簿の `retry_listed_archives` が行う)
+            readArchivedChildThreadIds(dir),
           ).rows;
         }
       } catch {

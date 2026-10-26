@@ -150,3 +150,56 @@ test("id の無い要素は無視する(壊れた要素で落ちない)", () => 
   const result = mergeUnregisteredThreads([], [{ title: "id 無し" }, { id: 42, title: "数値" }]);
   assert.equal(result.rows.length, 0);
 });
+
+// ---- 2026-10-27 通し検証BのOpus指摘(1・5) ----
+
+test("指摘1: 親として見出しになっているスレは、未登録の行として足さない(二重表示の防止)", () => {
+  const rows = [row("kid", { parentAgentId: "cc", parentTitle: "子司令塔" })];
+  const result = mergeUnregisteredThreads(rows, [
+    { id: "cc", title: "子司令塔", status: "running" },
+  ]);
+  assert.deepEqual(
+    result.rows.map((t) => t.agentId),
+    ["kid"],
+  );
+  assert.equal(result.skipped.parent, 1);
+  assert.equal(result.skipped.listed, 0);
+});
+
+test("指摘5: 契約どおり文字列の updatedAt を受けて更新順に並べる(数値も受ける)", () => {
+  const result = mergeUnregisteredThreads(
+    [],
+    [
+      { id: "old", title: "古い", status: "idle", updatedAt: "2026-10-25T01:00:00.000Z" },
+      { id: "new", title: "新しい", status: "idle", updatedAt: "2026-10-26T01:00:00.000Z" },
+      { id: "mid", title: "中", status: "idle", updatedAt: "2026-10-25T13:00:00.000Z" },
+    ],
+  );
+  assert.deepEqual(
+    result.rows.map((t) => t.agentId),
+    ["new", "mid", "old"],
+  );
+  assert.equal(result.rows[0]?.updatedAt, Date.parse("2026-10-26T01:00:00.000Z"));
+});
+
+test("指摘5: 壊れた文字列の updatedAt は0に落とし、落ちない", () => {
+  const result = mergeUnregisteredThreads(
+    [],
+    [{ id: "bad", title: "壊れ", updatedAt: "not-a-date" }],
+  );
+  assert.equal(result.rows[0]?.updatedAt, 0);
+});
+
+test("指摘4: 登録簿で畳み済み(archived)のスレは、一覧に残っていても未登録の行として足さない", () => {
+  // agent のアーカイブが失敗し、Paseo 側にだけ残っているもの。登録簿 archivable() が見失っている
+  // その1本を `retryListedArchivedIds` で拾って渡す。
+  const result = mergeUnregisteredThreads(
+    [],
+    [{ id: "left", title: "畳み済みだが残っている", status: "closed" }],
+    [],
+    new Set(),
+    new Set(["left"]),
+  );
+  assert.deepEqual(result.rows, []);
+  assert.equal(result.skipped.archivedRegistry, 1);
+});
