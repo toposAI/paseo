@@ -167,6 +167,11 @@ export function ChildDoneView({
     () => (data?.threads ?? []).filter(isCardDone),
     [data],
   );
+  // カードを作らない運用で完了した行(このタブには出さない)。空のときの文言を事実に合わせるためだけに数える。
+  const nocardDone = useMemo(
+    () => (data?.threads ?? []).filter((t) => t.status === "完了" && t.nocard).length,
+    [data],
+  );
   // 「確認済み」は**個別の ack** で判定する(アーカイブ条件と同じ)。「すべて既読」ではアーカイブされないため。
   const isAcked = (t: ChildThread) => t.summaryAcked;
   const visible = showAcked ? done : done.filter((t) => !isAcked(t));
@@ -244,7 +249,11 @@ export function ChildDoneView({
       ))}
       {data && visible.length === 0 && !error ? (
         <Text style={s.meta}>
-          {done.length === 0 ? "完了した子スレはありません" : "確認待ちの完了報告はありません"}
+          {done.length > 0
+            ? "確認待ちの完了報告はありません"
+            : nocardDone > 0
+              ? "確認箱で確認する完了報告はありません(完了まとめのカードを作らない運用の完了はここに出しません)"
+              : "完了した子スレはありません"}
         </Text>
       ) : null}
       {unconfirmed > 0 ? (
