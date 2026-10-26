@@ -104,4 +104,15 @@ SessionStart hook additional context: このセッションはメインworking t
       false,
     );
   });
+
+  it("folds the summary turn written when a session is compacted or resumed", () => {
+    expect(
+      isHarnessContextOnlyMessage(
+        "This session is being continued from a previous conversation that ran out of context.\n\nSummary:\n1. Primary Request",
+      ),
+    ).toBe(true);
+    expect(
+      isHarnessContextOnlyMessage("前の会話の続きです。\n\nThis session is being continued"),
+    ).toBe(false);
+  });
 });

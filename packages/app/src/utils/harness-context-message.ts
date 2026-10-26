@@ -15,6 +15,10 @@ const HOOK_OUTPUT_HEADER_PATTERN =
 // comes last, so everything from its marker on belongs to the hook output.
 const COMPACT_CONTEXT_MARKER = "[compact_context]";
 
+// The summary Claude Code writes as the first turn of a compacted or resumed session. Its body
+// is free-form with blank lines, so it is recognized by its fixed opening sentence alone.
+const COMPACT_SUMMARY_OPENING = "This session is being continued from a previous conversation";
+
 function isHookOutputTurn(text: string): boolean {
   const lines = text.split("\n").map((line) => readLineText(line).trim());
   const markerIndex = lines.findIndex((line) => line.startsWith(COMPACT_CONTEXT_MARKER));
@@ -56,6 +60,7 @@ export function isHarnessContextOnlyMessage(text: string): boolean {
   // Hook output carries free-form lines (healthchecks, quoted earlier requests), so it is
   // recognized by its headers: every paragraph must open with one, or the user's words stay.
   if (isHookOutputTurn(text)) return true;
+  if (readLineText(text.trimStart()).startsWith(COMPACT_SUMMARY_OPENING)) return true;
   const withoutReminders = text.replace(SYSTEM_REMINDER_BLOCK_PATTERN, "");
   const sawReminder = withoutReminders !== text;
   const lines = withoutReminders.split("\n");
