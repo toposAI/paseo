@@ -101,9 +101,9 @@ function machineHint(machineState: string | null): ChildThread["status"] {
 }
 
 /**
- * 組み立て中(=動きが無く、承認待ちでもない)の機械状態か。`statusKindOfMachine` のうち idle/closed だけ。
- * 登録簿にあるスレを未登録行として足さない条件に使う(`inRegistry`)。`error`・未知・null もここに入る
- * (`statusKindOfMachine` の寄せ方)ので、その場合は従来どおり行を足す=消す側に倒さない。
+ * 動きが止まっている(idle/closed)機械状態か。登録簿にあるスレを未登録行として足さない条件に使う
+ * (`inRegistry`)。`error`・未知・null も `statusKindOfMachine` の寄せ方で idle 扱いになり、ここに入る
+ * =**その場合も行は足さない**(登録簿が正で、完了の自己申告を機械状態で上書きしない)。
  */
 function isAtRestMachine(v: unknown): boolean {
   const kind = statusKindOfMachine(str(v) || null);

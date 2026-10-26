@@ -324,3 +324,25 @@ test("R2-5: ピン止めした親は行として1回だけ出て、未登録と�
   assert.equal(result.skipped.listed, 2);
   assert.equal(result.skipped.parent, 0);
 });
+
+// ---- 2026-10-27 出口レビュー round2 R2-6 ----
+
+test("R2-6: 登録簿にあるスレは error・状態なしでも未登録として足さない(状態の不明を「動いている」と見なさない)", () => {
+  const result = mergeUnregisteredThreads(
+    [],
+    [
+      { id: "err", title: "失敗した", status: "error" },
+      { id: "none", title: "状態なし" },
+      { id: "run", title: "走っている", status: "running" },
+    ],
+    [],
+    new Set(),
+    new Set(),
+    new Set(["err", "none", "run"]),
+  );
+  assert.deepEqual(
+    result.rows.map((t) => t.agentId),
+    ["run"],
+  );
+  assert.equal(result.skipped.inRegistry, 2);
+});
