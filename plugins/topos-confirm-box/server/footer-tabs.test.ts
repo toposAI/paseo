@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   FOOTER_TABS,
-  boxTabMode,
   bugBadgeCount,
   confirmBoxTabs,
   footerTitle,
@@ -10,15 +9,9 @@ import {
 } from "../shared/footer-tabs.js";
 
 // 確認箱の画面のタブ(実装と同じ並び)。id だけを見れば足りる。
-const TABS = [
-  { id: "items" },
-  { id: "bugs" },
-  { id: "childdone" },
-  { id: "notify" },
-  { id: "priority" },
-];
+const TABS = [{ id: "items" }, { id: "bugs" }, { id: "notify" }, { id: "priority" }];
 
-test("確認箱の中は PC も iPhone も3枚(ユーザー判断・子スレ完了は下部バーへ移した)", () => {
+test("確認箱の中は PC も iPhone も3枚(ユーザー判断は下部バーへ移した)", () => {
   assert.deepEqual(
     confirmBoxTabs(TABS).map((t) => t.id),
     ["bugs", "notify", "priority"],
@@ -27,8 +20,8 @@ test("確認箱の中は PC も iPhone も3枚(ユーザー判断・子スレ完
 
 test("下部バーのバッジは未対応のバグ報告の数だけ(通知の未読は箱の中に出す)", () => {
   assert.equal(bugBadgeCount({ bugs: 5 }), 5);
-  // 通知と、下部バーへ移した2枚の件数は数えない(二重に数えない)。
-  assert.equal(bugBadgeCount({ items: 18, childdone: 3, bugs: 5, notify: 29 }), 5);
+  // 通知と、下部バーへ移した「ユーザー判断」の件数は数えない(二重に数えない)。
+  assert.equal(bugBadgeCount({ items: 18, bugs: 5, notify: 29 }), 5);
   assert.equal(bugBadgeCount({}), 0);
 });
 
@@ -47,19 +40,11 @@ test("PC幅の判定(一覧とチャットを横に並べるか)は幅720px・�
   assert.equal(isWideLayout(1440, 900, false), true);
 });
 
-test("下部バーから開く画面のタブは ?mode= で決まる(不正値はユーザー判断)", () => {
-  assert.equal(boxTabMode("childdone"), "childdone");
-  assert.equal(boxTabMode("items"), "items");
-  assert.equal(boxTabMode(undefined), "items");
-  assert.equal(boxTabMode("bogus"), "items");
-});
-
-test("下部バーの並び: ユーザー判断 → 子スレ完了 → バグ報告 → スレ一覧 → 構想一覧 → メールUI", () => {
+test("下部バーの並び: ユーザー判断 → バグ報告 → スレ一覧 → 構想一覧 → メールUI", () => {
   assert.deepEqual(
     FOOTER_TABS.map((t) => [t.id, t.title]),
     [
       ["judgment", "ユーザー判断"],
-      ["childdone", "子スレ完了"],
       ["bugs", "バグ報告"],
       ["sidebar-threads", "スレ一覧"],
       ["sidebar-concepts", "構想一覧"],

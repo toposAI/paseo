@@ -271,9 +271,9 @@ test("通し(画面と同じ集合): 司令塔が上段から外れていても�
   assert.equal(reorderKey, keyOf("kid2"));
 });
 
-// ---- 判断待ちと完了待ちの分離(2026-10-25 ユーザー指示) ----
+// ---- 完了の「確認待ち」表示を廃止(2026-10-26 ユーザー指示) ----
 
-const doneUnconfirmed = (agentId: string, over: Record<string, unknown> = {}) => ({
+const completed = (agentId: string, over: Record<string, unknown> = {}) => ({
   agentId,
   status: "完了" as const,
   title: agentId,
@@ -281,16 +281,17 @@ const doneUnconfirmed = (agentId: string, over: Record<string, unknown> = {}) =>
   ...over,
 });
 
-test("完了報告済みで未確認のスレは『完了待ち』の行になり、判断待ちとは別ラベル", () => {
+test("完了したスレは確認を待たずに上段から外れる(確認済みかどうかは表示を変えない)", () => {
   const impl = new Map([
     ["b", note({ path: "/v/b.md", status: "実装中", title: "ノートB" })],
     ["c", note({ path: "/v/c.md", status: "確認待ち", title: "ノートC" })],
   ]);
   const rows = buildUpperRows(
     [
-      doneUnconfirmed("a"), // ノート無し
-      doneUnconfirmed("b"), // ノートは古く実装中のまま
-      doneUnconfirmed("c"), // ノートは確認待ち
+      completed("a"), // ノート無し → 上段から外す
+      completed("b"), // ノートは古く実装中のまま → ノートの status が正なので残る
+      completed("c"), // 旧語彙のノート(移行中)は完了へ進むまで残る
+      completed("acked", { summaryAcked: true }),
       thread("d", "ユーザー判断待ち"),
     ],
     impl,
@@ -298,63 +299,48 @@ test("完了報告済みで未確認のスレは『完了待ち』の行にな�
   assert.deepEqual(
     rows.map((r) => [r.thread.agentId, r.statusLabel]),
     [
-      ["a", "完了待ち"],
-      ["b", "完了待ち"],
-      ["c", "完了待ち"],
+      ["b", "実装中"],
+      ["c", "確認待ち"],
       ["d", "判断待ち"],
     ],
   );
-  assert.equal(rows[1].title, "ノートB"); // 題名はノート優先のまま
+  assert.equal(rows[0].title, "ノートB"); // 題名はノート優先のまま
 });
 
-test("完了待ちにならないもの: 確認済み・ノートが判断待ち/完了・司令塔・summaryAcked不明", () => {
+test("上段に残るのはノートの status が実装中/判断待ち/確認待ちの行だけ(完了ノートは外す)", () => {
   const impl = new Map([
     ["judge", note({ path: "/v/j.md", status: "判断待ち" })],
     ["fin", note({ path: "/v/f.md", status: "完了" })],
   ]);
   const rows = buildUpperRows(
-    [
-      doneUnconfirmed("acked", { summaryAcked: true }),
-      doneUnconfirmed("judge"), // ユーザー判断が残っているノートは判断待ちのまま
-      doneUnconfirmed("fin"), // ノートが完了 = 上段から外す(従来どおり)
-      doneUnconfirmed("coord", { coordinator: true }),
-      { agentId: "unknown", status: "完了" as const, title: "unknown" }, // summaryAcked 未指定
-    ],
+    [completed("judge"), completed("fin"), completed("coord", { coordinator: true })],
     impl,
   );
   assert.deepEqual(
     rows.map((r) => [r.thread.agentId, r.statusLabel]),
-    [["judge", "判断待ち"]], // 他は従来どおり上段に出ない(完了はノート無しなら外す)
+    [["judge", "判断待ち"]],
   );
 });
 
-test("nocard(完了まとめのカードを作らない)行は『完了待ち』にせず、件数にも入れない", () => {
-  // 箱に確認する項目が無い行。押しても効かない確認を出さず、件数チップ/下部バッジも水増ししない。
-  const rows = buildUpperRows(
-    [doneUnconfirmed("nc", { nocard: true }), doneUnconfirmed("card")],
-    new Map(),
-  );
-  // ノートの無い nocard 行は上段から外れる。実カードの行だけ完了待ち。
-  assert.deepEqual(
-    rows.map((r) => [r.thread.agentId, r.statusLabel]),
-    [["card", "完了待ち"]],
-  );
-  assert.equal(countStatusLabels(rows).doneWait, 1);
+test("完了した行はカードの有無(nocard)に関わらず上段に出ない", () => {
+  // 箱に確認する項目があるかどうかは表示を変えない(完了は確認を待たずに畳まれる)。
+  const rows = buildUpperRows([completed("nc", { nocard: true }), completed("card")], new Map());
+  assert.deepEqual(rows, []);
 });
 
 test("nocard 行はノートの状態をそのまま使う(実装中は実装中、判断待ちは判断待ち)", () => {
   const impl = new Map([
     ["work", note({ path: "/v/w.md", status: "実装中", title: "ノートW" })],
     ["judge", note({ path: "/v/j.md", status: "判断待ち", title: "ノートJ" })],
-    // 子スレが完了すると実装ノートは「確認待ち」に写される(一番よく起きる形)。
-    // これはノート自身の状態なので、カードの有無に関わらず上段に「確認待ち」で残す。
+    // 旧語彙のノート(移行中)は完了へ進むまで上段に残る。ノート自身の状態なので、
+    // カードの有無に関わらず「確認待ち」で出す。
     ["check", note({ path: "/v/c.md", status: "確認待ち", title: "ノートC" })],
   ]);
   const rows = buildUpperRows(
     [
-      doneUnconfirmed("work", { nocard: true }),
-      doneUnconfirmed("judge", { nocard: true }),
-      doneUnconfirmed("check", { nocard: true }),
+      completed("work", { nocard: true }),
+      completed("judge", { nocard: true }),
+      completed("check", { nocard: true }),
     ],
     impl,
   );
@@ -367,24 +353,22 @@ test("nocard 行はノートの状態をそのまま使う(実装中は実装中
     ],
   );
   const counts = countStatusLabels(rows);
-  assert.equal(counts.doneWait, 0);
   assert.equal(counts.judgment, 1);
   assert.equal(counts.running, 1);
 });
 
-test("countStatusLabels は判断待ちと完了待ちを別々に数える", () => {
+test("countStatusLabels は判断待ち・実装中・司令塔・待機中を数える", () => {
   const rows = buildUpperRows(
     [
       thread("a", "ユーザー判断待ち"),
       thread("b", "ユーザー判断待ち"),
-      doneUnconfirmed("c"),
+      completed("c"),
       thread("d", "実装中"),
     ],
     new Map(),
   );
   assert.deepEqual(countStatusLabels(rows), {
     judgment: 2,
-    doneWait: 1,
     running: 1,
     coordinator: 0,
     idle: 0,
@@ -403,7 +387,6 @@ test("countStatusLabels は実装中・司令塔・待機中も数え、司令�
   );
   assert.deepEqual(countStatusLabels(rows), {
     judgment: 0,
-    doneWait: 0,
     running: 2,
     coordinator: 1,
     idle: 1,

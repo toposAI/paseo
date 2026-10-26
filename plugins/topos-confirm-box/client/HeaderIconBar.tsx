@@ -1,28 +1,28 @@
 /**
  * 確認箱の画面の最上部に置く、画面切替のアイコン列+更新ボタン(2026-10-25 ユーザー依頼)。
  *
- * 下部バーから「ユーザー判断」「子スレ完了」「バグ報告」を開いた画面で、**どの画面へも1タップで移れる**ように、
- * 5つの画面(ユーザー判断・子スレ完了・バグ報告・通知・優先順位)をアイコンだけで並べる。現在の画面は強調し、
+ * 下部バーから「ユーザー判断」「バグ報告」を開いた画面で、**どの画面へも1タップで移れる**ように、
+ * 4つの画面(ユーザー判断・バグ報告・通知・優先順位)をアイコンだけで並べる。現在の画面は強調し、
  * 件数のあるものは右上にバッジを付ける。更新ボタンは同じ行の右端(旧: 一覧の下の行に孤立していた)。
  * アイコンだけで意味が分かるよう、各ボタンに accessibilityLabel(名前+件数)を付ける。
+ * 2026-10-26: 「子スレ完了」の画面を撤去したので、この列からも外した。
  */
 import { useCallback, useMemo } from "react";
 import type { ComponentType } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
-import { BellIcon, BugIcon, CheckCircleIcon, InboxIcon, ListIcon } from "./Icons.js";
+import { BellIcon, BugIcon, InboxIcon, ListIcon } from "./Icons.js";
 import { ReloadButton } from "./ReloadButton.js";
 
-export type HeaderTabId = "items" | "childdone" | "bugs" | "notify" | "priority";
+export type HeaderTabId = "items" | "bugs" | "notify" | "priority";
 
-/** 並びは下部バーと同じ順(ユーザー判断 → 子スレ完了 → バグ報告)の後ろに 通知・優先順位。 */
+/** 並びは下部バーと同じ順(ユーザー判断 → バグ報告)の後ろに 通知・優先順位。 */
 export const HEADER_TABS: {
   id: HeaderTabId;
   label: string;
   Icon: ComponentType<{ color: string; size?: number }>;
 }[] = [
   { id: "items", label: "ユーザー判断", Icon: InboxIcon },
-  { id: "childdone", label: "子スレ完了", Icon: CheckCircleIcon },
   { id: "bugs", label: "バグ報告", Icon: BugIcon },
   { id: "notify", label: "通知", Icon: BellIcon },
   { id: "priority", label: "優先順位", Icon: ListIcon },

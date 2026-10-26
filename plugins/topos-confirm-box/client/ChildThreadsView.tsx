@@ -28,7 +28,8 @@ function summaryNote(thread: {
   summaryAcked: boolean;
 }): string {
   if (!isCardDone(thread) || !thread.summaryItemId) return "";
-  return thread.summaryAcked ? " ・ 確認済み" : " ・ 確認待ち(勝手に畳みません)";
+  // 2026-10-26: 完了はユーザー確認を待たない(証拠2経路の廃止)。確認済みだけを注記する。
+  return thread.summaryAcked ? " ・ 確認済み" : "";
 }
 
 export function ChildThreadsView({
@@ -92,7 +93,7 @@ export function ChildThreadsView({
             {t.status === "完了" ? (
               <Text style={s.text}>
                 {t.nocard
-                  ? "この運用では完了まとめのカードを作りません(確認箱の子スレ完了には出しません)。会話に完了報告が残っています。差し戻すときはスレで直接伝えてください(条件を満たすと毎時の自動アーカイブが畳みます)。"
+                  ? "この運用では完了まとめのカードを作りません(確認箱には出しません)。会話に完了報告が残っています。差し戻すときはスレで直接伝えてください(条件を満たすと毎時の自動アーカイブが畳みます)。"
                   : (t.summary ?? "(完了まとめを確認箱から引けません)")}
               </Text>
             ) : null}

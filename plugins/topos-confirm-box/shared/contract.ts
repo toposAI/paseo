@@ -189,8 +189,6 @@ export const confirmBoxCountRpc = defineRpc({
     notifications: z.number().int().default(0),
     /** バグ報告タブの未対応(status=new)。 */
     bugs: z.number().int().default(0),
-    /** 子スレ完了報告タブの未確認(完了かつまとめが未読)。 */
-    childDone: z.number().int().default(0),
     generatedAt: z.number(),
   }),
 });
