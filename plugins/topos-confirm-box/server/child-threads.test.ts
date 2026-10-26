@@ -372,7 +372,7 @@ test("親(子司令塔)は行として残し `groupingParent` を立てる(状�
   assert.equal(byId.get("k1")?.groupingParent, false);
 });
 
-test("readKnownChildThreadIds は畳み済み・見出しの親も含めて登録簿の id を全部返す(2026-10-27 実測 12b4eab)", () => {
+test("readKnownChildThreadIds は見出しの親も含めて登録簿の id を返す(畳み済みは除く。2026-10-27 実測 12b4eab)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "known-ids-"));
   fs.writeFileSync(
     path.join(dir, "child_threads.json"),
@@ -383,7 +383,7 @@ test("readKnownChildThreadIds は畳み済み・見出しの親も含めて登�
       ],
     }),
   );
-  assert.deepEqual([...readKnownChildThreadIds(dir)].sort(), ["done-parent", "live-child"]);
+  assert.deepEqual([...readKnownChildThreadIds(dir)], ["live-child"]);
   // 読めない/無い/壊れている → 空(取り込みを止めない側に倒さない)
   assert.deepEqual([...readKnownChildThreadIds(path.join(dir, "missing"))], []);
   fs.writeFileSync(path.join(dir, "child_threads.json"), "{broken");

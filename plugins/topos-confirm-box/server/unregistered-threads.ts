@@ -156,8 +156,10 @@ export function mergeUnregisteredThreads(
    */
   registryArchivedIds: ReadonlySet<string> = new Set(),
   /**
-   * 登録簿に載っている agent id の**全部**(畳み済み・子の見出しになった親も含む。`readKnownChildThreadIds`)。
-   * ここに入っているスレは「未登録」ではないので、行に無くても足さない(2026-10-27 実測: `12b4eab`)。
+   * 登録簿に載っていて、**行として描画されうる** agent id の全部(子の見出しになった親も含む。
+   * `readKnownChildThreadIds`。畳み済み=サイドバーに出ない行は含めない)。ここに入っているスレは
+   * 「未登録」ではないので、行に無くても足さない(2026-10-27 実測: `12b4eab`)。畳み済みまで含めると、
+   * 登録簿に出ない行のスレがどの面にも表示されなくなる(出口レビュー round3 指摘5)。
    */
   registryKnownIds: ReadonlySet<string> = new Set(),
 ): UnregisteredThreads {

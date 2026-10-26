@@ -237,6 +237,7 @@ export function readArchivedChildThreadIds(dir: string): Set<string> {
  * 自身が行に出ず親としても読み飛ばされるため、Paseo の一覧から機械状態だけで「待機中」の行を
  * 足していた(`12b4eab`)。登録簿に載っている=未登録ではないので、行に無くても足さない。
  * `readArchivedChildThreadIds` は畳み済みの再取り込み防止だけを見るので、こちらは別に読む。
+ * **畳み済みは含めない**(一覧に出ない行なので、含めるとそのスレがどの面にも表示されなくなる)。
  * 読めなければ空(取り込みを止めない=消す側に倒さない)。
  */
 export function readKnownChildThreadIds(dir: string): Set<string> {
@@ -248,7 +249,11 @@ export function readKnownChildThreadIds(dir: string): Set<string> {
     const ids = new Set<string>();
     for (const r of list) {
       if (!r || typeof r !== "object") continue;
-      const id = str((r as Record<string, unknown>).agent_id).slice(0, 200);
+      const rec = r as Record<string, unknown>;
+      // 畳み済みは一覧に行として出ない(サイドバーに出す面が無い)。登録簿に居るという理由だけで
+      // 未登録行からも弾くと、どこにも表示されないスレになる(出口レビュー round3 指摘5)。
+      if (rec.archived === true) continue;
+      const id = str(rec.agent_id).slice(0, 200);
       if (id) ids.add(id);
     }
     return ids;
