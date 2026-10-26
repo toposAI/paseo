@@ -60,18 +60,30 @@ function baseDeps(overrides: Partial<Parameters<typeof planOpenAgentInRightColum
 
 describe("planOpenAgentInRightColumn", () => {
   it("エージェントのワークスペースがわからなければ開かない", () => {
+    const reasons: string[] = [];
     expect(
       planOpenAgentInRightColumn(
         { serverId: SERVER_ID, agentId: "a" },
-        baseDeps({ readAgentWorkspaceId: () => null }),
+        baseDeps({
+          readAgentWorkspaceId: () => null,
+          reportUnavailable: (reason) => reasons.push(reason),
+        }),
       ),
     ).toBeNull();
-    expect(
-      planOpenAgentInRightColumn(
-        { serverId: SERVER_ID, agentId: "a" },
-        baseDeps({ resolveWorkspaceMapKey: () => null }),
-      ),
-    ).toBeNull();
+    expect(reasons).toEqual(["agent-workspace-unknown"]);
+  });
+
+  it("ワークスペース一覧に無くても、生のIDで置き場所を決める", () => {
+    // 2026-10-27 本番: 一覧から引けないだけで右カラムを諦めていた(押しても遷移するだけだった)。
+    const plan = planOpenAgentInRightColumn(
+      { serverId: SERVER_ID, agentId: "a" },
+      baseDeps({ resolveWorkspaceMapKey: () => null }),
+    );
+    expect(plan).toEqual({
+      workspaceId: WORKSPACE_ID,
+      workspaceKey: WORKSPACE_KEY,
+      paneId: null,
+    });
   });
 
   it("保存済みレイアウトが無ければ、呼び出し側が右カラムを作る(paneId: null)", () => {
@@ -342,9 +354,20 @@ describe("openAgentInRightColumn", () => {
 
   it("保存済みレイアウトの読み込み前は false を返し、右カラムを勝手に作らない", () => {
     vi.spyOn(useWorkspaceLayoutStore.persist, "hasHydrated").mockReturnValue(false);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(openAgentInRightColumn({ serverId: SERVER_ID, agentId: "agent-1" })).toBe(false);
     expect(layoutStore.getState().sidePaneIdByWorkspace[WORKSPACE_KEY]).toBeUndefined();
     expect(navigateToWorkspaceMock).not.toHaveBeenCalled();
+    expect(warn.mock.calls.flat().join("\n")).toContain("Right column unavailable: layout-not-loaded");
+    warn.mockRestore();
+  });
+
+  it("サイドペインを作れなければ、理由を記録して false を返す", () => {
+    vi.spyOn(useWorkspaceLayoutStore.getState(), "ensureSidePane").mockReturnValue(null);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(openAgentInRightColumn({ serverId: SERVER_ID, agentId: "agent-1" })).toBe(false);
+    expect(warn.mock.calls.flat().join("\n")).toContain("Right column unavailable: side-pane-unavailable");
+    warn.mockRestore();
   });
 
   it("エージェントが見つからなければ false を返し、呼び出し側が通常遷移へ落とせる", () => {

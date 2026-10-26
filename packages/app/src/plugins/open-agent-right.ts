@@ -30,7 +30,19 @@ export interface OpenAgentRightDeps {
   /** 保存済みのエクスプローラID。未記録なら既定のエクスプローラIDに倒す。 */
   readExplorerSidebarPaneId: (workspaceKey: string) => string | null | undefined;
   readSidePaneId: (workspaceKey: string) => string | null | undefined;
+  /** 右カラムに開けなかった理由の記録先。既定では何も記録しない(純関数のまま保つ)。 */
+  reportUnavailable?: (reason: OpenAgentRightUnavailableReason) => void;
 }
+
+/**
+ * 右カラムに開けなかった理由。実画面で「押しても何も起きない」を追えるように、
+ * 黙って false を返す枝を名前で残す(2026-10-27 本番で開かなかった原因の切り分け用)。
+ */
+export type OpenAgentRightUnavailableReason =
+  | "agent-workspace-unknown"
+  | "workspace-key-unavailable"
+  | "layout-not-loaded"
+  | "side-pane-unavailable";
 
 /**
  * 右端のペイン。左右の区別は水平分割でしか付かないので、一番上の分割が縦なら
@@ -82,6 +94,14 @@ function visiblePaneId(pane: SplitPane, excludePaneId: string): string | null {
 }
 
 let warnedBeforeHydration = false;
+/** 同じ理由の警告でログを埋めない(読み込み直すまで1回ずつ)。 */
+const warnedReasons = new Set<OpenAgentRightUnavailableReason>();
+
+function reportUnavailable(reason: OpenAgentRightUnavailableReason): void {
+  if (warnedReasons.has(reason)) return;
+  warnedReasons.add(reason);
+  console.warn(`[Plugins] Right column unavailable: ${reason}`);
+}
 
 /**
  * エージェントを右カラムで開くときの置き場所を決める。2026-10-25、確認箱の「スレを開く」用。
@@ -95,15 +115,22 @@ export function planOpenAgentInRightColumn(
   deps: OpenAgentRightDeps,
 ): OpenAgentRightPlan | null {
   const rawWorkspaceId = normalizeWorkspaceOpaqueId(deps.readAgentWorkspaceId(input));
-  if (!rawWorkspaceId) return null;
-  const workspaceId = deps.resolveWorkspaceMapKey({
-    serverId: input.serverId,
-    workspaceId: rawWorkspaceId,
-  });
-  if (!workspaceId) return null;
+  if (!rawWorkspaceId) {
+    deps.reportUnavailable?.("agent-workspace-unknown");
+    return null;
+  }
+  // 一覧(`sessions[serverId].workspaces`)に無いと引けないが、保存キーも遷移先も生のIDで足りる
+  // (通常の遷移 `navigateToWorkspace` も同じIDをそのまま使う)。一覧が古い/未取得でも
+  // 右カラムを諦めないよう、引けないときは生のIDへ落とす。
+  const workspaceId =
+    deps.resolveWorkspaceMapKey({ serverId: input.serverId, workspaceId: rawWorkspaceId }) ??
+    rawWorkspaceId;
 
   const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId: input.serverId, workspaceId });
-  if (!workspaceKey) return null;
+  if (!workspaceKey) {
+    deps.reportUnavailable?.("workspace-key-unavailable");
+    return null;
+  }
 
   const layout = deps.readLayout(workspaceKey);
   if (!layout) return { workspaceId, workspaceKey, paneId: null };
@@ -143,6 +170,7 @@ export function openAgentInRightColumn(input: { serverId: string; agentId: strin
     if (!warnedBeforeHydration) {
       warnedBeforeHydration = true;
       console.warn("[Plugins] Layout not loaded yet; opening agents without the right column");
+      reportUnavailable("layout-not-loaded");
     }
     return false;
   }
@@ -163,11 +191,15 @@ export function openAgentInRightColumn(input: { serverId: string; agentId: strin
     readExplorerSidebarPaneId: (workspaceKey) =>
       store.explorerSidebarPaneIdByWorkspace[workspaceKey],
     readSidePaneId: (workspaceKey) => store.sidePaneIdByWorkspace[workspaceKey],
+    reportUnavailable,
   });
   if (!plan) return false;
 
   const paneId = plan.paneId ?? store.ensureSidePane(plan.workspaceKey);
-  if (!paneId) return false;
+  if (!paneId) {
+    reportUnavailable("side-pane-unavailable");
+    return false;
+  }
 
   navigateToWorkspace({
     serverId: input.serverId,
