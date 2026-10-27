@@ -79,7 +79,8 @@ describe("runTitleBackfill", () => {
       ],
     });
     const result = await runTitleBackfill(deps);
-    expect(result).toEqual({ marked: 1, retitled: 1, failed: 0, skipped: 0, busy: 0 });
+    // アーカイブ済み・内部用・人が固定した題名の3本は対象から外れる(合図は残す)。
+    expect(result).toEqual({ marked: 1, retitled: 1, failed: 0, skipped: 0, busy: 0, excluded: 3 });
     expect(calls.retitle).toEqual(["a"]);
     expect(calls.markDone).toEqual(["a"]);
   });
@@ -106,7 +107,7 @@ describe("runTitleBackfill", () => {
       retitleResult: (agentId) => (agentId === "boom" ? new Error("boom") : false),
     });
     const result = await runTitleBackfill(deps);
-    expect(result).toEqual({ marked: 2, retitled: 0, failed: 1, skipped: 1, busy: 0 });
+    expect(result).toEqual({ marked: 2, retitled: 0, failed: 1, skipped: 1, busy: 0, excluded: 0 });
     expect(calls.markDone).toEqual(["boom", "nogen"]);
     expect(calls.close).toEqual(["boom", "nogen"]);
   });
@@ -114,7 +115,7 @@ describe("runTitleBackfill", () => {
   test("does nothing (and logs nothing) when no agent is marked", async () => {
     const { deps, calls } = setup({ records: [record("a", {})] });
     const result = await runTitleBackfill(deps);
-    expect(result).toEqual({ marked: 0, retitled: 0, failed: 0, skipped: 0, busy: 0 });
+    expect(result).toEqual({ marked: 0, retitled: 0, failed: 0, skipped: 0, busy: 0, excluded: 0 });
     expect(calls.retitle).toEqual([]);
   });
 
@@ -129,7 +130,7 @@ describe("runTitleBackfill", () => {
       busy: ["running"],
     });
     const result = await runTitleBackfill(deps);
-    expect(result).toEqual({ marked: 1, retitled: 0, failed: 0, skipped: 0, busy: 1 });
+    expect(result).toEqual({ marked: 1, retitled: 0, failed: 0, skipped: 0, busy: 1, excluded: 0 });
     expect(calls.retitle).toEqual([]);
     expect(calls.close).toEqual([]);
     // 印は残す: 触っていないのだから「済み」にしてはいけない。
@@ -146,5 +147,21 @@ describe("runTitleBackfill", () => {
     expect(calls.ensureLoaded).toEqual(["late"]);
     expect(calls.close).toEqual([]);
     expect(calls.markDone).toEqual(["late"]);
+  });
+
+  // 回帰: 最近動いたスレを先に処理すると、その復元で始まるターンを待つ間に列の後ろが
+  // 止まった(2026-10-27 本番: 20分近く1本も終わらなかった)。古い順に処理する。
+  test("processes the least recently updated agent first", async () => {
+    const withUpdatedAt = (id: string, updatedAt: string) =>
+      ({ ...record(id, { [TITLE_RETITLE_LABEL]: "1" }), updatedAt }) as StoredAgentRecord;
+    const { deps, calls } = setup({
+      records: [
+        withUpdatedAt("recent", new Date().toISOString()),
+        withUpdatedAt("old", "2026-10-26T00:00:00.000Z"),
+        withUpdatedAt("mid", "2026-10-27T00:00:00.000Z"),
+      ],
+    });
+    await runTitleBackfill(deps);
+    expect(calls.retitle).toEqual(["old", "mid", "recent"]);
   });
 });

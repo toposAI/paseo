@@ -42,6 +42,31 @@ export interface TitleBackfillResult {
   skipped: number;
   /** 実行中だったので触らず、合図も残したままにしたスレ(次の起動で再挑戦する)。 */
   busy: number;
+  /** すでにアーカイブ済み・内部用だったので対象から外したスレ(合図は残す)。 */
+  excluded: number;
+}
+
+/**
+ * 合図(`paseo.title-retitle=1`)が立っているスレを対象に絞る。
+ *
+ * 常駐の役スレ(窓口B・裏方 など)は題名そのものが識別子になっている
+ * (起動スクリプトと通知デーモンが名前で探す)。人が固定した題名は触らない。
+ * 除外したものは合図を残す(役スレは合図の付与時点で判定しているので、後から
+ * 対象化しない。アーカイブ済みはアーカイブ経路で扱う)。
+ */
+export function selectTitleBackfillTargets(records: readonly StoredAgentRecord[]): {
+  targets: StoredAgentRecord[];
+  excluded: number;
+} {
+  const isExcluded = (record: StoredAgentRecord) =>
+    Boolean(record.archivedAt) ||
+    Boolean(record.internal) ||
+    record.labels?.[AGENT_TITLE_SOURCE_LABEL] === AGENT_TITLE_SOURCE_USER;
+  const marked = records.filter((record) => record.labels?.[TITLE_RETITLE_LABEL] === "1");
+  return {
+    targets: marked.filter((record) => !isExcluded(record)),
+    excluded: marked.filter(isExcluded).length,
+  };
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -64,20 +89,25 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * 取れない。デーモン起動直後に1本ずつ読み込み → 付け直し → 閉じる、を直列で行う。
  * 合図は成否にかかわらず `done` にする(失敗したスレで毎回やり直さない = 「1回だけ」)。
  * ただし実行中のスレには触らない(閉じるとターンを中断してしまう)。合図も残し、次の起動で拾い直す。
+ *
+ * 処理するのは**書き込みや返事の遅いスレから**。閉じているスレを1本復元するたびにターンが
+ * 始まるので、最近まで動いていたスレの復元待ちで列の後ろが止まり、20分近く何も終わらないことが
+ * あった(2026-10-27)。直列であること自体は変えない。
  */
 export async function runTitleBackfill(deps: TitleBackfillDeps): Promise<TitleBackfillResult> {
   const ioTimeoutMs = deps.ioTimeoutMs ?? TITLE_BACKFILL_IO_TIMEOUT_MS;
-  const result: TitleBackfillResult = { marked: 0, retitled: 0, failed: 0, skipped: 0, busy: 0 };
+  const result: TitleBackfillResult = {
+    marked: 0,
+    retitled: 0,
+    failed: 0,
+    skipped: 0,
+    busy: 0,
+    excluded: 0,
+  };
   const stored = await deps.listStored();
-  const targets = stored.filter(
-    (record) =>
-      record.labels?.[TITLE_RETITLE_LABEL] === "1" &&
-      !record.archivedAt &&
-      !record.internal &&
-      // 常駐の役スレ(裏方・窓口B など)は題名そのものが識別子になっている
-      // (起動スクリプトと通知デーモンが名前で探す)。人が固定した題名は触らない。
-      record.labels?.[AGENT_TITLE_SOURCE_LABEL] !== AGENT_TITLE_SOURCE_USER,
-  );
+  const { targets: selected, excluded } = selectTitleBackfillTargets(stored);
+  result.excluded = excluded;
+  const targets = [...selected].sort(byLeastRecentlyUpdated);
   result.marked = targets.length;
   if (targets.length === 0) return result;
 
@@ -111,6 +141,17 @@ export async function runTitleBackfill(deps: TitleBackfillDeps): Promise<TitleBa
   }
   deps.logger.info(result, "agent title backfill finished");
   return result;
+}
+
+/** 最後に動いてから長い順(読み込みで起きるターンが短いものから処理する)。 */
+function byLeastRecentlyUpdated(a: StoredAgentRecord, b: StoredAgentRecord): number {
+  const timeOf = (record: StoredAgentRecord) => Date.parse(record.updatedAt ?? "");
+  const timeA = timeOf(a);
+  const timeB = timeOf(b);
+  const knownA = Number.isFinite(timeA);
+  const knownB = Number.isFinite(timeB);
+  if (knownA && knownB) return timeA - timeB;
+  return Number(knownA) - Number(knownB);
 }
 
 function logMarkFailure(deps: TitleBackfillDeps, error: unknown, agentId: string): void {
