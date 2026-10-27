@@ -272,12 +272,16 @@ describe("useReadPositionSync", () => {
     rerender({ items: [row(11, "e2"), row(12, "e2"), row(13, "e2")], epoch: "e2" });
     await waitFor(() => expect(result.current.unreadFromSeq).toBeNull());
 
-    // The new history is not resumed from (the record belongs to the old one), so where the view was
-    // left before is not a landing; once the reader moves, reading is recorded — under the new row's
-    // history.
+    // The new history is not resumed from (the record belongs to the old one), so what the chat
+    // opened with is not where the reader has read to; once the reader moves, reading is recorded —
+    // under the new row's history.
+    const afterQuiet = Date.now() + 10_000;
+    const spy = vi.spyOn(Date, "now").mockReturnValue(afterQuiet);
     act(() => result.current.reportViewedSeq(13, 11));
-    act(() => result.current.reportViewedSeq(13, 13));
-    await waitFor(() => expect(sentSeqs()).toContain(13), { timeout: 4000 });
+    act(() => result.current.reportViewedSeq(12, 10));
+    act(() => result.current.reportViewedSeq(12, 10));
+    spy.mockRestore();
+    await waitFor(() => expect(readposSetCalls().length).toBeGreaterThan(0), { timeout: 4000 });
     const last = readposSetCalls().at(-1);
     expect((last?.[2] as { epoch?: string } | undefined)?.epoch).toBe("e2");
   });
@@ -314,12 +318,23 @@ describe("useReadPositionSync", () => {
     expect(sentSeqs()).toEqual([]);
     spy.mockRestore();
 
+    // A resize re-lays the rows out: the top row changes while the reader is still at the bottom.
+    // That is not the reader moving.
+    const resized = Date.now() + 15_000;
+    const spyResize = vi.spyOn(Date, "now").mockReturnValue(resized);
+    act(() => result.current.reportViewedSeq(15, 14));
+    spyResize.mockRestore();
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    expect(sentSeqs()).toEqual([]);
+
     // Once the reader actually scrolls, reading is recorded again.
     const later = Date.now() + 20_000;
     const spy2 = vi.spyOn(Date, "now").mockReturnValue(later);
     act(() => result.current.reportViewedSeq(12, 10));
+    act(() => result.current.reportViewedSeq(12, 10));
     spy2.mockRestore();
     await waitFor(() => expect(sentSeqs()).toContain(12), { timeout: 4000 });
+    expect(sentSeqs()).not.toContain(15);
   }, 15_000);
 
   it("does not resume from a record written under another history", async () => {
