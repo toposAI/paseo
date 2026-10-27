@@ -8,7 +8,10 @@
 ## 1. 判断待ち(既存・変更なし)
 
 - データ元: `~/.local/state/toposai/confirm_box/events-*.jsonl` の箱 + `pending_user_decisions.jsonl` の未投函 + Paseo の承認待ち。
-- バッジ: `options` を持つ項目のうち未承認の件数(`confirmBoxCountRpc.open`、従来どおり)。
+- バッジ: 確認箱の **open 件数 N**(判断窓口 `judgment_window.py` の `counts.open` と同じ定義)。
+  数え方は `shared/judgment-open.ts` の `countJudgmentOpen` の1本で、確認箱の中のバッジ(`confirmBoxCountRpc.open`)・
+  下部バーの「ユーザー判断」・判断タブの行(既定の絞り込み)が同じものを使う。承認済み・既読(材料待ち相当)は数えない
+  (2026-10-27: 材料待ちを数えていてバッジが N より大きく出た。Vault の `waiting_materials` は元々出していない)。
 
 ## 2. Toposバグ報告(bug)
 

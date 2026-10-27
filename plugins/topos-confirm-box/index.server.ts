@@ -31,7 +31,6 @@ import {
   cardChatCancelRpc,
   cardChatSayRpc,
   countUrgentUnreadNotifications,
-  isJudgmentItem,
   isNotificationItem,
   priorityListRpc,
   priorityMoveRpc,
@@ -62,6 +61,7 @@ import {
   readVaultDecisions,
   vaultSourceEnabled,
 } from "./server/vault-decisions.js";
+import { isJudgmentOpen } from "./shared/judgment-open.js";
 import {
   childThreadsArchiveRpc,
   childThreadsListRpc,
@@ -503,8 +503,9 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(confirmBoxCountRpc, async (_input, ctx) => {
     const { items, sources, generatedAt } = await collect(ctx);
-    // 判断タブと同じ定義(SSOT は `isJudgmentItem`)。通知だけの項目は数えない。
-    const open = items.filter((i) => isJudgmentItem(i) && i.state !== "approved");
+    // 判断タブ・下部バーと同じ定義(SSOT は `countJudgmentOpen`)。判断窓口の counts.open(N)に揃えるため、
+    // 承認済みだけでなく材料待ち(`waiting_materials`)も数えない。通知だけの項目は数えない。
+    const open = items.filter(isJudgmentOpen);
     // バッジは失敗しても0で返す(件数が取れないだけで確認箱そのものは開けるようにする)
     let bugs = 0;
     try {

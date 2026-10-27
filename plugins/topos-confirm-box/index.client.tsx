@@ -84,6 +84,8 @@ function useJudgmentBadge(): number | undefined {
   useEffect(() => {
     let alive = true;
     // 一時的な失敗では前回の件数を残す(バッジが消えると「未確認が無くなった」と読めるため)。
+    // 件数は確認箱の open(N)。値は件数 RPC(サーバーで `isJudgmentOpen` に絞った数)をそのまま出し、
+    // 下部バーだけ別の数え方をしない(2026-10-27: N より大きく出る不具合の再発防止)。
     const tick = () =>
       count({})
         .then((r) => alive && setN(r.open))
@@ -108,7 +110,7 @@ function useJudgmentBadge(): number | undefined {
 
 /**
  * 下部バーの「ユーザー判断」の1行(PC も iPhone も同じ)。
- * 件数は確認箱のタブと同じ数え方(`open`=判断印つきで未承認)。
+ * 件数は確認箱の中のバッジと同じ数え方(`open`=判断項目のうち state が new=N。材料待ち・承認済みは数えない)。
  */
 function BoxTabLink({ currentScreen, openScreen }: BoxTabLinkProps) {
   const n = useJudgmentBadge();

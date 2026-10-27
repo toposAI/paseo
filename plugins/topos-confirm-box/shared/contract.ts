@@ -10,6 +10,7 @@
  */
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
+import { countJudgmentOpen, isJudgmentOpen } from "./judgment-open.js";
 
 // ---------------------------------------------------------------- 語彙(SSOTは store.ts)
 
@@ -176,7 +177,8 @@ export const confirmBoxCountRpc = defineRpc({
   name: "topos.confirmbox.count",
   input: z.object({}),
   output: z.object({
-    /** 判断タブと同じ件数(判断印 `judgment: true` か permit の項目のうち承認済みを除く)。
+    /** 確認箱の open 件数 N=判断窓口 `judgment_window.py` の `counts.open` と同じ定義。判断タブ・下部バーと
+     * 同じ数え方(`countJudgmentOpen`: 判断印 `judgment: true` か permit のうち承認済み・材料待ちを除く)。
      * 印の無い旧形式は数えない。通知・バグ報告・完了報告は数えない。 */
     open: z.number().int(),
     /** うち priority=blocking。 */
@@ -469,15 +471,16 @@ export function judgmentTabRows(
   const rows = items.filter(
     (i) =>
       (isJudgmentItem(i) || (opts.legacy === true && isLegacyOptionItem(i))) &&
-      (opts.showDone || i.state !== "approved") &&
+      // 既定は **open だけ**(承認済み・既読を出さない)。`showDone` の時だけ決定済みも並べる。
+      (opts.showDone || isJudgmentOpen(i)) &&
       (opts.prio === null || i.priority === opts.prio),
   );
   return opts.newestFirst ? [...rows].sort((a, b) => b.ts - a.ts) : rows;
 }
 
-/** 画面に出す「要対応」件数。判断タブと同じ定義で、承認済みは数えない。 */
+/** 画面に出す「要対応」件数。判断タブと同じ定義で、open(箱の new)だけを数える(数え方は `countJudgmentOpen`)。 */
 export function countOpen(items: readonly ConfirmBoxItem[]): number {
-  return items.filter((i) => isJudgmentItem(i) && i.state !== "approved").length;
+  return countJudgmentOpen(items);
 }
 
 /** 子スレの完了まとめを投函する側の source(書き手は `child_thread_registry.py` の `SOURCE`)。 */
