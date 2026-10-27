@@ -110,7 +110,8 @@ function useJudgmentBadge(): number | undefined {
 
 /**
  * 下部バーの「ユーザー判断」の1行(PC も iPhone も同じ)。
- * 件数は確認箱の中のバッジと同じ数え方(`open`=判断項目のうち state が new=N。材料待ち・承認済みは数えない)。
+ * 件数は確認箱の中のバッジと同じ数え方(`open`=判断窓口の counts.open と同対象。材料待ち・承認済み・
+ * ノートを持たない旧い箱行は数えない)。
  */
 function BoxTabLink({ currentScreen, openScreen }: BoxTabLinkProps) {
   const n = useJudgmentBadge();

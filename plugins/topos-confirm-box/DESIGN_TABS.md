@@ -8,10 +8,14 @@
 ## 1. 判断待ち(既存・変更なし)
 
 - データ元: `~/.local/state/toposai/confirm_box/events-*.jsonl` の箱 + `pending_user_decisions.jsonl` の未投函 + Paseo の承認待ち。
-- バッジ: 確認箱の **open 件数 N**(判断窓口 `judgment_window.py` の `counts.open` と同じ定義)。
-  数え方は `shared/judgment-open.ts` の `countJudgmentOpen` の1本で、確認箱の中のバッジ(`confirmBoxCountRpc.open`)・
-  下部バーの「ユーザー判断」・判断タブの行(既定の絞り込み)が同じものを使う。承認済み・既読(材料待ち相当)は数えない
-  (2026-10-27: 材料待ちを数えていてバッジが N より大きく出た。Vault の `waiting_materials` は元々出していない)。
+- バッジ: 確認箱の **open 件数 N**(判断窓口 `judgment_window.py` の `counts.open` と同じ対象)。
+  数え方は `shared/judgment-open.ts` の `countJudgmentCounted` の1本で、確認箱の中のバッジ
+  (`confirmBoxCountRpc.open`)と下部バーの「ユーザー判断」が同じものを使う。数えるのは
+  **Vault 判断ノート由来(`key: vault:` の open)** と **Paseo の承認待ち(permit)の open** だけ。
+  承認済み・既読(材料待ち相当)と、ノート化されていない古い箱の判断行は数えない
+  (2026-10-27: 材料待ちと旧い箱行を数えていてバッジが N より大きく出た。実測 11 対 N=10)。
+- 判断タブの行の既定の絞り込みは `isJudgmentOpen`(判断印 or permit の `state: "new"`)で、**N より行が
+  多いことがある**。まだノートになっていない投函も画面から消さないため(数える側だけ N に揃える)。
 
 ## 2. Toposバグ報告(bug)
 
