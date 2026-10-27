@@ -121,14 +121,11 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     const pending = pendingRef.current;
     pendingRef.current = null;
     if (pending === null || pending.epoch === null) return;
-    // Lines that kept streaming while the reader was still below them are not read yet.
+    // Lines that kept streaming while the reader was still below them are not read yet: keep the
+    // position from before the unread stretch rather than reporting one they may not have seen.
     const blocked = blockedUntilRef.current;
-    let seq = pending.seq;
-    if (blocked && blocked.key === pending.atKey) {
-      // Keep the blocked position instead of the unread rows (never report "read" a row they may not have seen).
-      if (seq >= blocked.markerSeq) seq = blocked.readSeq;
-      blockedUntilRef.current = null;
-    }
+    if (blocked && blocked.key === pending.atKey) blockedUntilRef.current = null;
+    const seq = blocked && blocked.key === pending.atKey ? blocked.readSeq : pending.seq;
     void invoke(pending.serverId, "topos.readpos.set", {
       agentId: pending.agentId,
       title: pending.title ?? undefined,
