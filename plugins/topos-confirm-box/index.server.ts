@@ -121,6 +121,8 @@ import {
   notesSidebarRpc,
   openConceptThreadRpc,
 } from "./shared/notes.js";
+import { readNoteRpc, resolveNoteLinkRpc } from "./shared/note-view.js";
+import { readVaultNote, resolveVaultLink } from "./server/note-view.js";
 import type {
   ConceptModelOption,
   MoveConceptNoteOutput,
@@ -1333,6 +1335,12 @@ export default function contribute(server: PluginServerContext) {
       if (createdHandles.get(key) === handle) createdHandles.delete(key);
     }
   }
+
+  // ノートの閲覧(読むだけ)。live Vault の中のノートだけを返す。
+  server.handle(readNoteRpc, async (input) => readVaultNote(resolveVaultDir(), input.path));
+  server.handle(resolveNoteLinkRpc, async (input) =>
+    resolveVaultLink(resolveVaultDir(), input.from, input.target),
+  );
 
   // 連打対策: 同じノートの作成は1本に畳む(記録まで終わった後の分は上の `already` が受ける)。
   const opening = new Map<string, Promise<OpenConceptThreadOutput>>();

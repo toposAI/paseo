@@ -57,6 +57,8 @@ export function ConceptRowMenu({
   busy,
   colors,
   onMove,
+  onThread,
+  movable,
 }: {
   zone: ConceptZone;
   /** 行に出ている題名(読み上げの文言に使う)。 */
@@ -64,6 +66,10 @@ export function ConceptRowMenu({
   busy: boolean;
   colors: SidebarColors;
   onMove: () => void;
+  /** 壁打ち(深掘りスレを開く/作る)。 */
+  onThread: () => void;
+  /** 「あとで/検討中」へ移せる行か。 */
+  movable: boolean;
 }) {
   const panelStyle = useMemo(
     () => [styles.panel, { backgroundColor: colors.surface1, borderColor: colors.border }],
@@ -73,26 +79,62 @@ export function ConceptRowMenu({
   const noteStyle = useMemo(() => [styles.noteText, { color: colors.foregroundMuted }], [colors]);
   return (
     <View testID="concept-row-menu" style={panelStyle}>
-      {busy ? (
-        <Text style={noteStyle}>移しています…</Text>
-      ) : (
-        <Pressable
-          testID="concept-row-menu-defer"
-          accessibilityRole="button"
-          accessibilityLabel={`${title}を${deferMenuLabel(zone)}`}
-          disabled={busy}
-          onPress={onMove}
-          style={styles.item}
-        >
-          <Text style={textStyle}>{deferMenuLabel(zone)}</Text>
-        </Pressable>
-      )}
+      <Pressable
+        testID="concept-row-menu-thread"
+        accessibilityRole="button"
+        accessibilityLabel={`${title}を壁打ちする`}
+        onPress={onThread}
+        style={styles.item}
+      >
+        <Text style={textStyle}>壁打ちする(スレを開く)</Text>
+      </Pressable>
+      {movable ? (
+        <MoveItems
+          zone={zone}
+          title={title}
+          busy={busy}
+          onMove={onMove}
+          textStyle={textStyle}
+          noteStyle={noteStyle}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function MoveItems({
+  zone,
+  title,
+  busy,
+  onMove,
+  textStyle,
+  noteStyle,
+}: {
+  zone: ConceptZone;
+  title: string;
+  busy: boolean;
+  onMove: () => void;
+  textStyle: object;
+  noteStyle: object;
+}) {
+  if (busy) return <Text style={noteStyle}>移しています…</Text>;
+  return (
+    <>
+      <Pressable
+        testID="concept-row-menu-defer"
+        accessibilityRole="button"
+        accessibilityLabel={`${title}を${deferMenuLabel(zone)}`}
+        onPress={onMove}
+        style={styles.item}
+      >
+        <Text style={textStyle}>{deferMenuLabel(zone)}</Text>
+      </Pressable>
       <Text style={noteStyle}>
         {zone === "active"
           ? "検討中の一覧から外して「あとで」へ移します(Vault の Paseo/構想)"
           : "「検討中」の一覧へ戻します(Vault の Paseo/構想)"}
       </Text>
-    </View>
+    </>
   );
 }
 

@@ -19,6 +19,7 @@ import { useRpc } from "@getpaseo/plugin/client";
 import type { PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { Icon } from "@getpaseo/plugin/client/react-native";
+import { NOTE_VIEW_SCREEN_ID } from "../shared/note-view.js";
 import { moveConceptNoteRpc, notesSidebarRpc, openConceptThreadRpc } from "../shared/notes.js";
 import type { NoteStatus, SidebarNote } from "../shared/notes.js";
 import type { ConceptZone, SidebarPlace, ZoneCounts } from "../shared/concept-places.js";
@@ -359,8 +360,9 @@ export function ConceptNotesList({
     [moveNote, onCreated, showFailure],
   );
 
-  const press = useCallback(
+  const startThread = useCallback(
     (n: SidebarNote) => {
+      setMenuPath(null);
       if (n.threadId) {
         jumpTo(n.threadId);
         return;
@@ -403,6 +405,15 @@ export function ConceptNotesList({
     [dismissNotice, jumpTo, onCreated, openThread, showFailure],
   );
 
+  /** 行を押す: 深掘りスレではなくノートの中身を開く(壁打ちは行の「…」メニューか、ノート画面のボタン)。 */
+  const press = useCallback(
+    (n: SidebarNote) => {
+      setMenuPath(null);
+      openScreen({ screenId: NOTE_VIEW_SCREEN_ID, params: { path: n.path } });
+    },
+    [openScreen],
+  );
+
   const headerLabel =
     error && active.length === 0 ? "進行中の構想(取得失敗)" : `進行中の構想 ${active.length}件`;
 
@@ -438,11 +449,23 @@ export function ConceptNotesList({
       onPress: press,
       onToggleMenu: toggleMenu,
       onMove: move,
+      onThread: startThread,
       onBadge: explainBadge,
       color: statusColor,
       colors,
     }),
-    [colors, creating, explainBadge, menuPath, move, moving, press, statusColor, toggleMenu],
+    [
+      colors,
+      creating,
+      explainBadge,
+      menuPath,
+      move,
+      moving,
+      press,
+      startThread,
+      statusColor,
+      toggleMenu,
+    ],
   );
   const renderRow = useCallback(
     (n: SidebarNote) => <ConceptRow key={n.path} note={n} {...rowProps} />,
@@ -596,6 +619,7 @@ interface ConceptRowProps {
   onPress: (n: SidebarNote) => void;
   onToggleMenu: (path: string) => void;
   onMove: (n: SidebarNote) => void;
+  onThread: (n: SidebarNote) => void;
   onBadge: (n: SidebarNote) => void;
   color: string;
 }
@@ -608,13 +632,14 @@ interface ConceptRowProps {
  */
 function ConceptRow({ note: n, ...p }: ConceptRowProps & { note: SidebarNote }) {
   const { creating, moving: movingSet, menuPath, colors, color } = p;
-  const { onPress, onToggleMenu, onMove, onBadge } = p;
+  const { onPress, onToggleMenu, onMove, onThread, onBadge } = p;
   const busy = creating.has(n.path);
   const moving = movingSet.has(n.path);
   const menuOpen = menuPath === n.path;
   const press = useCallback(() => onPress(n), [onPress, n]);
   const toggleMenu = useCallback(() => onToggleMenu(n.path), [onToggleMenu, n.path]);
   const doMove = useCallback(() => onMove(n), [onMove, n]);
+  const doThread = useCallback(() => onThread(n), [onThread, n]);
   const explain = useCallback(() => onBadge(n), [onBadge, n]);
   const title = conceptRowTitle(n);
   const full = conceptRowFullLabel(n);
@@ -625,7 +650,7 @@ function ConceptRow({ note: n, ...p }: ConceptRowProps & { note: SidebarNote }) 
     return (
       <View style={styles.trailing}>
         {badge === "thread" ? null : <ThreadBadge kind={badge} title={full} onPress={explain} />}
-        {n.movable ? (
+        {
           <ConceptMenuButton
             title={full}
             open={menuOpen}
@@ -633,10 +658,10 @@ function ConceptRow({ note: n, ...p }: ConceptRowProps & { note: SidebarNote }) 
             color={color}
             onPress={toggleMenu}
           />
-        ) : null}
+        }
       </View>
     );
-  }, [badge, busy, color, explain, full, menuOpen, moving, n.movable, toggleMenu]);
+  }, [badge, busy, color, explain, full, menuOpen, moving, toggleMenu]);
 
   return (
     <>
@@ -648,7 +673,15 @@ function ConceptRow({ note: n, ...p }: ConceptRowProps & { note: SidebarNote }) 
         trailing={trailing}
       />
       {menuOpen ? (
-        <ConceptRowMenu zone={n.zone} title={full} busy={moving} colors={colors} onMove={doMove} />
+        <ConceptRowMenu
+          zone={n.zone}
+          title={full}
+          busy={moving}
+          colors={colors}
+          onMove={doMove}
+          onThread={doThread}
+          movable={n.movable === true}
+        />
       ) : null}
     </>
   );

@@ -12,6 +12,8 @@ import {
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { ChildThreadsSidebar, CHILD_THREADS_SCREEN_ID } from "./client/ChildThreadsSidebar";
 import { ChildThreadsView } from "./client/ChildThreadsView";
+import { ConceptNoteView } from "./client/ConceptNoteView";
+import { NOTE_VIEW_SCREEN_ID } from "./shared/note-view";
 import {
   SHARED_PROJECT_SCREEN_ID,
   SharedProjectView,
@@ -329,6 +331,18 @@ function ChildThreadsScreen({ theme, params }: PluginScreenProps) {
   return <ChildThreadsView theme={theme} focusId={focusId} />;
 }
 
+function ConceptNoteScreen({ theme, params, navigation, host }: PluginScreenProps) {
+  return (
+    <ConceptNoteView
+      theme={theme}
+      path={params.path ?? null}
+      openScreen={openBoxScreen}
+      openAgent={navigation?.openAgent}
+      serverId={host.id}
+    />
+  );
+}
+
 function SharedProjectScreen({ theme, params }: PluginScreenProps) {
   return <SharedProjectView theme={theme} projectId={params.id ?? null} />;
 }
@@ -398,6 +412,7 @@ export default function contribute(ctx: PluginClientContext) {
     title: "共有プロジェクト",
     Component: SharedProjectScreen,
   });
+  ctx.addScreen({ id: NOTE_VIEW_SCREEN_ID, title: "構想ノート", Component: ConceptNoteScreen });
   ctx.addScreen({ id: SCREEN_ID, title: "確認箱", Component: Screen });
   ctx.addScreen({ id: BOX_TAB_SCREEN_ID, title: "確認箱", Component: BoxTabScreen });
   // 並びは `FOOTER_TABS`(SSOT)の順で登録する。PC も iPhone も同じ5項目を出す。
