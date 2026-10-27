@@ -2,6 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { countOpen, judgmentTabRows, type ConfirmBoxItem } from "../shared/contract.js";
 import { countJudgmentCounted } from "../shared/judgment-open.js";
+import { VAULT_DECISION_SOURCE } from "./vault-decisions.js";
+
+/** Vault 判断ノートから作られた形の項目(`readVaultDecisions` と同じ出所・id・key)。 */
+function vault(id: string, extra: Partial<ConfirmBoxItem> = {}): ConfirmBoxItem {
+  return item(`pending:vault:${id}`, {
+    kind: "pending",
+    key: `vault:${id}`,
+    source: VAULT_DECISION_SOURCE,
+    ...extra,
+  });
+}
 
 function item(id: string, extra: Partial<ConfirmBoxItem> = {}): ConfirmBoxItem {
   return {
@@ -32,14 +43,14 @@ function item(id: string, extra: Partial<ConfirmBoxItem> = {}): ConfirmBoxItem {
 test("バッジの件数(countOpen)は判断窓口の N(Vault ノート由来 + permit の open)と同じ", () => {
   const items = [
     // Vault 判断ノート由来(ノート化された判断)
-    item("v1", { kind: "pending", key: "vault:j-1" }),
-    item("v2", { kind: "pending", key: "vault:j-2", priority: "blocking" }),
-    item("c", { kind: "pending", key: "vault:j-3", state: "approved" }),
+    vault("v1"),
+    vault("v2", { priority: "blocking" }),
+    vault("c", { state: "approved" }),
     item("d", { judgment: false }),
     item("e", { judgment: false, options: [{ id: "a", label: "x" }] as never }),
     item("p", { kind: "permit", judgment: false }),
-    // 既読=材料待ち相当。判断窓口の open ではないので、バッジにも判断タブにも出さない(2026-10-27)
-    item("n", { kind: "pending", key: "vault:j-4", state: "read" }),
+    // 既読(人が箱で既読にした行)。判断窓口の open ではないので、バッジにも判断タブにも出さない
+    vault("n", { state: "read" }),
     // ノート化されていない古い箱の判断行。N に出てこないのでバッジには数えない(2026-10-27)
     item("stale", { key: "coord-j-6b02455-20261025" }),
   ];
@@ -54,10 +65,10 @@ test("バッジの件数(countOpen)は判断窓口の N(Vault ノート由来 + 
 
 test("バッジの件数は判断窓口の open 件数と同じ(材料待ち・承認済み・既読・ノート無しの箱行を足さない)", () => {
   const items = [
-    item("open-1", { kind: "pending", key: "vault:j-1" }),
-    item("open-2", { kind: "pending", key: "vault:j-2", priority: "blocking" }),
-    item("approve", { kind: "pending", key: "vault:j-3", state: "approved" }),
-    item("read-1", { kind: "pending", key: "vault:j-4", state: "read" }),
+    vault("open-1"),
+    vault("open-2", { priority: "blocking" }),
+    vault("approve", { state: "approved" }),
+    vault("read-1", { state: "read" }),
     item("notice", { judgment: false, options: [] }),
     item("stale", { key: "inbox-monitor-parallel-count-merge-blocked-20261025" }),
   ];

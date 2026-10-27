@@ -128,10 +128,17 @@ test("(f) countOpen は判断窓口の N と同じ対象(Vault ノート由来�
     item({ id: "box:done", judgment: true, options: OPTIONS, state: "approved" }),
     PERMIT,
     item({ id: "box:notify-read", source: "x", state: "read" }),
-    item({ id: "pending:vault:j", kind: "pending", key: "vault:j" }),
+    item({
+      id: "pending:vault:j",
+      kind: "pending",
+      key: "vault:j",
+      judgment: true,
+      source: "vault_decision_note",
+    }),
     // ノート化されていない古い箱の判断行(N に出てこない。2026-10-27)
     item({ id: "box:stale", key: "coord-j-6b02455-20261025" }),
   ];
+  // Vault ノート由来1件 + permit 1件。判断印だけの箱の行(box:judgment)はノート化されるまで数えない
   assert.equal(countOpen(rows), 2);
 });
 

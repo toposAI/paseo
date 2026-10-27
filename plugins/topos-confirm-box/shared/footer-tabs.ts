@@ -50,7 +50,7 @@ export function confirmBoxTabs<T extends { id: string }>(all: readonly T[]): rea
  * `shared/feedback.ts` の `countOpenReports`)。
  * 通知の未読は下部バーに出さない(箱の中の通知タブにバッジが出る)。
  */
-export function bugBadgeCount(counts: Partial<Record<string, number>>): number {
+export function bugBadgeCount(counts: { bugs?: number; [key: string]: unknown }): number {
   return counts.bugs ?? 0;
 }
 

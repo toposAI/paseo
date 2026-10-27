@@ -507,6 +507,9 @@ export default function contribute(server: PluginServerContext) {
     // Vault 判断ノート由来の項目と permit のうち state が new だけを数え、材料待ち・承認済み・既読と
     // ノートを持たない古い箱の判断行(答え先が無い行)は数えない。通知だけの項目も数えない。
     const open = items.filter(isJudgmentCounted);
+    // N の対象(Vault ノート)を読めなかった/読まない設定のときは 0 件を「判断待ちなし」と誤読させない。
+    // 出所が failedSources に入っていれば `collect` が Vault を読めなかった(`applyVaultSource(..., true)`)。
+    const openKnown = vaultSourceEnabled() && sources.every((src) => src.ok);
     // バッジは失敗しても0で返す(件数が取れないだけで確認箱そのものは開けるようにする)
     let bugs = 0;
     try {
@@ -517,6 +520,7 @@ export default function contribute(server: PluginServerContext) {
     }
     return {
       open: open.length,
+      openKnown,
       blocking: open.filter((i) => i.priority === "blocking").length,
       permits: open.filter((i) => i.kind === "permit").length,
       failedSources: sources.filter((src) => !src.ok).length,

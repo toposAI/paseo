@@ -10,7 +10,7 @@
  */
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
-import { countJudgmentCounted, isJudgmentOpen } from "./judgment-open.js";
+import { countJudgmentCounted, isOpenState } from "./judgment-open.js";
 
 // ---------------------------------------------------------------- 語彙(SSOTは store.ts)
 
@@ -181,6 +181,12 @@ export const confirmBoxCountRpc = defineRpc({
      * 数え方は `countJudgmentCounted`(ノート由来 `vault:` の項目と permit のうち `state: "new"` だけ。
      * 材料待ち・承認済み・既読、ノートを持たない古い箱の判断行は数えない)。通知・バグ報告・完了報告は数えない。 */
     open: z.number().int(),
+    /**
+     * `open` が数え切れているか。false のときは `open` を表示しない(「判断待ちなし」と誤読させない)。
+     * 2026-10-27: Vault 判断ノートを読めないと N の対象が全部抜けて 0 件に見えていたため追加。
+     * 出所(Vault・箱)のどれかが読めない、または Vault の読み取りを止める設定なら false。
+     */
+    openKnown: z.boolean().default(true),
     /** うち priority=blocking。 */
     blocking: z.number().int(),
     /** うち Paseo の承認待ち。 */
@@ -472,13 +478,16 @@ export function judgmentTabRows(
     (i) =>
       (isJudgmentItem(i) || (opts.legacy === true && isLegacyOptionItem(i))) &&
       // 既定は **open だけ**(承認済み・既読を出さない)。`showDone` の時だけ決定済みも並べる。
-      (opts.showDone || isJudgmentOpen(i)) &&
+      // 判断かどうかは上の条件(`isJudgmentItem` / 旧形式)が判定済みなので、ここは state だけを見る
+      // (旧形式は `judgment` 印を持たないため、`isJudgmentOpen` を掛けると `legacy: true` でも出なくなる)。
+      (opts.showDone || isOpenState(i)) &&
       (opts.prio === null || i.priority === opts.prio),
   );
   return opts.newestFirst ? [...rows].sort((a, b) => b.ts - a.ts) : rows;
 }
 
-/** バッジの「要対応」件数=確認箱の open 件数 N。数え方は `countJudgmentCounted`(判断窓口の counts.open と同対象)。 */
+/** バッジの「要対応」件数=確認箱の open 件数 N。数え方は `countJudgmentCounted`
+ * (判断窓口の counts.open の対象である Vault ノートの open + Paseo の承認待ち)。 */
 export function countOpen(items: readonly ConfirmBoxItem[]): number {
   return countJudgmentCounted(items);
 }

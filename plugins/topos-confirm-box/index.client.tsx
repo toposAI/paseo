@@ -67,8 +67,10 @@ function SidebarSectionLink({ section, icon }: { section: "threads" | "concepts"
 
 const badgeText = { color: "#ffffff", fontSize: 10, fontWeight: "700" as const };
 
-/** 件数そのままのバッジ。0/取得前は出さない(既存の確認箱バッジと同じ)。 */
-function CountBadge({ n }: { n: number | undefined }) {
+/** 件数そのままのバッジ。0/取得前は出さない(既存の確認箱バッジと同じ)。
+ * `unknown`(数え切れていない)は件数の代わりに「!」を出す(0 件と読ませない)。 */
+function CountBadge({ n, unknown = false }: { n: number | undefined; unknown?: boolean }) {
+  if (unknown) return <Text style={badgeText}>!</Text>;
   if (!n) return null;
   return <Text style={badgeText}>{n > 99 ? "99+" : n}</Text>;
 }
@@ -77,18 +79,25 @@ function CountBadge({ n }: { n: number | undefined }) {
  * 下部バーの「ユーザー判断」1行の件数。確認箱のバッジと同じ回り方(30秒毎 + 変更通知)で取り直す。
  * 「子スレ完了」のバッジは 2026-10-26 に撤去した(完了報告は完了箱Cへ一本化)。
  */
-function useJudgmentBadge(): number | undefined {
+function useJudgmentBadge(): { n: number | undefined; unknown: boolean } {
   const count = useRpc(confirmBoxCountRpc);
   const signalTimes = useRpc(boxSignalRpc);
   const [n, setN] = useState<number | undefined>(undefined);
+  const [unknown, setUnknown] = useState(false);
   useEffect(() => {
     let alive = true;
     // 一時的な失敗では前回の件数を残す(バッジが消えると「未確認が無くなった」と読めるため)。
     // 件数は確認箱の open(N)。値は件数 RPC(サーバーで `isJudgmentCounted` に絞った数)をそのまま出し、
     // 下部バーだけ別の数え方をしない(2026-10-27: N より大きく出る不具合の再発防止)。
+    // `openKnown` が false のときは数字を出さない(数え切れていない 0 を「判断待ちなし」と読ませない)。
     const tick = () =>
       count({})
-        .then((r) => alive && setN(r.open))
+        .then((r) => {
+          if (!alive) return null;
+          setUnknown(!r.openKnown);
+          setN(r.open);
+          return null;
+        })
         .catch(() => {});
     void tick();
     const timer = setInterval(tick, COUNT_MS);
@@ -105,7 +114,7 @@ function useJudgmentBadge(): number | undefined {
       stop();
     };
   }, [count, signalTimes]);
-  return n;
+  return { n, unknown };
 }
 
 /**
@@ -114,11 +123,11 @@ function useJudgmentBadge(): number | undefined {
  * ノートを持たない旧い箱行は数えない)。
  */
 function BoxTabLink({ currentScreen, openScreen }: BoxTabLinkProps) {
-  const n = useJudgmentBadge();
+  const badge = useJudgmentBadge();
   const press = useCallback(() => openScreen({ screenId: BOX_TAB_SCREEN_ID }), [openScreen]);
   const active = currentScreen?.screenId === BOX_TAB_SCREEN_ID;
   // jsx を prop に渡すと lint(react-perf)に当たるので、要素は一度だけ作る。
-  const trailing = CountBadge({ n });
+  const trailing = CountBadge({ n: badge.n, unknown: badge.unknown });
   return (
     <SidebarRow
       icon="CircleHelp"
