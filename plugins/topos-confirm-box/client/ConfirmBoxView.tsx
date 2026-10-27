@@ -900,7 +900,7 @@ function summarizeFilter({
     legacyOff ? "" : "旧形式含む",
     // 判断窓口の「全N件」は判断ノートだけ。Paseo の承認待ちは別枠なので、含むときは内訳を出す
     // (バッジが窓口の件数より大きく見える理由を画面で分かるようにする。2026-10-27)
-    permits > 0 ? `${count}件(判断${count - permits}件+Paseo承認待ち${permits}件)` : `${count}件`,
+    permits > 0 ? `${count}件(うちPaseo承認待ち${permits}件)` : `${count}件`,
   ];
   return parts.filter(Boolean).join(" · ");
 }
