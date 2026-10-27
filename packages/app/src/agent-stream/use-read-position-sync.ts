@@ -19,6 +19,9 @@ const REPORT_DEBOUNCE_MS = 1500;
 const POST_RESTORE_QUIET_MS = 2500;
 // History may need more than one fetch to reach a row that was seen long ago; stop asking after this.
 const MAX_HISTORY_FETCHES = 8;
+// A restore with no rows attached yet cannot scroll anywhere: it asks again once rows are in.
+const RESTORE_JUMP_ROUNDS = 1;
+// Rows attached by the time the restore asks for its jump: fewer means the chat is still empty.
 // Landing is the view being scrolled around the restored row close to when it was asked for; the
 // fetch for a row that is not loaded yet usually takes longer than this.
 const LANDING_GRACE_MS = 1000;
@@ -145,6 +148,10 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
   const requestAtRef = useRef<number | null>(null);
   const [jumpRequest, setJumpRequest] = useState(0);
   const historyFetchCountRef = useRef(0);
+  // Whether the jump to the stored row has been asked for with the rows already in place, and which
+  // row it goes to.
+  const restoredJumpsRef = useRef(0);
+  const pendingRestoreRef = useRef<number | null>(null);
   const lastOldestSeenRef = useRef<number | null>(null);
   const fetchStartedForRef = useRef<string | null>(null);
   const currentKeyRef = useRef("");
@@ -202,6 +209,8 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     requestAtRef.current = null;
     setJumpRequest(0);
     historyFetchCountRef.current = 0;
+    restoredJumpsRef.current = 0;
+    pendingRestoreRef.current = null;
     lastOldestSeenRef.current = null;
     dismissAtRef.current = null;
     setUnreadFrom(null);
@@ -299,10 +308,7 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
   const restoreAfterHistory = useCallback(
     (storedSeq: number, oldestLoaded: number) => {
       const seen = lastOldestSeenRef.current;
-      if (
-        historyFetchCountRef.current >= MAX_HISTORY_FETCHES ||
-        (seen === oldestLoaded && storedSeq < oldestLoaded)
-      ) {
+      if (historyFetchCountRef.current >= MAX_HISTORY_FETCHES || seen === oldestLoaded) {
         // No progress: the stored row is gone. Leave the chat as it is (no divider) and keep reading
         // from where the record already is; recording from here would start over from the bottom.
         awaitingLandingRef.current = false;
@@ -346,11 +352,27 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     firstUnreadRef.current = pick.firstUnreadSeq;
     setUnreadFrom({ key, epoch: timelineEpoch, seq: pick.firstUnreadSeq });
     requestAtRef.current = Date.now();
+    // A fresh page attaches the chat before its rows are in: with nothing to scroll to, the jump
+    // below finds no row. Remember it, and ask again once the rows are there (see the effect under
+    // it) — the chat would otherwise open at the bottom.
+    pendingRestoreRef.current = pick.restoreSeq;
+    restoredJumpsRef.current = loadedSeqs.length >= RESTORE_JUMP_ROUNDS ? 1 : 0;
     // Each restore gets a fresh number, so the measuring timer below is armed again (even when the
     // new history restores at the same row as the old one).
     setJumpRequest((request) => request + 1);
     jump(pick.restoreSeq);
   }, [fetchedFor, key, loadedSeqs, stored, storedLoaded, timelineEpoch, jump, restoreAfterHistory]);
+
+  // The rows now: the restore's jump found nothing when they were attached after it, so ask again.
+  const hasRows = loadedSeqs.length >= RESTORE_JUMP_ROUNDS;
+  useEffect(() => {
+    if (!isWeb || !restoredRef.current || restoredJumpsRef.current > 0 || !hasRows) return;
+    const seq = pendingRestoreRef.current;
+    if (seq === null) return;
+    restoredJumpsRef.current += 1;
+    pendingRestoreRef.current = null;
+    jump(seq);
+  }, [hasRows, jump]);
 
   // The record is the last row the view showed in full (see read-position-sync.ts); `epoch`/`title`
   // are the ones it was shown under.

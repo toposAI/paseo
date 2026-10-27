@@ -241,6 +241,28 @@ describe("useReadPositionSync", () => {
     expect(sentSeqs()).not.toContain(15);
   });
 
+  it("jumps once more when the rows are attached after the restore", async () => {
+    // A fresh page attaches the chat before its rows: the first jump has nothing to go to.
+    const jump = vi.fn();
+    const { rerender } = renderHook(
+      ({ items }: { items: StreamItem[] }) =>
+        useReadPositionSync({
+          serverId: "host-1",
+          agentId: "a1",
+          timelineEpoch: "e1",
+          items,
+          jumpToSeq: jump,
+        }),
+      { initialProps: { items: [] as StreamItem[] } },
+    );
+    await waitFor(() => expect(rpc.invokePluginRpc).toHaveBeenCalled());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+    expect(jump).not.toHaveBeenCalled();
+
+    rerender({ items: [row(10), row(12), row(15)] });
+    await waitFor(() => expect(jump).toHaveBeenCalledWith(10));
+  });
+
   it("forgets the divider when the history changes", async () => {
     const jump = vi.fn();
     const { result, rerender } = renderHook(
