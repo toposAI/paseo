@@ -103,6 +103,12 @@ import {
 } from "./server/thread-liveness.js";
 import { listAllAgents } from "./server/agent-pages.js";
 import { applyStateDots, stateDotsById } from "./server/agent-state-dots.js";
+import {
+  dropFinishedClosedRows,
+  readCoreWindowIds,
+  readSidebarHiddenIds,
+  standbyForCoreClosed,
+} from "./server/closed-rows.js";
 import { applyWindowUnread, readWindowId } from "./server/window-unread.js";
 import { mergeUnregisteredThreads } from "./server/unregistered-threads.js";
 import type { ListedAgentLike } from "./server/unregistered-threads.js";
@@ -368,6 +374,12 @@ export default function contribute(server: PluginServerContext) {
       // 親の判定は**全ページ**の一覧で行う(1ページ目だけだと、後から建てた子司令塔ほど
       // 「開けない親」に落ちて見出しが開閉だけになる。出口レビュー round2 指摘1)。
       threads = markOpenableParents(threads, finalAgents, access);
+      // 閉じた中核スレは「終了」でなく「待機中」、終わった閉じ行と非表示 id は外す(2026-10-28)。
+      threads = dropFinishedClosedRows(
+        standbyForCoreClosed(threads, readCoreWindowIds()),
+        readCoreWindowIds(),
+        readSidebarHiddenIds(),
+      );
     } catch {
       threads = adoptOrphans(markCoordinators(rows, ids));
       parentsUnknown = true;
