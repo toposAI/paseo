@@ -121,7 +121,8 @@ import {
   notesSidebarRpc,
   openConceptThreadRpc,
 } from "./shared/notes.js";
-import { readNoteRpc, resolveNoteLinkRpc } from "./shared/note-view.js";
+import { readNoteRpc, resolveNoteLinkRpc, saveNoteRpc } from "./shared/note-view.js";
+import { saveVaultNote } from "./server/note-edit.js";
 import { readVaultNote, resolveVaultLink } from "./server/note-view.js";
 import type {
   ConceptModelOption,
@@ -1338,6 +1339,10 @@ export default function contribute(server: PluginServerContext) {
 
   // ノートの閲覧(読むだけ)。live Vault の中のノートだけを返す。
   server.handle(readNoteRpc, async (input) => readVaultNote(resolveVaultDir(), input.path));
+  // 既存ノートの編集(競合検知・履歴つき。新規作成・削除・名前変更はしない)。
+  server.handle(saveNoteRpc, async (input) =>
+    saveVaultNote(resolveVaultDir(), input.path, input.text, input.base),
+  );
   server.handle(resolveNoteLinkRpc, async (input) =>
     resolveVaultLink(resolveVaultDir(), input.from, input.target),
   );

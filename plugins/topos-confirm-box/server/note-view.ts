@@ -7,6 +7,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { isBackupPath } from "./notes.js";
 
 /** 読む本文の上限(バイト)。超えたら先頭だけ返して `truncated`。 */
@@ -23,6 +24,10 @@ export interface NoteReadResult {
   rel: string;
   updatedAt: number;
   truncated: boolean;
+  editable: boolean;
+  editBlock: string;
+  raw: string;
+  version: string;
   message: string | null;
 }
 
@@ -35,6 +40,10 @@ function fail(message: string): NoteReadResult {
     rel: "",
     updatedAt: 0,
     truncated: false,
+    editable: false,
+    editBlock: "",
+    raw: "",
+    version: "",
     message,
   };
 }
@@ -76,6 +85,33 @@ export function confineToVault(
   return { ok: true, real, root };
 }
 
+/** 保存時の「開いた時点の版」。改行の違いを含めた実際の中身(NFC)のハッシュ。 */
+export function noteVersion(text: string): string {
+  return crypto
+    .createHash("sha256")
+    .update(text.normalize("NFC"), "utf8")
+    .digest("hex")
+    .slice(0, 24);
+}
+
+/** 改行の流儀。`crlf` / `lf` / 混在(`mixed`)。保存で元の流儀へ戻すために使う。 */
+export function eolStyle(text: string): "lf" | "crlf" | "mixed" {
+  const crlf = (text.match(/\r\n/g) ?? []).length;
+  const lf = (text.match(/\n/g) ?? []).length - crlf;
+  const cr = (text.match(/\r/g) ?? []).length - crlf;
+  if (cr > 0 || (crlf > 0 && lf > 0)) return "mixed";
+  return crlf > 0 ? "crlf" : "lf";
+}
+
+/** UTF-8 として読めなければ null(置換文字で保存してしまわないため)。 */
+export function decodeStrict(buf: Uint8Array): string | null {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {
+    return null;
+  }
+}
+
 /** frontmatter を本文から分ける。閉じが無ければ全体を本文として返す。 */
 export function splitFrontmatter(text: string): { head: string[]; body: string } {
   const src = text.replace(/^﻿/, "");
@@ -112,6 +148,7 @@ export function readVaultNote(vaultDir: string, file: string): NoteReadResult {
   if (!st.isFile()) return fail("ノートではありません");
   const size = Math.min(st.size, NOTE_VIEW_MAX_BYTES);
   let text: string;
+  let fullBytes: Buffer = Buffer.alloc(0);
   try {
     const fd = fs.openSync(c.real, "r");
     try {
@@ -122,7 +159,8 @@ export function readVaultNote(vaultDir: string, file: string): NoteReadResult {
       }
       const buf = Buffer.alloc(size);
       const n = fs.readSync(fd, buf, 0, size, 0);
-      text = buf.subarray(0, n).toString("utf8");
+      fullBytes = buf.subarray(0, n);
+      text = fullBytes.toString("utf8");
     } finally {
       fs.closeSync(fd);
     }
@@ -131,6 +169,13 @@ export function readVaultNote(vaultDir: string, file: string): NoteReadResult {
   }
   const { head, body } = splitFrontmatter(text);
   const base = path.basename(c.real, ".md");
+  const truncated = st.size > NOTE_VIEW_MAX_BYTES;
+  const strict = truncated ? null : decodeStrict(fullBytes);
+  const eol = strict === null ? "mixed" : eolStyle(strict);
+  let editBlock = "";
+  if (truncated) editBlock = "長いため編集できません";
+  else if (strict === null) editBlock = "UTF-8として読めない文字があるため編集できません";
+  else if (eol === "mixed") editBlock = "改行の形式が混在しているため編集できません";
   return {
     ok: true,
     title: headValue(head, "title") || base,
@@ -138,7 +183,11 @@ export function readVaultNote(vaultDir: string, file: string): NoteReadResult {
     status: headValue(head, "status"),
     rel: path.relative(c.root, c.real).split(path.sep).join("/"),
     updatedAt: Math.round(st.mtimeMs),
-    truncated: st.size > NOTE_VIEW_MAX_BYTES,
+    truncated,
+    editable: editBlock === "",
+    editBlock,
+    raw: editBlock === "" && strict !== null ? strict.replace(/\r\n/g, "\n") : "",
+    version: editBlock === "" && strict !== null ? noteVersion(strict) : "",
     message: null,
   };
 }

@@ -6,10 +6,15 @@
  * 一覧の行の「…」メニューから始める(`topos.notes.open-concept-thread`)。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View, Linking } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View, Linking } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import { openConceptThreadRpc } from "../shared/notes.js";
-import { NOTE_VIEW_SCREEN_ID, readNoteRpc, resolveNoteLinkRpc } from "../shared/note-view.js";
+import {
+  NOTE_VIEW_SCREEN_ID,
+  readNoteRpc,
+  resolveNoteLinkRpc,
+  saveNoteRpc,
+} from "../shared/note-view.js";
 import type { ReadNoteOutput } from "../shared/note-view.js";
 import { parseMarkdown } from "../shared/markdown-lite.js";
 import type { Block, Inline } from "../shared/markdown-lite.js";
@@ -27,17 +32,24 @@ interface Props {
 export function ConceptNoteView({ theme, path, openScreen, openAgent, serverId }: Props) {
   const read = useRpc(readNoteRpc);
   const resolve = useRpc(resolveNoteLinkRpc);
+  const save = useRpc(saveNoteRpc);
   const openThread = useRpc(openConceptThreadRpc);
   const [note, setNote] = useState<ReadNoteOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [conflict, setConflict] = useState<{ current: string; version: string } | null>(null);
   const c = theme.colors;
 
   useEffect(() => {
     setNote(null);
     setError(null);
     setNotice(null);
+    setEditing(false);
+    setConflict(null);
     if (!path) {
       setError("ノートが指定されていません");
       return;
@@ -88,6 +100,51 @@ export function ConceptNoteView({ theme, path, openScreen, openAgent, serverId }
       .finally(() => setBusy(false));
   }, [busy, openAgent, openScreen, openThread, path, serverId]);
 
+  const onEdit = useCallback(() => {
+    if (!note) return;
+    setDraft(note.raw);
+    setConflict(null);
+    setNotice(null);
+    setEditing(true);
+  }, [note]);
+
+  const onCancel = useCallback(() => {
+    setEditing(false);
+    setConflict(null);
+  }, []);
+
+  /** 競合のとき: 自分の編集を捨てて、いま保存されている最新に差し替える。 */
+  const onReload = useCallback(() => {
+    if (!conflict) return;
+    setDraft(conflict.current);
+    setNote((n) => (n ? { ...n, raw: conflict.current, version: conflict.version } : n));
+    setConflict(null);
+  }, [conflict]);
+
+  const onSave = useCallback(() => {
+    if (!path || !note || saving) return;
+    setSaving(true);
+    setNotice(null);
+    save({ path, text: draft, base: note.version })
+      .then((r) => {
+        if (r.status === "saved" || r.status === "unchanged") {
+          // 本文・題名・状態は保存後のファイルから読み直す。
+          setEditing(false);
+          setConflict(null);
+          setNotice(r.message);
+          return read({ path }).then((n) => {
+            if (n.ok) setNote(n);
+            return null;
+          });
+        }
+        if (r.status === "conflict") setConflict({ current: r.current, version: r.version });
+        setNotice(r.message);
+        return null;
+      })
+      .catch((e: unknown) => setNotice(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSaving(false));
+  }, [draft, note, path, read, save, saving]);
+
   const blocks = useMemo(() => (note ? parseMarkdown(note.body) : []), [note]);
   const s = useMemo(() => styles(c), [c]);
 
@@ -112,11 +169,35 @@ export function ConceptNoteView({ theme, path, openScreen, openAgent, serverId }
             >
               <Text style={s.buttonText}>{busy ? "開いています…" : "壁打ちする"}</Text>
             </Pressable>
+            {note.editable && !editing ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="このノートを編集する"
+                onPress={onEdit}
+                style={s.button}
+              >
+                <Text style={s.buttonText}>編集</Text>
+              </Pressable>
+            ) : null}
           </View>
+          {!note.editable && note.editBlock ? <Text style={s.muted}>{note.editBlock}</Text> : null}
           {notice ? <Text style={s.error}>{notice}</Text> : null}
-          {blocks.map((b) => (
-            <BlockView key={b.id} block={b} s={s} onLink={onLink} onExternal={onExternal} />
-          ))}
+          {editing ? (
+            <Editor
+              s={s}
+              draft={draft}
+              onChange={setDraft}
+              saving={saving}
+              conflict={conflict !== null}
+              onSave={onSave}
+              onCancel={onCancel}
+              onReload={onReload}
+            />
+          ) : (
+            blocks.map((b) => (
+              <BlockView key={b.id} block={b} s={s} onLink={onLink} onExternal={onExternal} />
+            ))
+          )}
           {note.truncated ? <Text style={s.muted}>(長いため途中までを表示しています)</Text> : null}
         </>
       ) : null}
@@ -125,6 +206,59 @@ export function ConceptNoteView({ theme, path, openScreen, openAgent, serverId }
 }
 
 type S = ReturnType<typeof styles>;
+
+interface EditorProps {
+  s: S;
+  draft: string;
+  onChange: (v: string) => void;
+  saving: boolean;
+  conflict: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+  onReload: () => void;
+}
+
+function Editor({ s, draft, onChange, saving, conflict, onSave, onCancel, onReload }: EditorProps) {
+  return (
+    <View style={s.editor}>
+      {conflict ? (
+        <Text style={s.error}>
+          別の場所で変更されています。「最新に差し替える」と今の編集は捨てられます(下の文章は
+          コピーしてから)。
+        </Text>
+      ) : null}
+      <TextInput
+        accessibilityLabel="ノートの本文"
+        multiline
+        value={draft}
+        onChangeText={onChange}
+        style={s.input}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+      <View style={s.metaRow}>
+        <Pressable accessibilityRole="button" onPress={onCancel} style={s.button}>
+          <Text style={s.buttonText}>キャンセル</Text>
+        </Pressable>
+        {conflict ? (
+          <Pressable accessibilityRole="button" onPress={onReload} style={s.button}>
+            <Text style={s.buttonText}>最新に差し替える</Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="保存する"
+            disabled={saving}
+            onPress={onSave}
+            style={s.button}
+          >
+            <Text style={s.buttonText}>{saving ? "保存中…" : "保存"}</Text>
+          </Pressable>
+        )}
+      </View>
+    </View>
+  );
+}
 
 interface Handlers {
   s: S;
@@ -253,6 +387,20 @@ function styles(c: Colors) {
       borderWidth: 1,
       borderColor: c.border,
       backgroundColor: c.surface1,
+    },
+    editor: { gap: 8 },
+    input: {
+      color: c.foreground,
+      backgroundColor: c.surface1,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 6,
+      padding: 10,
+      minHeight: 320,
+      fontFamily: "Menlo",
+      fontSize: 13,
+      lineHeight: 20,
+      textAlignVertical: "top",
     },
     buttonText: { color: c.foreground, fontSize: 13 },
     text,

@@ -254,7 +254,7 @@ function releaseLock(file: string, token: string): void {
 }
 
 /** O_EXCL でロックファイルを取る。stale は取り直す。 */
-async function acquireLock(key: string): Promise<() => void> {
+export async function acquireLock(key: string): Promise<() => void> {
   const file = lockFileFor(key);
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -279,7 +279,7 @@ async function acquireLock(key: string): Promise<() => void> {
 }
 
 /** 一時ファイルへ書いて rename する(読み手に中途半端な内容を見せない)。 */
-function atomicWrite(file: string, body: string): void {
+export function atomicWrite(file: string, body: string): void {
   const dir = path.dirname(file);
   const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
   try {

@@ -28,6 +28,14 @@ export const readNoteRpc = defineRpc({
     updatedAt: z.number().default(0),
     /** 本文が上限で切れたか。 */
     truncated: z.boolean().default(false),
+    /** 編集できるか(切れていない・UTF-8・改行が混在していない)。 */
+    editable: z.boolean().default(false),
+    /** editable=false の理由(画面にそのまま出す)。 */
+    editBlock: z.string().default(""),
+    /** 編集用の全文(frontmatter を含む・改行は \n に統一)。editable のときだけ入る。 */
+    raw: z.string().default(""),
+    /** 開いた時点の版(保存時に `base` として返す)。 */
+    version: z.string().default(""),
     /** ok=false の理由(画面にそのまま出す)。 */
     message: z.string().nullable().default(null),
   }),
@@ -50,6 +58,27 @@ export const resolveNoteLinkRpc = defineRpc({
   }),
 });
 export type ResolveNoteLinkOutput = z.infer<typeof resolveNoteLinkRpc.output>;
+
+export const saveNoteRpc = defineRpc({
+  name: "topos.notes.save",
+  input: z.object({
+    path: z.string().min(1).max(4096),
+    /** 編集後の全文(frontmatter を含む)。 */
+    text: z.string().max(1024 * 1024),
+    /** 開いた時点の版(`topos.notes.read` の `version`)。食い違えば上書きしない。 */
+    base: z.string().max(64),
+  }),
+  output: z.object({
+    /** saved=保存した / conflict=別の場所で変わっていた / unchanged=変更なし / rejected=保存できない */
+    status: z.enum(["saved", "conflict", "unchanged", "rejected"]),
+    message: z.string().default(""),
+    /** 保存後(または conflict 時は今)の版。 */
+    version: z.string().default(""),
+    /** conflict のときの今の全文(画面が並べて見せる)。 */
+    current: z.string().default(""),
+  }),
+});
+export type SaveNoteOutput = z.infer<typeof saveNoteRpc.output>;
 
 /** ノートを開く画面の ID(`params.path` に絶対パス)。 */
 export const NOTE_VIEW_SCREEN_ID = "concept-note";
