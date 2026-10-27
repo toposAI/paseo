@@ -62,6 +62,9 @@ export function confineToVault(
   } catch {
     return { ok: false, message: "ノートが見つかりません" };
   }
+  if (!real.toLowerCase().endsWith(".md")) {
+    return { ok: false, message: "Markdown のノート(.md)だけ開けます" };
+  }
   const rel = path.relative(root, real);
   if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel) || isBackupPath(real)) {
     return { ok: false, message: "Vault の外のファイルは開けません" };
@@ -157,8 +160,9 @@ function buildIndex(root: string): LinkIndex {
   const byName = new Map<string, string[]>();
   const byRel = new Map<string, string>();
   let count = 0;
+  let visited = 0;
   const stack = [root];
-  while (stack.length > 0 && count < LINK_INDEX_LIMIT) {
+  while (stack.length > 0 && count < LINK_INDEX_LIMIT && visited < LINK_INDEX_LIMIT * 4) {
     const dir = stack.pop() as string;
     let entries: fs.Dirent[];
     try {
@@ -166,6 +170,7 @@ function buildIndex(root: string): LinkIndex {
     } catch {
       continue;
     }
+    visited += entries.length;
     for (const e of entries) {
       if (e.name.startsWith(".") || e.name === "node_modules") continue;
       const full = path.join(dir, e.name);
@@ -232,7 +237,7 @@ export function resolveVaultLink(
     const base = key.split("/").pop() as string;
     const cands = idx.byName.get(base) ?? [];
     const pool = name.includes("/")
-      ? cands.filter((p) => p.toLowerCase().endsWith(`${key}.md`))
+      ? cands.filter((p) => p.normalize("NFC").toLowerCase().endsWith(`/${key}.md`))
       : cands;
     const fromDir = path.dirname(c.real);
     // 同じフォルダ → 浅い順 → 短い順(Topos のビューアと同じ考え方)。

@@ -114,3 +114,16 @@ test("拒否: 隠しフォルダ・外へ向くフォルダのsymlink・URLエ�
   assert.equal(resolveVaultLink(v, from, "escape/s").ok, false);
   assert.equal(resolveVaultLink(v, path.join(outDir, "s.md"), "a").ok, false);
 });
+
+test("相対指定のリンクはフォルダ境界で一致させる / .md でない実体を指す symlink は拒否", () => {
+  const v = makeVault();
+  resetLinkIndex();
+  fs.mkdirSync(path.join(v, "AnOther"));
+  fs.writeFileSync(path.join(v, "AnOther", "zz.md"), "x");
+  const from = path.join(v, "Paseo", "構想", "検討中", "a.md");
+  assert.equal(resolveVaultLink(v, from, "Other/zz").ok, false);
+  assert.equal(resolveVaultLink(v, from, "AnOther/zz").ok, true);
+  fs.writeFileSync(path.join(v, "data.json"), "{}");
+  fs.symlinkSync(path.join(v, "data.json"), path.join(v, "alias.md"));
+  assert.equal(readVaultNote(v, path.join(v, "alias.md")).ok, false);
+});
