@@ -3,7 +3,7 @@
  *
  * 守ること(2026-10-28 ユーザー決定。Topos の Vault 編集と同じ考え方):
  * - 書き先は live Vault の中の既存 `.md` だけ。パス検査は閲覧と同じ `confineToVault`(Obsidian-Git・Vault 外・
- *   symlink・隠しフォルダは拒否)。
+ *   隠しフォルダは拒否。Vault 内を指す symlink は実体へ書き、Vault 外・バックアップを指すものは拒否)。
  * - 競合検知: 開いた時点の版(`base`)と今のファイルの版が違えば上書きしない(conflict で今の全文を返す)。
  * - 変更履歴: 書き換える前の全文を Vault の**外**(`Application Support/Paseo/note-history`)へ残す。
  *   残せなければ保存しない(履歴なしの上書きは許さない)。
@@ -64,6 +64,7 @@ function historyDirProblem(historyDir: string, vaultRoot: string): string | null
   } catch {
     return "履歴の置き場を確認できません";
   }
+  if (isBackupPath(resolved)) return "履歴の置き場の実体がバックアップ側です";
   const rel = path.relative(vaultRoot, resolved);
   if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) {
     return "履歴の置き場が Vault の中です";
@@ -72,22 +73,32 @@ function historyDirProblem(historyDir: string, vaultRoot: string): string | null
 }
 
 /** 書き換える前の全文を履歴へ残す。残した場所を返す。 */
-function snapshot(historyDir: string, rel: string, before: string, version: string): string {
+function snapshot(historyDir: string, rel: string, before: Uint8Array, version: string): string {
   const key = crypto.createHash("sha1").update(rel).digest("hex").slice(0, 16);
   const dir = path.join(historyDir, key);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "NOTE.txt"), `${rel}\n`, "utf8");
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const file = path.join(dir, `${stamp}-${version}.md`);
-  fs.writeFileSync(file, before, { encoding: "utf8", flag: "wx" });
-  const olds = fs
-    .readdirSync(dir)
-    .filter((n) => n.endsWith(".md"))
-    .sort();
-  for (const n of olds.slice(0, Math.max(0, olds.length - NOTE_HISTORY_KEEP))) {
-    fs.rmSync(path.join(dir, n), { force: true });
-  }
+  fs.writeFileSync(file, before, { flag: "wx" });
   return file;
+}
+
+/** 書き込みが済んだ後で古い世代を消す(失敗しても保存は止めない)。 */
+function pruneHistory(historyDir: string, rel: string): void {
+  const key = crypto.createHash("sha1").update(rel).digest("hex").slice(0, 16);
+  const dir = path.join(historyDir, key);
+  try {
+    const olds = fs
+      .readdirSync(dir)
+      .filter((n) => n.endsWith(".md"))
+      .sort();
+    for (const n of olds.slice(0, Math.max(0, olds.length - NOTE_HISTORY_KEEP))) {
+      fs.rmSync(path.join(dir, n), { force: true });
+    }
+  } catch {
+    // 掃除の失敗で保存結果を変えない
+  }
 }
 
 export async function saveVaultNote(
@@ -156,7 +167,7 @@ function writeLocked(
   if (before === null) return result("rejected", "UTF-8として読めない文字があるため保存できません");
   const eol = eolStyle(before);
   if (eol === "mixed") return result("rejected", "改行の形式が混在しているため保存できません");
-  const nowVersion = noteVersion(before);
+  const nowVersion = noteVersion(bytes);
   const currentLf = before.replace(/\r\n/g, "\n");
   if (nowVersion !== base) {
     return result(
@@ -166,11 +177,19 @@ function writeLocked(
       currentLf,
     );
   }
-  const next = eol === "crlf" ? text.replace(/\r?\n/g, "\r\n") : text.replace(/\r\n/g, "\n");
+  // 単独の \r も改行として扱い、混在ファイルを作らない(自分の保存で編集不能にしない)。
+  const lf = text.replace(/\r\n?/g, "\n");
+  const next = eol === "crlf" ? lf.replace(/\n/g, "\r\n") : lf;
+  if (Buffer.byteLength(next, "utf8") > NOTE_VIEW_MAX_BYTES) {
+    return result("rejected", "大きさの上限を超えるため保存できません");
+  }
   if (next === before) return result("unchanged", "変更がありません", nowVersion);
+  const rel = path.relative(root, real).split(path.sep).join("/");
   try {
-    const rel = path.relative(root, real).split(path.sep).join("/");
-    snapshot(historyDir, rel, before, nowVersion);
+    // 鍵の中でも置き場を確かめ直す(検査後に差し替えられていないか)。
+    const problem = historyDirProblem(historyDir, root);
+    if (problem) return result("rejected", `${problem}(履歴を残せないため保存しません)`);
+    snapshot(historyDir, rel, bytes, nowVersion);
   } catch (e) {
     return result("rejected", `履歴を残せないため保存しません(${(e as Error).message})`);
   }
@@ -179,5 +198,6 @@ function writeLocked(
   } catch (e) {
     return result("rejected", `保存できませんでした(${(e as Error).message})`);
   }
+  pruneHistory(historyDir, rel);
   return result("saved", "保存しました", noteVersion(next));
 }

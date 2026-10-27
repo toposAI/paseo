@@ -85,13 +85,9 @@ export function confineToVault(
   return { ok: true, real, root };
 }
 
-/** 保存時の「開いた時点の版」。改行の違いを含めた実際の中身(NFC)のハッシュ。 */
-export function noteVersion(text: string): string {
-  return crypto
-    .createHash("sha256")
-    .update(text.normalize("NFC"), "utf8")
-    .digest("hex")
-    .slice(0, 24);
+/** 保存時の「開いた時点の版」。BOM・改行・正規化の違いも含む、生バイトのハッシュ。 */
+export function noteVersion(content: string | Uint8Array): string {
+  return crypto.createHash("sha256").update(content).digest("hex").slice(0, 24);
 }
 
 /** 改行の流儀。`crlf` / `lf` / 混在(`mixed`)。保存で元の流儀へ戻すために使う。 */
@@ -103,10 +99,10 @@ export function eolStyle(text: string): "lf" | "crlf" | "mixed" {
   return crlf > 0 ? "crlf" : "lf";
 }
 
-/** UTF-8 として読めなければ null(置換文字で保存してしまわないため)。 */
+/** UTF-8 として読めなければ null(置換文字で保存してしまわないため)。BOM は残す(保存で付け直す)。 */
 export function decodeStrict(buf: Uint8Array): string | null {
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(buf);
   } catch {
     return null;
   }
@@ -187,7 +183,7 @@ export function readVaultNote(vaultDir: string, file: string): NoteReadResult {
     editable: editBlock === "",
     editBlock,
     raw: editBlock === "" && strict !== null ? strict.replace(/\r\n/g, "\n") : "",
-    version: editBlock === "" && strict !== null ? noteVersion(strict) : "",
+    version: editBlock === "" && strict !== null ? noteVersion(fullBytes) : "",
     message: null,
   };
 }

@@ -141,3 +141,46 @@ test("履歴は世代数の上限で古いものから消える", async () => {
   const d = fs.readdirSync(hist)[0];
   assert.equal(fs.readdirSync(path.join(hist, d)).filter((n) => n.endsWith(".md")).length, 50);
 });
+
+test("BOM は保存後も残り、履歴は生バイトのまま", async () => {
+  const { vault, hist, note } = setup();
+  fs.writeFileSync(
+    note,
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("# 題\n本文\n")]),
+  );
+  const r0 = readVaultNote(vault, note);
+  assert.equal(r0.editable, true);
+  const r = await saveVaultNote(vault, note, r0.raw.replace("本文", "変更"), r0.version, hist);
+  assert.equal(r.status, "saved");
+  const after = fs.readFileSync(note);
+  assert.deepEqual([...after.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
+  assert.equal(r.version, noteVersion(after));
+  const d = fs.readdirSync(hist)[0];
+  const snap = fs.readdirSync(path.join(hist, d)).find((n) => n.endsWith(".md")) as string;
+  assert.deepEqual(
+    [...fs.readFileSync(path.join(hist, d, snap)).subarray(0, 3)],
+    [0xef, 0xbb, 0xbf],
+  );
+});
+
+test("単独の CR を含む入力でも混在ファイルにならない", async () => {
+  const { vault, hist, note } = setup();
+  const base = readVaultNote(vault, note).version;
+  const r = await saveVaultNote(vault, note, "a\rb\r\nc\n", base, hist);
+  assert.equal(r.status, "saved");
+  assert.equal(fs.readFileSync(note, "utf8"), "a\nb\nc\n");
+  assert.equal(readVaultNote(vault, note).editable, true);
+});
+
+test("履歴の置き場がバックアップへの symlink なら拒否", async () => {
+  const { tmp, vault, note } = setup();
+  const backup = path.join(tmp, "Obsidian-Git");
+  fs.mkdirSync(backup);
+  const link = path.join(tmp, "histlink");
+  fs.symlinkSync(backup, link);
+  const base = readVaultNote(vault, note).version;
+  const r = await saveVaultNote(vault, note, "# 題\nx\n", base, link);
+  assert.equal(r.status, "rejected");
+  assert.equal(fs.readdirSync(backup).length, 0);
+  assert.equal(fs.readFileSync(note, "utf8"), "# 題\n本文\n");
+});
