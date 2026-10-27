@@ -3,7 +3,7 @@
  * (agent)へ送信してそのスレの応答を表示する。
  *
  * Paseo本体の composer はプラグインAPIに公開されていないため、同じ操作感の簡易入力欄を自前で持つ。
- * 送信先 agent ID はバックエンド確定後に `PRIORITY_CHAT_AGENT_ID` へ入れる(未設定の間は送れず理由を表示)。
+ * 送信先は安い常駐応答役(Sonnet 5.5 low)。判断の要る話はそのスレが裏方1へ回す。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
@@ -16,7 +16,7 @@ import { notifyBoxChanged } from "./events.js";
 /** カード💬の会話スレッド(確認箱チャット用)の agent ID。優先順位ページの常駐会話と共通。 */
 export const CARD_CHAT_AGENT_ID: string | null = "887a6133-01de-498a-be7e-0262c61e0bc9";
 
-export const PRIORITY_CHAT_AGENT_ID: string | null = "887a6133-01de-498a-be7e-0262c61e0bc9";
+export const PRIORITY_CHAT_AGENT_ID: string | null = "94e4ef6d-ca58-420c-b26e-eccce308176e";
 
 /** この幅以上(PC)なら会話を右サイドパネルで出す。未満(スマホ)は下寄せの吹き出し。 */
 const WIDE_MIN_WIDTH = 900;
