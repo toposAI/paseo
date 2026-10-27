@@ -1521,6 +1521,15 @@ export class Session {
     return source ? (this.clientSources.get(source)?.activity ?? null) : null;
   }
 
+  /** topos-customizations: 在席の読み出し口(/api/presence)用。活動報告を受けた端末だけ返す。 */
+  public listClientActivities(): ClientActivity[] {
+    const out: ClientActivity[] = [];
+    for (const meta of this.clientSources.values()) {
+      if (meta.activity) out.push(meta.activity);
+    }
+    return out;
+  }
+
   private getFocusedAgentSelectionForCwd(cwd: string):
     | {
         provider?: string | null;

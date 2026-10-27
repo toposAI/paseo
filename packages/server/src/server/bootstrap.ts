@@ -244,6 +244,7 @@ import { PluginService } from "./plugins/index.js";
 import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
 import { ManagedPluginSources } from "./plugins/managed-source.js";
 import { setupConfirmBox } from "./confirm-box/index.js";
+import { buildPresenceSnapshot, parseWithinSeconds } from "./presence/snapshot.js";
 import type { ConfirmBoxTimelineItem } from "./confirm-box/chat.js";
 import { sendPromptToAgent } from "./agent/agent-prompt.js";
 
@@ -842,6 +843,16 @@ export async function createPaseoDaemon(
       // async で包むことで reject に変わり、ルート側が「返答を読めなかった」として扱える。
       timeline: async (agentId) => projectConfirmBoxTimeline(agentManager.getTimeline(agentId)),
     }),
+  });
+
+  // topos-customizations: 在席の読み出し(読み取り専用)。使っていない間だけ動く常駐スクリプト用。
+  app.get("/api/presence", (req, res) => {
+    const activities = (wsServer?.listSessions() ?? []).flatMap((session) =>
+      session.listClientActivities(),
+    );
+    res.json(
+      buildPresenceSnapshot(activities, Date.now(), parseWithinSeconds(req.query.withinSeconds)),
+    );
   });
 
   app.get("/api/status", (_req, res) => {
