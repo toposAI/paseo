@@ -66,6 +66,13 @@ export function normalizeProjects(raw: unknown): PriorityProject[] | null {
       thread: typeof rec.thread === "string" && rec.thread.trim() ? rec.thread.trim() : null,
       ...(rec.new === true ? { isNew: true } : {}),
       ...(rec.auto === true ? { auto: true } : {}),
+      ...(rec.archived === true
+        ? {
+            archived: true,
+            ...(typeof rec.archived_ts === "number" ? { archivedTs: rec.archived_ts } : {}),
+            ...(typeof rec.archived_by === "string" ? { archivedBy: rec.archived_by } : {}),
+          }
+        : {}),
     });
   }
   return out.length > 0 ? out : null;
@@ -81,8 +88,13 @@ export function readLedger(dir: string): { projects: PriorityProject[]; updatedT
 
 /** UIの `isNew`(読み込み時に `new` から写す)を台帳の `new` に戻す。`auto` はそのまま通す。 */
 function toLedgerRow(p: PriorityProject): Record<string, unknown> {
-  const { isNew, ...rest } = p;
-  return { ...rest, ...(isNew ? { new: true } : {}) };
+  const { isNew, archivedTs, archivedBy, ...rest } = p;
+  return {
+    ...rest,
+    ...(isNew ? { new: true } : {}),
+    ...(archivedTs !== undefined ? { archived_ts: archivedTs } : {}),
+    ...(archivedBy !== undefined ? { archived_by: archivedBy } : {}),
+  };
 }
 
 function writeLedger(dir: string, projects: readonly PriorityProject[]): void {
@@ -106,25 +118,81 @@ function appendLine(dir: string, name: string, rec: unknown): void {
   fs.appendFileSync(path.join(dir, name), JSON.stringify(rec) + "\n", "utf-8");
 }
 
-/** 順位を直接変える。変更前の並びを履歴へ残してから書く(戻せる)。 */
+/** 一覧に出す行(アーカイブ済みを除く)と、アーカイブ済みの行(新しい順)。 */
+export function splitArchived(projects: readonly PriorityProject[]): {
+  visible: PriorityProject[];
+  archived: PriorityProject[];
+} {
+  const visible = projects.filter((p) => p.archived !== true);
+  const archived = projects
+    .filter((p) => p.archived === true)
+    .sort((a, b) => (b.archivedTs ?? 0) - (a.archivedTs ?? 0));
+  return { visible, archived };
+}
+
+/**
+ * 順位を直接変える。`toRank` は**画面に見えている行**(アーカイブ済みを除く)の何位か。
+ * 変更前の並びを履歴へ残してから書く(戻せる)。アーカイブ済みの行は台帳の中で動かさない。
+ */
 export function moveProject(
   dir: string,
   id: string,
   toRank: number,
 ): { ok: boolean; message: string } {
   const { projects } = readLedger(dir);
-  const from = projects.findIndex((p) => p.id === id);
-  if (from < 0) return { ok: false, message: "その項目は台帳にありません" };
-  const to = Math.min(Math.max(toRank, 1), projects.length) - 1;
-  if (to === from) return { ok: true, message: "順位は変わりません" };
+  const { visible } = splitArchived(projects);
+  const fromVisible = visible.findIndex((p) => p.id === id);
+  if (fromVisible < 0) return { ok: false, message: "その項目は台帳にありません" };
+  const toVisible = Math.min(Math.max(toRank, 1), visible.length) - 1;
+  if (toVisible === fromVisible) return { ok: true, message: "順位は変わりません" };
   appendLine(dir, HISTORY_FILE, { ts: Date.now(), by: "ui-move", before: projects });
-  const next = [...projects];
-  const [item] = next.splice(from, 1);
-  next.splice(to, 0, item);
+  const order = visible.map((p) => p.id);
+  const [movedId] = order.splice(fromVisible, 1);
+  order.splice(toVisible, 0, movedId);
+  // 見えている行だけを新しい順に並べ直し、アーカイブ済みは元の位置(添字)のまま残す
+  const byId = new Map(projects.map((p) => [p.id, p]));
+  let k = 0;
+  const next = projects.map((p) => (p.archived === true ? p : (byId.get(order[k++]) as PriorityProject)));
+  const to = next.findIndex((p) => p.id === id);
+  const item = next[to];
   // ユーザーが動かした=確認済み。『新規』の印を外す(台帳の `new`)。
   next[to] = { ...item, isNew: undefined };
   writeLedger(dir, next);
-  return { ok: true, message: `「${item.name}」を ${to + 1} 位にしました` };
+  return { ok: true, message: `「${item.name}」を ${toVisible + 1} 位にしました` };
+}
+
+/** 行をアーカイブする/戻す。台帳から消さず印だけ。履歴へ変更前を残す。 */
+export function archiveProject(
+  dir: string,
+  id: string,
+  archived: boolean,
+): { ok: boolean; message: string } {
+  const { projects } = readLedger(dir);
+  const idx = projects.findIndex((p) => p.id === id);
+  if (idx < 0) return { ok: false, message: "その項目は台帳にありません" };
+  const cur = projects[idx];
+  if ((cur.archived === true) === archived) {
+    return { ok: true, message: archived ? "すでにアーカイブ済みです" : "すでに一覧にあります" };
+  }
+  appendLine(dir, HISTORY_FILE, {
+    ts: Date.now(),
+    by: archived ? "ui-archive" : "ui-unarchive",
+    before: projects,
+  });
+  const next = [...projects];
+  if (archived) {
+    next[idx] = { ...cur, isNew: undefined, archived: true, archivedTs: Date.now(), archivedBy: "ui" };
+  } else {
+    // 戻した行は一覧の末尾に置く(元の順位は他の行が動いて意味を失っているため)
+    const { archived: _a, archivedTs: _t, archivedBy: _b, ...rest } = cur;
+    next.splice(idx, 1);
+    next.push(rest);
+  }
+  writeLedger(dir, next);
+  return {
+    ok: true,
+    message: archived ? `「${cur.name}」をアーカイブしました` : `「${cur.name}」を一覧に戻しました`,
+  };
 }
 
 /** 自由記述を受ける。要求を追記し、受領の返答を**同期で必ず1行**書く(fail-open)。 */

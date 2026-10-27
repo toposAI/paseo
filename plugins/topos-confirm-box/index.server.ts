@@ -32,6 +32,7 @@ import {
   cardChatSayRpc,
   countUrgentUnreadNotifications,
   isNotificationItem,
+  priorityArchiveRpc,
   priorityListRpc,
   priorityMoveRpc,
   prioritySayRpc,
@@ -153,7 +154,14 @@ import {
   readCardChat,
   sayToCard,
 } from "./server/cardchat.js";
-import { moveProject, readLedger, readReplies, sayToLedger } from "./server/priority.js";
+import {
+  archiveProject,
+  moveProject,
+  readLedger,
+  readReplies,
+  sayToLedger,
+  splitArchived,
+} from "./server/priority.js";
 import {
   answerlessAllowBlocked,
   permitQuestions,
@@ -709,8 +717,17 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(priorityListRpc, async () => {
     const dir = resolveConfirmBoxDir();
-    const { projects, updatedTs } = readLedger(dir);
-    return { projects, replies: readReplies(dir), updatedTs };
+    const { projects: all, updatedTs } = readLedger(dir);
+    const { visible, archived } = splitArchived(all);
+    return { projects: visible, archived, replies: readReplies(dir), updatedTs };
+  });
+
+  server.handle(priorityArchiveRpc, async (input) => {
+    try {
+      return archiveProject(resolveConfirmBoxDir(), input.id, input.archived);
+    } catch (error) {
+      return { ok: false, message: `アーカイブできません: ${(error as Error).message}` };
+    }
   });
 
   server.handle(priorityMoveRpc, async (input) => {

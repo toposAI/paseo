@@ -12,7 +12,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Platform, Pressable, Text, TextInput, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
 import { onBoxChanged } from "./events.js";
-import { priorityListRpc, priorityMoveRpc, prioritySayRpc } from "../shared/contract.js";
+import {
+  priorityArchiveRpc,
+  priorityListRpc,
+  priorityMoveRpc,
+  prioritySayRpc,
+} from "../shared/contract.js";
 import type { PriorityListOutput } from "../shared/contract.js";
 
 const REFRESH_MS = 30_000;
@@ -272,6 +277,7 @@ function RankRow({
   isNew,
   styles,
   onShift,
+  onArchive,
 }: {
   id: string;
   index: number;
@@ -282,7 +288,9 @@ function RankRow({
   isNew: boolean;
   styles: Styles;
   onShift: (id: string, toRank: number) => Promise<void>;
+  onArchive: (id: string, archived: boolean) => Promise<void>;
 }) {
+  const archive = useCallback(() => void onArchive(id, true), [onArchive, id]);
   const up = useCallback(() => void onShift(id, index), [onShift, id, index]);
   const down = useCallback(() => void onShift(id, index + 2), [onShift, id, index]);
   const card = useMemo(() => [styles.card, rankRow, dragStyle], [styles.card]);
@@ -303,6 +311,35 @@ function RankRow({
       <Pressable accessibilityRole="button" style={styles.btn} onPress={down}>
         <Text style={styles.btnText}>▼</Text>
       </Pressable>
+      <Pressable accessibilityRole="button" style={styles.btn} onPress={archive}>
+        <Text style={styles.btnText}>アーカイブ</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function ArchivedRow({
+  id,
+  name,
+  styles,
+  onArchive,
+}: {
+  id: string;
+  name: string;
+  styles: Styles;
+  onArchive: (id: string, archived: boolean) => Promise<void>;
+}) {
+  const restore = useCallback(() => void onArchive(id, false), [onArchive, id]);
+  const card = useMemo(() => [styles.card, rankRow], [styles.card]);
+  const label = useMemo(() => [styles.muted, grow], [styles.muted]);
+  return (
+    <View style={card}>
+      <Text style={label} numberOfLines={2}>
+        {name}
+      </Text>
+      <Pressable accessibilityRole="button" style={styles.btn} onPress={restore}>
+        <Text style={styles.btnText}>戻す</Text>
+      </Pressable>
     </View>
   );
 }
@@ -320,6 +357,8 @@ export function PriorityView({
   const list = useRpc(priorityListRpc);
   const move = useRpc(priorityMoveRpc);
   const say = useRpc(prioritySayRpc);
+  const archiveRpc = useRpc(priorityArchiveRpc);
+  const [showArchived, setShowArchived] = useState(false);
   const [data, setData] = useState<PriorityListOutput | null>(null);
   const [text, setText] = useState("");
   const [notice, setNotice] = useState("");
@@ -355,6 +394,19 @@ export function PriorityView({
     },
     [move, reload],
   );
+
+  const onArchive = useCallback(
+    async (id: string, archived: boolean) => {
+      try {
+        setNotice((await archiveRpc({ id, archived })).message);
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : String(e));
+      }
+      void reload();
+    },
+    [archiveRpc, reload],
+  );
+  const toggleArchived = useCallback(() => setShowArchived((v) => !v), []);
 
   const listRef = useRef<View>(null);
   const drop = useCallback(
@@ -415,7 +467,7 @@ export function PriorityView({
       <Text style={styles.muted}>
         開発の優先順位(全{data?.projects.length ?? 0}
         件)。行タップで担当スレを開く。ドラッグ/長押しか▲▼で
-        並べ替え。確認箱の判断も上位プロジェクトが先に並びます
+        並べ替え。終わった項目は「アーカイブ」で一覧から外せます(戻せます)。確認箱の判断も上位プロジェクトが先に並びます
       </Text>
       {notice ? <Text style={styles.muted}>{notice}</Text> : null}
       <View ref={listRef} style={gap8}>
@@ -429,9 +481,22 @@ export function PriorityView({
             isNew={p.isNew === true}
             styles={styles}
             onShift={shift}
+            onArchive={onArchive}
           />
         ))}
       </View>
+      {(data?.archived.length ?? 0) > 0 ? (
+        <Pressable accessibilityRole="button" style={styles.btn} onPress={toggleArchived}>
+          <Text style={styles.btnText}>
+            {`アーカイブ済み ${data?.archived.length ?? 0} 件を${showArchived ? "隠す" : "見る"}`}
+          </Text>
+        </Pressable>
+      ) : null}
+      {showArchived
+        ? data?.archived.map((p) => (
+            <ArchivedRow key={p.id} id={p.id} name={p.name} styles={styles} onArchive={onArchive} />
+          ))
+        : null}
       <TextInput
         value={text}
         onChangeText={setText}

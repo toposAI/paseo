@@ -313,6 +313,11 @@ export const PriorityProjectSchema = z.object({
   isNew: z.boolean().optional(),
   /** 動いているスレから自動で足された行(台帳の `auto`)。UIは書き戻しで落とさない。 */
   auto: z.boolean().optional(),
+  /** アーカイブ済み(台帳の `archived`)。一覧には出さず、「アーカイブ済み」から戻せる。台帳からは消さない。 */
+  archived: z.boolean().optional(),
+  /** アーカイブした時刻(ms)と理由(`ui`=ユーザーが押した / `auto:…`=完了検知)。 */
+  archivedTs: z.number().optional(),
+  archivedBy: z.string().optional(),
 });
 export type PriorityProject = z.infer<typeof PriorityProjectSchema>;
 
@@ -330,6 +335,8 @@ export const priorityListRpc = defineRpc({
   input: z.object({}),
   output: z.object({
     projects: z.array(PriorityProjectSchema),
+    /** アーカイブ済みの行(新しい順)。一覧には出さず、戻す操作だけに使う。 */
+    archived: z.array(PriorityProjectSchema),
     replies: z.array(PriorityReplySchema),
     updatedTs: z.number(),
   }),
@@ -340,6 +347,13 @@ export type PriorityListOutput = z.infer<typeof priorityListRpc.output>;
 export const priorityMoveRpc = defineRpc({
   name: "topos.confirmbox.priority.move",
   input: z.object({ id: z.string(), toRank: z.number().int() }),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
+
+/** 行をアーカイブ(archived=true)/ 戻す(false)。台帳から消さず印だけ付け外しする(可逆)。 */
+export const priorityArchiveRpc = defineRpc({
+  name: "topos.confirmbox.priority.archive",
+  input: z.object({ id: z.string(), archived: z.boolean() }),
   output: z.object({ ok: z.boolean(), message: z.string() }),
 });
 
