@@ -618,6 +618,63 @@ describe("useReadPositionSync", () => {
     expect(sentSeqs()).toEqual([]);
   }, 15_000);
 
+  describe("a position read on another device", () => {
+    function expectUnreadFrom(
+      result: { current: { unreadFromSeq: number | null } },
+      seq: number | null,
+    ) {
+      return waitFor(() => expect(result.current.unreadFromSeq).toBe(seq));
+    }
+
+    async function openThenComeBack(remoteSeq: number) {
+      const jump = vi.fn();
+      const { result } = renderHook(() =>
+        useReadPositionSync({
+          serverId: "host-1",
+          agentId: "a1",
+          timelineEpoch: "e1",
+          items: [row(10), row(12), row(15), row(18)],
+          jumpToSeq: jump,
+        }),
+      );
+      await waitFor(() => expect(result.current.unreadFromSeq).toBe(12));
+      rpc.invokePluginRpc.mockImplementation(async (_pluginId, method) =>
+        method === "topos.readpos.get"
+          ? { enabled: true, seq: remoteSeq, epoch: "e1", updatedAt: 2 }
+          : { ok: true },
+      );
+      const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      visibility.mockReturnValue("visible");
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      visibility.mockRestore();
+      jump.mockClear();
+      return { result, jump };
+    }
+
+    it("moves the divider below what the other device read, without moving the view", async () => {
+      const { result, jump } = await openThenComeBack(15);
+      await expectUnreadFrom(result, 18);
+      expect(jump).not.toHaveBeenCalled();
+    });
+
+    it("drops the divider when the other device read everything that was unread", async () => {
+      const { result, jump } = await openThenComeBack(18);
+      await expectUnreadFrom(result, null);
+      expect(jump).not.toHaveBeenCalled();
+    });
+
+    it("keeps the divider when the other device is behind this one", async () => {
+      const { result } = await openThenComeBack(11);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(result.current.unreadFromSeq).toBe(12);
+    });
+  });
+
   it("does not record a chat that followed new rows while the page was away", async () => {
     const jump = vi.fn();
     const { result, rerender } = renderHook(
