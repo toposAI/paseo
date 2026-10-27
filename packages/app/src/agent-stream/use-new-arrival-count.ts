@@ -27,7 +27,11 @@ export function useNewArrivalCount(input: {
     [baselineSeq, epoch, holding, items],
   );
   useEffect(() => {
-    if (holding) return;
+    const known = baselineRef.current;
+    const sameChat = known !== null && known.key === resetKey && known.epoch === epoch;
+    // Opened already away from the bottom (a restored place): nothing was followed yet, so start
+    // counting from what is loaded now.
+    if (holding && sameChat) return;
     baselineRef.current = { key: resetKey, epoch, seq: newestSeqOf(items, epoch) };
   }, [epoch, holding, items, resetKey]);
   return count;

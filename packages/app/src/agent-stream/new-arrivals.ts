@@ -1,4 +1,5 @@
 import type { StreamItem } from "@/types/stream";
+import { getStreamItemMessageId } from "./presentation";
 
 // Rows that arrive while the reader is away from the bottom do not move the view; they are only
 // counted, so the "new messages" button can say how many are waiting below.
@@ -15,8 +16,9 @@ export function newestSeqOf(items: readonly StreamItem[], epoch: string | null):
 }
 
 /**
- * Rows newer than the baseline. Older history loading in above the reader has smaller seqs, so it
- * is never counted as news.
+ * Messages newer than the baseline. Older history loading in above the reader has smaller seqs, so
+ * it is never counted as news. An assistant message is several rows, so rows are counted once per
+ * message, and the reader's own sent messages are not news.
  */
 export function countArrivalsAfter(
   items: readonly StreamItem[],
@@ -24,10 +26,13 @@ export function countArrivalsAfter(
   baselineSeq: number | null,
 ): number {
   if (baselineSeq === null) return 0;
-  let count = 0;
+  const messages = new Set<string>();
   for (const item of items) {
     const cursor = item.timelineCursor;
-    if (cursor && cursor.epoch === epoch && cursor.seq > baselineSeq) count += 1;
+    if (item.kind === "user_message") continue;
+    if (cursor && cursor.epoch === epoch && cursor.seq > baselineSeq) {
+      messages.add(getStreamItemMessageId(item));
+    }
   }
-  return count;
+  return messages.size;
 }

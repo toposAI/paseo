@@ -285,6 +285,16 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
         const remoteSeq = remote.seq;
         if (highWaterRef.current !== null && remoteSeq <= highWaterRef.current) return;
         highWaterRef.current = remoteSeq;
+        // A report still waiting to go out must not overwrite the further place the other device saved.
+        const waiting = pendingRef.current;
+        if (
+          waiting &&
+          waiting.atKey === key &&
+          waiting.epoch === epoch &&
+          waiting.seq <= remoteSeq
+        ) {
+          pendingRef.current = null;
+        }
         setStored(remote);
         if (shouldDismissUnreadDivider(remoteSeq, dismissAtRef.current)) {
           setUnreadFrom((current) => (current?.key === key ? null : current));
