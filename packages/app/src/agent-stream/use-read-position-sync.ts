@@ -82,11 +82,8 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     null,
   );
   const dismissAtRef = useRef<number | null>(null);
-  // While the unread stretch below the divider is still on screen, the reader may not move their
-  // record into it by scrolling (a long line grows as it streams and drops out of view). Cleared by
-  // reaching the divider or the newest row.
-  const blockedUntilRef = useRef<{ key: string; markerSeq: number; readSeq: number } | null>(null);
   const restoredRef = useRef(false);
+
   const awaitingLandingRef = useRef(false);
   const landedRef = useRef(false);
   const quietUntilRef = useRef(0);
@@ -109,9 +106,9 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
   const estimateRef = useRef<number | null>(null);
   const estimateStampRef = useRef<"jump" | "load" | null>(null);
   const requestAtRef = useRef<number | null>(null);
+  const [jumpRequest, setJumpRequest] = useState(0);
   const historyFetchCountRef = useRef(0);
-  const oldestRequestedRef = useRef<number | null>(null);
-  const fetchedForRef = useRef<string | null>(null);
+  const lastOldestSeenRef = useRef<number | null>(null);
   const fetchStartedForRef = useRef<string | null>(null);
   const currentKeyRef = useRef("");
   const latestRef = useRef({ epoch: timelineEpoch, title, newest: -1 });
@@ -145,6 +142,8 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
 
   // New chat or new history: forget everything. Leaving a chat (or the page going hidden) must not
   // lose the last seen row; the pending row carries its own chat and epoch, so sending it here is safe.
+  // A new history keeps the fetched record (it is per chat, and the epoch it was written under is
+  // checked when it is used), so only the state that belongs to the old history goes.
   useEffect(() => {
     setSettleAt(null);
     restoredRef.current = false;
@@ -159,13 +158,10 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     estimateRef.current = null;
     estimateStampRef.current = null;
     requestAtRef.current = null;
+    setJumpRequest(0);
     historyFetchCountRef.current = 0;
-    oldestRequestedRef.current = null;
-    fetchedForRef.current = null;
+    lastOldestSeenRef.current = null;
     dismissAtRef.current = null;
-    blockedUntilRef.current = null;
-    setStored(null);
-    setFetchedFor(null);
     setUnreadFrom(null);
     if (!isWeb) return;
     const onHidden = () => {
@@ -177,6 +173,13 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
       sendPending();
     };
   }, [key, timelineEpoch, sendPending]);
+
+  // A new chat (not a new history) also drops the fetched record so it is asked for again.
+  useEffect(() => {
+    fetchStartedForRef.current = null;
+    setStored(null);
+    setFetchedFor(null);
+  }, [key]);
 
   // The default-on rule reads the title, so ask once it is known (and only once per chat).
   useEffect(() => {
@@ -201,20 +204,22 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
 
   // The reader stopped before the oldest loaded row: the rows in between are missing, so a divider
   // here would sit under a gap and silently skip them. Pull that part of the history and decide
-  // again once it is here. A fetch that brings nothing older, or too many fetches, ends the waiting
-  // with the restored row unknown (opened as if everything were read) rather than never restoring.
+  // again once it is here. Progress means the oldest loaded row moved down; rows arriving at the
+  // bottom are not progress. With no progress (the row is gone) or after too many fetches, the
+  // jump is not trusted: the record waits for the reader to move instead of marking everything read.
   const restoreAfterHistory = useCallback(
-    (storedSeq: number) => {
-      const oldest = oldestRequestedRef.current;
+    (storedSeq: number, oldestLoaded: number) => {
+      const seen = lastOldestSeenRef.current;
       if (
         historyFetchCountRef.current >= MAX_HISTORY_FETCHES ||
-        (oldest !== null && storedSeq >= oldest)
+        (seen !== null && oldestLoaded >= seen)
       ) {
-        restoredRef.current = true;
+        // No progress: the stored row is gone. Leave the chat as it is (no divider, no record) —
+        // recording the newest row here would mark rows that were never shown as read.
+        awaitingLandingRef.current = false;
         return;
       }
-      if (oldest === null) requestAtRef.current = Date.now();
-      oldestRequestedRef.current = storedSeq;
+      lastOldestSeenRef.current = oldestLoaded;
       historyFetchCountRef.current += 1;
       jump(storedSeq);
     },
@@ -228,7 +233,7 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     const storedSeq =
       stored?.enabled === true && stored.epoch === timelineEpoch ? stored.seq : null;
     if (storedSeq !== null && storedSeq < oldestLoaded) {
-      restoreAfterHistory(storedSeq);
+      restoreAfterHistory(storedSeq, oldestLoaded);
       return;
     }
     restoredRef.current = true;
@@ -242,44 +247,25 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     setSettleAt(quietUntilRef.current);
     dismissAtRef.current = pick.newestSeq;
     firstUnreadRef.current = pick.firstUnreadSeq;
-    if (stored?.seq !== null && stored?.seq !== undefined) {
-      blockedUntilRef.current = {
-        key,
-        markerSeq: pick.firstUnreadSeq,
-        readSeq: stored.seq,
-      };
-    }
     setUnreadFrom({ key, epoch: timelineEpoch, seq: pick.firstUnreadSeq });
     requestAtRef.current = Date.now();
+    // Each restore gets a fresh number, so the measuring timer below is armed again (even when the
+    // new history restores at the same row as the old one).
+    setJumpRequest((request) => request + 1);
     jump(pick.restoreSeq);
   }, [fetchedFor, key, loadedSeqs, stored, timelineEpoch, jump, restoreAfterHistory]);
 
-  const unreadFromSeqRef = useRef<number | null>(null);
-
-  /** Records the last row the reader has fully seen; `epoch`/`title` are the ones it was seen under. */
+  // The record is the last row the view showed in full (see read-position-sync.ts); `epoch`/`title`
+  // are the ones it was shown under.
   const record = useCallback(
     (viewedSeq: number | null, epoch: string | null, seenUnder: string | null) => {
       if (Date.now() < quietUntilRef.current) return;
-      if (viewedSeq !== null && viewedSeq >= (dismissAtRef.current ?? Number.POSITIVE_INFINITY)) {
-        // Everything that existed at open has been seen: nothing left to protect.
-        blockedUntilRef.current = null;
-      } else if (
-        viewedSeq !== null &&
-        viewedSeq >= (unreadFromSeqRef.current ?? Number.POSITIVE_INFINITY)
-      ) {
-        // The reader reached the divider; from here on the rows they pass are read.
-        blockedUntilRef.current = null;
-      }
       const next = nextHighWater(highWaterRef.current, viewedSeq);
       if (next === null) return;
       highWaterRef.current = next;
       if (shouldDismissUnreadDivider(next, dismissAtRef.current)) {
         setUnreadFrom((current) => (current?.key === key ? null : current));
       }
-      // A scrolling view is already showing what it moves past: drop the not-yet-read mark as soon
-      // as the reader has moved it (the rows below the divider that were on screen still are not
-      // read; the report sent for this landing keeps the old position, see `sendPending`).
-      if (blockedUntilRef.current !== null) blockedUntilRef.current = null;
       pendingRef.current = { seq: next, epoch, title: seenUnder, serverId, agentId, atKey: key };
       if (!timerRef.current) timerRef.current = setTimeout(sendPending, REPORT_DEBOUNCE_MS);
     },
@@ -303,18 +289,19 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
         } else if (estimateStampRef.current === "load") {
           // Rows still being loaded can move the view without the reader: not a landing.
           estimateStampRef.current = null;
-        } else if (estimate !== null && topSeq !== null && topSeq !== estimate) {
-          // A scroll reaching above where the view was left once the request settled is the reader
-          // moving (the rows loaded on the way can be taller than the ones replaced).
+        } else if (estimate !== null && topSeq !== null && topSeq < estimate) {
+          // The view moved up, away from the bottom the chat starts at: the reader scrolled, or the
+          // jump took effect. Moving down is what a chat left at the bottom does on its own.
           landedRef.current = true;
         }
       }
       if (Date.now() < quietUntilRef.current) return;
       if (awaitingLandingRef.current) {
         // Without a landing, the report is the bottom of the chat (where the newest rows are) and
-        // would mark every unread row as read; skip it until the reader moves.
-        if (!landedRef.current && (viewedSeq === null || viewedSeq >= latestRef.current.newest))
-          return;
+        // would mark every unread row as read; skip it until the reader moves. When the stored row
+        // could not be brought into view at all, every report is this case: the record waits rather
+        // than going past rows that were never shown.
+        if (!landedRef.current) return;
         awaitingLandingRef.current = false;
       }
       landedRef.current = false;
@@ -339,7 +326,8 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
       Math.max(0, request + LANDING_GRACE_MS - Date.now()),
     );
     return () => clearTimeout(timer);
-  }, [fetchedFor, stored]);
+    // Re-armed per jump request: the record arriving for the chat is not the moment to measure.
+  }, [jumpRequest]);
 
   // A jump the view cannot tell apart from the bottom (every unread row fits on one screen) still
   // counts as landed once the quiet moment is over. The timer is scheduled from the restore itself:
@@ -378,7 +366,6 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     unreadFrom !== null && unreadFrom.key === key && unreadFrom.epoch === timelineEpoch
       ? unreadFrom.seq
       : null;
-  unreadFromSeqRef.current = unreadFromSeq;
 
   // Rows loaded while the view is at the bottom move it there, not the reader: remember that the
   // next report may be caused by loading.

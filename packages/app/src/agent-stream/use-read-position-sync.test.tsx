@@ -67,6 +67,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   useSessionStore.setState({ sessions: {} } as never);
 });
 
@@ -117,12 +118,13 @@ describe("useReadPositionSync", () => {
     );
     await waitFor(() => expect(result.current.unreadFromSeq).toBe(12));
 
-    // The viewport is quiet right after the jump; reports resume a few seconds later.
+    // The viewport is quiet right after the jump; reports resume a few seconds later. The view
+    // reports both cursors: the top row (at the divider) and the last row shown in full.
     const afterLanding = Date.now() + 10_000;
     const spy = vi.spyOn(Date, "now").mockReturnValue(afterLanding);
-    act(() => result.current.reportViewedSeq(12));
+    act(() => result.current.reportViewedSeq(12, 10));
     expect(result.current.unreadFromSeq).toBe(12);
-    act(() => result.current.reportViewedSeq(15));
+    act(() => result.current.reportViewedSeq(15, 12));
     await waitFor(() => expect(result.current.unreadFromSeq).toBeNull());
     spy.mockRestore();
   });
@@ -222,6 +224,60 @@ describe("useReadPositionSync", () => {
     // divider under a gap (which would silently skip that stretch).
     expect(jump).toHaveBeenCalledWith(5);
     expect(result.current.unreadFromSeq).toBeNull();
+  });
+
+  it("keeps fetching until the rows between the record and the loaded ones arrive", async () => {
+    rpc.invokePluginRpc.mockImplementation(
+      async (_pluginId, method): Promise<RpcReply | null> =>
+        method === "topos.readpos.get" ? { enabled: true, seq: 1, epoch: "e1" } : { ok: true },
+    );
+    const jump = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ items }: { items: StreamItem[] }) =>
+        useReadPositionSync({
+          serverId: "host-1",
+          agentId: "a1",
+          timelineEpoch: "e1",
+          items,
+          jumpToSeq: jump,
+        }),
+      { initialProps: { items: [row(10), row(12)] } },
+    );
+    await waitFor(() => expect(jump).toHaveBeenCalledWith(1));
+
+    // The older rows arrive, but not far enough yet: keep asking instead of giving up on the first
+    // answer, or the divider would sit under a gap (or never appear at all).
+    rerender({ items: [row(5), row(10), row(12)] });
+    await waitFor(() => expect(jump.mock.calls.length).toBeGreaterThan(1));
+
+    rerender({ items: [row(1), row(5), row(10), row(12)] });
+    await waitFor(() => expect(result.current.unreadFromSeq).toBe(5));
+  });
+
+  it("keeps recording after the history changes", async () => {
+    const jump = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ items, epoch }: { items: StreamItem[]; epoch: string }) =>
+        useReadPositionSync({
+          serverId: "host-1",
+          agentId: "a1",
+          timelineEpoch: epoch,
+          items,
+          jumpToSeq: jump,
+        }),
+      { initialProps: { items: [row(10), row(12), row(15)], epoch: "e1" } },
+    );
+    await waitFor(() => expect(result.current.unreadFromSeq).toBe(12));
+
+    rerender({ items: [row(11, "e2"), row(12, "e2"), row(13, "e2")], epoch: "e2" });
+    await waitFor(() => expect(result.current.unreadFromSeq).toBeNull());
+
+    // The new history is not resumed from (the record belongs to the old one), but reading in it is
+    // still recorded — under the new history, so the next open can use it.
+    act(() => result.current.reportViewedSeq(13, 11));
+    await waitFor(() => expect(sentSeqs()).toContain(13), { timeout: 4000 });
+    const last = readposSetCalls().at(-1);
+    expect((last?.[2] as { epoch?: string } | undefined)?.epoch).toBe("e2");
   });
 
   it("does not resume from a record written under another history", async () => {
