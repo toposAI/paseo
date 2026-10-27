@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { countOpen, judgmentTabRows, type ConfirmBoxItem } from "../shared/contract.js";
-import { countJudgmentOpen } from "../shared/judgment-open.js";
+import { countJudgmentCounted } from "../shared/judgment-open.js";
 
 function item(id: string, extra: Partial<ConfirmBoxItem> = {}): ConfirmBoxItem {
   return {
@@ -29,38 +29,44 @@ function item(id: string, extra: Partial<ConfirmBoxItem> = {}): ConfirmBoxItem {
   } as ConfirmBoxItem;
 }
 
-test("バッジの件数(countOpen)と判断タブの既定の行数は常に一致する", () => {
+test("バッジの件数(countOpen)は判断窓口の N(Vault ノート由来 + permit の open)と同じ", () => {
   const items = [
-    item("a"),
-    item("b", { priority: "blocking" }),
-    item("c", { state: "approved" }),
+    // Vault 判断ノート由来(ノート化された判断)
+    item("v1", { kind: "pending", key: "vault:j-1" }),
+    item("v2", { kind: "pending", key: "vault:j-2", priority: "blocking" }),
+    item("c", { kind: "pending", key: "vault:j-3", state: "approved" }),
     item("d", { judgment: false }),
-    item("e", { judgment: false, options: [{ id: "a", label: "x" } as never] }),
+    item("e", { judgment: false, options: [{ id: "a", label: "x" }] as never }),
     item("p", { kind: "permit", judgment: false }),
     // 既読=材料待ち相当。判断窓口の open ではないので、バッジにも判断タブにも出さない(2026-10-27)
-    item("n", { state: "read" }),
+    item("n", { kind: "pending", key: "vault:j-4", state: "read" }),
+    // ノート化されていない古い箱の判断行。N に出てこないのでバッジには数えない(2026-10-27)
+    item("stale", { key: "coord-j-6b02455-20261025" }),
   ];
   const rows = judgmentTabRows(items, { showDone: false, prio: null, newestFirst: false });
-  assert.equal(countOpen(items), rows.length);
-  assert.equal(countJudgmentOpen(items), countOpen(items));
-  // a・b・p の3件だけ(approved・read・印なしは数えない)
-  assert.equal(rows.length, 3);
+  // v1・v2・p の3件だけ(approved・read・印なし・ノート無しの箱行は数えない)
+  assert.equal(countOpen(items), 3);
+  assert.equal(countJudgmentCounted(items), countOpen(items));
+  // 判断タブはまだノートになっていない投函も見せるので N ≤ 行数(隠す方が害が大きい)
+  assert.equal(rows.length, 4);
+  assert.ok(rows.some((r) => r.id === "stale"));
 });
 
-test("バッジの件数は判断窓口の open 件数と同じ(材料待ち・承認済み・既読を足さない)", () => {
+test("バッジの件数は判断窓口の open 件数と同じ(材料待ち・承認済み・既読・ノート無しの箱行を足さない)", () => {
   const items = [
-    item("open-1"),
-    item("open-2", { priority: "blocking" }),
-    item("approve", { state: "approved" }),
-    item("read-1", { state: "read" }),
+    item("open-1", { kind: "pending", key: "vault:j-1" }),
+    item("open-2", { kind: "pending", key: "vault:j-2", priority: "blocking" }),
+    item("approve", { kind: "pending", key: "vault:j-3", state: "approved" }),
+    item("read-1", { kind: "pending", key: "vault:j-4", state: "read" }),
     item("notice", { judgment: false, options: [] }),
+    item("stale", { key: "inbox-monitor-parallel-count-merge-blocked-20261025" }),
   ];
-  assert.equal(countJudgmentOpen(items), 2);
-  // 判断タブ(既定の絞り込み)の行数と揃う
+  assert.equal(countJudgmentCounted(items), 2);
+  // 判断タブ(既定の絞り込み)は、承認済み・既読・通知を除いた3件(ノート無しの箱行は出す)
   assert.equal(
     judgmentTabRows(items, { showDone: false, prio: null, newestFirst: false }).length,
-    2,
+    3,
   );
   // 決定済みを出す設定でもバッジの数は変わらない(バッジは open だけ)
-  assert.equal(countJudgmentOpen(items), 2);
+  assert.equal(countJudgmentCounted(items), 2);
 });

@@ -1,26 +1,27 @@
 /**
  * サイドバー(下部バー)と確認箱の中のバッジの件数が、確認箱の open 件数 N から逃げない回帰ガード
- * (2026-10-27: バッジが N より大きく出ることがあった)。
+ * (2026-10-27: バッジが N より大きく出ることがあった。実測 11 対 窓口A「残り3」)。
  *
- * 数え方は3箇所(画面の一覧・確認箱の中のバッジ・下部バー)にあるが、SSOT は `countJudgmentOpen` の1本。
+ * 数え方の SSOT は `shared/judgment-open.ts` の `countJudgmentCounted`。N は判断窓口
+ * (`judgment_window.py` の `counts.open` = Vault 判断ノートの open)と同じ対象にする。
  * 描画の実体は React Native なので `node --test` では動かせない。代わりに**ソースの形**を機械的に検査する
  * (`sidebar-trailing-badge.test.ts` と同じ方式)。
  */
 import assert from "node:assert/strict";
-import fs, { readFileSync } from "node:fs";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { isJudgmentItem, type ConfirmBoxItem } from "../shared/contract.js";
-import { countJudgmentOpen, isJudgmentOpen } from "../shared/judgment-open.js";
+import { countOpen, type ConfirmBoxItem } from "../shared/contract.js";
+import { countJudgmentCounted, isJudgmentCounted } from "../shared/judgment-open.js";
 import { readVaultDecisions } from "./vault-decisions.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pluginDir = join(here, "..");
-const serverSource = readFileSync(join(pluginDir, "index.server.ts"), "utf8");
-const clientSource = readFileSync(join(pluginDir, "index.client.tsx"), "utf8");
+const serverSource = fs.readFileSync(join(pluginDir, "index.server.ts"), "utf8");
+const clientSource = fs.readFileSync(join(pluginDir, "index.client.tsx"), "utf8");
 
 function item(over: Partial<ConfirmBoxItem>): ConfirmBoxItem {
   return {
@@ -48,21 +49,24 @@ function item(over: Partial<ConfirmBoxItem>): ConfirmBoxItem {
   };
 }
 
-test("open=N は箱の new(判断印・permit)だけ。材料待ち・既読・承認済み・通知・旧形式は数えない", () => {
+test("N は Vault ノート由来(vault:)と permit の new だけ。材料待ち・既読・承認済み・ノート無しの箱行は数えない", () => {
   const items = [
-    item({ id: "a" }),
-    item({ id: "b", priority: "blocking" }),
+    item({ id: "v1", kind: "pending", key: "vault:j-1" }),
+    item({ id: "v2", kind: "pending", key: "vault:j-2", priority: "blocking" }),
     item({ id: "p", kind: "permit", judgment: false }),
-    item({ id: "materials", state: "read", summary: "【材料待ち】差分の整理" }),
-    item({ id: "done", state: "approved" }),
+    // 材料待ち相当(既読)・承認済みは数えない
+    item({ id: "materials", kind: "pending", key: "vault:j-3", state: "read" }),
+    item({ id: "done", kind: "pending", key: "vault:j-4", state: "approved" }),
+    // ノート化されていない古い箱の判断行=N に出てこない(2026-10-27 の実例の形)
+    item({ id: "stale", key: "coord-j-6b02455-20261025" }),
+    // 通知・旧形式
     item({ id: "notice", judgment: false }),
     item({ id: "legacy", judgment: false, options: [{ id: "a", label: "x" }] }),
   ];
-  const open = items.filter(isJudgmentOpen);
-  assert.equal(open.length, 3);
-  assert.equal(countJudgmentOpen(items), 3);
-  // 数えた項目はすべて judgment(通知・旧形式を混ぜていない)
-  assert.ok(open.every(isJudgmentItem));
+  assert.equal(items.filter(isJudgmentCounted).length, 3);
+  assert.equal(countJudgmentCounted(items), 3);
+  // バッジ(countOpen)も同じ数
+  assert.equal(countOpen(items), 3);
 });
 
 test("Vault の判断ノート: open は出し、材料待ちは出す前の段で外す(窓口の open_notes と同じ数)", () => {
@@ -97,14 +101,33 @@ a 維持 / b 取り消す
   const r = readVaultDecisions({ TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir });
   assert.equal(r.error, null);
   assert.equal(r.waiting, 1);
-  assert.equal(countJudgmentOpen(r.items), 2, "材料待ちは出さないのでバッジにも乗らない");
+  assert.equal(countJudgmentCounted(r.items), 2, "材料待ちは出さないのでバッジにも乗らない");
 });
 
-test("確認箱の中のバッジ(サーバー)と下部バー(クライアント)は `countJudgmentOpen` の1本を使う", () => {
-  // サーバー: 件数 RPC の open は isJudgmentOpen で絞る(`state !== "approved"` を復活させない)
-  assert.match(serverSource, /import \{ isJudgmentOpen \} from "\.\/shared\/judgment-open\.js";/);
-  assert.match(serverSource, /const open = items\.filter\(isJudgmentOpen\);/);
+test("実データの形: Stale な箱行が残っていても N はノートの open と同じ", () => {
+  // 画面の一覧(ノート + 残った箱行)で数えても、バッジの数え方はノートの open から動かない
+  const items = [
+    item({ id: "pending:vault:j-a", kind: "pending", key: "vault:j-a" }),
+    item({ id: "pending:vault:j-b", kind: "pending", key: "vault:j-b" }),
+    item({ id: "b4ec64f814d1477d", key: "inbox-monitor-parallel-count-merge-blocked-20261025" }),
+    item({ id: "0d6672bfb083419e", key: "coord-j-6b02455-20261025" }),
+  ];
+  assert.equal(countOpen(items), 2);
+});
+
+test("確認箱の中のバッジ(サーバー)と下部バー(クライアント)は `countJudgmentCounted` の1本を使う", () => {
+  // サーバー: 件数 RPC の open は isJudgmentCounted で絞る(`state !== "approved"` を復活させない)
+  assert.match(
+    serverSource,
+    /import \{ isJudgmentCounted \} from "\.\/shared\/judgment-open\.js";/,
+  );
+  assert.match(serverSource, /const open = items\.filter\(isJudgmentCounted\);/);
   assert.doesNotMatch(serverSource, /i\.state !== "approved"/);
+  assert.doesNotMatch(
+    serverSource,
+    /items\.filter\(isJudgmentOpen\)/,
+    "N を判断タブの全行で数えない",
+  );
 
   // クライアント: 下部バーの `useJudgmentBadge` は件数 RPC の値を書き換えずに出す
   const start = clientSource.indexOf("function useJudgmentBadge(");

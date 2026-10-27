@@ -61,7 +61,7 @@ import {
   readVaultDecisions,
   vaultSourceEnabled,
 } from "./server/vault-decisions.js";
-import { isJudgmentOpen } from "./shared/judgment-open.js";
+import { isJudgmentCounted } from "./shared/judgment-open.js";
 import {
   childThreadsArchiveRpc,
   childThreadsListRpc,
@@ -503,9 +503,10 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(confirmBoxCountRpc, async (_input, ctx) => {
     const { items, sources, generatedAt } = await collect(ctx);
-    // 判断タブ・下部バーと同じ定義(SSOT は `countJudgmentOpen`)。判断窓口の counts.open(N)に揃えるため、
-    // 承認済みだけでなく材料待ち(`waiting_materials`)も数えない。通知だけの項目は数えない。
-    const open = items.filter(isJudgmentOpen);
+    // 数え方の SSOT は `countJudgmentCounted`。判断窓口の counts.open(N)と同じ対象に揃えるため、
+    // Vault 判断ノート由来の項目と permit のうち state が new だけを数え、材料待ち・承認済み・既読と
+    // ノートを持たない古い箱の判断行(答え先が無い行)は数えない。通知だけの項目も数えない。
+    const open = items.filter(isJudgmentCounted);
     // バッジは失敗しても0で返す(件数が取れないだけで確認箱そのものは開けるようにする)
     let bugs = 0;
     try {

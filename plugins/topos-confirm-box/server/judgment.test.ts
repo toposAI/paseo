@@ -120,7 +120,7 @@ test("(e) 印ありも印なしの選択肢つきも通知タブに出ない(選
   );
 });
 
-test("(f) countOpen も同じ定義(判断印か permit だけを数え、旧形式は数えない)", () => {
+test("(f) countOpen は判断窓口の N と同じ対象(Vault ノート由来と permit だけ。旧形式・ノート無しの箱行は数えない)", () => {
   const rows = [
     MAIL,
     JUDGMENT,
@@ -128,6 +128,9 @@ test("(f) countOpen も同じ定義(判断印か permit だけを数え、旧形
     item({ id: "box:done", judgment: true, options: OPTIONS, state: "approved" }),
     PERMIT,
     item({ id: "box:notify-read", source: "x", state: "read" }),
+    item({ id: "pending:vault:j", kind: "pending", key: "vault:j" }),
+    // ノート化されていない古い箱の判断行(N に出てこない。2026-10-27)
+    item({ id: "box:stale", key: "coord-j-6b02455-20261025" }),
   ];
   assert.equal(countOpen(rows), 2);
 });

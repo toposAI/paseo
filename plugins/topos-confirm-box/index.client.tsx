@@ -84,7 +84,7 @@ function useJudgmentBadge(): number | undefined {
   useEffect(() => {
     let alive = true;
     // 一時的な失敗では前回の件数を残す(バッジが消えると「未確認が無くなった」と読めるため)。
-    // 件数は確認箱の open(N)。値は件数 RPC(サーバーで `isJudgmentOpen` に絞った数)をそのまま出し、
+    // 件数は確認箱の open(N)。値は件数 RPC(サーバーで `isJudgmentCounted` に絞った数)をそのまま出し、
     // 下部バーだけ別の数え方をしない(2026-10-27: N より大きく出る不具合の再発防止)。
     const tick = () =>
       count({})
