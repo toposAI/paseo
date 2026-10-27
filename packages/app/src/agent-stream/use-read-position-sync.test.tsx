@@ -48,6 +48,13 @@ function sentSeqs(): number[] {
   });
 }
 
+/** The reader scrolling with the keyboard/wheel: the only thing that counts as reading. */
+function readerScrolls() {
+  act(() => {
+    document.dispatchEvent(new Event("wheel"));
+  });
+}
+
 function setTitle(title: string) {
   useSessionStore.setState({
     sessions: {
@@ -178,6 +185,8 @@ describe("useReadPositionSync", () => {
 
     // Only after the reader has been back to the divider is the position theirs to move. The report
     // is debounced by 1.5s, so give the send more room than waitFor's default.
+    readerScrolls();
+    act(() => result.current.reportViewedSeq(12, 10));
     await waitFor(() => expect(sentSeqs()).toContain(12), { timeout: 4000 });
     expect(sentSeqs()).not.toContain(15);
   });
@@ -278,7 +287,7 @@ describe("useReadPositionSync", () => {
     const afterQuiet = Date.now() + 10_000;
     const spy = vi.spyOn(Date, "now").mockReturnValue(afterQuiet);
     act(() => result.current.reportViewedSeq(13, 11));
-    act(() => result.current.reportViewedSeq(12, 10));
+    readerScrolls();
     act(() => result.current.reportViewedSeq(12, 10));
     spy.mockRestore();
     await waitFor(() => expect(readposSetCalls().length).toBeGreaterThan(0), { timeout: 4000 });
@@ -289,9 +298,7 @@ describe("useReadPositionSync", () => {
   it("does not mark the chat as read from where it opened when there is no record yet", async () => {
     rpc.invokePluginRpc.mockImplementation(
       async (_pluginId, method): Promise<RpcReply | null> =>
-        method === "topos.readpos.get"
-          ? { enabled: true, seq: null, epoch: null }
-          : { ok: true },
+        method === "topos.readpos.get" ? { enabled: true, seq: null, epoch: null } : { ok: true },
     );
     const jump = vi.fn();
     const { result } = renderHook(() =>
@@ -330,10 +337,111 @@ describe("useReadPositionSync", () => {
     // Once the reader actually scrolls, reading is recorded again.
     const later = Date.now() + 20_000;
     const spy2 = vi.spyOn(Date, "now").mockReturnValue(later);
-    act(() => result.current.reportViewedSeq(12, 10));
+    readerScrolls();
     act(() => result.current.reportViewedSeq(12, 10));
     spy2.mockRestore();
     await waitFor(() => expect(sentSeqs()).toContain(12), { timeout: 4000 });
+    expect(sentSeqs()).not.toContain(15);
+  }, 15_000);
+
+  it("does not record rows that arrive while nobody is at the screen", async () => {
+    rpc.invokePluginRpc.mockImplementation(
+      async (_pluginId, method): Promise<RpcReply | null> =>
+        method === "topos.readpos.get" ? { enabled: true, seq: null, epoch: null } : { ok: true },
+    );
+    const jump = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ items }: { items: StreamItem[] }) =>
+        useReadPositionSync({
+          serverId: "host-1",
+          agentId: "a1",
+          timelineEpoch: "e1",
+          items,
+          jumpToSeq: jump,
+        }),
+      { initialProps: { items: [row(10), row(12)] } },
+    );
+    await waitFor(() => expect(rpc.invokePluginRpc).toHaveBeenCalled());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+
+    // The chat is left open at the bottom and new rows keep coming: they move both ends of the view
+    // without anyone scrolling. Recording that is exactly "the chat was newest in the morning".
+    const afterQuiet = Date.now() + 10_000;
+    const spy = vi.spyOn(Date, "now").mockReturnValue(afterQuiet);
+    act(() => result.current.reportViewedSeq(12, 12));
+    rerender({ items: [row(10), row(12), row(15)] });
+    act(() => result.current.reportViewedSeq(15, 15));
+    rerender({ items: [row(10), row(12), row(15), row(18)] });
+    act(() => result.current.reportViewedSeq(18, 18));
+    spy.mockRestore();
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    expect(sentSeqs()).toEqual([]);
+  }, 15_000);
+
+  it("keeps recording when the stored row is gone from the history", async () => {
+    rpc.invokePluginRpc.mockImplementation(
+      async (_pluginId, method): Promise<RpcReply | null> =>
+        method === "topos.readpos.get" ? { enabled: true, seq: 5, epoch: "e1" } : { ok: true },
+    );
+    const jump = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ items }: { items: StreamItem[] }) =>
+        useReadPositionSync({
+          serverId: "host-1",
+          agentId: "a1",
+          timelineEpoch: "e1",
+          items,
+          jumpToSeq: jump,
+        }),
+      { initialProps: { items: [row(10), row(12)] } },
+    );
+    // The row the record points at is gone from the loaded rows and the history will not grow.
+    await waitFor(() => expect(jump).toHaveBeenCalledWith(5));
+    rerender({ items: [row(10), row(12)] });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+    const later = Date.now() + 10_000;
+    const spy = vi.spyOn(Date, "now").mockReturnValue(later);
+    readerScrolls();
+    // The chat stays where it opened (the bottom) until the reader scrolls; the first report is
+    // where it opened, the second is the reader.
+    act(() => result.current.reportViewedSeq(12, 10));
+    act(() => result.current.reportViewedSeq(13, 12));
+    spy.mockRestore();
+    // Even though the record could not be brought into view, reading is still recorded past it —
+    // otherwise this chat would never record anything again.
+    await waitFor(() => expect(sentSeqs().length).toBeGreaterThan(0), { timeout: 4000 });
+  }, 15_000);
+
+  it("keeps the newest rows out of the record when the jump could not land and news arrives", async () => {
+    const jump = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ items }: { items: StreamItem[] }) =>
+        useReadPositionSync({
+          serverId: "host-1",
+          agentId: "a1",
+          timelineEpoch: "e1",
+          items,
+          jumpToSeq: jump,
+        }),
+      { initialProps: { items: [row(10), row(12), row(15)] } },
+    );
+    await waitFor(() => expect(result.current.unreadFromSeq).toBe(12));
+
+    // The jump did not take effect: the view stays at the bottom, where the top row is the newest.
+    // After the landing grace the view is measured there.
+    act(() => result.current.reportViewedSeq(15, 15));
+    // A new row arrives and the bottom follows it downwards. That is not a landing either: the
+    // reader has still not been shown anything above the divider.
+    rerender({ items: [row(10), row(12), row(15), row(18)] });
+    act(() => result.current.reportViewedSeq(18, 18));
+
+    const afterQuiet = Date.now() + 10_000;
+    const spy = vi.spyOn(Date, "now").mockReturnValue(afterQuiet);
+    readerScrolls();
+    act(() => result.current.reportViewedSeq(18, 18));
+    spy.mockRestore();
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    expect(sentSeqs()).not.toContain(18);
     expect(sentSeqs()).not.toContain(15);
   }, 15_000);
 

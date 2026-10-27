@@ -22,6 +22,7 @@ const MAX_HISTORY_FETCHES = 8;
 // Landing is the view being scrolled around the restored row close to when it was asked for; the
 // fetch for a row that is not loaded yet usually takes longer than this.
 const LANDING_GRACE_MS = 1000;
+const READER_SCROLL_INPUTS = ["wheel", "touchmove", "keydown", "pointerdown"] as const;
 
 interface Input {
   serverId: string;
@@ -95,12 +96,12 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
   // The rows on top and at the bottom where the chat opened.
   const restTopRef = useRef<number | null>(null);
   const restViewedRef = useRef<number | null>(null);
-  // Reports dropped during the quiet moment may already show the reader's view; the first report
-  // after it only moves that view on, without recording.
-  const quietDroppedRef = useRef(false);
-  const restUntilRef = useRef(0);
-  // The view was only moved on from; the record already holds what was on screen before.
-  const skipRecordRef = useRef(false);
+  // The reader's own scrolling, as input rather than rows moving: rows also move from a resize, a
+  // rotation, loading, and the chat following new messages while nobody is at the screen.
+  const readerMovedRef = useRef(false);
+  // The view has been looked at in this chat: coming back to the page re-arms the opening rule even
+  // when nothing has been restored (there is no record to restore from yet).
+  const hasBeenShownRef = useRef(false);
   const quietUntilRef = useRef(0);
   const highWaterRef = useRef<number | null>(null);
   // The row is captured with the chat and history epoch it was seen under, so a send that happens
@@ -167,9 +168,8 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     mustMoveRef.current = false;
     restTopRef.current = null;
     restViewedRef.current = null;
-    quietDroppedRef.current = false;
-    restUntilRef.current = 0;
-    skipRecordRef.current = false;
+    readerMovedRef.current = false;
+    hasBeenShownRef.current = false;
     quietUntilRef.current = 0;
     highWaterRef.current = null;
     pendingRef.current = null;
@@ -185,12 +185,33 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     dismissAtRef.current = null;
     setUnreadFrom(null);
     if (!isWeb) return;
-    const onHidden = () => {
-      if (document.visibilityState === "hidden") sendPending();
+    const onReaderScroll = () => {
+      readerMovedRef.current = true;
     };
-    document.addEventListener("visibilitychange", onHidden);
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        sendPending();
+        return;
+      }
+      // Back looking at the page: the view has not been looked at yet, even if its layout settled
+      // while the page was away.
+      readerMovedRef.current = false;
+      if (hasBeenShownRef.current) mustMoveRef.current = true;
+      restTopRef.current = null;
+      restViewedRef.current = null;
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    // The page is a web app, so these are the reader's own moving (keyboard included). A resize or a
+    // rotation fires none of them, and neither does the chat following new rows. Registered before the
+    // record is fetched, so a scroll made while it is on its way still counts.
+    for (const type of READER_SCROLL_INPUTS) {
+      document.addEventListener(type, onReaderScroll, { capture: true, passive: true });
+    }
     return () => {
-      document.removeEventListener("visibilitychange", onHidden);
+      document.removeEventListener("visibilitychange", onVisibility);
+      for (const type of READER_SCROLL_INPUTS) {
+        document.removeEventListener(type, onReaderScroll, { capture: true });
+      }
       sendPending();
     };
   }, [key, timelineEpoch, sendPending]);
@@ -240,9 +261,11 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
         historyFetchCountRef.current >= MAX_HISTORY_FETCHES ||
         (seen === oldestLoaded && storedSeq < oldestLoaded)
       ) {
-        // No progress: the stored row is gone. Leave the chat as it is (no divider, no record) —
-        // recording the newest row here would mark rows that were never shown as read.
+        // No progress: the stored row is gone. Leave the chat as it is (no divider) and keep reading
+        // from where the record already is; recording from here would start over from the bottom.
         awaitingLandingRef.current = false;
+        restoredRef.current = true;
+        highWaterRef.current = storedSeq;
         mustMoveRef.current = true;
         return;
       }
@@ -276,7 +299,6 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     }
     awaitingLandingRef.current = true;
     quietUntilRef.current = Date.now() + POST_RESTORE_QUIET_MS;
-    restUntilRef.current = quietUntilRef.current;
     setSettleAt(quietUntilRef.current);
     dismissAtRef.current = pick.newestSeq;
     firstUnreadRef.current = pick.firstUnreadSeq;
@@ -295,10 +317,6 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
       if (Date.now() < quietUntilRef.current) return;
       const next = nextHighWater(highWaterRef.current, viewedSeq);
       if (next === null) return;
-      if (skipRecordRef.current) {
-        skipRecordRef.current = false;
-        return;
-      }
       highWaterRef.current = next;
       if (shouldDismissUnreadDivider(next, dismissAtRef.current)) {
         setUnreadFrom((current) => (current?.key === key ? null : current));
@@ -327,34 +345,25 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     return estimate !== null && topSeq < estimate;
   }, []);
 
-  // Whether leaving the row the chat opened at means the reader has moved: both ends have to move,
-  // since a resize or a rotation re-lays the rows out and moves the top one while the reader is still
-  // looking at the same place, and the bottom stays put. "moving" is every report that does not
-  // (yet) count as that move. "waited" is the first report after the chat opened being left while it
-  // had to wait for the reader.
-  const leavesOpeningSpot = useCallback(
-    (viewedSeq: number | null, topSeq: number | null): "no" | "moving" | "waited" => {
-      if (!mustMoveRef.current) {
-        // Reports dropped during the quiet moment may already be the reader's view: the first one to
-        // count is the first the view moves on from, not the quiet moment's own view.
-        if (!quietDroppedRef.current || (topSeq !== null && topSeq > lastViewedRef.current!)) {
-          return "no";
-        }
-        return "waited";
-      }
+  // Whether the view has left the row the chat opened at. Both ends have to move: a resize or a
+  // rotation re-lays the rows out and moves the top one while the reader is still looking at the
+  // same place, and the bottom stays put.
+  const leftOpeningSpot = useCallback(
+    (viewedSeq: number | null, topSeq: number | null): boolean => {
+      if (!mustMoveRef.current) return true;
       if (restTopRef.current === null) {
         // The view had not been measured when the chat opened (or has not been measured yet).
         restTopRef.current = topSeq;
         restViewedRef.current = viewedSeq;
-        return "moving";
+        return false;
       }
       const moved =
         topSeq !== null && topSeq !== restTopRef.current && viewedSeq !== restViewedRef.current;
-      if (!moved) return "moving";
+      if (!moved) return false;
       mustMoveRef.current = false;
       restTopRef.current = null;
       restViewedRef.current = null;
-      return "no";
+      return true;
     },
     [],
   );
@@ -363,17 +372,15 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     (viewedSeq: number | null, topSeq: number | null = null) => {
       // Until the stored record has been applied, the bottom of the chat would overwrite it.
       if (!isWeb || !storedLoaded || !restoredRef.current || !stored?.enabled) return;
+      // A page that is not being looked at cannot be read (a phone left in a pocket, a tab in the
+      // background); its rows keep arriving and keep moving the view.
+      if (document.visibilityState === "hidden") return;
+      hasBeenShownRef.current = true;
       lastViewedRef.current = viewedSeq;
       lastTopRef.current = topSeq;
       // The landing is only remembered here; recording still waits for the quiet moment.
       if (awaitingLandingRef.current && looksLanded(topSeq)) landedRef.current = true;
-      if (Date.now() < quietUntilRef.current) {
-        // Whether the reader's own view arrived during the quiet moment is not known until it ends.
-        if (topSeq !== null) quietDroppedRef.current = true;
-        return;
-      }
-      // The state of the view when it was quiet; the reader's next report is the one to record.
-      if (Date.now() >= restUntilRef.current) quietDroppedRef.current = false;
+      if (Date.now() < quietUntilRef.current) return;
       if (awaitingLandingRef.current) {
         // Without a landing, the report is the bottom of the chat (where the newest rows are) and
         // would mark every unread row as read; skip it until the reader moves. When the stored row
@@ -382,21 +389,31 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
         if (!landedRef.current) return;
         awaitingLandingRef.current = false;
       }
-      // Where the chat opened is not where the reader has read to: the record waits until the view
-      // leaves it. When that has to wait, the quiet moment's own view is not the reader's either.
-      const brushed = leavesOpeningSpot(viewedSeq, topSeq);
-      if (brushed === "moving") return;
-      if (brushed === "waited") {
-        quietDroppedRef.current = false;
-        lastViewedRef.current = viewedSeq;
-        lastTopRef.current = topSeq;
-        skipRecordRef.current = true;
-        return;
+      // The divider is about what existed when the chat opened, not about the record: it goes as soon
+      // as the reader has been shown that far, even when reading is not recorded yet.
+      if (shouldDismissUnreadDivider(viewedSeq, dismissAtRef.current)) {
+        setUnreadFrom((current) => (current?.key === key ? null : current));
       }
+      // The rows moving is not the reader reading: they also move when the chat follows new messages
+      // while nobody is at the screen. Until the reader scrolls here, the record stays where it was.
+      // Where the chat opened is not where the reader has read to: the record waits until the view
+      // leaves it. (Takes the opening spot itself, so it runs before the reader check below.)
+      const leftSpot = leftOpeningSpot(viewedSeq, topSeq);
+      // A report that shows the divider (or above it) was not taken at the bottom at open, whatever
+      // its timing: the view can only be there because it moved.
+      if (
+        viewedSeq !== null &&
+        firstUnreadRef.current !== null &&
+        viewedSeq <= firstUnreadRef.current
+      ) {
+        readerMovedRef.current = true;
+      }
+      if (!readerMovedRef.current) return;
+      if (!leftSpot) return;
       landedRef.current = false;
       record(viewedSeq, latestRef.current.epoch, latestRef.current.title);
     },
-    [leavesOpeningSpot, looksLanded, record, stored, storedLoaded],
+    [key, leftOpeningSpot, looksLanded, record, stored, storedLoaded],
   );
 
   // The jump request is measured once the view has had time to apply it (history fetched for a row
@@ -437,18 +454,24 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
           (top !== null &&
             (firstUnread !== null && top <= firstUnread
               ? true
-              : estimate !== null && top !== estimate));
-        // Never take "still at the bottom" for a landing: a jump that failed leaves the view there,
-        // and recording it would mark every unread row as read.
+              : // Up, away from the bottom; down is what the bottom does on its own when news
+                // arrives, and a failed jump leaves the view there.
+                estimate !== null && top < estimate));
         if (!landed) return;
         awaitingLandingRef.current = false;
         landedRef.current = false;
+        // The rows on screen are not read by being on screen: the record only moves once the reader
+        // has scrolled. The divider still goes once the newest row at open has been reached.
+        if (shouldDismissUnreadDivider(lastViewedRef.current, dismissAtRef.current)) {
+          setUnreadFrom((current) => (current?.key === key ? null : current));
+        }
+        if (!readerMovedRef.current || !leftOpeningSpot(lastViewedRef.current, top)) return;
         record(lastViewedRef.current, epoch, latestRef.current.title);
       },
       Math.max(0, settleAt + 100 - Date.now()),
     );
     return () => clearTimeout(timer);
-  }, [settleAt, key, timelineEpoch, record]);
+  }, [settleAt, key, timelineEpoch, record, leftOpeningSpot]);
 
   // Only the current chat and history's divider counts; one remembered from before must not show.
   const unreadFromSeq =
