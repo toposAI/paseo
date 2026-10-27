@@ -32,6 +32,7 @@ const item = (over: Partial<ConfirmBoxItem> = {}) =>
 const ctx = (over: Partial<ProgressContext> = {}): ProgressContext => ({
   intake: {},
   approvalItems: {},
+  phases: {},
   boxItems: [],
   now: NOW,
   ...over,
@@ -124,4 +125,16 @@ test("他ソースの項目は無視し、台帳が壊れていれば受付に�
   assert.equal(c.boxItems.length, 0);
   assert.deepEqual(c.intake, {});
   assert.equal(deriveProgress(rep(), c).stage, "received");
+});
+
+test("手動の段階は台帳より優先し、完了(done)は上書きしない", () => {
+  const phases = { [RID]: { phase: "awaiting_apply", note: "修正済み・反映待ち" } };
+  const p = deriveProgress(rep(), ctx({ phases }));
+  assert.equal(p.stage, "awaiting_apply");
+  assert.equal(p.detail, "修正済み・反映待ち");
+  assert.equal(deriveProgress(rep({ status: "done" }), ctx({ phases })).stage, "done");
+  assert.equal(
+    deriveProgress(rep(), ctx({ phases: { [RID]: { phase: "bogus" } } })).stage,
+    "received",
+  );
 });

@@ -28,12 +28,20 @@ interface IntakeEntry {
   /** 秒(Python の time.time())。 */
   at?: number;
 }
+/** 子スレ/裏方が `feedback_phase.py` で書く手動の段階(台帳が無い報告の救済)。 */
+interface PhaseEntry {
+  phase?: string;
+  note?: string;
+}
+const MANUAL_PHASES = ["investigating", "awaiting_decision", "awaiting_apply"] as const;
 interface StepEntry {
   state?: string;
 }
 export interface ProgressContext {
   intake: Record<string, IntakeEntry>;
   approvalItems: Record<string, { chosen?: string; steps?: Record<string, StepEntry> }>;
+  /** `feedback_phase.json`(報告ID → 手動の段階)。 */
+  phases: Record<string, PhaseEntry>;
   /** source=feedback_auto の確認箱項目。 */
   boxItems: readonly ConfirmBoxItem[];
   now: number;
@@ -64,6 +72,7 @@ export function loadProgressContext(
     approvalItems: asRecord<{ chosen?: string; steps?: Record<string, StepEntry> }>(
       readJson(path.join(ledgerDir, "feedback_approval_ledger.json")).items,
     ),
+    phases: asRecord<PhaseEntry>(readJson(path.join(ledgerDir, "feedback_phase.json"))),
     boxItems: boxItems.filter((i) => i.source === "feedback_auto"),
     now,
   };
@@ -137,6 +146,12 @@ export function deriveProgress(
   if (report.status === "hold") return make("awaiting_decision", `保留中${replied}`);
   const agentId = ctx.intake[report.id]?.agent_id;
   const threadId = typeof agentId === "string" ? agentId : null;
+  const manual = ctx.phases[report.id];
+  const phase = MANUAL_PHASES.find((p) => p === manual?.phase);
+  if (phase) {
+    const note = typeof manual?.note === "string" ? manual.note.slice(0, 120) : "";
+    return make(phase, note || `手動で「${phase}」と記録${replied}`, { threadId });
+  }
   const item = findItem(report.id, ctx.boxItems);
   return item
     ? progressForItem(item, ctx, threadId, replied)

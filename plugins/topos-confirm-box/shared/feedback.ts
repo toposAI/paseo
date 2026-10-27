@@ -22,6 +22,7 @@ export const FEEDBACK_PROGRESS_STAGES = [
   "received",
   "investigating",
   "awaiting_decision",
+  "awaiting_apply",
   "applying",
   "done",
   "stale",
@@ -29,9 +30,10 @@ export const FEEDBACK_PROGRESS_STAGES = [
 export type FeedbackProgressStage = (typeof FEEDBACK_PROGRESS_STAGES)[number];
 
 export const FEEDBACK_PROGRESS_LABEL: Record<FeedbackProgressStage, string> = {
-  received: "受付",
-  investigating: "調査中",
-  awaiting_decision: "判断待ち(修正済み・確認待ち)",
+  received: "未対応",
+  investigating: "AI対応中",
+  awaiting_decision: "ユーザー判断待ち",
+  awaiting_apply: "反映待ち(直したが家族版に未反映)",
   applying: "反映中",
   done: "完了",
   stale: "⚠放置の疑い",
