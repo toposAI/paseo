@@ -23,7 +23,9 @@ import { CHILD_THREADS_FILE } from "./child-threads.js";
 import { resolveConfirmBoxDir } from "./box.js";
 import { BACKGROUND_MAX, SUMMARY_MAX, SUBJECT_MAX, normalizePriority } from "./normalize.js";
 
-export const VAULT_DECISION_SOURCE = "vault_decision_note";
+import { VAULT_DECISION_SOURCE } from "../shared/judgment-open.js";
+
+export { VAULT_DECISION_SOURCE };
 export const VAULT_KEY_PREFIX = "vault:";
 const DECISION_SUBDIR = path.join("05_Projects", "ToposAI", "ユーザー判断");
 const NOTE_FILE = /^j-[0-9A-Za-z][0-9A-Za-z-]*\.md$/;

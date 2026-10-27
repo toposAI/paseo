@@ -21,7 +21,12 @@
  */
 import { isJudgmentItem } from "./contract.js";
 import type { ConfirmBoxItem } from "./contract.js";
-import { VAULT_DECISION_SOURCE } from "../server/vault-decisions.js";
+
+/**
+ * Vault の判断ノートから作った項目の出所。サーバー専用モジュールからは import できない
+ * (shared バンドルがビルドで落ちる)ので、定義はここに置き、server 側が再 export する。
+ */
+export const VAULT_DECISION_SOURCE = "vault_decision_note";
 
 /** 箱の項目のうち open(新しい・まだ見ていない)。`approved` は決定済み、`read` は既読(open は出さない)。 */
 export const OPEN_BOX_STATE = "new";
