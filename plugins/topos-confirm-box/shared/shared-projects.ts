@@ -65,6 +65,7 @@ export const sharedProjectThreadRpc = defineRpc({
     message: z.string().optional(),
     messages: z.array(sharedMessageSchema),
     latestSeq: z.number(),
+    shownMaxSeq: z.number(),
     unread: z.number(),
   }),
 });

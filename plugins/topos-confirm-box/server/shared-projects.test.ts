@@ -186,6 +186,7 @@ test("スレッドの整形: 表示名・自分・AI・添付数", () => {
   );
   assert.deepEqual(r.messages[0].to, ["ボブ"]);
   assert.equal(r.latestSeq, 3);
+  assert.equal(r.shownMaxSeq, 3);
   assert.equal(r.unread, 1);
 });
 
@@ -214,7 +215,7 @@ test("投稿: 宛先なし・空/長すぎは送らない・不正IDは送らな
     },
   };
   assert.equal((await postMessage(PID, "  こんにちは  ", deps)).ok, true);
-  assert.deepEqual(body, { text: "こんにちは" });
+  assert.deepEqual(body, { text: "こんにちは", to: [] });
   body = null;
   assert.equal((await postMessage(PID, "   ", deps)).ok, false);
   assert.equal((await postMessage(PID, "x".repeat(8001), deps)).ok, false);
@@ -247,4 +248,35 @@ test("純粋関数: 未読表示・合計・空文言・投稿可否・時刻", 
   assert.equal(canPost("a"), true);
   assert.equal(shortTime("not-a-date"), "not-a-date");
   assert.match(shortTime("2026-10-27T01:02:00Z"), /^\d+\/\d+ \d\d:\d\d$/);
+});
+
+test("形が想定と違う応答は『0件』にせずエラーにする", async () => {
+  const deps = (data: unknown) => ({ load: () => OK, fetchImpl: async () => json(data) });
+  const l = await listProjects(deps({ detail: "x" }));
+  assert.equal(l.ok, false);
+  const t = await fetchThread(PID, deps({ latest_seq: 1 }));
+  assert.equal(t.ok, false);
+});
+
+test("404の文言: 一覧は鍵の案内・個別プロジェクトは見つからない", async () => {
+  const deps = { load: () => OK, fetchImpl: async () => json({}, 404) };
+  const l = await listProjects(deps);
+  const t = await fetchThread(PID, deps);
+  assert.ok(!l.ok && !t.ok);
+  assert.notEqual(l.message, t.message);
+  assert.match(String(t.message), /見つかりません/);
+});
+
+test("投稿が時間切れなら『送れたか不明』と返す", async () => {
+  const deps = {
+    load: () => OK,
+    fetchImpl: async () => {
+      const e = new Error("t");
+      e.name = "TimeoutError";
+      throw e;
+    },
+  };
+  const r = await postMessage(PID, "a", deps);
+  assert.equal(r.ok, false);
+  assert.match(String(r.message), /送れたか不明/);
 });

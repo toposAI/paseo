@@ -761,8 +761,21 @@ export default function contribute(server: PluginServerContext) {
   server.handle(sharedProjectThreadRpc, async (input) => {
     const r = await fetchThread(input.id);
     return r.ok
-      ? { status: "ok" as const, messages: r.messages, latestSeq: r.latestSeq, unread: r.unread }
-      : { status: r.status, message: r.message, messages: [], latestSeq: 0, unread: 0 };
+      ? {
+          status: "ok" as const,
+          messages: r.messages,
+          latestSeq: r.latestSeq,
+          shownMaxSeq: r.shownMaxSeq,
+          unread: r.unread,
+        }
+      : {
+          status: r.status,
+          message: r.message,
+          messages: [],
+          latestSeq: 0,
+          shownMaxSeq: 0,
+          unread: 0,
+        };
   });
   server.handle(sharedProjectPostRpc, async (input) => postMessage(input.id, input.text));
   server.handle(sharedProjectReadRpc, async (input) => markRead(input.id, input.seq));

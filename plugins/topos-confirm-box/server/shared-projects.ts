@@ -77,8 +77,14 @@ export function loadConfig(configPath = resolveConfigPath()): Loaded {
       };
     }
     token = fs.readFileSync(tokenFile, "utf8").trim();
-  } catch {
-    return { ok: false, status: "unconfigured", message: "鍵ファイルがありません" };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT")
+      return { ok: false, status: "unconfigured", message: "鍵ファイルがありません" };
+    return {
+      ok: false,
+      status: "error",
+      message: "鍵ファイルを読めません(権限を確認してください)",
+    };
   }
   if (!token) return { ok: false, status: "unconfigured", message: "鍵ファイルが空です" };
   return {
@@ -90,7 +96,7 @@ export function loadConfig(configPath = resolveConfigPath()): Loaded {
 
 export type CallResult<T> =
   | { ok: true; data: T }
-  | { ok: false; status: "unconfigured" | "error"; message: string };
+  | { ok: false; status: "unconfigured" | "error"; message: string; timedOut?: boolean };
 
 const TIMEOUT_MS = 10_000;
 
@@ -119,7 +125,8 @@ export async function callTopos<T>(
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!res.ok) return { ok: false, status: "error", message: describeHttp(res.status) };
+    if (!res.ok)
+      return { ok: false, status: "error", message: describeHttp(res.status, pathAndQuery) };
     return { ok: true, data: (await res.json()) as T };
   } catch (error) {
     const name = error instanceof Error ? error.name : "";
@@ -128,14 +135,20 @@ export async function callTopos<T>(
       status: "error",
       message:
         name === "TimeoutError" ? "Topos の応答がありません(時間切れ)" : "Topos に繋がりません",
+      timedOut: name === "TimeoutError",
     };
   }
 }
 
-function describeHttp(status: number): string {
+function describeHttp(status: number, pathAndQuery = ""): string {
   if (status === 401) return "Topos に鍵を拒否されました(401)";
   if (status === 403) return "Topos に拒否されました(403)";
-  if (status === 404) return "Topos 側で共有プロジェクトの鍵が有効になっていません(404)";
+  if (status === 404) {
+    // 一覧(/api/family-projects 直下)の404は鍵・旗の問題。個別プロジェクトの404は退出やアーカイブ等の可能性
+    return /^\/api\/family-projects(\?|$)/.test(pathAndQuery)
+      ? "Topos 側で共有プロジェクトの鍵が有効になっていません(404)"
+      : "このプロジェクトは見つかりません(退出した可能性があります)";
+  }
   return `Topos がエラーを返しました(${status})`;
 }
 
@@ -174,9 +187,10 @@ export function toProjects(raw: unknown): SharedProject[] {
 export function toMessages(raw: unknown): {
   messages: SharedMessage[];
   latestSeq: number;
+  shownMaxSeq: number;
   unread: number;
 } {
-  if (!isObj(raw)) return { messages: [], latestSeq: 0, unread: 0 };
+  if (!isObj(raw)) return { messages: [], latestSeq: 0, shownMaxSeq: 0, unread: 0 };
   const names = isObj(raw.names) ? raw.names : {};
   const me = text(raw.me);
   const nameOf = (id: string) => (typeof names[id] === "string" ? (names[id] as string) : id);
@@ -198,14 +212,23 @@ export function toMessages(raw: unknown): {
       attachments: Array.isArray(m.attachments) ? m.attachments.length : 0,
     });
   }
-  return { messages, latestSeq: num(raw.latest_seq), unread: num(raw.unread_count) };
+  const shownMax = messages.reduce((a, m) => Math.max(a, m.seq), 0);
+  return {
+    messages,
+    latestSeq: num(raw.latest_seq),
+    shownMaxSeq: shownMax,
+    unread: num(raw.unread_count),
+  };
 }
 
 const ID_RE = /^[0-9a-f]{32}$/;
 
 export async function listProjects(deps?: Parameters<typeof callTopos>[3]) {
   const r = await callTopos<unknown>("GET", "/api/family-projects", undefined, deps);
-  return r.ok ? ({ ok: true, projects: toProjects(r.data) } as const) : r;
+  if (!r.ok) return r;
+  if (!Array.isArray(r.data))
+    return { ok: false, status: "error", message: "Topos の応答の形が想定と違います" } as const;
+  return { ok: true, projects: toProjects(r.data) } as const;
 }
 
 /** 画面に出す最新の投稿数。Topos のスレッド取得は古い側から返すので、最新側は2回に分けて取る。 */
@@ -226,7 +249,10 @@ export async function fetchThread(id: string, deps?: Parameters<typeof callTopos
     undefined,
     deps,
   );
-  return r.ok ? ({ ok: true, ...toMessages(r.data) } as const) : r;
+  if (!r.ok) return r;
+  if (!isObj(r.data) || !Array.isArray(r.data.messages))
+    return { ok: false, status: "error", message: "Topos の応答の形が想定と違います" } as const;
+  return { ok: true, ...toMessages(r.data) } as const;
 }
 
 /** 投稿。宛先は付けない(全員宛・AI には聞かない)。 */
@@ -241,10 +267,13 @@ export async function postMessage(
   const r = await callTopos<unknown>(
     "POST",
     `/api/family-projects/${id}/thread/messages`,
-    { text: t },
+    { text: t, to: [] },
     deps,
   );
-  return r.ok ? { ok: true } : { ok: false, message: r.message };
+  if (r.ok) return { ok: true };
+  if (!r.ok && r.timedOut)
+    return { ok: false, message: "送れたか不明です。画面を更新して確認してください" };
+  return { ok: false, message: r.message };
 }
 
 export async function markRead(id: string, seq: number, deps?: Parameters<typeof callTopos>[3]) {

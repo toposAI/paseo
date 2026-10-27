@@ -5,7 +5,7 @@
  * 取得は Paseo のサーバー部が Topos の範囲つきトークンで行う(`server/shared-projects.ts`)。
  * 設定が無い/繋がらないときは、0件と区別して理由を行で出す。
  */
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
@@ -202,23 +202,41 @@ export function SharedProjectView({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const c = theme.colors;
+  const seqRef = useRef(0);
+  const busyRef = useRef(false);
+
+  // プロジェクトが変わったら前の画面の内容・入力・状態を持ち越さない
+  useEffect(() => {
+    seqRef.current += 1;
+    busyRef.current = false;
+    setMessages([]);
+    setStatus("loading");
+    setNote("");
+    setText("");
+  }, [projectId]);
 
   const reload = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId || busyRef.current) return;
+    busyRef.current = true;
+    const mySeq = seqRef.current;
     try {
       const r = await thread({ id: projectId });
+      if (mySeq !== seqRef.current) return; // 別プロジェクトへ切り替わった後の古い応答は捨てる
       setStatus(r.status);
       setNote(r.message ?? "");
       if (r.status === "ok") {
         setMessages(r.messages);
-        // 表示した分まで既読にする(失敗しても表示は続ける)
-        if (r.unread > 0 && r.latestSeq > 0) {
-          void markRead({ id: projectId, seq: r.latestSeq }).catch(() => {});
+        // 実際に表示した最新の投稿まで既読にする(読み込み中に届いた分は未読のまま。失敗しても表示は続ける)
+        if (r.unread > 0 && r.shownMaxSeq > 0) {
+          void markRead({ id: projectId, seq: r.shownMaxSeq }).catch(() => {});
         }
       }
     } catch (e) {
+      if (mySeq !== seqRef.current) return;
       setStatus("error");
       setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (mySeq === seqRef.current) busyRef.current = false;
     }
   }, [projectId, thread, markRead]);
 
