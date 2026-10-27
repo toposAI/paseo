@@ -1146,19 +1146,24 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           : undefined;
         readPosition.reportViewedSeq(
           viewedCursor && viewedCursor.epoch === timelineEpoch ? viewedCursor.seq : null,
+          row && row.item.timelineCursor?.epoch === timelineEpoch
+            ? row.item.timelineCursor.seq
+            : null,
         );
       },
     );
 
     // The first turn the reader had not seen when the chat opened gets the "ここから未読" line above it.
+    // Rows are matched by "at or after" rather than by the exact seq: grouping and transforms can drop
+    // the row the divider was picked for, and a divider one row lower beats no divider at all.
+    const unreadFromSeq = readPosition.unreadFromSeq;
     const unreadFromItemId =
-      readPosition.unreadFromSeq === null
+      unreadFromSeq === null
         ? null
-        : ([...streamLayout.history, ...streamLayout.liveHead].find(
-            (row) =>
-              row.item.timelineCursor?.seq === readPosition.unreadFromSeq &&
-              row.item.timelineCursor?.epoch === timelineEpoch,
-          )?.item.id ?? null);
+        : ([...streamLayout.history, ...streamLayout.liveHead].find((row) => {
+            const cursor = row.item.timelineCursor;
+            return cursor?.epoch === timelineEpoch && cursor.seq >= unreadFromSeq;
+          })?.item.id ?? null);
     const historyRowHasDivider = useCallback(
       (item: StreamItem) => item.id === unreadFromItemId,
       [unreadFromItemId],

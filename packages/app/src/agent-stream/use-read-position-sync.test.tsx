@@ -26,14 +26,26 @@ vi.mock("@/constants/platform", async (importOriginal) => ({
 import { useSessionStore } from "@/stores/session-store";
 import { useReadPositionSync } from "./use-read-position-sync";
 
-function row(seq: number): StreamItem {
+function row(seq: number, epoch = "e1"): StreamItem {
   return {
     id: `row-${seq}`,
     kind: "assistant_message",
     text: `row ${seq}`,
     timestamp: new Date(),
-    timelineCursor: { epoch: "e1", seq },
+    timelineCursor: { epoch, seq },
   } as StreamItem;
+}
+
+function readposSetCalls() {
+  return rpc.invokePluginRpc.mock.calls.filter(([, method]) => method === "topos.readpos.set");
+}
+
+/** The positions actually sent to the daemon, oldest first. */
+function sentSeqs(): number[] {
+  return readposSetCalls().flatMap(([, , input]) => {
+    const seq = (input as { seq?: unknown } | undefined)?.seq;
+    return typeof seq === "number" ? [seq] : [];
+  });
 }
 
 function setTitle(title: string) {
@@ -128,13 +140,65 @@ describe("useReadPositionSync", () => {
     );
     await waitFor(() => expect(result.current.unreadFromSeq).toBe(11));
 
-    // After the quiet moment the newest row is still the last fully visible one: the jump cannot be
-    // told apart from the bottom that way. The record must still move, or the divider never goes.
-    const spy = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10_000);
-    act(() => result.current.reportViewedSeq(11));
+    // The viewport reports during the quiet moment: the view is at the top of the unread stretch, so
+    // the jump landed, but nothing may be recorded yet. The settle timer has to fire after the quiet
+    // window and do the recording itself, or the record never moves and the divider never goes.
+    act(() => result.current.reportViewedSeq(11, 9));
+    expect(result.current.unreadFromSeq).toBe(11);
+
     await waitFor(() => expect(result.current.unreadFromSeq).toBeNull(), { timeout: 6000 });
     expect(jump).toHaveBeenCalledWith(10);
+  });
+
+  it("does not mark the unread rows as read when the jump never landed", async () => {
+    const jump = vi.fn();
+    const { result } = renderHook(() =>
+      useReadPositionSync({
+        serverId: "host-1",
+        agentId: "a1",
+        timelineEpoch: "e1",
+        items: [row(10), row(12), row(15)],
+        jumpToSeq: jump,
+      }),
+    );
+    await waitFor(() => expect(result.current.unreadFromSeq).toBe(12));
+
+    // A failed jump leaves the view at the bottom: the top row is the newest one, below the divider.
+    const afterQuiet = Date.now() + 10_000;
+    const spy = vi.spyOn(Date, "now").mockReturnValue(afterQuiet);
+    act(() => result.current.reportViewedSeq(15, 15));
+    expect(result.current.unreadFromSeq).toBe(12);
+    // Scrolling down to the newest row is the reader moving, but every row below the divider was
+    // already on screen: the report must keep the old position rather than mark them read.
+    expect(sentSeqs()).not.toContain(15);
+    act(() => result.current.reportViewedSeq(12, 10));
     spy.mockRestore();
+
+    // Only after the reader has been back to the divider is the position theirs to move. The report
+    // is debounced by 1.5s, so give the send more room than waitFor's default.
+    await waitFor(() => expect(sentSeqs()).toContain(12), { timeout: 4000 });
+    expect(sentSeqs()).not.toContain(15);
+  });
+
+  it("forgets the divider when the history changes", async () => {
+    const jump = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ items, epoch }: { items: StreamItem[]; epoch: string }) =>
+        useReadPositionSync({
+          serverId: "host-1",
+          agentId: "a1",
+          timelineEpoch: epoch,
+          items,
+          jumpToSeq: jump,
+        }),
+      { initialProps: { items: [row(10), row(12), row(15)], epoch: "e1" } },
+    );
+    await waitFor(() => expect(result.current.unreadFromSeq).toBe(12));
+
+    // seq 12 exists in the new history too, but it is a different row: showing the old divider there
+    // would point at something the reader never saw.
+    rerender({ items: [row(11, "e2"), row(12, "e2"), row(13, "e2")], epoch: "e2" });
+    await waitFor(() => expect(result.current.unreadFromSeq).toBeNull());
   });
 
   it("asks for the history around a record older than the loaded rows instead of the oldest row", async () => {
