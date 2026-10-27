@@ -8,7 +8,7 @@
  * Paseo のサイドバー下部タブバーの2項目で切り替える。
  */
 
-export const SIDEBAR_SECTIONS = ["threads", "concepts"] as const;
+export const SIDEBAR_SECTIONS = ["threads", "concepts", "projects"] as const;
 export type SidebarSectionKey = (typeof SIDEBAR_SECTIONS)[number];
 
 /** 初期値。props で指定が無ければスレ一覧を出す(従来の主画面を変えない)。 */
@@ -17,6 +17,7 @@ export const DEFAULT_SIDEBAR_SECTION: SidebarSectionKey = "threads";
 export const SIDEBAR_SECTION_LABELS: Record<SidebarSectionKey, string> = {
   threads: "スレ一覧",
   concepts: "構想一覧",
+  projects: "共有プロジェクト",
 };
 
 /** 保存先のキー。値の書式は変えない想定なので、版番号は付けない。 */
@@ -91,5 +92,6 @@ export const PINNED_GROUP_LABEL = "ピン止め";
 
 /** 一覧が空のときの行の文言(タブごと)。 */
 export function emptySectionLabel(section: SidebarSectionKey): string {
+  if (section === "projects") return "参加している共有プロジェクトはありません";
   return section === "concepts" ? "進行中の構想はありません" : "実装中のスレはありません";
 }

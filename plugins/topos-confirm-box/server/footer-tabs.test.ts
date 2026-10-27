@@ -40,7 +40,7 @@ test("PC幅の判定(一覧とチャットを横に並べるか)は幅720px・�
   assert.equal(isWideLayout(1440, 900, false), true);
 });
 
-test("下部バーの並び: ユーザー判断 → バグ報告 → スレ一覧 → 構想一覧 → メールUI", () => {
+test("下部バーの並び: ユーザー判断 → バグ報告 → スレ一覧 → 構想一覧 → 共有プロジェクト → メールUI", () => {
   assert.deepEqual(
     FOOTER_TABS.map((t) => [t.id, t.title]),
     [
@@ -48,6 +48,7 @@ test("下部バーの並び: ユーザー判断 → バグ報告 → スレ一�
       ["bugs", "バグ報告"],
       ["sidebar-threads", "スレ一覧"],
       ["sidebar-concepts", "構想一覧"],
+      ["sidebar-projects", "共有プロジェクト"],
       ["mail", "メールUI"],
     ],
   );

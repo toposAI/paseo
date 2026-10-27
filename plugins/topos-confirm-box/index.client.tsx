@@ -12,6 +12,11 @@ import {
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { ChildThreadsSidebar, CHILD_THREADS_SCREEN_ID } from "./client/ChildThreadsSidebar";
 import { ChildThreadsView } from "./client/ChildThreadsView";
+import {
+  SHARED_PROJECT_SCREEN_ID,
+  SharedProjectView,
+  useSharedUnread,
+} from "./client/SharedProjects";
 import { ConfirmBoxView } from "./client/ConfirmBoxView";
 import { onBoxChanged } from "./client/events";
 import { watchBoxSignal } from "./client/change-signal";
@@ -52,7 +57,15 @@ function MailLink() {
  * 2026-10-26 ユーザー指示で「子スレ完了」を撤去した(完了報告は完了箱Cへ一本化)。
  * バーの項目はアイコンだけが出るので、`label` は読み上げ用(と設定画面の項目名)になる。
  */
-function SidebarSectionLink({ section, icon }: { section: "threads" | "concepts"; icon: string }) {
+function SidebarSectionLink({
+  section,
+  icon,
+  trailing,
+}: {
+  section: "threads" | "concepts" | "projects";
+  icon: string;
+  trailing?: ReactElement;
+}) {
   const mode = useSidebarMode();
   const press = useCallback(() => setSidebarMode(section), [section]);
   return (
@@ -61,6 +74,7 @@ function SidebarSectionLink({ section, icon }: { section: "threads" | "concepts"
       label={SIDEBAR_SECTION_LABELS[section]}
       active={mode === section}
       onPress={press}
+      trailing={trailing}
     />
   );
 }
@@ -315,6 +329,10 @@ function ChildThreadsScreen({ theme, params }: PluginScreenProps) {
   return <ChildThreadsView theme={theme} focusId={focusId} />;
 }
 
+function SharedProjectScreen({ theme, params }: PluginScreenProps) {
+  return <SharedProjectView theme={theme} projectId={params.id ?? null} />;
+}
+
 // ホストのポップオーバー面は maxHeight 440 で、超えた分は中でスクロールになる。
 // チャットペインは下端に入力欄を置くので、箱からはみ出させない(440 に収める)。
 const popoverStyle = { height: 420 };
@@ -342,12 +360,19 @@ function Popover({ theme }: PluginButtonContentProps) {
 const FooterJudgment = (props: PluginSidebarItemProps) => <BoxTabLink {...props} />;
 const FooterThreads = () => <SidebarSectionLink section="threads" icon="ListTree" />;
 const FooterConcepts = () => <SidebarSectionLink section="concepts" icon="Lightbulb" />;
+// 共有プロジェクトの未読合計をバッジに出す(参加中のものだけ。設定が無いときは出さない)。
+function FooterProjects() {
+  const n = useSharedUnread();
+  const trailing = CountBadge({ n });
+  return <SidebarSectionLink section="projects" icon="Users" trailing={trailing ?? undefined} />;
+}
 
 const FOOTER_COMPONENTS: Record<FooterTabId, (props: PluginSidebarItemProps) => ReactElement> = {
   judgment: FooterJudgment,
   bugs: Sidebar,
   "sidebar-threads": FooterThreads,
   "sidebar-concepts": FooterConcepts,
+  "sidebar-projects": FooterProjects,
   mail: MailLink,
 };
 
@@ -367,6 +392,11 @@ export default function contribute(ctx: PluginClientContext) {
     id: "child-threads",
     title: "子スレ",
     Component: ChildThreadsSidebar,
+  });
+  ctx.addScreen({
+    id: SHARED_PROJECT_SCREEN_ID,
+    title: "共有プロジェクト",
+    Component: SharedProjectScreen,
   });
   ctx.addScreen({ id: SCREEN_ID, title: "確認箱", Component: Screen });
   ctx.addScreen({ id: BOX_TAB_SCREEN_ID, title: "確認箱", Component: BoxTabScreen });

@@ -64,6 +64,7 @@ import { pickReadableText } from "../shared/contrast.js";
 import { menuCanArchive } from "../shared/thread-menu.js";
 import type { ThreadMenuIntent } from "../shared/thread-menu.js";
 import { ConceptNotesList, useSidebarNotes } from "./ConceptNotes.js";
+import { SharedProjectsList } from "./SharedProjects.js";
 import { StatusBadge } from "./sidebar-badge.js";
 import { stateDotIcons } from "./StateDot.js";
 import type { StateDotIcon } from "./StateDot.js";
@@ -858,6 +859,9 @@ function SidebarContents({
     [statusColor],
   );
   const emptyLabel = emptySectionLabel(section);
+  if (section === "projects") {
+    return <SharedProjectsList openScreen={openScreen} />;
+  }
   if (section === "concepts") {
     // 構想一覧: 見出しはタブ自体が担うので積まない。押すと深掘りスレを開く(無ければ作ってノートに記録)。
     return (

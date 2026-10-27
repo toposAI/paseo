@@ -48,6 +48,13 @@ import {
   setEnabled as setReadPositionEnabled,
   setPosition,
 } from "./server/read-position.js";
+import {
+  sharedProjectPostRpc,
+  sharedProjectReadRpc,
+  sharedProjectThreadRpc,
+  sharedProjectsListRpc,
+} from "./shared/shared-projects.js";
+import { fetchThread, listProjects, markRead, postMessage } from "./server/shared-projects.js";
 import { feedbackReportsListRpc, countOpenReports } from "./shared/feedback.js";
 import { readFeedbackReports } from "./server/feedback.js";
 import { loadProgressContext } from "./server/feedback-progress.js";
@@ -743,6 +750,35 @@ export default function contribute(server: PluginServerContext) {
       return { ok: false, message: `切り替えを保存できません: ${(error as Error).message}` };
     }
   });
+
+  // 共有プロジェクト(参加中のものだけ。Topos の範囲つきトークンで取る。鍵・設定が無ければ unconfigured)。
+  server.handle(sharedProjectsListRpc, async () => {
+    const r = await listProjects();
+    return r.ok
+      ? { status: "ok" as const, projects: r.projects }
+      : { status: r.status, message: r.message, projects: [] };
+  });
+  server.handle(sharedProjectThreadRpc, async (input) => {
+    const r = await fetchThread(input.id);
+    return r.ok
+      ? {
+          status: "ok" as const,
+          messages: r.messages,
+          latestSeq: r.latestSeq,
+          shownMaxSeq: r.shownMaxSeq,
+          unread: r.unread,
+        }
+      : {
+          status: r.status,
+          message: r.message,
+          messages: [],
+          latestSeq: 0,
+          shownMaxSeq: 0,
+          unread: 0,
+        };
+  });
+  server.handle(sharedProjectPostRpc, async (input) => postMessage(input.id, input.text));
+  server.handle(sharedProjectReadRpc, async (input) => markRead(input.id, input.seq));
 
   server.handle(coordinatorTargetRpc, async () => ({
     agentId: readGeneralCoordinatorId(),
