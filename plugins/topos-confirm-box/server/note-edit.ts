@@ -106,16 +106,27 @@ export async function saveVaultNote(
   }
   const problem = historyDirProblem(historyDir, c.root);
   if (problem) return result("rejected", `${problem}(履歴を残せないため保存しません)`);
-  const releaseVault = await acquireLock(vaultLockKey(c.root));
   try {
-    const releaseNote = await acquireLock(`note:${c.real}`);
-    try {
+    return await withLocks(c.root, c.real, () => {
       // ロックの中で検査し直す(待っている間に差し替えられていないか)。
       const again = confineToVault(vaultDir, file);
       if (!again.ok || again.real !== c.real) {
         return result("rejected", again.ok ? "ノートの場所が変わりました" : again.message);
       }
       return writeLocked(c.real, c.root, text, base, historyDir);
+    });
+  } catch (e) {
+    return result("rejected", `保存の順番待ちに失敗しました(${(e as Error).message})`);
+  }
+}
+
+/** 記録・移動と同じ順(Vault → ノート)で鍵を取って fn を実行する。 */
+async function withLocks<T>(root: string, real: string, fn: () => T): Promise<T> {
+  const releaseVault = await acquireLock(vaultLockKey(root));
+  try {
+    const releaseNote = await acquireLock(`note:${real}`);
+    try {
+      return fn();
     } finally {
       releaseNote();
     }
