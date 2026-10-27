@@ -123,8 +123,6 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
   // on screen while the reader was there, so a report taken later (a resize, coming back to the page)
   // must not carry them into the record.
   const inputBaseRef = useRef<number | null>(null);
-  // Where the reader's last scroll left the view (top row and last full row).
-  const inputSpotRef = useRef<{ top: number | null; viewed: number | null } | null>(null);
   const quietUntilRef = useRef(0);
   const highWaterRef = useRef<number | null>(null);
   // The row is captured with the chat and history epoch it was seen under, so a send that happens
@@ -193,7 +191,6 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     restViewedRef.current = null;
     readerMovedRef.current = false;
     inputBaseRef.current = null;
-    inputSpotRef.current = null;
     quietUntilRef.current = 0;
     highWaterRef.current = null;
     pendingRef.current = null;
@@ -213,10 +210,16 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
       readerMovedRef.current = true;
       // What was loaded at this moment is what the reader can have seen; anything newer is out.
       inputBaseRef.current = latestRef.current.newest >= 0 ? latestRef.current.newest : null;
-      inputSpotRef.current = { top: lastTopRef.current, viewed: lastViewedRef.current };
     };
     const onReaderScroll = (event: Event) => {
-      if (event.type === "pointerdown" && scrollBox() === null) return;
+      const box = scrollBox();
+      const target = event.target;
+      if (
+        event.type === "pointerdown" &&
+        !(box !== null && target instanceof Node && box.contains(target))
+      ) {
+        return;
+      }
       markReader();
     };
     const onKeyDown = (event: KeyboardEvent) => {
@@ -230,20 +233,13 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
         sendPending();
         return;
       }
-      // Back looking at the page: the view has not been looked at yet, even if its layout settled
-      // while the page was away.
+      // Back looking at the page: the chat may have followed rows on its own while it was away, and
+      // the view is not the reader's until it moves again (unless the reader has already moved it).
       readerMovedRef.current = false;
-      // A click elsewhere (the list, a button) is user input too, but not the reader moving the chat:
-      // only input taken where the reader's last look left the view may end the opening rule.
-      const spot = inputSpotRef.current;
-      if (
-        mustMoveRef.current &&
-        spot !== null &&
-        spot.top !== null &&
-        spot.top === lastTopRef.current &&
-        spot.viewed === lastViewedRef.current
-      ) {
-        mustMoveRef.current = false;
+      if (mustMoveRef.current || !restoredRef.current) {
+        mustMoveRef.current = true;
+        restTopRef.current = null;
+        restViewedRef.current = null;
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -412,12 +408,15 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
       }
       const moved =
         topSeq !== null && topSeq !== restTopRef.current && viewedSeq !== restViewedRef.current;
-      if (!readerHere) return false;
       // The view is off the opening spot, or arrived at the edge of it from the newest row: either
       // way the reader brought it there with the input just made.
-      if (!moved && !(prevTop === null && topSeq !== null && topSeq < restTopRef.current)) {
+      if (
+        !moved &&
+        !(prevTop === restTopRef.current && topSeq !== null && topSeq < restTopRef.current)
+      ) {
         return false;
       }
+      if (!readerHere) return false;
       mustMoveRef.current = false;
       restTopRef.current = null;
       restViewedRef.current = null;

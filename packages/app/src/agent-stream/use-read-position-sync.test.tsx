@@ -55,18 +55,41 @@ function readerScrolls() {
   });
 }
 
+/** Adds the chat's scrolling area (or gets it) and something on the page outside it. */
+function withChatArea(run: (box: HTMLElement, outside: HTMLElement) => void) {
+  let box = document.querySelector<HTMLElement>('[data-testid="agent-chat-scroll"]');
+  const ownBox = box === null;
+  if (box === null) {
+    box = document.createElement("div");
+    box.setAttribute("data-testid", "agent-chat-scroll");
+    document.body.appendChild(box);
+  }
+  const outside = document.createElement("button");
+  document.body.appendChild(outside);
+  try {
+    run(box, outside);
+  } finally {
+    outside.remove();
+    if (ownBox) box.remove();
+  }
+}
+
 /** The reader clicking in the chat's scrolling area. */
 function readerClicksChat() {
-  const box = document.createElement("div");
-  box.setAttribute("data-testid", "agent-chat-scroll");
-  document.body.appendChild(box);
-  try {
+  withChatArea((box) => {
     act(() => {
       box.dispatchEvent(new Event("pointerdown", { bubbles: true }));
     });
-  } finally {
-    box.remove();
-  }
+  });
+}
+
+/** The reader clicking anywhere on the page but the chat. */
+function readerClicksOutsideChat() {
+  withChatArea((_box, outside) => {
+    act(() => {
+      outside.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    });
+  });
 }
 
 /** The reader pressing a key somewhere on the page. */
@@ -490,9 +513,79 @@ describe("useReadPositionSync", () => {
     act(() => result.current.reportViewedSeq(11, 9));
     readerClicksChat();
     await waitFor(() => expect(result.current.unreadFromSeq).toBeNull(), { timeout: 6000 });
-    // Same view as when the chat opened as far as the rows go: not the reader's.
+    // The reader clicked in the chat and looks at row 11 now: that is where their reading is.
+    await waitFor(() => expect(sentSeqs()).toEqual([11]), { timeout: 4000 });
+  }, 15_000);
+
+  it("does not count a click outside the chat as the reader moving it", async () => {
+    rpc.invokePluginRpc.mockImplementation(
+      async (_pluginId, method): Promise<RpcReply | null> =>
+        method === "topos.readpos.get" ? { enabled: true, seq: null, epoch: null } : { ok: true },
+    );
+    const jump = vi.fn();
+    const { result } = renderHook(() =>
+      useReadPositionSync({
+        serverId: "host-1",
+        agentId: "a1",
+        timelineEpoch: "e1",
+        items: [row(10), row(12), row(15)],
+        jumpToSeq: jump,
+      }),
+    );
+    await waitFor(() => expect(rpc.invokePluginRpc).toHaveBeenCalled());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+
+    // The chat opens at the bottom; clicking in the thread list is not scrolling the chat.
+    const afterQuiet = Date.now() + 10_000;
+    const spy = vi.spyOn(Date, "now").mockReturnValue(afterQuiet);
+    act(() => result.current.reportViewedSeq(15, 15));
+    readerClicksOutsideChat();
+    pressKey("Tab");
+    act(() => result.current.reportViewedSeq(15, 15));
+    spy.mockRestore();
+    await new Promise((resolve) => setTimeout(resolve, 1800));
     expect(sentSeqs()).toEqual([]);
-  });
+  }, 15_000);
+
+  it("does not record a chat that followed new rows while the page was away", async () => {
+    const jump = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ items }: { items: StreamItem[] }) =>
+        useReadPositionSync({
+          serverId: "host-1",
+          agentId: "a1",
+          timelineEpoch: "e1",
+          items,
+          jumpToSeq: jump,
+        }),
+      { initialProps: { items: [row(10), row(12), row(15)] } },
+    );
+    await waitFor(() => expect(result.current.unreadFromSeq).toBe(12));
+
+    // The reader scrolls a little and stops below the divider, then leaves the page.
+    const later = Date.now() + 10_000;
+    const spy = vi.spyOn(Date, "now").mockReturnValue(later);
+    readerScrolls();
+    act(() => result.current.reportViewedSeq(14, 12));
+    await waitFor(() => expect(sentSeqs()).toEqual([14]), { timeout: 4000 });
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    // The rows keep coming in overnight and the chat follows them to the bottom. Coming back to the
+    // page is not the reader moving the chat: it sits where the news left it, above rows nobody read.
+    rerender({ items: [row(10), row(12), row(15), row(18), row(21)] });
+    visibility.mockReturnValue("visible");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    visibility.mockRestore();
+    act(() => result.current.reportViewedSeq(21, 21));
+    await settle(spy);
+    expect(sentSeqs()).not.toContain(18);
+    expect(sentSeqs()).not.toContain(21);
+  }, 15_000);
 
   it("does not record rows that arrived to a chat the reader had stopped scrolling", async () => {
     const jump = vi.fn();
@@ -528,42 +621,6 @@ describe("useReadPositionSync", () => {
     await settle(spy);
     expect(sentSeqs()).not.toContain(18);
     expect(sentSeqs()).not.toContain(21);
-  }, 15_000);
-
-  it("does not make a click outside the chat count as the reader moving it", async () => {
-    rpc.invokePluginRpc.mockImplementation(
-      async (_pluginId, method): Promise<RpcReply | null> =>
-        method === "topos.readpos.get" ? { enabled: true, seq: null, epoch: null } : { ok: true },
-    );
-    const jump = vi.fn();
-    const { result } = renderHook(() =>
-      useReadPositionSync({
-        serverId: "host-1",
-        agentId: "a1",
-        timelineEpoch: "e1",
-        items: [row(10), row(12), row(15)],
-        jumpToSeq: jump,
-      }),
-    );
-    await waitFor(() => expect(rpc.invokePluginRpc).toHaveBeenCalled());
-    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
-
-    // The reader opens the chat, clicks a button in the thread list, and leaves the page for the
-    // night: the chat follows new rows on its own and nobody scrolls it.
-    const afterQuiet = Date.now() + 10_000;
-    const spy = vi.spyOn(Date, "now").mockReturnValue(afterQuiet);
-    act(() => result.current.reportViewedSeq(15, 15));
-    act(() => {
-      document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    });
-    pressKey("Tab");
-    act(() => {
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-    act(() => result.current.reportViewedSeq(15, 15));
-    spy.mockRestore();
-    await new Promise((resolve) => setTimeout(resolve, 1800));
-    expect(sentSeqs()).toEqual([]);
   }, 15_000);
 
   it("does not resume from a record written under another history", async () => {
