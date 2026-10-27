@@ -6,7 +6,7 @@
  * 送信先 agent ID はバックエンド確定後に `PRIORITY_CHAT_AGENT_ID` へ入れる(未設定の間は送れず理由を表示)。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { getPaseoClient, useHosts, useRpc } from "@getpaseo/plugin/client";
 import { coordinatorTargetRpc } from "../shared/contract.js";
 import { DOCK_FALLBACK_CONTEXT, pickDockTarget } from "../shared/card-pane.js";
@@ -17,6 +17,10 @@ import { notifyBoxChanged } from "./events.js";
 export const CARD_CHAT_AGENT_ID: string | null = "887a6133-01de-498a-be7e-0262c61e0bc9";
 
 export const PRIORITY_CHAT_AGENT_ID: string | null = "887a6133-01de-498a-be7e-0262c61e0bc9";
+
+/** この幅以上(PC)なら会話を右サイドパネルで出す。未満(スマホ)は下寄せの吹き出し。 */
+const WIDE_MIN_WIDTH = 900;
+const SIDE_PANEL_WIDTH = 380;
 
 interface ChatLine {
   id: string;
@@ -160,6 +164,8 @@ export function ChatPanel({
     }
   }, [text, agentId, serverId, context]);
 
+  const { width: winW, height: winH } = useWindowDimensions();
+  const wide = winW >= WIDE_MIN_WIDTH;
   const st = useMemo(
     () => ({
       panelInline: {
@@ -170,20 +176,34 @@ export function ChatPanel({
         padding: 8,
         gap: 8,
       },
-      panel: {
-        position: "absolute" as const,
-        left: 12,
-        right: 12,
-        bottom: 140,
-        maxHeight: 420,
-        backgroundColor: colors.surface1,
-        borderColor: colors.border,
-        borderWidth: 1,
-        borderRadius: 12,
-        padding: 10,
-        gap: 8,
-      },
-      list: { maxHeight: 280 },
+      // PC(幅が広い)は右端に縦いっぱいのサイドパネル、スマホは下寄せの吹き出し(画面高さに収める)
+      panel: wide
+        ? {
+            position: "absolute" as const,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: SIDE_PANEL_WIDTH,
+            backgroundColor: colors.surface1,
+            borderColor: colors.border,
+            borderLeftWidth: 1,
+            padding: 10,
+            gap: 8,
+          }
+        : {
+            position: "absolute" as const,
+            left: 12,
+            right: 12,
+            bottom: 140,
+            maxHeight: Math.max(160, Math.min(420, winH - 200)),
+            backgroundColor: colors.surface1,
+            borderColor: colors.border,
+            borderWidth: 1,
+            borderRadius: 12,
+            padding: 10,
+            gap: 8,
+          },
+      list: wide ? { flex: 1 } : { maxHeight: Math.max(100, Math.min(280, winH - 320)) },
       listBody: { gap: 6 },
       mine: {
         alignSelf: "flex-end" as const,
@@ -226,7 +246,7 @@ export function ChatPanel({
       },
       sendText: { color: colors.accentForeground, fontSize: 14, fontWeight: "600" as const },
     }),
-    [colors],
+    [colors, wide, winH],
   );
 
   return (
