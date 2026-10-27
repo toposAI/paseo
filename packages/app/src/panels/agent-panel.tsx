@@ -1459,6 +1459,7 @@ const AgentStreamSection = memo(function AgentStreamSection({
 
   return (
     <AgentStreamView
+      key={`${serverId}:${agent.id}`}
       ref={streamViewRef}
       agentId={agent.id}
       serverId={serverId}
