@@ -263,6 +263,51 @@ describe("useReadPositionSync", () => {
     await waitFor(() => expect(jump).toHaveBeenCalledWith(10));
   });
 
+  it("jumps again when older history arrives after the first jump", async () => {
+    // A direct link mounts the thread with only its tail attached and the workspace then shows the
+    // whole history: the first jump lands on the tail, and only the older rows can reach the record.
+    const jump = vi.fn();
+    const { rerender } = renderHook(
+      ({ items }: { items: StreamItem[] }) =>
+        useReadPositionSync({
+          serverId: "host-1",
+          agentId: "a1",
+          timelineEpoch: "e1",
+          items,
+          jumpToSeq: jump,
+        }),
+      { initialProps: { items: [row(12), row(15)] as StreamItem[] } },
+    );
+    await waitFor(() => expect(jump).toHaveBeenCalledTimes(1));
+
+    rerender({ items: [row(10), row(12), row(15)] });
+    await waitFor(() => expect(jump).toHaveBeenCalledTimes(2));
+    expect(jump).toHaveBeenLastCalledWith(10);
+  });
+
+  it("stops asking after the second jump", async () => {
+    const jump = vi.fn();
+    const { rerender } = renderHook(
+      ({ items }: { items: StreamItem[] }) =>
+        useReadPositionSync({
+          serverId: "host-1",
+          agentId: "a1",
+          timelineEpoch: "e1",
+          items,
+          jumpToSeq: jump,
+        }),
+      { initialProps: { items: [row(12), row(15)] as StreamItem[] } },
+    );
+    await waitFor(() => expect(jump).toHaveBeenCalledTimes(1));
+    rerender({ items: [row(10), row(12), row(15)] });
+    await waitFor(() => expect(jump).toHaveBeenCalledTimes(2));
+    // Once the reader has moved the view, more rows must not pull it back.
+    readerScrolls();
+    rerender({ items: [row(8), row(10), row(12), row(15)] });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(jump).toHaveBeenCalledTimes(2);
+  });
+
   it("forgets the divider when the history changes", async () => {
     const jump = vi.fn();
     const { result, rerender } = renderHook(

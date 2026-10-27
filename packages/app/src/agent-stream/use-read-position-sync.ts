@@ -21,6 +21,8 @@ const POST_RESTORE_QUIET_MS = 2500;
 const MAX_HISTORY_FETCHES = 8;
 // A restore with no rows attached yet cannot scroll anywhere: it asks again once rows are in.
 const RESTORE_JUMP_ROUNDS = 1;
+// Jumps per restore: the first jump, then one more for the older history it missed.
+const MAX_RESTORE_JUMPS = 2;
 // Rows attached by the time the restore asks for its jump: fewer means the chat is still empty.
 // Landing is the view being scrolled around the restored row close to when it was asked for; the
 // fetch for a row that is not loaded yet usually takes longer than this.
@@ -363,16 +365,34 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     jump(pick.restoreSeq);
   }, [fetchedFor, key, loadedSeqs, stored, storedLoaded, timelineEpoch, jump, restoreAfterHistory]);
 
-  // The rows now: the restore's jump found nothing when they were attached after it, so ask again.
+  // The first jump runs against rows already on screen, but those may be only the tail: a direct
+  // link mounts the thread before its older history arrives. So the next rows to show up get one
+  // more jump, even when the first one did something — a page that is rebuilt later (direct link,
+  // then the workspace tab) starts from the bottom again.
   const hasRows = loadedSeqs.length >= RESTORE_JUMP_ROUNDS;
+  const rowsBefore = useRef<{ key: string | null; count: number } | null>(null);
   useEffect(() => {
-    if (!isWeb || !restoredRef.current || restoredJumpsRef.current > 0 || !hasRows) return;
+    if (!isWeb || !restoredRef.current || !hasRows) return;
+    // The reader has the view now: later rows (older history, or the rebuilt page's tail) are not
+    // allowed to yank it back to the restore row.
+    if (readerMovedRef.current) {
+      pendingRestoreRef.current = null;
+      return;
+    }
     const seq = pendingRestoreRef.current;
     if (seq === null) return;
+    const before = rowsBefore.current;
+    const grew = before !== null && before.key === key && loadedSeqs.length > before.count;
+    rowsBefore.current = { key, count: loadedSeqs.length };
+    if (restoredJumpsRef.current >= MAX_RESTORE_JUMPS) {
+      pendingRestoreRef.current = null;
+      return;
+    }
+    if (restoredJumpsRef.current > 0 && !grew) return;
     restoredJumpsRef.current += 1;
-    pendingRestoreRef.current = null;
+    if (restoredJumpsRef.current >= MAX_RESTORE_JUMPS) pendingRestoreRef.current = null;
     jump(seq);
-  }, [hasRows, jump]);
+  }, [hasRows, loadedSeqs.length, key, jump]);
 
   // The record is the last row the view showed in full (see read-position-sync.ts); `epoch`/`title`
   // are the ones it was shown under.
