@@ -287,7 +287,7 @@ describe("useReadPositionSync", () => {
 
   it("stops asking after the second jump", async () => {
     const jump = vi.fn();
-    const { rerender } = renderHook(
+    const { result, rerender } = renderHook(
       ({ items }: { items: StreamItem[] }) =>
         useReadPositionSync({
           serverId: "host-1",
@@ -301,8 +301,10 @@ describe("useReadPositionSync", () => {
     await waitFor(() => expect(jump).toHaveBeenCalledTimes(1));
     rerender({ items: [row(10), row(12), row(15)] });
     await waitFor(() => expect(jump).toHaveBeenCalledTimes(2));
-    // Once the reader has moved the view, more rows must not pull it back.
+    // The reader has scrolled up to a row they had already read: more rows must not pull them back.
     readerScrolls();
+    act(() => result.current.reportViewedSeq(12, 12));
+    act(() => result.current.reportViewedSeq(8, 8));
     rerender({ items: [row(8), row(10), row(12), row(15)] });
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(jump).toHaveBeenCalledTimes(2);
@@ -713,6 +715,26 @@ describe("useReadPositionSync", () => {
     await waitFor(() => expect(rpc.invokePluginRpc).toHaveBeenCalled());
     expect(jump).not.toHaveBeenCalled();
     expect(result.current.unreadFromSeq).toBeNull();
+  });
+
+  it("asks again when the page is not connected yet", async () => {
+    // Opening a thread before the daemon connection is up fails the first fetch ("no client").
+    rpc.invokePluginRpc.mockRejectedValueOnce(new Error("no client"));
+    const jump = vi.fn();
+    renderHook(() =>
+      useReadPositionSync({
+        serverId: "host-1",
+        agentId: "a1",
+        timelineEpoch: "e1",
+        items: [row(10), row(12), row(20)],
+        jumpToSeq: jump,
+      }),
+    );
+
+    await waitFor(() => expect(jump).toHaveBeenCalledWith(10), { timeout: 4000 });
+    expect(
+      rpc.invokePluginRpc.mock.calls.filter(([, method]) => method === "topos.readpos.get"),
+    ).toHaveLength(2);
   });
 
   it("does nothing when the record cannot be fetched", async () => {

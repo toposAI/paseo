@@ -21,6 +21,9 @@ const POST_RESTORE_QUIET_MS = 2500;
 const MAX_HISTORY_FETCHES = 8;
 // A restore with no rows attached yet cannot scroll anywhere: it asks again once rows are in.
 const RESTORE_JUMP_ROUNDS = 1;
+// Opening a thread before the daemon connection is up makes the first fetch fail: ask again.
+const FETCH_RETRIES = 3;
+const FETCH_RETRY_MS = 1000;
 // Jumps per restore: the first jump, then one more for the older history it missed.
 const MAX_RESTORE_JUMPS = 2;
 // Rows attached by the time the restore asks for its jump: fewer means the chat is still empty.
@@ -55,6 +58,11 @@ interface Input {
   timelineEpoch: string | null;
   items: readonly StreamItem[];
   jumpToSeq: (seq: number) => void;
+}
+
+/** The page is open but not connected yet: not the daemon's answer, so worth asking again. */
+function clientUnavailable(error: unknown): boolean {
+  return error instanceof Error && error.message === "no client";
 }
 
 async function invoke(serverId: string, method: string, input: unknown): Promise<unknown> {
@@ -105,6 +113,12 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
   // yet, and the bottom of the chat (where it opens) would otherwise count as where the reader is.
   const [storedLoaded, setStoredLoaded] = useState(false);
   const [fetchedFor, setFetchedFor] = useState<string | null>(null);
+  const [fetchAttempt, setFetchAttempt] = useState(0);
+  // Clears the once-per-chat guard so the effect below asks for the record again.
+  const askAgain = useCallback(() => {
+    fetchStartedForRef.current = null;
+    setFetchAttempt((attempt) => attempt + 1);
+  }, []);
   // The "ここから未読" divider: dropped once the reader has seen everything that existed at open.
   // It belongs to the history it was picked from, so a new epoch neither shows nor reuses it.
   const [unreadFrom, setUnreadFrom] = useState<{ key: string; epoch: string; seq: number } | null>(
@@ -124,6 +138,8 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
   // The reader's own scrolling, as input rather than rows moving: rows also move from a resize, a
   // rotation, loading, and the chat following new messages while nobody is at the screen.
   const readerMovedRef = useRef(false);
+  // Whether the reader has scrolled since the chat opened: no re-jump for the restore after that.
+  const readerTookOverRef = useRef(false);
   // What the chat had loaded when the reader last scrolled: rows that arrived after that were never
   // on screen while the reader was there, so a report taken later (a resize, coming back to the page)
   // must not carry them into the record.
@@ -199,6 +215,7 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     restTopRef.current = null;
     restViewedRef.current = null;
     readerMovedRef.current = false;
+    readerTookOverRef.current = false;
     inputBaseRef.current = null;
     quietUntilRef.current = 0;
     highWaterRef.current = null;
@@ -219,6 +236,7 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     if (!isWeb) return;
     const markReader = () => {
       readerMovedRef.current = true;
+      readerTookOverRef.current = true;
       // What was loaded at this moment is what the reader can have seen; anything newer is out.
       inputBaseRef.current = latestRef.current.newest >= 0 ? latestRef.current.newest : null;
     };
@@ -245,7 +263,8 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
         return;
       }
       // Back looking at the page: the chat may have followed rows on its own while it was away, and
-      // the view is not the reader's until it moves again.
+      // the view is not the reader's until it moves again. But coming back is not moving the view, so
+      // a restore still waiting for its rows keeps waiting for them.
       readerMovedRef.current = false;
       mustMoveRef.current = true;
       restTopRef.current = null;
@@ -272,6 +291,7 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
   // A new chat (not a new history) also drops the fetched record so it is asked for again.
   useEffect(() => {
     fetchStartedForRef.current = null;
+    setFetchAttempt(0);
     setStored(null);
     setStoredLoaded(false);
     setFetchedFor(null);
@@ -281,6 +301,7 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
   useEffect(() => {
     if (!isWeb || !titleReady || fetchStartedForRef.current === key) return;
     fetchStartedForRef.current = key;
+    const retries = fetchAttempt;
     invoke(serverId, "topos.readpos.get", {
       agentId,
       title: latestRef.current.title ?? undefined,
@@ -292,13 +313,27 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
         setFetchedFor(key);
         return true;
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (currentKeyRef.current !== key) return;
+        // A page that has just opened may not be connected yet: a failure that was not the daemon's
+        // answer is asked for again. Treating it as "nothing to resume" would open the chat at the
+        // bottom and record that as read.
+        if (clientUnavailable(error) && retries < FETCH_RETRIES) {
+          setTimeout(
+            () => {
+              if (currentKeyRef.current === key) askAgain();
+            },
+            FETCH_RETRY_MS * (retries + 1),
+          );
+          return;
+        }
         // No record could be fetched: treat it as "nothing to resume", so reading is still recorded.
         setStoredLoaded(true);
         setFetchedFor(key);
       });
-  }, [key, titleReady, serverId, agentId]);
+    // The attempt number only re-runs the request; a new chat is caught by the guard above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, titleReady, serverId, agentId, fetchAttempt]);
 
   const jump = useStableEvent(jumpToSeq);
 
@@ -364,36 +399,6 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     setJumpRequest((request) => request + 1);
     jump(pick.restoreSeq);
   }, [fetchedFor, key, loadedSeqs, stored, storedLoaded, timelineEpoch, jump, restoreAfterHistory]);
-
-  // The first jump runs against rows already on screen, but those may be only the tail: a direct
-  // link mounts the thread before its older history arrives. So the next rows to show up get one
-  // more jump, even when the first one did something — a page that is rebuilt later (direct link,
-  // then the workspace tab) starts from the bottom again.
-  const hasRows = loadedSeqs.length >= RESTORE_JUMP_ROUNDS;
-  const rowsBefore = useRef<{ key: string | null; count: number } | null>(null);
-  useEffect(() => {
-    if (!isWeb || !restoredRef.current || !hasRows) return;
-    // The reader has the view now: later rows (older history, or the rebuilt page's tail) are not
-    // allowed to yank it back to the restore row.
-    if (readerMovedRef.current) {
-      pendingRestoreRef.current = null;
-      return;
-    }
-    const seq = pendingRestoreRef.current;
-    if (seq === null) return;
-    const before = rowsBefore.current;
-    const grew = before !== null && before.key === key && loadedSeqs.length > before.count;
-    rowsBefore.current = { key, count: loadedSeqs.length };
-    if (restoredJumpsRef.current >= MAX_RESTORE_JUMPS) {
-      pendingRestoreRef.current = null;
-      return;
-    }
-    if (restoredJumpsRef.current > 0 && !grew) return;
-    restoredJumpsRef.current += 1;
-    if (restoredJumpsRef.current >= MAX_RESTORE_JUMPS) pendingRestoreRef.current = null;
-    jump(seq);
-  }, [hasRows, loadedSeqs.length, key, jump]);
-
   // The record is the last row the view showed in full (see read-position-sync.ts); `epoch`/`title`
   // are the ones it was shown under.
   const record = useCallback(
@@ -465,6 +470,23 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     [],
   );
 
+  // Settling means the view stopped where it started: the opening spot (older rows are not loaded
+  // yet, so they must not count as read) or a jump that put the reader at or above the first unread
+  // row. Rows that loaded under the reader are not read by being on screen.
+  const settledWithoutReading = useCallback(
+    (viewed: number | null) => {
+      const stamp = estimateStampRef.current;
+      estimateStampRef.current = null;
+      const estimate = estimateRef.current;
+      if (leftOpeningSpot(viewed, null, null, true)) return true;
+      if (stamp !== "jump" || estimate === null || viewed === null) return false;
+      return (
+        viewed <= estimate && (firstUnreadRef.current === null || viewed <= firstUnreadRef.current)
+      );
+    },
+    [leftOpeningSpot],
+  );
+
   const reportViewedSeq = useCallback(
     (viewedSeq: number | null, topSeq: number | null = null) => {
       // Until the stored record has been applied, the bottom of the chat would overwrite it.
@@ -518,6 +540,31 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     [key, leftOpeningSpot, looksLanded, record, stored, storedLoaded],
   );
 
+  // The first jump runs against rows already on screen, but those may be only the tail: a direct
+  // link mounts the thread before its older history arrives. So the next rows to show up get one
+  // more jump, even when the first one did something — a page that is rebuilt later (direct link,
+  // then the workspace tab) starts from the bottom again.
+  const hasRows = loadedSeqs.length >= RESTORE_JUMP_ROUNDS;
+  const rowsBefore = useRef<{ key: string | null; count: number } | null>(null);
+  useEffect(() => {
+    if (!isWeb || !restoredRef.current || !hasRows) return;
+    const seq = pendingRestoreRef.current;
+    if (seq === null) return;
+    // The reader has scrolled since the last jump: rows arriving now (older history, or the
+    // rebuilt page's tail) must not yank the view back to the record.
+    if (readerTookOverRef.current) {
+      pendingRestoreRef.current = null;
+      return;
+    }
+    const before = rowsBefore.current;
+    const grew = before !== null && before.key === key && loadedSeqs.length > before.count;
+    rowsBefore.current = { key, count: loadedSeqs.length };
+    if (restoredJumpsRef.current > 0 && !grew) return;
+    restoredJumpsRef.current += 1;
+    if (restoredJumpsRef.current >= MAX_RESTORE_JUMPS) pendingRestoreRef.current = null;
+    jump(seq);
+  }, [hasRows, loadedSeqs.length, key, jump]);
+
   // The jump request is measured once the view has had time to apply it (history fetched for a row
   // that is not loaded arrives later). Nothing is recorded until then, so an estimate taken late
   // cannot be mistaken for the reader scrolling.
@@ -567,11 +614,10 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
         if (shouldDismissUnreadDivider(lastViewedRef.current, dismissAtRef.current)) {
           setUnreadFrom((current) => (current?.key === key ? null : current));
         }
-        if (!readerMovedRef.current || !leftOpeningSpot(lastViewedRef.current, top, top, true)) {
-          return;
-        }
         const base = inputBaseRef.current;
         const viewed = lastViewedRef.current;
+        const stoppedAt = settledWithoutReading(viewed);
+        if (!stoppedAt) return;
         record(
           viewed !== null && base !== null ? Math.min(viewed, base) : viewed,
           epoch,
@@ -581,7 +627,7 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
       Math.max(0, settleAt + 100 - Date.now()),
     );
     return () => clearTimeout(timer);
-  }, [settleAt, key, timelineEpoch, record, leftOpeningSpot]);
+  }, [settleAt, key, timelineEpoch, record, settledWithoutReading]);
 
   // Only the current chat and history's divider counts; one remembered from before must not show.
   const unreadFromSeq =
