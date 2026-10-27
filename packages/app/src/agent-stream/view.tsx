@@ -78,6 +78,7 @@ import { type StreamSegmentRenderers, type StreamViewportHandle } from "./strate
 import { ChatOutlineRail } from "@/agent-stream/chat-outline/rail";
 import { useChatOutline } from "@/agent-stream/chat-outline/use-chat-outline";
 import { useReadPositionSync } from "@/agent-stream/use-read-position-sync";
+import { useNewArrivalCount } from "@/agent-stream/use-new-arrival-count";
 import { UnreadDivider } from "./unread-divider";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
@@ -336,6 +337,7 @@ function resolveBottomOverlayControlOffset(clearance: number | undefined): numbe
 }
 
 const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamViewProps>(
+  // oxlint-disable-next-line complexity -- over the limit before this change too; splitting it is a separate job
   function AgentStreamView(
     {
       agentId,
@@ -684,6 +686,16 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       // The outline's jump only goes to prompts (and needs its index built); resuming goes to the
       // saved row itself, so in-chat jumps go straight to the viewport.
       jumpToSeq: jumpToLoadedRow,
+    });
+
+    // While the reader is away from the bottom the view stays put; the rows arriving meanwhile are
+    // counted on the jump-to-bottom button instead.
+    const newArrivalCount = useNewArrivalCount({
+      items: findItemsForSync,
+      epoch: timelineEpoch,
+      isNearBottom,
+      isTimelineDetached,
+      resetKey: `${resolvedServerId}\u0000${agentId}`,
     });
 
     useImperativeHandle(
@@ -1345,15 +1357,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             {(!isNearBottom || isTimelineDetached) && !toposKeyboardOpen && (
               <View style={scrollToBottomContainerStyle} pointerEvents="box-none">
                 <Animated.View entering={scrollIndicatorFadeIn} exiting={scrollIndicatorFadeOut}>
-                  <Pressable
-                    style={stylesheet.scrollToBottomButton}
-                    onPress={scrollToBottom}
-                    accessibilityRole="button"
-                    accessibilityLabel={t("agentStream.scrollToBottom")}
-                    testID="scroll-to-bottom-button"
-                  >
-                    <ChevronDown size={24} color={stylesheet.scrollToBottomIcon.color} />
-                  </Pressable>
+                  <ScrollToBottomButton count={newArrivalCount} onPress={scrollToBottom} />
                 </Animated.View>
               </View>
             )}
@@ -1363,6 +1367,28 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
   },
 );
+
+function ScrollToBottomButton({ count, onPress }: { count: number; onPress: () => void }) {
+  const { t } = useTranslation();
+  const label =
+    count > 0 ? t("agentStream.newMessages", { count }) : t("agentStream.scrollToBottom");
+  return (
+    <Pressable
+      style={count > 0 ? stylesheet.newMessagesButton : stylesheet.scrollToBottomButton}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      testID="scroll-to-bottom-button"
+    >
+      {count > 0 ? (
+        <Text style={stylesheet.newMessagesText} testID="new-messages-count">
+          {label}
+        </Text>
+      ) : null}
+      <ChevronDown size={24} color={stylesheet.scrollToBottomIcon.color} />
+    </Pressable>
+  );
+}
 
 function agentCapabilityFlagsEqual(
   left: AgentCapabilityFlags | undefined,
@@ -1899,6 +1925,23 @@ const stylesheet = StyleSheet.create((theme) => ({
     alignItems: "center",
     justifyContent: "center",
     ...theme.shadow.sm,
+  },
+  newMessagesButton: {
+    height: 48,
+    borderRadius: 24,
+    paddingLeft: theme.spacing[4],
+    paddingRight: theme.spacing[3],
+    backgroundColor: theme.colors.surface2,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: theme.spacing[1],
+    ...theme.shadow.sm,
+  },
+  newMessagesText: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.base,
+    fontWeight: "600",
   },
   scrollToBottomIcon: {
     color: theme.colors.foreground,

@@ -179,6 +179,8 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     title,
     newest: newestLoadedSeq ?? -1,
   };
+  const loadedSeqsRef = useRef<readonly number[]>(loadedSeqs);
+  loadedSeqsRef.current = loadedSeqs;
   const key = `${serverId}\u0000${agentId}`;
   currentKeyRef.current = key;
   const titleReady = title !== null;
@@ -269,6 +271,48 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
       mustMoveRef.current = true;
       restTopRef.current = null;
       restViewedRef.current = null;
+      refreshFromOtherDevice();
+    };
+    // Another device may have read further while this page was in the background. The view is not
+    // moved (the reader's place is theirs); the record and the "ここから未読" divider catch up.
+    const refreshFromOtherDevice = () => {
+      if (!restoredRef.current) return;
+      const { epoch, title: seenTitle } = latestRef.current;
+      const apply = (out: unknown) => {
+        if (currentKeyRef.current !== key || latestRef.current.epoch !== epoch) return;
+        const remote = parseStored(out);
+        if (!remote?.enabled || remote.seq === null || remote.epoch !== epoch) return;
+        const remoteSeq = remote.seq;
+        if (highWaterRef.current !== null && remoteSeq <= highWaterRef.current) return;
+        highWaterRef.current = remoteSeq;
+        // A report still waiting to go out must not overwrite the further place the other device saved.
+        const waiting = pendingRef.current;
+        if (
+          waiting &&
+          waiting.atKey === key &&
+          waiting.epoch === epoch &&
+          waiting.seq <= remoteSeq
+        ) {
+          pendingRef.current = null;
+        }
+        setStored(remote);
+        if (shouldDismissUnreadDivider(remoteSeq, dismissAtRef.current)) {
+          setUnreadFrom((current) => (current?.key === key ? null : current));
+          return;
+        }
+        // Still unread at the bottom: the divider moves down to the first row after the remote one.
+        const next = loadedSeqsRef.current.filter((seq) => seq > remoteSeq);
+        if (next.length === 0) return;
+        const firstUnread = Math.min(...next);
+        firstUnreadRef.current = firstUnread;
+        setUnreadFrom((current) =>
+          current?.key === key && epoch !== null ? { key, epoch, seq: firstUnread } : current,
+        );
+      };
+      invoke(serverId, "topos.readpos.get", { agentId, title: seenTitle ?? undefined }).then(
+        apply,
+        () => undefined,
+      );
     };
     document.addEventListener("visibilitychange", onVisibility);
     // The page is a web app, so these are the reader's own moving. A resize or a rotation fires none of
@@ -286,7 +330,7 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
       document.removeEventListener("keydown", onKeyDown, { capture: true });
       sendPending();
     };
-  }, [key, timelineEpoch, sendPending]);
+  }, [key, timelineEpoch, sendPending, serverId, agentId]);
 
   // A new chat (not a new history) also drops the fetched record so it is asked for again.
   useEffect(() => {
