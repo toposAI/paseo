@@ -75,7 +75,12 @@ function section(body: string, heading: string): string {
   return m ? m[1].trim() : "";
 }
 
-/** 「a 〜 / b 〜(推奨)」を選択肢へ。2つ未満しか取れなければ空(チャットでだけ答える項目)。 */
+/**
+ * 「a 〜 / b 〜(推奨)」を選択肢へ。2つ未満しか取れなければ空(チャットでだけ答える項目)。
+ * id は a〜f の1文字に加え、英小文字の短い名前(`both` `reflect_only` `rework` など)も受ける。
+ * 以前は a〜f だけで、バグ報告の承認ノート(`both 両方承認 / reflect_only … / rework … / reject …`)が
+ * 「選択肢なし」と読まれ、箱から直接答えられなかった(2026-10-27)。
+ */
 export function parseOptions(text: string): {
   options: ConfirmBoxOption[];
   recommended: string | null;
@@ -84,7 +89,7 @@ export function parseOptions(text: string): {
   let recommended: string | null = null;
   const firstLine = text.split("\n")[0] ?? "";
   for (const part of firstLine.split(/\s\/\s/)) {
-    const m = /^([a-f])\s+(.+)$/.exec(part.trim());
+    const m = /^([a-z][a-z0-9_]{0,23})\s+(.+)$/.exec(part.trim());
     if (!m) continue;
     const raw = m[2].trim();
     if (/推奨/.test(raw)) recommended = m[1];

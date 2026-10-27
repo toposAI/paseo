@@ -84,6 +84,21 @@ test("parseOptions: 推奨の印を外して id と推奨を取る / 2つ未満�
   assert.deepEqual(parseOptions("自由記述").options, []);
 });
 
+test("parseOptions: 英小文字の名前の id(バグ報告の承認ノート)も選択肢にする", () => {
+  const r = parseOptions(
+    "both 両方承認(修正を反映して返信も送る)(推奨) / reflect_only 反映のみ(返信案は差し戻し) / rework 差し戻し(チャット欄のコメントを入れて作り直す) / reject 却下(何もしない)",
+  );
+  assert.deepEqual(
+    r.options.map((o) => o.id),
+    ["both", "reflect_only", "rework", "reject"],
+  );
+  assert.equal(r.recommended, "both");
+  assert.equal(r.options[0].label, "両方承認(修正を反映して返信も送る)");
+  // 日本語だけの文章・大文字始まりは選択肢にしない
+  assert.deepEqual(parseOptions("どちらでもよい / 任せる").options, []);
+  assert.deepEqual(parseOptions("Approve this / Reject that").options, []);
+});
+
 test("open だけ画面に出し、waiting_materials は件数だけ・answered/superseded は出さない", () => {
   const dir = tmpDir();
   fs.writeFileSync(path.join(dir, "j-1.md"), NOTE("j-1", "open"));
