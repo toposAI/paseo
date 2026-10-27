@@ -234,13 +234,11 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
         return;
       }
       // Back looking at the page: the chat may have followed rows on its own while it was away, and
-      // the view is not the reader's until it moves again (unless the reader has already moved it).
+      // the view is not the reader's until it moves again.
       readerMovedRef.current = false;
-      if (mustMoveRef.current || !restoredRef.current) {
-        mustMoveRef.current = true;
-        restTopRef.current = null;
-        restViewedRef.current = null;
-      }
+      mustMoveRef.current = true;
+      restTopRef.current = null;
+      restViewedRef.current = null;
     };
     document.addEventListener("visibilitychange", onVisibility);
     // The page is a web app, so these are the reader's own moving. A resize or a rotation fires none of

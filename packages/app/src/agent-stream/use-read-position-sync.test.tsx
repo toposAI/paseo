@@ -541,7 +541,9 @@ describe("useReadPositionSync", () => {
     act(() => result.current.reportViewedSeq(15, 15));
     readerClicksOutsideChat();
     pressKey("Tab");
-    act(() => result.current.reportViewedSeq(15, 15));
+    // The view is elsewhere now (a resize, a late layout): the report must still not count, or every
+    // click anywhere on the page would let the chat record where it happens to be.
+    act(() => result.current.reportViewedSeq(12, 10));
     spy.mockRestore();
     await new Promise((resolve) => setTimeout(resolve, 1800));
     expect(sentSeqs()).toEqual([]);
@@ -581,6 +583,8 @@ describe("useReadPositionSync", () => {
       document.dispatchEvent(new Event("visibilitychange"));
     });
     visibility.mockRestore();
+    // The reader comes back and scrolls once, finding the chat already at the bottom.
+    readerScrolls();
     act(() => result.current.reportViewedSeq(21, 21));
     await settle(spy);
     expect(sentSeqs()).not.toContain(18);
