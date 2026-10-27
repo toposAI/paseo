@@ -266,8 +266,14 @@ const handleStyle = (
   Platform.OS === "web" ? { touchAction: "none", cursor: "grab", paddingHorizontal: 6 } : {}
 ) as object;
 const handleDataSet = { dragHandle: "1" };
-const rankRow = { flexDirection: "row" as const, alignItems: "center" as const, gap: 8 };
-const grow = { flex: 1 };
+const rankRow = {
+  flexDirection: "row" as const,
+  alignItems: "center" as const,
+  flexWrap: "wrap" as const,
+  gap: 8,
+};
+// 行名が長い/パネルが狭いときは、名前の下へボタンを折り返す(右端で切れない)
+const grow = { flex: 1, minWidth: 140 };
 
 function RankRow({
   id,
