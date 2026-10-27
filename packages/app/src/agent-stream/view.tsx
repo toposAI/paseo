@@ -669,12 +669,21 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       () => [...effectiveStreamItems, ...(effectiveStreamHead ?? [])],
       [effectiveStreamItems, effectiveStreamHead],
     );
+    const jumpToLoadedRow = useCallback(
+      (seq: number) => {
+        const item = findItemsForSync.find((candidate) => candidate.timelineCursor?.seq === seq);
+        if (item) viewportRef.current?.scrollToMessage?.(item.id);
+      },
+      [findItemsForSync, viewportRef],
+    );
     const readPosition = useReadPositionSync({
       serverId: resolvedServerId,
       agentId,
       timelineEpoch,
       items: findItemsForSync,
-      jumpToSeq: chatOutline.jumpToPrompt,
+      // The outline's jump only goes to prompts (and needs its index built); resuming goes to the
+      // saved row itself, so in-chat jumps go straight to the viewport.
+      jumpToSeq: jumpToLoadedRow,
     });
 
     useImperativeHandle(
