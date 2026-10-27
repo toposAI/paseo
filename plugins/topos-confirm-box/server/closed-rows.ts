@@ -45,6 +45,8 @@ export function readCoreWindowIds(dir: string = stateDir()): string[] {
     // 無ければ空
   }
   ids.push(...readIdLines(path.join(dir, "progress_window", "window_id")).slice(0, 1));
+  // 窓口A など上の2か所に登録が無い中核スレ(1行1id・`#` コメント可)。
+  ids.push(...readIdLines(path.join(dir, "sidebar_core_agent_ids.txt")));
   return ids;
 }
 
@@ -74,17 +76,27 @@ export function standbyForCoreClosed(
   });
 }
 
-/** 非表示 id と、本当に終わった `closed` の行を外す。ピン止め・見出しの親・中核は残す。 */
+/**
+ * 非表示 id と、本当に終わった `closed` の行を外す。ピン止め・見出しの親・中核は残す。
+ * 非表示の親を持つ子は、親の見出し(`parentTitle`)ごと外して単独の行にする
+ * (親の行だけ外しても、子の `parentTitle` から見出しが作られて残るため。2026-10-28 画面確認)。
+ */
 export function dropFinishedClosedRows(
   rows: readonly ChildThread[],
   coreIds: readonly string[],
   hiddenIds: readonly string[],
 ): ChildThread[] {
-  return rows.filter((t) => {
-    if (matchesAny(t.agentId, hiddenIds)) return false;
-    if (t.machineState !== "closed") return true;
-    if (t.coordinator || t.pinned || t.groupingParent) return true;
-    if (matchesAny(t.agentId, coreIds)) return true;
-    return !(t.status === "完了" || t.status === "待機中");
-  });
+  return rows
+    .filter((t) => {
+      if (matchesAny(t.agentId, hiddenIds)) return false;
+      if (t.machineState !== "closed") return true;
+      if (t.coordinator || t.pinned || t.groupingParent) return true;
+      if (matchesAny(t.agentId, coreIds)) return true;
+      return !(t.status === "完了" || t.status === "待機中");
+    })
+    .map((t) =>
+      t.parentAgentId && matchesAny(t.parentAgentId, hiddenIds)
+        ? Object.assign({}, t, { parentAgentId: null, parentTitle: null })
+        : t,
+    );
 }

@@ -107,3 +107,21 @@ test("id ファイルを読む(コメント・壊れた値は無視、無けれ�
   assert.deepEqual(readSidebarHiddenIds(dir), [BACKSTAGE]);
   assert.deepEqual(readSidebarHiddenIds(path.join(dir, "none")), []);
 });
+
+test("非表示の親の子は見出しを外して単独の行で残す", () => {
+  const out = dropFinishedClosedRows(
+    [
+      row(BACKSTAGE, { machineState: "running" }),
+      row("child-thread-1", {
+        machineState: "idle",
+        parentAgentId: BACKSTAGE,
+        parentTitle: "coordinator_backstage",
+      }),
+    ],
+    [],
+    [BACKSTAGE],
+  );
+  assert.equal(out.length, 1);
+  assert.equal(out[0].parentAgentId, null);
+  assert.equal(out[0].parentTitle, null);
+});
