@@ -115,6 +115,15 @@ test("実データの形: Stale な箱行が残っていても N はノートの
   assert.equal(countOpen(items), 2);
 });
 
+test("Vault 読み取りを止めた(TOPOS_CONFIRM_BOX_VAULT_SOURCE=0)ときは、permit だけを数える", () => {
+  // ノートを読まない設定では N もノート由来の項目を持たない。箱の判断行まで数えると N より多くなるので数えない
+  const items = [
+    item({ id: "stale", key: "coord-j-6b02455-20261025" }),
+    item({ id: "p", kind: "permit", judgment: false }),
+  ];
+  assert.equal(countJudgmentCounted(items), 1);
+});
+
 test("確認箱の中のバッジ(サーバー)と下部バー(クライアント)は `countJudgmentCounted` の1本を使う", () => {
   // サーバー: 件数 RPC の open は isJudgmentCounted で絞る(`state !== "approved"` を復活させない)
   assert.match(
