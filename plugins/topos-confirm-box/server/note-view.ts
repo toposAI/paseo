@@ -66,6 +66,10 @@ export function confineToVault(
   if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel) || isBackupPath(real)) {
     return { ok: false, message: "Vault の外のファイルは開けません" };
   }
+  // リンク索引と同じく、隠しフォルダ(.obsidian / .git / .trash など)の中は開かない。
+  if (rel.split(path.sep).some((seg) => seg.startsWith("."))) {
+    return { ok: false, message: "隠しフォルダの中のファイルは開けません" };
+  }
   return { ok: true, real, root };
 }
 
@@ -108,6 +112,11 @@ export function readVaultNote(vaultDir: string, file: string): NoteReadResult {
   try {
     const fd = fs.openSync(c.real, "r");
     try {
+      // 検査(realpath)から開くまでの間に差し替えられていないこと(同じ実体か)を確かめる。
+      const opened = fs.fstatSync(fd);
+      if (!opened.isFile() || opened.ino !== st.ino || opened.dev !== st.dev) {
+        return fail("読み込み中にノートが入れ替わりました");
+      }
       const buf = Buffer.alloc(size);
       const n = fs.readSync(fd, buf, 0, size, 0);
       text = buf.subarray(0, n).toString("utf8");

@@ -98,3 +98,19 @@ test("リンク解決: 同じフォルダ優先・見つからなければ失敗
   assert.equal(resolveVaultLink(v, from, "ない").ok, false);
   assert.equal(resolveVaultLink(v, from, "../../etc/passwd").ok, false);
 });
+
+test("拒否: 隠しフォルダ・外へ向くフォルダのsymlink・URLエンコード名", () => {
+  const v = makeVault();
+  resetLinkIndex();
+  fs.mkdirSync(path.join(v, ".obsidian"));
+  fs.writeFileSync(path.join(v, ".obsidian", "h.md"), "x");
+  assert.equal(readVaultNote(v, path.join(v, ".obsidian", "h.md")).ok, false);
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "nv-outdir-"));
+  fs.writeFileSync(path.join(outDir, "s.md"), "secret");
+  fs.symlinkSync(outDir, path.join(v, "escape"));
+  assert.equal(readVaultNote(v, path.join(v, "escape", "s.md")).ok, false);
+  const from = path.join(v, "Paseo", "構想", "検討中", "a.md");
+  assert.equal(resolveVaultLink(v, from, "%2e%2e/%2e%2e/etc/passwd").ok, false);
+  assert.equal(resolveVaultLink(v, from, "escape/s").ok, false);
+  assert.equal(resolveVaultLink(v, path.join(outDir, "s.md"), "a").ok, false);
+});
