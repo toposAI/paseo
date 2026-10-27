@@ -71,4 +71,5 @@ test("localStorage の読み書きは同じキーを使う", () => {
 test("空一覧の文言はタブごとに違う", () => {
   assert.equal(emptySectionLabel("threads"), "実装中のスレはありません");
   assert.equal(emptySectionLabel("concepts"), "進行中の構想はありません");
+  assert.equal(emptySectionLabel("projects"), "参加している共有プロジェクトはありません");
 });
