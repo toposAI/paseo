@@ -212,7 +212,7 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
       const seen = lastOldestSeenRef.current;
       if (
         historyFetchCountRef.current >= MAX_HISTORY_FETCHES ||
-        (seen !== null && oldestLoaded >= seen)
+        (seen === oldestLoaded && storedSeq < oldestLoaded)
       ) {
         // No progress: the stored row is gone. Leave the chat as it is (no divider, no record) —
         // recording the newest row here would mark rows that were never shown as read.
