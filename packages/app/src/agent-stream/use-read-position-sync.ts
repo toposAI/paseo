@@ -75,6 +75,9 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     [loadedSeqs],
   );
   const [stored, setStored] = useState<StoredReadPosition | null>(null);
+  // Null until the daemon has answered. Without that answer there is no stored row to have landed at
+  // yet, and the bottom of the chat (where it opens) would otherwise count as where the reader is.
+  const [storedLoaded, setStoredLoaded] = useState(false);
   const [fetchedFor, setFetchedFor] = useState<string | null>(null);
   // The "ここから未読" divider: dropped once the reader has seen everything that existed at open.
   // It belongs to the history it was picked from, so a new epoch neither shows nor reuses it.
@@ -86,6 +89,11 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
 
   const awaitingLandingRef = useRef(false);
   const landedRef = useRef(false);
+  // A chat that opens where it was last left (the bottom) shows its newest row without the reader
+  // having read it: the first record waits until the view actually moves.
+  const mustMoveRef = useRef(false);
+  // The row on top where the chat opened.
+  const restTopRef = useRef<number | null>(null);
   const quietUntilRef = useRef(0);
   const highWaterRef = useRef<number | null>(null);
   // The row is captured with the chat and history epoch it was seen under, so a send that happens
@@ -149,6 +157,8 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     restoredRef.current = false;
     awaitingLandingRef.current = false;
     landedRef.current = false;
+    mustMoveRef.current = false;
+    restTopRef.current = null;
     quietUntilRef.current = 0;
     highWaterRef.current = null;
     pendingRef.current = null;
@@ -178,6 +188,7 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
   useEffect(() => {
     fetchStartedForRef.current = null;
     setStored(null);
+    setStoredLoaded(false);
     setFetchedFor(null);
   }, [key]);
 
@@ -192,11 +203,15 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
       .then((out) => {
         if (currentKeyRef.current !== key) return false;
         setStored(parseStored(out));
+        setStoredLoaded(true);
         setFetchedFor(key);
         return true;
       })
       .catch(() => {
-        if (currentKeyRef.current === key) setFetchedFor(key);
+        if (currentKeyRef.current !== key) return;
+        // No record could be fetched: treat it as "nothing to resume", so reading is still recorded.
+        setStoredLoaded(true);
+        setFetchedFor(key);
       });
   }, [key, titleReady, serverId, agentId]);
 
@@ -217,6 +232,7 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
         // No progress: the stored row is gone. Leave the chat as it is (no divider, no record) —
         // recording the newest row here would mark rows that were never shown as read.
         awaitingLandingRef.current = false;
+        mustMoveRef.current = true;
         return;
       }
       lastOldestSeenRef.current = oldestLoaded;
@@ -227,7 +243,7 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
   );
 
   useEffect(() => {
-    if (!isWeb || fetchedFor !== key || restoredRef.current) return;
+    if (!isWeb || !storedLoaded || fetchedFor !== key || restoredRef.current) return;
     if (loadedSeqs.length === 0 || timelineEpoch === null) return;
     const oldestLoaded = loadedSeqs.reduce((m, s) => (s < m ? s : m), Number.POSITIVE_INFINITY);
     const storedSeq =
@@ -241,7 +257,12 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
       highWaterRef.current = stored.seq;
     }
     const pick = pickResume({ stored, timelineEpoch, loadedSeqs });
-    if (pick === null) return;
+    if (pick === null) {
+      // Nothing to resume: the chat stays at the bottom. Its newest row is on screen, but the reader
+      // has not been there yet — the record waits until the view moves.
+      mustMoveRef.current = true;
+      return;
+    }
     awaitingLandingRef.current = true;
     quietUntilRef.current = Date.now() + POST_RESTORE_QUIET_MS;
     setSettleAt(quietUntilRef.current);
@@ -253,7 +274,7 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     // new history restores at the same row as the old one).
     setJumpRequest((request) => request + 1);
     jump(pick.restoreSeq);
-  }, [fetchedFor, key, loadedSeqs, stored, timelineEpoch, jump, restoreAfterHistory]);
+  }, [fetchedFor, key, loadedSeqs, stored, storedLoaded, timelineEpoch, jump, restoreAfterHistory]);
 
   // The record is the last row the view showed in full (see read-position-sync.ts); `epoch`/`title`
   // are the ones it was shown under.
@@ -272,29 +293,32 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
     [agentId, key, sendPending, serverId],
   );
 
+  // Whether this report shows the view at (or above) the row the stored position was restored to.
+  const looksLanded = useCallback((topSeq: number | null) => {
+    const estimate = estimateRef.current;
+    if (topSeq === null) return false;
+    if (firstUnreadRef.current !== null && topSeq <= firstUnreadRef.current) {
+      // The view sits at or above the first unread row: the jump landed, whatever the newest row is.
+      return true;
+    }
+    if (estimateStampRef.current === "load") {
+      // Rows still being loaded can move the view without the reader: not a landing.
+      estimateStampRef.current = null;
+      return false;
+    }
+    // The view moved up, away from the bottom the chat starts at: the reader scrolled, or the jump
+    // took effect. Moving down is what a chat left at the bottom does on its own.
+    return estimate !== null && topSeq < estimate;
+  }, []);
+
   const reportViewedSeq = useCallback(
     (viewedSeq: number | null, topSeq: number | null = null) => {
       // Until the stored record has been applied, the bottom of the chat would overwrite it.
-      if (!isWeb || !restoredRef.current || !stored?.enabled) return;
+      if (!isWeb || !storedLoaded || !restoredRef.current || !stored?.enabled) return;
       lastViewedRef.current = viewedSeq;
       lastTopRef.current = topSeq;
-      const estimate = estimateRef.current;
-      if (awaitingLandingRef.current) {
-        const atOrAboveUnread =
-          topSeq !== null && firstUnreadRef.current !== null && topSeq <= firstUnreadRef.current;
-        if (atOrAboveUnread) {
-          // The view sits at or above the first unread row: the jump landed, whatever the newest row
-          // is. The landing is only remembered here; recording still waits for the quiet moment.
-          landedRef.current = true;
-        } else if (estimateStampRef.current === "load") {
-          // Rows still being loaded can move the view without the reader: not a landing.
-          estimateStampRef.current = null;
-        } else if (estimate !== null && topSeq !== null && topSeq < estimate) {
-          // The view moved up, away from the bottom the chat starts at: the reader scrolled, or the
-          // jump took effect. Moving down is what a chat left at the bottom does on its own.
-          landedRef.current = true;
-        }
-      }
+      // The landing is only remembered here; recording still waits for the quiet moment.
+      if (awaitingLandingRef.current && looksLanded(topSeq)) landedRef.current = true;
       if (Date.now() < quietUntilRef.current) return;
       if (awaitingLandingRef.current) {
         // Without a landing, the report is the bottom of the chat (where the newest rows are) and
@@ -304,10 +328,20 @@ export function useReadPositionSync(input: Input): ReadPositionSync {
         if (!landedRef.current) return;
         awaitingLandingRef.current = false;
       }
+      if (mustMoveRef.current) {
+        // Where the chat opened is not where the reader has read to. Wait until the view leaves it.
+        if (restTopRef.current === null) {
+          restTopRef.current = topSeq;
+          return;
+        }
+        if (topSeq === null || topSeq === restTopRef.current) return;
+        mustMoveRef.current = false;
+        restTopRef.current = null;
+      }
       landedRef.current = false;
       record(viewedSeq, latestRef.current.epoch, latestRef.current.title);
     },
-    [record, stored],
+    [looksLanded, record, stored, storedLoaded],
   );
 
   // The jump request is measured once the view has had time to apply it (history fetched for a row

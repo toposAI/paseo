@@ -272,13 +272,55 @@ describe("useReadPositionSync", () => {
     rerender({ items: [row(11, "e2"), row(12, "e2"), row(13, "e2")], epoch: "e2" });
     await waitFor(() => expect(result.current.unreadFromSeq).toBeNull());
 
-    // The new history is not resumed from (the record belongs to the old one), but reading in it is
-    // still recorded — under the new history, so the next open can use it.
+    // The new history is not resumed from (the record belongs to the old one), so where the view was
+    // left before is not a landing; once the reader moves, reading is recorded — under the new row's
+    // history.
     act(() => result.current.reportViewedSeq(13, 11));
+    act(() => result.current.reportViewedSeq(13, 13));
     await waitFor(() => expect(sentSeqs()).toContain(13), { timeout: 4000 });
     const last = readposSetCalls().at(-1);
     expect((last?.[2] as { epoch?: string } | undefined)?.epoch).toBe("e2");
   });
+
+  it("does not mark the chat as read from where it opened when there is no record yet", async () => {
+    rpc.invokePluginRpc.mockImplementation(
+      async (_pluginId, method): Promise<RpcReply | null> =>
+        method === "topos.readpos.get"
+          ? { enabled: true, seq: null, epoch: null }
+          : { ok: true },
+    );
+    const jump = vi.fn();
+    const { result } = renderHook(() =>
+      useReadPositionSync({
+        serverId: "host-1",
+        agentId: "a1",
+        timelineEpoch: "e1",
+        items: [row(10), row(12), row(15)],
+        jumpToSeq: jump,
+      }),
+    );
+    await waitFor(() => expect(rpc.invokePluginRpc).toHaveBeenCalled());
+    // Let the view's first report (taken while the record is still on its way) and the fetched record
+    // be applied: where the chat opened is seen from the record on.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+
+    // The chat opens at the bottom and the newest row is on screen without the reader having read
+    // it. Recording that would make everything look read: the record waits for the view to move.
+    const afterQuiet = Date.now() + 10_000;
+    const spy = vi.spyOn(Date, "now").mockReturnValue(afterQuiet);
+    act(() => result.current.reportViewedSeq(15, 15));
+    act(() => result.current.reportViewedSeq(15, 15));
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    expect(sentSeqs()).toEqual([]);
+    spy.mockRestore();
+
+    // Once the reader actually scrolls, reading is recorded again.
+    const later = Date.now() + 20_000;
+    const spy2 = vi.spyOn(Date, "now").mockReturnValue(later);
+    act(() => result.current.reportViewedSeq(12, 10));
+    spy2.mockRestore();
+    await waitFor(() => expect(sentSeqs()).toContain(12), { timeout: 4000 });
+  }, 15_000);
 
   it("does not resume from a record written under another history", async () => {
     rpc.invokePluginRpc.mockImplementation(
