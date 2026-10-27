@@ -55,6 +55,33 @@ function readerScrolls() {
   });
 }
 
+/** The reader clicking in the chat's scrolling area. */
+function readerClicksChat() {
+  const box = document.createElement("div");
+  box.setAttribute("data-testid", "agent-chat-scroll");
+  document.body.appendChild(box);
+  try {
+    act(() => {
+      box.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    });
+  } finally {
+    box.remove();
+  }
+}
+
+/** The reader pressing a key somewhere on the page. */
+function pressKey(key: string, target: EventTarget = document.body) {
+  act(() => {
+    target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+  });
+}
+
+/** Waits for the report debounce to run out, then restores the clock. */
+async function settle(spy: ReturnType<typeof vi.spyOn>) {
+  await new Promise((resolve) => setTimeout(resolve, 1800));
+  spy.mockRestore();
+}
+
 function setTitle(title: string) {
   useSessionStore.setState({
     sessions: {
@@ -443,6 +470,100 @@ describe("useReadPositionSync", () => {
     await new Promise((resolve) => setTimeout(resolve, 1800));
     expect(sentSeqs()).not.toContain(18);
     expect(sentSeqs()).not.toContain(15);
+  }, 15_000);
+
+  it("makes a report held back during the quiet moment wait for the reader", async () => {
+    // Everything unread fits on one screen, so a reader who scrolls during the quiet moment sees the
+    // whole of it at once: the view does not move afterwards and only the settle timer can record.
+    const jump = vi.fn();
+    const { result } = renderHook(() =>
+      useReadPositionSync({
+        serverId: "host-1",
+        agentId: "a1",
+        timelineEpoch: "e1",
+        items: [row(9), row(10), row(11)],
+        jumpToSeq: jump,
+      }),
+    );
+    await waitFor(() => expect(result.current.unreadFromSeq).toBe(11));
+
+    act(() => result.current.reportViewedSeq(11, 9));
+    readerClicksChat();
+    await waitFor(() => expect(result.current.unreadFromSeq).toBeNull(), { timeout: 6000 });
+    // Same view as when the chat opened as far as the rows go: not the reader's.
+    expect(sentSeqs()).toEqual([]);
+  });
+
+  it("does not record rows that arrived to a chat the reader had stopped scrolling", async () => {
+    const jump = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ items }: { items: StreamItem[] }) =>
+        useReadPositionSync({
+          serverId: "host-1",
+          agentId: "a1",
+          timelineEpoch: "e1",
+          items,
+          jumpToSeq: jump,
+        }),
+      { initialProps: { items: [row(10), row(12), row(15)] } },
+    );
+    await waitFor(() => expect(result.current.unreadFromSeq).toBe(12));
+
+    // The reader scrolls back up and stops there; a few seconds later the view's layout settles and
+    // reports the same spot again.
+    const later = Date.now() + 10_000;
+    const spy = vi.spyOn(Date, "now").mockReturnValue(later);
+    readerScrolls();
+    act(() => result.current.reportViewedSeq(11, 10));
+    await waitFor(() => expect(sentSeqs()).toEqual([11]), { timeout: 4000 });
+
+    // The chat follows the new rows down on its own and the layout settles again at the bottom. The
+    // row that arrived while the reader was away is not read by it: the record may only reach what
+    // was loaded when the reader last scrolled.
+    rerender({ items: [row(10), row(12), row(15), row(18)] });
+    act(() => result.current.reportViewedSeq(18, 18));
+    act(() => result.current.reportViewedSeq(18, 18));
+    rerender({ items: [row(10), row(12), row(15), row(18), row(21)] });
+    act(() => result.current.reportViewedSeq(21, 21));
+    await settle(spy);
+    expect(sentSeqs()).not.toContain(18);
+    expect(sentSeqs()).not.toContain(21);
+  }, 15_000);
+
+  it("does not make a click outside the chat count as the reader moving it", async () => {
+    rpc.invokePluginRpc.mockImplementation(
+      async (_pluginId, method): Promise<RpcReply | null> =>
+        method === "topos.readpos.get" ? { enabled: true, seq: null, epoch: null } : { ok: true },
+    );
+    const jump = vi.fn();
+    const { result } = renderHook(() =>
+      useReadPositionSync({
+        serverId: "host-1",
+        agentId: "a1",
+        timelineEpoch: "e1",
+        items: [row(10), row(12), row(15)],
+        jumpToSeq: jump,
+      }),
+    );
+    await waitFor(() => expect(rpc.invokePluginRpc).toHaveBeenCalled());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+
+    // The reader opens the chat, clicks a button in the thread list, and leaves the page for the
+    // night: the chat follows new rows on its own and nobody scrolls it.
+    const afterQuiet = Date.now() + 10_000;
+    const spy = vi.spyOn(Date, "now").mockReturnValue(afterQuiet);
+    act(() => result.current.reportViewedSeq(15, 15));
+    act(() => {
+      document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    });
+    pressKey("Tab");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    act(() => result.current.reportViewedSeq(15, 15));
+    spy.mockRestore();
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    expect(sentSeqs()).toEqual([]);
   }, 15_000);
 
   it("does not resume from a record written under another history", async () => {
