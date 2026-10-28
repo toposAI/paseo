@@ -19,6 +19,7 @@ import {
   isExplorerSidebarOpen,
   openExplorerSidebarView,
   resolveExplorerSidebarPresentation,
+  showExplorerSidebar,
   toggleExplorerSidebar,
 } from "@/workspace-tabs/explorer-sidebar";
 
@@ -36,6 +37,7 @@ beforeEach(() => {
     mobilePanel: { target: "agent", revision: 0 },
     explorerTab: "files",
     explorerTabByCheckout: {},
+    compactExplorerView: "files",
   });
 });
 
@@ -60,6 +62,24 @@ describe("Explorer sidebar", () => {
 
     expect(usePanelStore.getState().mobilePanel.target).toBe("file-explorer");
     expect(useWorkspaceLayoutStore.getState().layoutByWorkspace[WORKSPACE_KEY]).toBeUndefined();
+  });
+
+  // 2026-10-28: 狭い画面の右から出る幕にもプラグインの面板(窓口Bのタスク台帳)を出せる。
+  // ファイル一覧・変更・PR を開いたら幕はファイル側に戻る(直前の面板から切り替える)。
+  it("switches the compact overlay back to files when a tree is opened", () => {
+    usePanelStore.getState().setCompactExplorerView("plugin");
+    openExplorerSidebarView({
+      isCompact: true,
+      workspaceKey: WORKSPACE_KEY,
+      checkout: CHECKOUT,
+      view: "files",
+    });
+    expect(usePanelStore.getState().compactExplorerView).toBe("files");
+    expect(usePanelStore.getState().mobilePanel.target).toBe("file-explorer");
+
+    usePanelStore.getState().setCompactExplorerView("plugin");
+    showExplorerSidebar({ isCompact: true, workspaceKey: WORKSPACE_KEY, checkout: CHECKOUT });
+    expect(usePanelStore.getState().compactExplorerView).toBe("files");
   });
 
   it("creates a dedicated desktop Explorer containing only its requested tree", () => {

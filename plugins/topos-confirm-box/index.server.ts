@@ -179,6 +179,8 @@ import {
   sayToLedger,
   splitArchived,
 } from "./server/priority.js";
+import { buildTaskLedger } from "./server/task-ledger.js";
+import { taskLedgerListRpc } from "./shared/task-ledger.js";
 import {
   answerlessAllowBlocked,
   permitQuestions,
@@ -760,6 +762,20 @@ export default function contribute(server: PluginServerContext) {
       return sayToLedger(resolveConfirmBoxDir(), input.text);
     } catch (error) {
       return { ok: false, message: `送れません: ${(error as Error).message}` };
+    }
+  });
+
+  // 窓口Bの右側の「タスク台帳」。読むだけ(ファイルは書き換えない)。読めない出所は空で続け、
+  // 何が読めなかったかを `notes` で返す(画面全体を消さない)。
+  server.handle(taskLedgerListRpc, async () => {
+    try {
+      return buildTaskLedger();
+    } catch (error) {
+      return {
+        rows: [],
+        notes: [`台帳を読めません: ${(error as Error).message}`],
+        sources: { items: false, inbox: false, childThreads: false, priority: false },
+      };
     }
   });
 

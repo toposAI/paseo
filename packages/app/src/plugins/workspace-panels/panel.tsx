@@ -105,7 +105,11 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
 
 const ThemedPluginPanelBody = withUnistyles(PluginPanelBody);
 
-function PluginPanel() {
+/**
+ * パネル本体。ワークスペースの右側の欄・パネル見本・狭い画面の右から出る幕(2026-10-28)のどこでも使う。
+ * 使う側は `PaneProvider` の中で描く。
+ */
+export function PluginPanel() {
   return <ThemedPluginPanelBody uniProps={pluginThemeMapping} />;
 }
 

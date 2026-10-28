@@ -9,6 +9,15 @@ import { z } from "zod";
 
 export type MobilePanelView = "agent" | "agent-list" | "file-explorer";
 
+/**
+ * 狭い画面(スマホ幅)で右から出る幕に出すもの。
+ * - "files" … 変更・ファイル・PR(従来どおり)
+ * - "plugin" … ワークスペースの右側の欄に出ているプラグインの面板(例: 窓口Bの「タスク台帳」)
+ * 左端から右へスワイプして幕が出るとき、ワークスペースの右側の欄にプラグインの面板が出ていれば
+ * そちらを出す(出ていなければ従来どおりファイル一覧)。
+ */
+export type CompactExplorerView = "files" | "plugin";
+
 export interface MobilePanelSelection {
   target: MobilePanelView;
   revision: number;
@@ -38,6 +47,7 @@ export interface PanelCoreState {
   desktop: DesktopSidebarState;
   explorerTab: ExplorerTab;
   explorerTabByCheckout: Record<string, ExplorerTab>;
+  compactExplorerView: CompactExplorerView;
 }
 
 function clampNumber(value: number, min: number, max: number): number {

@@ -55,6 +55,8 @@ export function openExplorerSidebarView(
     if (!input.checkout) return;
     const panel = usePanelStore.getState();
     panel.setExplorerTabForCheckout({ ...input.checkout, tab: input.view });
+    // ファイル一覧・変更・PR を開いたら、幕はそちらに戻す(直前に開いたプラグインの面板から切り替える)。
+    panel.setCompactExplorerView("files");
     panel.openCompactFileExplorer(input.checkout);
     return;
   }
@@ -71,7 +73,10 @@ export function openExplorerSidebarView(
 
 export function showExplorerSidebar(input: ExplorerSidebarInput): void {
   if (usesCompactExplorerSidebar(input)) {
-    if (input.checkout) usePanelStore.getState().openCompactFileExplorer(input.checkout);
+    if (input.checkout) {
+      usePanelStore.getState().setCompactExplorerView("files");
+      usePanelStore.getState().openCompactFileExplorer(input.checkout);
+    }
     return;
   }
   if (input.workspaceKey && canUseExplorerSidebar(input)) {

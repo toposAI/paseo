@@ -80,8 +80,9 @@ export function ConfirmBoxView({
   /**
    * 開き方。`box`=確認箱そのもの(下部バー:「バグ報告」等から開く。中は バグ報告・通知・優先順位 の3枚)、
    * `items`=下部バーの「ユーザー判断」から開いた画面(そのタブだけ)。
+   * `priority`=タスク台帳の行の開発プロジェクトから開いた画面(優先順位のタブだけ)。
    */
-  mode?: "box" | "items";
+  mode?: BoxTabMode;
 }) {
   const list = useRpc(confirmBoxListRpc);
   const decide = useRpc(confirmBoxDecideRpc);
@@ -708,7 +709,9 @@ function InlineToggle({
 }
 
 /** アイコン列を出す画面では、下の並び(TabStrip)は要らない(`items` を渡すと何も描かない)。 */
-function stripMode(mode: "box" | "items", hasHeader: boolean) {
+type BoxTabMode = "box" | "items" | "priority";
+
+function stripMode(mode: BoxTabMode, hasHeader: boolean) {
   return hasHeader ? "items" : mode;
 }
 
@@ -725,8 +728,8 @@ type TabId = "items" | "bugs" | "notify" | "priority";
  * 初期タブは、開いた画面ならそのタブ、確認箱ならバグ報告。
  */
 function useBoxTabs(
-  mode: "box" | "items",
-  initialTab: "bugs" | "notify" | "priority" = "bugs",
+  mode: BoxTabMode,
+  initialTab: "items" | "bugs" | "notify" | "priority" = "bugs",
 ): {
   shownTab: TabId;
   tabs: readonly (typeof TABS)[number][];
@@ -753,7 +756,7 @@ function TabStrip({
   styles: s,
   colors: c,
 }: {
-  mode: "box" | "items";
+  mode: BoxTabMode;
   tabs: readonly (typeof TABS)[number][];
   shownTab: TabId;
   counts: Partial<Record<TabId, number>>;

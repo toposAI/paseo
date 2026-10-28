@@ -30,6 +30,7 @@ beforeEach(() => {
     mobilePanel: { target: "agent", revision: 0 },
     explorerTab: "files",
     explorerTabByCheckout: {},
+    compactExplorerView: "files",
   });
   useWorkspaceLayoutStore.setState({
     pullRequestTabAutoOpenedByWorkspace: {},

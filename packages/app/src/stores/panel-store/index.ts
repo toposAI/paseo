@@ -24,6 +24,7 @@ import {
   selectIsAgentListOpen,
   selectIsCompactFileExplorerOpen,
   setMobilePanelTarget,
+  type CompactExplorerView,
   type DesktopSidebarState,
   type MobilePanelView,
   type MobilePanelSelection,
@@ -35,6 +36,7 @@ import { createValidatedPersistStorage } from "@/storage/validated-persist-stora
 export type { ExplorerTab } from "../explorer-tab-memory";
 export type { ExplorerCheckoutContext } from "../explorer-checkout-context";
 export type {
+  CompactExplorerView,
   DesktopSidebarState,
   MobilePanelView,
   MobilePanelSelection,
@@ -65,6 +67,7 @@ export interface PanelState {
   // File explorer settings (shared between mobile/desktop)
   explorerTab: ExplorerTab;
   explorerTabByCheckout: Record<string, ExplorerTab>;
+  compactExplorerView: CompactExplorerView;
   expandedPathsByWorkspace: Record<string, string[]>;
   // Changes-view folder tree. Inverted semantics vs the fields above:
   // this stores COLLAPSED directory paths (empty = all folders expanded), keyed
@@ -94,6 +97,8 @@ export interface PanelState {
   toggleAgentListForLayout: (input: PanelLayoutInput) => void;
   openCompactFileExplorer: (checkout: ExplorerCheckoutContext) => void;
   toggleCompactFileExplorer: (checkout: ExplorerCheckoutContext) => void;
+  /** 狭い画面で右から出る幕の中身(ファイル一覧 / 右側の欄のプラグイン面板)を切り替える。 */
+  setCompactExplorerView: (view: CompactExplorerView) => void;
 
   // File explorer settings actions
   setExplorerTab: (tab: ExplorerTab) => void;
@@ -134,6 +139,7 @@ export const usePanelStore = create<PanelState>()(
       // File explorer defaults
       explorerTab: "changes",
       explorerTabByCheckout: {},
+      compactExplorerView: "files",
       expandedPathsByWorkspace: {},
       diffCollapsedFoldersByWorkspace: {},
       collapsedFilePathsByWorkspace: {},
@@ -226,6 +232,8 @@ export const usePanelStore = create<PanelState>()(
 
       toggleCompactFileExplorer: (checkout) =>
         set((state) => buildToggleFileExplorerPatch(state, checkout)),
+
+      setCompactExplorerView: (view) => set({ compactExplorerView: view }),
 
       setExplorerTab: (tab) => set({ explorerTab: tab }),
       setExplorerTabForCheckout: ({ serverId, cwd, isGit, tab }) =>

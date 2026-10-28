@@ -5,6 +5,7 @@ import {
   useHosts,
   useRpc,
   type PluginButtonContentProps,
+  type PluginButtonRegistration,
   type PluginClientContext,
   type PluginScreenProps,
   type PluginSidebarItemProps,
@@ -20,9 +21,17 @@ import {
   useSharedUnread,
 } from "./client/SharedProjects";
 import { ConfirmBoxView } from "./client/ConfirmBoxView";
+import {
+  TASK_LEDGER_PANEL_ID,
+  TASK_LEDGER_SCREEN_ID,
+  TaskLedgerPanel,
+  TaskLedgerScreen,
+  WINDOW_B_AGENT_ID,
+} from "./client/TaskLedgerView";
 import { onBoxChanged } from "./client/events";
 import { watchBoxSignal } from "./client/change-signal";
 import { setSidebarMode, useSidebarMode } from "./client/sidebar-mode";
+import { setScreenOpener } from "./client/screens";
 import { SIDEBAR_SECTION_LABELS } from "./shared/sidebar-section-mode";
 import { boxSignalRpc, confirmBoxCountRpc } from "./shared/contract";
 import {
@@ -217,9 +226,10 @@ function SidebarWithHeaderButton({
           for (const ws of res.entries ?? []) {
             const workspaceId = (ws as { id: string }).id;
             if (registered.has(workspaceId) || !client) continue;
+            const c = client;
             registered.set(
               workspaceId,
-              client.addHeaderButton({
+              c.addHeaderButton({
                 id: "box",
                 workspaceId,
                 button: {
@@ -229,15 +239,39 @@ function SidebarWithHeaderButton({
                 },
               }),
             );
+            // 窓口Bの右側の「タスク台帳」。押すと右の欄に台帳の面板が出る(2026-10-28 ユーザー指示)。
+            // 窓口Bのスレを開いている間だけ出す(`visible` を書き換えて出し分ける)。
+            const ledger = c.addHeaderButton({
+              id: TASK_LEDGER_HEADER_ID,
+              workspaceId,
+              button: {
+                title: "タスク台帳",
+                icon: "ClipboardList",
+                visible: false,
+                behavior: { kind: "action", onPress: () => openTaskLedgerPanel(c, workspaceId) },
+              },
+            });
+            ledgerButtons.set(workspaceId, ledger);
           }
           return null;
         })
         .catch(() => {});
     }
+    void refreshWindowBWorkspace(hosts);
     return () => {
       alive = false;
     };
   }, [hosts, registered, tick]);
+
+  // 窓口Bのスレがどのワークスペースにあるか(/ が無ければ null)が分かったら、そのワークスペースの
+  // ヘッダにだけ台帳のボタンを出す。他のワークスペースでも、台帳の面板を右の欄に出していれば出す。
+  // `windowBWorkspaceId` はモジュール側の変数(React の値ではない)なので依存には入れず、30秒ごとの
+  // `tick` と、ワークスペースが増えたときの再実行で見直す。
+  useEffect(() => {
+    for (const [workspaceId, reg] of ledgerButtons) {
+      reg.update({ visible: workspaceId === windowBWorkspaceId });
+    }
+  }, [tick]);
 
   const trailing = CountBadge({ n });
   return (
@@ -312,15 +346,17 @@ function Screen({ theme, navigation, layout, params }: PluginScreenProps) {
  * 下部バーの「ユーザー判断」から開く画面。そのタブだけを出す(並びは出さない)。
  * タブごとに状態(絞り込み・並び)を持ち越さないよう `key` で作り直す。
  */
-function BoxTabScreen({ theme, navigation, layout }: PluginScreenProps) {
+function BoxTabScreen({ theme, navigation, layout, params }: PluginScreenProps) {
   const openAgent = useOpenAgent(navigation);
+  // `tab=priority` で開かれたら（タスク台帳の行の開発プロジェクトから）優先順位のタブだけを出す。
+  const tab = params.tab === "priority" ? "priority" : "items";
   return (
     <ConfirmBoxView
-      key="items"
+      key={tab}
       theme={theme}
       openAgent={openAgent}
       layout={layout}
-      mode="items"
+      mode={tab}
       openScreen={openBoxScreen}
     />
   );
@@ -398,14 +434,79 @@ const FOOTER_COMPONENTS: Record<FooterTabId, (props: PluginSidebarItemProps) => 
   mail: MailLink,
 };
 
+// ---------------------------------------------------------------- タスク台帳(窓口Bの右側)
+// 窓口Bのスレ(固定ID)のワークスペースを30秒ごとに探し直す。見つかったらそのワークスペースのヘッダに
+// 「タスク台帳」ボタンを出し、押すと右の欄(`explorer`)に台帳の面板を開く。狭い画面では、右の欄の面板が
+// 左端からのスワイプで出る幕に載る(Paseo 本体 `CompactExplorerSidebarHost` の対応)。
+const TASK_LEDGER_HEADER_ID = "task-ledger";
+const ledgerButtons = new Map<string, PluginButtonRegistration>();
+let windowBWorkspaceId: string | null = null;
+let shownWindowBWorkspace: string | null = null;
+
+function openTaskLedgerPanel(c: PluginClientContext, workspaceId: string) {
+  try {
+    // パネルはワークスペースのものなので agentId は渡さない(窓口Bのスレが閉じていても開ける)。
+    c.openPanel(TASK_LEDGER_PANEL_ID, { workspaceId, location: "explorer" });
+  } catch {
+    // 右の欄を作れない画面(古いホスト・狭すぎる画面)では全画面の画面で出す。
+    c.openScreen({ screenId: TASK_LEDGER_SCREEN_ID });
+  }
+}
+
+const WINDOW_B_LOOKUP_MS = 10_000;
+let windowBLookupAt = 0;
+
+/**
+ * 窓口Bのスレのワークスペースを探す(見つかったらそのボタンを出す)。30秒ごとの巡回から呼ばれるが、
+ * スレ一覧の取得は重いので、前回から `WINDOW_B_LOOKUP_MS` 経っていなければ何もしない。
+ * 分からないままなら、30秒ごとに1回だけ取り直す。
+ */
+async function refreshWindowBWorkspace(hosts: ReturnType<typeof useHosts>): Promise<void> {
+  const now = Date.now();
+  if (shownWindowBWorkspace && ledgerButtons.has(shownWindowBWorkspace)) return;
+  if (now - windowBLookupAt < WINDOW_B_LOOKUP_MS) return;
+  windowBLookupAt = now;
+  for (const host of hosts) {
+    if (host.status !== "online") continue;
+    const c = getPaseoClient(host.serverId);
+    try {
+      const res = await c.agents.list({ scope: "active", includeBackground: true });
+      // 1件は `{ agent, project }` の入れ子(スレの本体は `agent`)。
+      const entry = res.entries.find((e) =>
+        String((e as { agent?: { id?: string } }).agent?.id ?? "")
+          .toLowerCase()
+          .startsWith(WINDOW_B_AGENT_ID.slice(0, 8)),
+      ) as { agent?: { workspaceId?: string } } | undefined;
+      const workspaceId = entry?.agent?.workspaceId;
+      if (!workspaceId) continue;
+      windowBWorkspaceId = workspaceId;
+      const reg = ledgerButtons.get(workspaceId);
+      if (reg && shownWindowBWorkspace !== workspaceId) {
+        reg.update({ visible: true });
+        shownWindowBWorkspace = workspaceId;
+      }
+      return;
+    } catch {
+      // 次の巡回で取り直す。
+    }
+  }
+}
+
 /** ヘッダボタンを外す。`contribute` 冒頭と片付けの両方から呼ぶ(登録簿を残したまま捨てると外せなくなる)。 */
 function removeHeaderButtons() {
   for (const r of headerButtons.values()) r.remove();
   headerButtons.clear();
+  for (const r of ledgerButtons.values()) r.remove();
+  ledgerButtons.clear();
+  windowBWorkspaceId = null;
+  shownWindowBWorkspace = null;
 }
 
 export default function contribute(ctx: PluginClientContext) {
   client = ctx;
+  // 面板・行からも画面を開けるように、画面を開く入口を預けておく(タスク台帳の行の開発プロジェクト→
+  // 優先順位の画面)。`contribute` より前に描かれることはない(プラグインの読み込み時に1度だけ呼ばれる)。
+  setScreenOpener(openBoxScreen);
   // ヘッダボタンはワークスペース単位でしか登録できないため、サイドバー項目(常駐)が
   // ホストのワークスペース一覧を見て各々へ登録する(`useRegisteredHeaderButtons` が登録簿を持つ)。
 
@@ -423,6 +524,17 @@ export default function contribute(ctx: PluginClientContext) {
   ctx.addScreen({ id: NOTE_VIEW_SCREEN_ID, title: "構想ノート", Component: ConceptNoteScreen });
   ctx.addScreen({ id: SCREEN_ID, title: "確認箱", Component: Screen });
   ctx.addScreen({ id: BOX_TAB_SCREEN_ID, title: "確認箱", Component: BoxTabScreen });
+  // 窓口Bの右側の「タスク台帳」(2026-10-28 ユーザー指示)。面板は右の欄に出し、
+  // 全画面の画面は右の欄を作れないときの落ち先。
+  ctx.addWorkspacePanel({
+    id: TASK_LEDGER_PANEL_ID,
+    title: "タスク台帳",
+    icon: "ClipboardList",
+    context: "workspace",
+    locations: ["workspace", "explorer"],
+    Component: TaskLedgerPanel,
+  });
+  ctx.addScreen({ id: TASK_LEDGER_SCREEN_ID, title: "タスク台帳", Component: TaskLedgerScreen });
   // 並びは `FOOTER_TABS`(SSOT)の順で登録する。PC も iPhone も同じ5項目を出す。
   for (const tab of FOOTER_TABS) {
     ctx.addSidebarFooterItem({
