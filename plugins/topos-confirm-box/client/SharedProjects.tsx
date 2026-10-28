@@ -7,7 +7,7 @@
  * 作成・名前変更・アーカイブ・並べ替え・既読の後は、画面側の合図(onProjectsChanged)で一覧を取り直す。
  */
 import { useCallback, useEffect, useState, type ReactElement } from "react";
-import { Text } from "react-native";
+import { Text, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import {
@@ -88,13 +88,33 @@ function oneLine(s: string, max = 56): string {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
-const badgeStyle = { color: "#ffffff", fontSize: 10, fontWeight: "700" as const };
+const badgeStyle = { color: "#ffffff", fontSize: 12, fontWeight: "700" as const, lineHeight: 16 };
+// 未読は青、自分宛てのメンションがあれば赤。白文字が読めるコントラストにする
+const badgeBox = {
+  minWidth: 22,
+  paddingHorizontal: 6,
+  borderRadius: 9,
+  backgroundColor: "#2f6fed",
+  alignItems: "center" as const,
+};
+const badgeBoxMention = { ...badgeBox, backgroundColor: "#c0392b" };
 
 type OpenScreen = (input: { screenId: string; params?: Record<string, string> }) => void;
 
 /** 未読バッジ。要素は関数呼び出しで作る(JSX を prop に直書きしない lint 規約)。 */
-function UnreadBadge({ label }: { label: string }): ReactElement | undefined {
-  return label ? <Text style={badgeStyle}>{label}</Text> : undefined;
+function UnreadBadge({
+  label,
+  mention,
+}: {
+  label: string;
+  mention: boolean;
+}): ReactElement | undefined {
+  if (!label) return undefined;
+  return (
+    <View style={mention ? badgeBoxMention : badgeBox}>
+      <Text style={badgeStyle}>{label}</Text>
+    </View>
+  );
 }
 
 function ProjectRow({ project, openScreen }: { project: SharedProject; openScreen: OpenScreen }) {
@@ -108,7 +128,8 @@ function ProjectRow({ project, openScreen }: { project: SharedProject; openScree
   );
   // 自分宛てのメンションがあれば「@」を添える(件数は未読バッジ側)
   const badge = unreadLabel(project.unread);
-  const trailing = UnreadBadge({ label: badge && project.mentions > 0 ? `@${badge}` : badge });
+  const mention = project.mentions > 0;
+  const trailing = UnreadBadge({ label: badge && mention ? `@${badge}` : badge, mention });
   return (
     <SidebarRow
       id={`shared-project-${project.id}`}

@@ -24,7 +24,9 @@ export function makeStyles(c: Colors) {
     backgroundColor: c.surface1,
   } as const;
   const chip = {
-    paddingHorizontal: 10,
+    minHeight: 40,
+    justifyContent: "center",
+    paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 14,
     borderWidth: 1,
@@ -92,11 +94,22 @@ export function makeStyles(c: Colors) {
       paddingHorizontal: 10,
       paddingVertical: 8,
     },
+    // 警告(エラー・AI失敗・上限超過)は全て同じ見た目: 赤い枠と文字
+    bannerWarn: {
+      backgroundColor: c.surface2,
+      borderColor: DANGER,
+      borderWidth: 1,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
     bannerText: { color: c.foreground, fontSize: 13, lineHeight: 19 },
     btn,
     btnOn: { ...btn, backgroundColor: c.accent, borderColor: c.accent },
     btnDanger: { ...btn, borderColor: DANGER },
-    btnOff: { ...btn, opacity: 0.45 },
+    // 無効ボタンは透過で背景に溶かさず、淡い面と読める文字色にする
+    btnOff: { ...btn, backgroundColor: c.surface2 },
+    btnTextOff: { color: c.foregroundMuted, fontSize: 13 },
     btnText: { color: c.foreground, fontSize: 13 },
     btnTextOn: { color: ON_ACCENT, fontSize: 13, fontWeight: "700" },
     btnTextDanger: { color: DANGER, fontSize: 13, fontWeight: "700" },
@@ -225,7 +238,7 @@ export function Btn({ s, label, onPress, value = "", tone = "plain", disabled, a
   const boxes = { plain: s.btn, primary: s.btnOn, danger: s.btnDanger } as const;
   const texts = { plain: s.btnText, primary: s.btnTextOn, danger: s.btnTextDanger } as const;
   const box = disabled ? s.btnOff : boxes[tone];
-  const txt = texts[tone];
+  const txt = disabled ? s.btnTextOff : texts[tone];
   return (
     <Pressable
       accessibilityRole="button"
@@ -278,7 +291,7 @@ export function Banner({
 }): ReactElement | null {
   if (!text) return null;
   return (
-    <View style={s.banner}>
+    <View style={error ? s.bannerWarn : s.banner}>
       <Text style={error ? s.error : s.bannerText}>{text}</Text>
     </View>
   );

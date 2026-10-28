@@ -3,8 +3,15 @@
  * 宛先の意味(省略=AI宛、空=全員宛でAIなし、指名=通知)は Topos 側。ここは選択を配列にして渡すだけ。
  * 旧鍵(本文だけの鍵)では宛先・添付・AIを隠し、全員宛てに本文だけを送る。
  */
-import { useCallback, useMemo, useState } from "react";
-import { Image, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Image,
+  Text,
+  TextInput,
+  View,
+  type NativeSyntheticEvent,
+  type TextInputKeyPressEventData,
+} from "react-native";
 import { POST_TEXT_MAX } from "../../shared/shared-projects.js";
 import {
   buildRecipients,
@@ -177,6 +184,31 @@ export function Composer({
 
   const sendPress = useCallback(() => void send(), [send]);
 
+  // 本文・宛先・添付を編集したら、古い送信エラー(413など)は消す
+  useEffect(() => {
+    setNotice("");
+  }, [text, choice, pick.items]);
+
+  const edit = useCallback((v: string) => {
+    setText(v);
+    setWarn("");
+  }, []);
+
+  // Enter は改行(複数行入力)。Cmd/Ctrl+Enter で送信(Web)
+  const onKey = useCallback(
+    (e: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
+      const ev = e.nativeEvent as TextInputKeyPressEventData & {
+        metaKey?: boolean;
+        ctrlKey?: boolean;
+      };
+      if (ev.key === "Enter" && (ev.metaKey === true || ev.ctrlKey === true)) {
+        e.preventDefault?.();
+        sendPress();
+      }
+    },
+    [sendPress],
+  );
+
   return (
     <View style={s.composer}>
       {limited ? (
@@ -197,7 +229,8 @@ export function Composer({
       <TextInput
         style={s.inputLine}
         value={text}
-        onChangeText={setText}
+        onChangeText={edit}
+        onKeyPress={onKey}
         placeholder={aiWillAnswer ? "メッセージ(AIに聞きます)" : "メッセージ"}
         placeholderTextColor={colors.foregroundMuted}
         multiline
@@ -223,7 +256,7 @@ export function Composer({
       </View>
       {sending && aiWillAnswer ? <Text style={s.muted}>AIが考えています…</Text> : null}
       <Banner s={s} text={notice} error />
-      <Banner s={s} text={warn} />
+      <Banner s={s} text={warn} error />
     </View>
   );
 }

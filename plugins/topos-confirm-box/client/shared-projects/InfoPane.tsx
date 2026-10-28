@@ -60,7 +60,13 @@ function Overview({ ctx }: { ctx: ProjectCtx }) {
     <View style={s.card}>
       <Text style={s.h2}>プロジェクトの概要</Text>
       {state === "loading" ? <Text style={s.muted}>読み込み中…</Text> : null}
-      {state === "none" ? <Text style={s.muted}>まだ概要はありません</Text> : null}
+      {state === "none" ? (
+        <Text style={s.muted}>
+          {ctx.detail?.overviewPending
+            ? "スレッドでAIの質問に答えてください。答えが揃うと概要ができます"
+            : "まだ概要はありません"}
+        </Text>
+      ) : null}
       <Banner s={s} text={state === "error" ? error : ""} error />
       {note ? <Markdown source={note.body} colors={colors} /> : null}
     </View>
@@ -172,7 +178,9 @@ function MemberRow({
     <View style={s.cardRow}>
       <View style={s.rowBetween}>
         <View style={s.grow}>
-          <Text style={s.text}>{m.userId === me ? `${m.name}(あなた)` : m.name}</Text>
+          <Text style={s.text}>
+            {m.userId === me && !m.name.includes("あなた") ? `${m.name}(あなた)` : m.name}
+          </Text>
           <Text style={s.muted}>{roleLabel(m)}</Text>
         </View>
         {creator && !m.isCreator && m.userId !== me ? (
@@ -341,7 +349,11 @@ function Archive({ ctx }: { ctx: ProjectCtx }) {
   const { s, call, id } = ctx;
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [asking, setAsking] = useState(false);
+  const ask = useCallback(() => setAsking(true), []);
+  const cancel = useCallback(() => setAsking(false), []);
   const archive = useCallback(() => {
+    setAsking(false);
     void call("archive", { id }).then((r) => {
       if (r.ok) {
         setNotice("アーカイブしました。サイドバーの「アーカイブ済み」から戻せます");
@@ -357,9 +369,19 @@ function Archive({ ctx }: { ctx: ProjectCtx }) {
       <Text style={s.muted}>
         自分の一覧から外します(他のメンバーには影響しません)。いつでも戻せます。
       </Text>
-      <View style={s.rowWrap}>
-        <Btn s={s} label="アーカイブする" onPress={archive} />
-      </View>
+      {asking ? (
+        <View style={s.card}>
+          <Text style={s.text}>このプロジェクトをアーカイブしますか?</Text>
+          <View style={s.rowWrap}>
+            <Btn s={s} label="アーカイブする" tone="danger" onPress={archive} />
+            <Btn s={s} label="やめる" onPress={cancel} />
+          </View>
+        </View>
+      ) : (
+        <View style={s.rowWrap}>
+          <Btn s={s} label="アーカイブ" onPress={ask} />
+        </View>
+      )}
       <Banner s={s} text={notice} />
       <Banner s={s} text={error} error />
     </View>

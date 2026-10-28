@@ -187,7 +187,14 @@ function detail(p) {
 }
 const noteSummary = (n) => ({ id: n.id, title: n.title, author: n.author, author_name: USERS[n.author] ?? n.author, updated_at: n.updated_at, created_at: n.created_at, ...(n.archived_at ? { archived_at: n.archived_at } : {}) });
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** 行単位の増減(同じ行は数えない)。実 Topos の差分に近い数え方。 */
+function lineDiff(oldText, newText) {
+  const a = oldText.split("\n");
+  const b = newText.split("\n");
+  return { added: b.filter((l) => !a.includes(l)).length, removed: a.filter((l) => !b.includes(l)).length };
+}
+
+const sleep =(ms) => new Promise((r) => setTimeout(r, ms));
 const mimeOk = (m) => /^(image\/|application\/pdf|text\/plain)/.test(m);
 
 // ── ルーティング ─────────────────────────────────────────────────────
@@ -369,7 +376,7 @@ function notes(p, sub, key, m, body) {
     n.title = String(body?.title ?? n.title);
     n.body = String(body?.body ?? n.body);
     n.updated_at = now();
-    n.versions.push({ v: n.versions.length + 1, ts: now(), actor: ME, op: "update", added: n.body.split("\n").length, removed: before.split("\n").length, restored_from: null, title: n.title, body: n.body });
+    n.versions.push({ v: n.versions.length + 1, ts: now(), actor: ME, op: "update", ...lineDiff(before, n.body), restored_from: null, title: n.title, body: n.body });
     return { ...noteSummary(n), body: n.body };
   }
   if (sub[0] === "shared-notes" && sub.length === 2 && m === "DELETE") {
@@ -401,7 +408,7 @@ function notes(p, sub, key, m, body) {
     delete n.archived_at;
     p.deletedNotes = p.deletedNotes.filter((x) => x !== n);
     if (!p.notes.includes(n)) p.notes.push(n);
-    n.versions.push({ v: n.versions.length + 1, ts: now(), actor: ME, op: "restore", added: 1, removed: 0, restored_from: v.v, title: n.title, body: n.body });
+    n.versions.push({ v: n.versions.length + 1, ts: now(), actor: ME, op: "restore", ...lineDiff(n.body, v.body), restored_from: v.v, title: n.title, body: n.body });
     return { ...noteSummary(n), body: n.body };
   }
   throw new HttpError(404, "not_found");

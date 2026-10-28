@@ -163,7 +163,8 @@ export function ThreadPane({
   return (
     <View style={s.fill}>
       <ScrollView ref={scroller} contentContainerStyle={s.msgList}>
-        {thread.openedAtSeq !== null &&
+        {count > 1 &&
+        thread.openedAtSeq !== null &&
         !limited &&
         thread.openedAtSeq < (thread.view?.latestSeq ?? 0) ? (
           <CatchupBox ctx={ctx} sinceSeq={thread.openedAtSeq} />

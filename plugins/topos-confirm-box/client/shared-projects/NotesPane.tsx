@@ -96,7 +96,7 @@ function NoteRow({ s, note, onOpen }: { s: S; note: NoteSummary; onOpen: (nid: s
       onPress={press}
       style={s.cardRow}
     >
-      <Text style={s.h2}>{note.overview ? `${note.title}(プロジェクトの概要)` : note.title}</Text>
+      <Text style={s.h2}>{note.title}</Text>
       <Text
         style={s.muted}
       >{`${note.author ? `${note.author} ・ ` : ""}${shortTime(note.updatedAt)}`}</Text>
