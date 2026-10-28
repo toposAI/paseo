@@ -834,12 +834,12 @@ export function PriorityView({
   const runningTotal = projects.reduce((n, p) => n + (p.running ?? 0), 0);
   const detailStanding = standing.some((p) => p.id === detailId);
 
-  // 中身を開いている行が一覧から外れたら(アーカイブ・方針へ)、パネルごと消えて何も出なくなるので閉じる
+  // 中身を開いている行が**一覧**から外れたら(アーカイブ・方針へ)閉じる。パネルを描くのは projects の中だけ
+  // なので、standing/archived へ移った行も「無い」と見る(移った先で開き直すと、戻したときに古い中身が出る)
   useEffect(() => {
     const d = led.data;
     if (!detailId || !d) return;
-    const ids = [...d.projects, ...d.standing, ...d.archived].map((p) => p.id);
-    if (!ids.includes(detailId)) setDetailId(null);
+    if (!d.projects.some((p) => p.id === detailId)) setDetailId(null);
   }, [detailId, led.data]);
 
   return (
