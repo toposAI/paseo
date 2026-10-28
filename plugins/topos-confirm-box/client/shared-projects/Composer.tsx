@@ -159,8 +159,8 @@ export function Composer({
       setSending(false);
     }
     if (!r.ok) {
-      if (r.reason === "timeout") {
-        // 時間切れは投稿が届いている可能性がある。本文は残し、取り直して確認を促す
+      if (r.reason === "timeout" || r.reason === "network") {
+        // 時間切れ・RPC失敗(デーモンの30秒上限など)は投稿が届いている可能性がある。本文は残し、取り直して確認を促す
         setNotice(TIMEOUT_NOTICE);
         void thread.reload();
       } else {
