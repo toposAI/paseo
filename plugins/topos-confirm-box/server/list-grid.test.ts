@@ -31,8 +31,13 @@ test("列が減ると2列以下になる(右ペインが開いて一覧が狭く
   assert.equal(listColumns(CARD_MIN_WIDTH + LIST_GRID_GAP - 1, true), 1);
 });
 
+test("3列になるのは幅 1006px から(330*3 + 8*2)", () => {
+  assert.equal(listColumns(1005, true), 2);
+  assert.equal(listColumns(1006, true), 3);
+});
+
 test("1枚の幅: 列数ぶん+すき間が一覧幅に収まる(端数で折り返さない)", () => {
-  // 実測幅は端数つきで来る(例 999.6 → round 1000)。切り上げで3枚目がはみ出さないこと。
+  // 実測幅は端数つきで来る(呼び出し側で Math.floor 済み)。切り上げで3枚目がはみ出さないこと。
   for (const total of [800, 975, 976, 998, 999, 1030, 1400, 2000]) {
     const cols = listColumns(total, true);
     const cell = listCellWidth(total, cols);
