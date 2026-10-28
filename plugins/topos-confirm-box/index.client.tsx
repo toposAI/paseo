@@ -435,9 +435,9 @@ const FOOTER_COMPONENTS: Record<FooterTabId, (props: PluginSidebarItemProps) => 
 };
 
 // ---------------------------------------------------------------- タスク台帳(窓口Bの右側)
-// 窓口Bのスレ(固定ID)のワークスペースを30秒ごとに探し直す。見つかったらそのワークスペースのヘッダに
-// 「タスク台帳」ボタンを出し、押すと右の欄(`explorer`)に台帳の面板を開く。狭い画面では、右の欄の面板が
-// 左端からのスワイプで出る幕に載る(Paseo 本体 `CompactExplorerSidebarHost` の対応)。
+// 窓口Bのスレ(固定ID)のワークスペースを10秒ごとに探し直す。見つかったらそのワークスペースのヘッダに
+// 「タスク台帳」ボタンを出し、押すと右の欄(`explorer`)に台帳の面板を開く。狭い画面では幕
+// (右端から左へスワイプして出る欄)がその面板を出したまま開く(Paseo 本体 `navigation.ts`)。
 const TASK_LEDGER_HEADER_ID = "task-ledger";
 const ledgerButtons = new Map<string, PluginButtonRegistration>();
 let windowBWorkspaceId: string | null = null;
@@ -446,6 +446,7 @@ let shownWindowBWorkspace: string | null = null;
 function openTaskLedgerPanel(c: PluginClientContext, workspaceId: string) {
   try {
     // パネルはワークスペースのものなので agentId は渡さない(窓口Bのスレが閉じていても開ける)。
+    // 狭い画面の幕(スワイプで出る右の欄)は、ホスト側の `navigateToWorkspace` が開く。
     c.openPanel(TASK_LEDGER_PANEL_ID, { workspaceId, location: "explorer" });
   } catch {
     // 右の欄を作れない画面(古いホスト・狭すぎる画面)では全画面の画面で出す。

@@ -1,11 +1,21 @@
 import { buildPluginSettingsRoute } from "./settings/routes";
 import { router } from "expo-router";
+import { UnistylesRuntime } from "react-native-unistyles";
 import type { PluginPanelLocation } from "@getpaseo/plugin/client";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { usePanelStore } from "@/stores/panel-store";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { buildPluginSurfaceRoute } from "./routes";
 import type { PluginNavigation } from "./actions";
+
+/**
+ * 狭い画面(幕の出る幅)かどうか。`useIsCompactFormFactor` の非フック版
+ * (`plugins/navigation.ts` はフックの外から呼ばれる)。判定は同じ出どころ(Unistyles の breakpoint)。
+ */
+function isCompactLayout(): boolean {
+  const breakpoint = UnistylesRuntime.breakpoint;
+  return breakpoint === "xs" || breakpoint === "sm";
+}
 
 export function createPluginNavigation(input: {
   serverId: string;
@@ -19,6 +29,18 @@ export function createPluginNavigation(input: {
     const paneId = useWorkspaceLayoutStore.getState().showExplorerSidebar(workspaceKey);
     if (!paneId) throw new Error("Explorer is unavailable");
     return { mode: "pane" as const, paneId };
+  }
+
+  /**
+   * プラグインの面板を右の欄に出した後、狭い画面ではその幕も開く
+   * (`compactExplorerView` = "plugin" で、幕の中身がその面板になる)。
+   * 2026-10-28 ユーザー指示「窓口Bの右側に台帳。スワイプでその台帳に移動できるように」の受け皿。
+   */
+  function showPanelInCompactExplorer(placed: { paneId: string } | undefined) {
+    if (!placed) return;
+    const panelStore = usePanelStore.getState();
+    panelStore.setCompactExplorerView("plugin");
+    if (isCompactLayout()) panelStore.openCompactExplorerView("plugin");
   }
   return {
     openSettings(pluginId, screenId) {
@@ -38,9 +60,7 @@ export function createPluginNavigation(input: {
         target: { kind: "plugin", pluginId, panelId, context: "workspace" },
         placement: placed,
       });
-      // 狭い画面: 右から出る幕も、いま開いた面板を出す(スワイプでそのまま台帳に移れる。
-      // ファイル一覧は幕の見出しの「ファイル」で切り替えられる)。
-      if (placed) usePanelStore.getState().setCompactExplorerView("plugin");
+      showPanelInCompactExplorer(placed);
     },
     openAgentPanel(pluginId, panelId, agentId, location) {
       if (!workspaceId) throw new Error("No active workspace");
@@ -51,7 +71,7 @@ export function createPluginNavigation(input: {
         target: { kind: "plugin", pluginId, panelId, context: "agent", agentId },
         placement: placed,
       });
-      if (placed) usePanelStore.getState().setCompactExplorerView("plugin");
+      showPanelInCompactExplorer(placed);
     },
   };
 }

@@ -97,6 +97,8 @@ export interface PanelState {
   toggleAgentListForLayout: (input: PanelLayoutInput) => void;
   openCompactFileExplorer: (checkout: ExplorerCheckoutContext) => void;
   toggleCompactFileExplorer: (checkout: ExplorerCheckoutContext) => void;
+  /** 狭い画面の右から出る幕を、選んだ中身のまま開く(例: プラグインの面板)。 */
+  openCompactExplorerView: (view: CompactExplorerView) => void;
   /** 狭い画面で右から出る幕の中身(ファイル一覧 / 右側の欄のプラグイン面板)を切り替える。 */
   setCompactExplorerView: (view: CompactExplorerView) => void;
 
@@ -139,7 +141,11 @@ export const usePanelStore = create<PanelState>()(
       // File explorer defaults
       explorerTab: "changes",
       explorerTabByCheckout: {},
-      compactExplorerView: "files",
+      // 幕(狭い画面)の中身。既定は「右の欄に出ているもの」= 右の欄のタブが
+      // プラグインの面板ならそれを出し、そうでなければファイル一覧に落ちる
+      // (`compact-explorer-sidebar-host` の `useCompactExplorerPluginTarget` が判定)。
+      // 2026-10-28 ユーザー指示「スワイプで台帳に移動できるように」の受け皿。
+      compactExplorerView: "plugin",
       expandedPathsByWorkspace: {},
       diffCollapsedFoldersByWorkspace: {},
       collapsedFilePathsByWorkspace: {},
@@ -232,6 +238,12 @@ export const usePanelStore = create<PanelState>()(
 
       toggleCompactFileExplorer: (checkout) =>
         set((state) => buildToggleFileExplorerPatch(state, checkout)),
+
+      openCompactExplorerView: (view) =>
+        set((state) => ({
+          ...setMobilePanelTargetPatch(state, "file-explorer"),
+          compactExplorerView: view,
+        })),
 
       setCompactExplorerView: (view) => set({ compactExplorerView: view }),
 

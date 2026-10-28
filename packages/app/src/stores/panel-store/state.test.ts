@@ -24,7 +24,7 @@ function makePanelState(overrides: Partial<PanelCoreState> = {}): PanelCoreState
     },
     explorerTab: "changes",
     explorerTabByCheckout: {},
-    compactExplorerView: "files",
+    compactExplorerView: "plugin",
     ...overrides,
   };
 }

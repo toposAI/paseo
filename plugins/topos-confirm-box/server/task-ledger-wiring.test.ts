@@ -71,6 +71,12 @@ test("15秒ごとに読み直す(受付されたら台帳に追加される)", (
   assert.match(viewSource, /REFRESH_MS = 15_000/);
 });
 
+test("右上の件数と更新の件数は、いま出している行の数(絞り込み後)を出す", () => {
+  // 全件数だけを出すと「完了は隠す」でも件数が変わらず、隠せていないように読める(2026-10-28 実機確認)。
+  assert.match(viewSource, /countText\(data, rows\.length, doneCount, mode\)/);
+  assert.match(viewSource, /更新\(\{rows\.length\}件/);
+});
+
 test("行の開発プロジェクトを押すと優先順位の画面が開く", () => {
   assert.match(viewSource, /openPriorityScreen\(\)/);
   const screensSource = readFileSync(join(here, "..", "client", "screens.ts"), "utf8");

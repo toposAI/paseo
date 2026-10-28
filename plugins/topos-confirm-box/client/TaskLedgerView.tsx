@@ -5,15 +5,15 @@
  * - 1行に、いつ受付したか・子スレに振ったか(子スレ名/代理決定/投函/説明のみ)・子スレの進捗・開発プロジェクト。
  * - 一番上の切り替えで「完了は隠す」(既定)と「完了も表示」。
  * - PC は右の欄の面板(`addWorkspacePanel` の `explorer`)として出す。窓口Bの画面のヘッダの
- *   「タスク台帳」ボタンか、チャットの左端から右へスワイプ(右の欄が出ていなければ)で開く。
- *   狭い(iPhone)画面では右から出る幕の中にそのまま出す(Paseo 本体の
+ *   「タスク台帳」ボタンで開く(iPhone では同じボタンが幕をそのまま開く)。
+ *   狭い(iPhone)画面では右端から左へスワイプして出る幕に載る(Paseo 本体の
  *   `CompactExplorerSidebarHost` が、右の欄のプラグイン面板を幕に載せる)。
  *
  * 読み込みは 15 秒ごとに取り直す(裏方が受付・振り分けを書いたら、少し待てば台帳に載る)。
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaInsetsContext } from "react-native-safe-area-context";
 import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import {
@@ -129,7 +129,9 @@ export function TaskLedgerView({
   compact?: boolean;
 }) {
   const s = useMemo(() => styles(theme), [theme]);
-  const insets = useSafeAreaInsets();
+  // `useSafeAreaInsets()` は安全領域の外で呼ぶと例外を投げ、飾りの余白のせいで面板ごと
+  // 「Plugin failed」に落ちる(2026-10-28 実機確認)。無いときは余白を付けないだけにする。
+  const insets = useContext(SafeAreaInsetsContext);
   const [openId, setOpenId] = useState<string | null>(null);
 
   const rows = useMemo(() => (data ? filterLedgerRows(data.rows, mode) : []), [data, mode]);
@@ -142,8 +144,11 @@ export function TaskLedgerView({
 
   // スマホ幅では状態バー・安全領域のぶんだけ中身を下げる(右の欄に並べる時は触らない)。
   const rootStyle = useMemo(
-    () => (compact ? [s.root, { paddingTop: insets.top, paddingBottom: insets.bottom }] : [s.root]),
-    [compact, insets.bottom, insets.top, s],
+    () =>
+      compact
+        ? [s.root, { paddingTop: insets?.top ?? 0, paddingBottom: insets?.bottom ?? 0 }]
+        : [s.root],
+    [compact, insets, s],
   );
 
   const chip = (label: string, on: boolean, press: () => void) => (
@@ -163,10 +168,7 @@ export function TaskLedgerView({
       <View style={rootStyle}>
         <View style={s.header}>
           <Text style={s.title}>タスク台帳</Text>
-          <Text style={s.muted}>
-            {data ? `${data.rows.length}件` : "読み込み中"}
-            {mode === "hide-done" && doneCount > 0 ? `(完了${doneCount}件は非表示)` : ""}
-          </Text>
+          <Text style={s.muted}>{countText(data, rows.length, doneCount, mode)}</Text>
         </View>
         <View style={s.chips}>
           {chip("完了は隠す", mode === "hide-done", hideDone)}
@@ -193,13 +195,26 @@ export function TaskLedgerView({
           ))}
           {data && rows.length > 0 ? (
             <Pressable accessibilityRole="button" style={s.refreshBtn} onPress={onRefresh}>
-              <Text style={s.muted}>更新({data.rows.length}件 / 15秒ごとに自動更新)</Text>
+              <Text style={s.muted}>更新({rows.length}件 / 15秒ごとに自動更新)</Text>
             </Pressable>
           ) : null}
         </ScrollView>
       </View>
     </OpenPriorityContext.Provider>
   );
+}
+
+/** 右上の件数。出す行の数(絞り込み後)を先に書き、隠している件数を括弧で添える。 */
+function countText(
+  data: TaskLedgerListOutput | null,
+  visible: number,
+  done: number,
+  mode: LedgerMode,
+): string {
+  if (!data) return "読み込み中";
+  if (mode === "hide-done")
+    return done > 0 ? `${visible}件(完了${done}件は非表示)` : `${visible}件`;
+  return done > 0 ? `${visible}件(完了${done}件を含む)` : `${visible}件`;
 }
 
 function emptyText(data: TaskLedgerListOutput, mode: LedgerMode): string {
