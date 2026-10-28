@@ -227,7 +227,7 @@ function useDragReorder(
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0 || from >= 0 || settling) return;
       const target0 = e.target as HTMLElement;
-      if (target0.closest("button,[role=button]")) return;
+      if (target0.closest("button,[role=button],[data-priority-detail]")) return;
       const row = rowEls().findIndex((r) => r.contains(target0));
       if (row < 0) return;
       from = row;
@@ -296,6 +296,8 @@ const plainRow = [rowCard, rankRow];
 const gap4 = { gap: ROW_GAP };
 // 並べ替えが見る「行」の印(行の間に中身パネルを挟むので、行だけを拾えるようにする)
 const rowDataSet = { priorityRow: "1" };
+// 中身パネルは行の中に入るので、行の扱い(長押し・タップ・並べ替え)から除く印
+const detailDataSet = { priorityDetail: "1" };
 const gap6 = { gap: 6 };
 const gap8 = { gap: 8 };
 const detailCard = { gap: 4 };
@@ -502,7 +504,7 @@ function DetailPanel({
     );
   }
   return (
-    <View style={panelStyle}>
+    <View style={panelStyle} {...({ dataSet: detailDataSet } as object)}>
       <Text style={styles.subject}>中身</Text>
       <Text style={styles.text}>{data.note ? `説明: ${data.note}` : "説明は台帳に未記入です"}</Text>
       <Text style={styles.muted}>{`子スレ ${rows.length} 件(生きている順)`}</Text>
@@ -831,6 +833,14 @@ export function PriorityView({
   const archived = led.data?.archived ?? [];
   const runningTotal = projects.reduce((n, p) => n + (p.running ?? 0), 0);
   const detailStanding = standing.some((p) => p.id === detailId);
+
+  // 中身を開いている行が一覧から外れたら(アーカイブ・方針へ)、パネルごと消えて何も出なくなるので閉じる
+  useEffect(() => {
+    const d = led.data;
+    if (!detailId || !d) return;
+    const ids = [...d.projects, ...d.standing, ...d.archived].map((p) => p.id);
+    if (!ids.includes(detailId)) setDetailId(null);
+  }, [detailId, led.data]);
 
   return (
     <View style={gap8}>
