@@ -706,6 +706,15 @@ export function isCreator(detail: ProjectDetail | null, me: string): boolean {
   return detail !== null && me !== "" && detail.createdBy === me;
 }
 
+/**
+ * 作成直後の最初の質問(kickoff)を、この画面から始めてよいか。
+ * `me` を返さない古いサーバー(家族版など)では作成者か分からないので、呼んでみる
+ * (作成者かどうかの判定はサーバーが持つ。作成者でなければサーバーが拒否するだけで、何も起きない)。
+ */
+export function mayStartKickoff(detail: ProjectDetail | null, me: string): boolean {
+  return detail !== null && (me === "" || detail.createdBy === me);
+}
+
 /** 並べ替え: ids の index を delta だけ動かした新しい並び(端は動かさない)。 */
 export function moveId(ids: readonly string[], id: string, delta: -1 | 1): string[] {
   const i = ids.indexOf(id);

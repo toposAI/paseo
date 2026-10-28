@@ -5,6 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import {
   aiFailureText,
+  mayStartKickoff,
+  type ProjectDetail,
   parseAiPending,
   parsePostResult,
   rateLimitText,
@@ -678,4 +680,19 @@ test("ジョブ: 鍵らしき語を含む生成文は failed:true・空本文で
   const commit = calls.inputs.find((i) => i.op === "aiCommit") as { body: Record<string, unknown> };
   assert.equal(commit.body.failed, true);
   assert.equal(commit.body.text, "");
+});
+
+test("kickoff開始: 自分のIDが分かれば作成者だけ、分からない(古いサーバー)ときは呼んでみる、詳細が無ければ呼ばない", () => {
+  const d = {
+    id: PID,
+    name: "n",
+    description: "",
+    createdBy: "owner",
+    members: [],
+    overviewPending: true,
+  } as ProjectDetail;
+  assert.equal(mayStartKickoff(d, "owner"), true);
+  assert.equal(mayStartKickoff(d, "other"), false);
+  assert.equal(mayStartKickoff(d, ""), true);
+  assert.equal(mayStartKickoff(null, ""), false);
 });

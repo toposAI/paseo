@@ -11,6 +11,7 @@ import type { PluginHostProps } from "@getpaseo/plugin/client";
 import {
   canWrite,
   isCreator,
+  mayStartKickoff,
   isId32,
   parseAiPending,
   parseConfig,
@@ -137,7 +138,7 @@ function ProjectScreen({
   // 作成直後(概要の聞き取り待ちでスレッドが空)は、AIの最初の質問を作成者の画面から始める
   const latest = thread.view?.latestSeq ?? -1;
   useEffect(() => {
-    if (!detail?.overviewPending || !creator || limited || latest !== 0) return;
+    if (!detail?.overviewPending || !mayStartKickoff(detail, me) || limited || latest !== 0) return;
     if (kicked.current === id) return;
     kicked.current = id;
     setKicking(true);
@@ -154,7 +155,7 @@ function ProjectScreen({
       await reloadDetail();
       return null;
     });
-  }, [detail?.overviewPending, creator, limited, latest, id, call, thread, reloadDetail, ai]);
+  }, [detail, me, limited, latest, id, call, thread, reloadDetail, ai]);
 
   const ctx: ProjectCtx = useMemo(
     () => ({
