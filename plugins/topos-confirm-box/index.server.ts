@@ -33,9 +33,11 @@ import {
   countUrgentUnreadNotifications,
   isNotificationItem,
   priorityArchiveRpc,
+  priorityDetailRpc,
   priorityListRpc,
   priorityMoveRpc,
   prioritySayRpc,
+  priorityStandingRpc,
   REJECT_CHOICE,
 } from "./shared/contract.js";
 import { appendAck } from "./server/ack.js";
@@ -173,12 +175,19 @@ import {
 } from "./server/cardchat.js";
 import {
   archiveProject,
+  buildPriorityDetail,
+  countRunning,
+  findProject,
+  markStanding,
   moveProject,
   readLedger,
+  readOpenQuestions,
   readReplies,
   sayToLedger,
   splitArchived,
+  type DetailThread,
 } from "./server/priority.js";
+import type { PriorityProject } from "./shared/contract.js";
 import {
   answerlessAllowBlocked,
   permitQuestions,
@@ -735,8 +744,28 @@ export default function contribute(server: PluginServerContext) {
   server.handle(priorityListRpc, async () => {
     const dir = resolveConfirmBoxDir();
     const { projects: all, updatedTs } = readLedger(dir);
-    const { visible, archived } = splitArchived(all);
-    return { projects: visible, archived, replies: readReplies(dir), updatedTs };
+    const { visible, archived, standing } = splitArchived(all);
+    // 動いている子スレの件数は一覧を作るたびに数える(保存しない=古い数を出さない)
+    let threads: DetailThread[] = [];
+    try {
+      threads = readChildThreads(dir).map((t) => ({
+        agentId: t.agentId,
+        title: t.title,
+        status: t.status,
+        machineState: t.machineState,
+      }));
+    } catch {
+      threads = []; // 数えられない=0件であってもアーカイブは止めない(確認を出さないだけ)
+    }
+    const withRunning = (rows: PriorityProject[]): PriorityProject[] =>
+      rows.map((p) => ({ ...p, running: countRunning(p, threads) }));
+    return {
+      projects: withRunning(visible),
+      archived: withRunning(archived),
+      standing: withRunning(standing),
+      replies: readReplies(dir),
+      updatedTs,
+    };
   });
 
   server.handle(priorityArchiveRpc, async (input) => {
@@ -745,6 +774,27 @@ export default function contribute(server: PluginServerContext) {
     } catch (error) {
       return { ok: false, message: `アーカイブできません: ${(error as Error).message}` };
     }
+  });
+
+  server.handle(priorityStandingRpc, async (input) => {
+    try {
+      return markStanding(resolveConfirmBoxDir(), input.id, input.standing);
+    } catch (error) {
+      return { ok: false, message: `移せません: ${(error as Error).message}` };
+    }
+  });
+
+  server.handle(priorityDetailRpc, async (input) => {
+    const dir = resolveConfirmBoxDir();
+    const project = findProject(dir, input.id);
+    if (!project) return null;
+    const threads = readChildThreads(dir).map((t) => ({
+      agentId: t.agentId,
+      title: t.title,
+      status: t.status,
+      machineState: t.machineState,
+    }));
+    return buildPriorityDetail(project, threads, readOpenQuestions(dir, project.name));
   });
 
   server.handle(priorityMoveRpc, async (input) => {
