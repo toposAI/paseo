@@ -106,6 +106,7 @@ import { listAllAgents } from "./server/agent-pages.js";
 import { applyStateDots, stateDotsById } from "./server/agent-state-dots.js";
 import {
   dropFinishedClosedRows,
+  promoteCoreRows,
   readCoreWindowIds,
   readSidebarHiddenIds,
   standbyForCoreClosed,
@@ -388,7 +389,7 @@ export default function contribute(server: PluginServerContext) {
       threads = markOpenableParents(threads, finalAgents, access);
       // 閉じた中核スレは「終了」でなく「待機中」、終わった閉じ行と非表示 id は外す(2026-10-28)。
       threads = dropFinishedClosedRows(
-        standbyForCoreClosed(threads, readCoreWindowIds()),
+        promoteCoreRows(standbyForCoreClosed(threads, readCoreWindowIds()), readCoreWindowIds()),
         readCoreWindowIds(),
         readSidebarHiddenIds(),
       );

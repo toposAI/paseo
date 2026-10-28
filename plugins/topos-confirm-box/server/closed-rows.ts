@@ -77,6 +77,32 @@ export function standbyForCoreClosed(
 }
 
 /**
+ * 中核スレ(完了箱Cなど)を、登録簿の親子・「実装中」に引きずられず上段に置く(2026-10-28 ユーザー報告
+ * 「再起動後に完了箱Cが消えた」)。実際は消えたのでなく、完了報告係(c9d9ed6e)が建てた子スレ
+ * (`child_threads.json` で親=「完了報告係の有効化」)として最下段の別グループに「実装中」で埋もれていた。
+ * 旧 C(03aeafd)だけがピン止めされていて、新しい係はピン止めされていなかった。
+ * - 親子を外して単独の行にし、ピン止め扱いにする(上段に出る。保存済みのピンファイルは書き換えない)。
+ * - 待機が正常な常駐なので、動いていない(`idle`/`closed`)ときの「実装中」は「待機中」に直す。
+ */
+export function promoteCoreRows(
+  rows: readonly ChildThread[],
+  coreIds: readonly string[],
+): ChildThread[] {
+  return rows.map((t) => {
+    if (t.coordinator || !matchesAny(t.agentId, coreIds)) return t;
+    const standby =
+      t.status === "実装中" && (t.machineState === "idle" || t.machineState === "closed");
+    return {
+      ...t,
+      pinned: true,
+      parentAgentId: null,
+      parentTitle: null,
+      status: standby ? "待機中" : t.status,
+    };
+  });
+}
+
+/**
  * 非表示 id と、本当に終わった `closed` の行を外す。ピン止め・見出しの親・中核は残す。
  * 非表示の親を持つ子は、親の見出し(`parentTitle`)ごと外して単独の行にする
  * (親の行だけ外しても、子の `parentTitle` から見出しが作られて残るため。2026-10-28 画面確認)。

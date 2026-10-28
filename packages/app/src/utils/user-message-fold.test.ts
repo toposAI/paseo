@@ -85,6 +85,16 @@ describe("foldUserMessage", () => {
     ).toEqual({ kind: "full" });
   });
 
+  it("folds the completion reporter thread by its machine title, but not when folding is off", () => {
+    const reporter = {
+      ...RELAY,
+      agentTitle: "coordinator_completion_reporter",
+      text: PLAIN_DIRECT_SEND,
+    };
+    expect(foldUserMessage(reporter).kind).toBe("folded");
+    expect(foldUserMessage({ ...reporter, relayFolding: "off" })).toEqual({ kind: "full" });
+  });
+
   it("folds a relay title that carries a suffix only when allowed", () => {
     const suffixed = { ...RELAY, agentTitle: "完了箱C (2)", text: PLAIN_DIRECT_SEND };
     expect(foldUserMessage(suffixed)).toEqual({ kind: "full" });

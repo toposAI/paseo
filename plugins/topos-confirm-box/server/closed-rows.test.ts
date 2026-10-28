@@ -12,6 +12,7 @@ import type { ChildThread } from "../shared/child-threads.js";
 import { displayStatus } from "../shared/thread-status-label.js";
 import {
   dropFinishedClosedRows,
+  promoteCoreRows,
   readCoreWindowIds,
   readSidebarHiddenIds,
   standbyForCoreClosed,
@@ -124,4 +125,33 @@ test("非表示の親の子は見出しを外して単独の行で残す", () =>
   assert.equal(out.length, 1);
   assert.equal(out[0].parentAgentId, null);
   assert.equal(out[0].parentTitle, null);
+});
+
+test("promoteCoreRows: 親子で埋もれた中核の行を単独・ピン止めにし、止まっている「実装中」は待機中にする", () => {
+  const C = "c9d9ed6e-1135-408f-a9e7-afdfd049552b";
+  const rows = [
+    row(C, { machineState: "idle", parentAgentId: "c6124b12", parentTitle: "完了報告係の有効化" }),
+    row("aaaaaaa1-0000-0000-0000-000000000000", {
+      machineState: "idle",
+      parentAgentId: "c6124b12",
+    }),
+  ];
+  const [core, other] = promoteCoreRows(rows, [C]);
+  assert.equal(core.pinned, true);
+  assert.equal(core.parentAgentId, null);
+  assert.equal(core.parentTitle, null);
+  assert.equal(core.status, "待機中");
+  assert.equal(other.pinned, false);
+  assert.equal(other.parentAgentId, "c6124b12");
+  assert.equal(other.status, "実装中");
+});
+
+test("promoteCoreRows: 走っている中核は「実装中」のまま・司令塔の行は触らない", () => {
+  const C = "c9d9ed6e-1135-408f-a9e7-afdfd049552b";
+  const [running, coordinator] = promoteCoreRows(
+    [row(C, { machineState: "running" }), row(C.replace("c9", "d9"), { coordinator: true })],
+    [C, C.replace("c9", "d9")],
+  );
+  assert.equal(running.status, "実装中");
+  assert.equal(coordinator.pinned, false);
 });

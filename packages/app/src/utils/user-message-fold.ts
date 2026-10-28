@@ -42,10 +42,18 @@ export function selectRelayFoldSettings(settings: {
 /** The envelope the server wraps around a message sent by another agent. */
 const AGENT_MESSAGE_ENVELOPE = /^<paseo-system([^<>]*)>\n([\s\S]*)\n<\/paseo-system>$/;
 
+/**
+ * Threads that act as the relay but carry a machine title instead of the mark: the completion
+ * reporter (agent title `coordinator_completion_reporter`, scripts look it up by that name, so it
+ * is not renamed to `完了箱C`). Accepted exactly, whenever folding is on.
+ */
+const RELAY_TITLE_ALIASES: ReadonlySet<string> = new Set(["coordinator_completion_reporter"]);
+
 /** The thread is the relay itself, not a thread that merely talks about it. */
 function isRelayTitle(title: string | null | undefined, mark: string, mode: RelayFolding): boolean {
   if (!title) return false;
   const normalized = title.trim();
+  if (RELAY_TITLE_ALIASES.has(normalized)) return true;
   if (mode === "relay") return normalized === mark;
   return (
     normalized === mark || normalized.startsWith(`${mark} `) || normalized.startsWith(`${mark}(`)

@@ -74,6 +74,20 @@ export function ThreadMenu({
     return () => registerClose?.(null);
   }, [onClose, registerClose]);
 
+  // スマホ幅のホスト標準ボトムシートは Esc で閉じない(2026-10-28 実測: フォーカスが状態帯に残り、
+  // ホストの Esc 処理が届かない)。シートの中身側でも Esc を拾って閉じる(PC幅の自前描画は
+  // `InlineMenu` も拾うが、閉じる処理は何度呼んでも同じ)。
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") {
+      return undefined;
+    }
+    const onKey = (event: { key?: string }) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   /**
    * 項目が押された。状態遷移は純粋関数(`nextMenu`)が正で、実行すべき副作用だけを親へ返す。
    * 閉じる遷移のときは先にポップアップを閉じる(アーカイブの2回目・ピン・スレを開く)。
@@ -103,16 +117,10 @@ export function ThreadMenu({
   );
   // 確認待ち(1回目)のときだけ赤く塗る。2回目で実行されることは文言で示す。
   const archiveItemStyle = useMemo(
-    () =>
-      state.confirmingArchive
-        ? [itemStyle, styles.dangerArmed]
-        : itemStyle,
+    () => (state.confirmingArchive ? [itemStyle, styles.dangerArmed] : itemStyle),
     [itemStyle, state.confirmingArchive],
   );
-  const pressedArchiveStyle = useMemo(
-    () => [archiveItemStyle, styles.pressed],
-    [archiveItemStyle],
-  );
+  const pressedArchiveStyle = useMemo(() => [archiveItemStyle, styles.pressed], [archiveItemStyle]);
   const labelStyle = useMemo(() => ({ color: colors.foreground }), [colors]);
   const mutedStyle = useMemo(() => ({ color: colors.foregroundMuted }), [colors]);
   const textStyle = useMemo(() => [styles.itemText, labelStyle], [labelStyle]);
@@ -218,6 +226,7 @@ function MenuItem({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       onPress={onPress}
+      // oxlint-disable-next-line react-perf/jsx-no-new-function-as-prop -- Pressable の style は押下状態を受ける関数が要る(既存)
       style={({ pressed }) => (pressed ? pressedStyle : style)}
     >
       <Text style={textStyle}>{label}</Text>
