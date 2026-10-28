@@ -198,7 +198,7 @@ test("単独の CR を含む入力でも混在ファイルにならない", asyn
   assert.equal(readVaultNote(vault, note).editable, true);
 });
 
-const TOPOS_CLI_DIR = "/Users/user/repos/topos-ai-wt/paseo-history-cli";
+const TOPOS_CLI_DIR = "/Users/user/services/topos-vault-history";
 const hasCli = fs.existsSync(
   path.join(TOPOS_CLI_DIR, "backend", "tools", "vault_history_commit.py"),
 );
