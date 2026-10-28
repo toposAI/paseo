@@ -48,7 +48,11 @@ export const API_OPS = {
   unarchive: { method: "DELETE", path: `${BASE}/{id}/archive` },
   project: { method: "GET", path: `${BASE}/{id}` },
   rename: { method: "PUT", path: `${BASE}/{id}/name`, body: "json" },
-  description: { method: "PUT", path: `${BASE}/{id}/description`, body: "json" },
+  description: {
+    method: "PUT",
+    path: `${BASE}/{id}/description`,
+    body: "json",
+  },
   members: { method: "GET", path: `${BASE}/{id}/members` },
   invite: { method: "POST", path: `${BASE}/{id}/members`, body: "json" },
   removeMember: {
@@ -58,9 +62,18 @@ export const API_OPS = {
   },
   overview: { method: "GET", path: `${BASE}/{id}/overview` },
   kickoff: { method: "POST", path: `${BASE}/{id}/kickoff`, timeoutMs: 55_000 },
-  overviewFinish: { method: "POST", path: `${BASE}/{id}/overview/finish`, timeoutMs: 30_000 },
+  overviewFinish: {
+    method: "POST",
+    path: `${BASE}/{id}/overview/finish`,
+    timeoutMs: 30_000,
+  },
   thread: { method: "GET", path: `${BASE}/{id}/thread`, composite: "thread" },
-  post: { method: "POST", path: `${BASE}/{id}/thread/messages`, body: "post", timeoutMs: 55_000 },
+  post: {
+    method: "POST",
+    path: `${BASE}/{id}/thread/messages`,
+    body: "post",
+    timeoutMs: 55_000,
+  },
   read: { method: "POST", path: `${BASE}/{id}/thread/read`, body: "json" },
   attachment: {
     method: "GET",
@@ -68,16 +81,38 @@ export const API_OPS = {
     binary: true,
     timeoutMs: 30_000,
   },
-  catchup: { method: "POST", path: `${BASE}/{id}/catchup`, body: "json", timeoutMs: 55_000 },
+  catchup: {
+    method: "POST",
+    path: `${BASE}/{id}/catchup`,
+    body: "json",
+    timeoutMs: 55_000,
+  },
   notes: { method: "GET", path: `${BASE}/{id}/notes` },
   note: { method: "GET", path: `${BASE}/{id}/notes/{nid}` },
-  noteCreate: { method: "POST", path: `${BASE}/{id}/shared-notes`, body: "json" },
-  noteUpdate: { method: "PUT", path: `${BASE}/{id}/shared-notes/{nid}`, body: "json" },
+  noteCreate: {
+    method: "POST",
+    path: `${BASE}/{id}/shared-notes`,
+    body: "json",
+  },
+  noteUpdate: {
+    method: "PUT",
+    path: `${BASE}/{id}/shared-notes/{nid}`,
+    body: "json",
+  },
   noteDelete: { method: "DELETE", path: `${BASE}/{id}/shared-notes/{nid}` },
   notesDeleted: { method: "GET", path: `${BASE}/{id}/shared-notes/deleted` },
-  noteHistory: { method: "GET", path: `${BASE}/{id}/shared-notes/{nid}/history` },
-  noteVersion: { method: "GET", path: `${BASE}/{id}/shared-notes/{nid}/history/{v}` },
-  noteRestore: { method: "POST", path: `${BASE}/{id}/shared-notes/{nid}/history/{v}/restore` },
+  noteHistory: {
+    method: "GET",
+    path: `${BASE}/{id}/shared-notes/{nid}/history`,
+  },
+  noteVersion: {
+    method: "GET",
+    path: `${BASE}/{id}/shared-notes/{nid}/history/{v}`,
+  },
+  noteRestore: {
+    method: "POST",
+    path: `${BASE}/{id}/shared-notes/{nid}/history/{v}/restore`,
+  },
   // AIの外部生成(projects_full 鍵だけ)。prepare=文脈とプロンプトを取る / commit=Paseo で作った本文を保存する。
   // どちらもサーバーのAIジョブだけが呼ぶ(internal)。画面は aiStart / aiPoll を使う
   aiPrepare: {
@@ -159,7 +194,12 @@ export const aiStartInputSchema = z.object({
     .optional(),
   since_seq: z.number().int().min(0).max(2_000_000_000).optional(),
   chat: z
-    .array(z.object({ role: z.enum(["user", "ai"]), text: z.string().max(AI_CHAT_CHARS * 2) }))
+    .array(
+      z.object({
+        role: z.enum(["user", "ai"]),
+        text: z.string().max(AI_CHAT_CHARS * 2),
+      }),
+    )
     .max(AI_CHAT_TURNS * 2 + 2)
     .optional(),
 });
@@ -224,11 +264,15 @@ export function aiFailureText(
 ): string {
   if (reason === "already_done") return "";
   if (reason === "rate_limited") return rateLimitText(retryAfterSec);
+  if (reason === "timeout" && kind === "kickoff")
+    return "AIの最初の質問がまだ届きません。このプロジェクトを開き直してください";
   if (reason === "timeout")
     return kind === "catchup"
       ? "AIの要約がまだ届きません。しばらくしてからもう一度お試しください"
       : "AIの返信がまだ届きません(投稿は届いています)。しばらくしてから開き直してください";
   if (reason === "busy" && message) return message;
+  if (kind === "kickoff")
+    return "AIの最初の質問を作れませんでした。このプロジェクトを開き直すと、もう一度試せます";
   return kind === "catchup"
     ? "AIの要約に失敗しました。もう一度お試しください"
     : "AIの返信に失敗しました(投稿は届いています)";
