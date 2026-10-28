@@ -206,6 +206,15 @@ export const confirmBoxCountRpc = defineRpc({
      * 出所(Vault・箱)のどれかが読めない、または Vault の読み取りを止める設定なら false。
      */
     openKnown: z.boolean().default(true),
+    /**
+     * **サイドバーのバッジの数字** = 窓口Aがいま出せる件数
+     * (判断窓口 `judgment_window.py badge-count` の答えをそのまま)。窓口は1問ずつなので
+     * 1=次の `next` が1件返す / 0=出せるものがない。null=数えられない(0 と区別する)。
+     * Paseo 側では判定しない(open の総数を数えると、窓口が出さない件まで数えて食い違う。2026-10-28 ユーザー指摘)。
+     * サイドバーのバッジはこの値をそのまま出す(open 総数や `permits` は足さない。窓口の答えを
+     * 画面側で書き換えると、また数える側と選ぶ側がずれる)。
+     */
+    presentable: z.number().int().nullable().default(null),
     /** うち priority=blocking。 */
     blocking: z.number().int(),
     /** うち Paseo の承認待ち。 */
@@ -579,8 +588,10 @@ export function judgmentTabRows(
   return opts.newestFirst ? [...rows].sort((a, b) => b.ts - a.ts) : rows;
 }
 
-/** バッジの「要対応」件数=確認箱の open 件数 N。数え方は `countJudgmentCounted`
- * (判断窓口の counts.open の対象である Vault ノートの open + Paseo の承認待ち)。 */
+/** 確認箱の中の「判断待ち」の行数=確認箱の open 件数 N。数え方は `countJudgmentCounted`
+ * (判断窓口の counts.open の対象である Vault ノートの open + Paseo の承認待ち)。
+ * **サイドバー下部のバッジはこの数を使わない**(窓口Aがいま出せる件数=件数 RPC の `presentable`。
+ * 2026-10-28 ユーザー「そしたらバッジださないでよ」)。 */
 export function countOpen(items: readonly ConfirmBoxItem[]): number {
   return countJudgmentCounted(items);
 }

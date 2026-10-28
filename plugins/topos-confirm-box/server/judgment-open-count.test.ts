@@ -1,9 +1,10 @@
 /**
- * サイドバー(下部バー)と確認箱の中のバッジの件数が、確認箱の open 件数 N から逃げない回帰ガード
- * (2026-10-27: バッジが N より大きく出ることがあった。実測 バッジ11 対 N=10)。
- *
- * 数え方の SSOT は `shared/judgment-open.ts` の `countJudgmentCounted`。N の対象は判断窓口
- * (`judgment_window.py` の `counts.open` = Vault 判断ノートの open)に Paseo の承認待ち(permit)を足したもの。
+ * バッジの件数の回帰ガード。サイドバー(下部バー)は **窓口Aがいま出せる件数**(`presentable`)を
+ * そのまま出し、open 総数 N や permit を足さない(2026-10-27: バッジが N より大きく出ることがあった。
+ * 実測 バッジ11 対 N=10 / 2026-10-28 ユーザー「そしたらバッジださないでよ」で窓口の答えへ切替)。
+ * 確認箱の中の「判断待ち」の行数は従来どおり N。数え方の SSOT は `shared/judgment-open.ts` の
+ * `countJudgmentCounted`。N の対象は判断窓口(`judgment_window.py` の `counts.open` = Vault 判断ノートの
+ * open)に Paseo の承認待ち(permit)を足したもの。
  * 描画の実体は React Native なので `node --test` では動かせない。代わりに**ソースの形**を機械的に検査する
  * (`sidebar-trailing-badge.test.ts` と同じ方式)。
  */
@@ -80,7 +81,7 @@ test("N は Vault ノート由来と permit の new だけ。既読・承認済�
   ];
   assert.equal(items.filter(isJudgmentCounted).length, 3);
   assert.equal(countJudgmentCounted(items), 3);
-  // バッジ(countOpen)も同じ数
+  // 確認箱の中の「判断待ち」の行数(countOpen)。サイドバーのバッジは窓口の答え(presentable)で別物
   assert.equal(countOpen(items), 3);
 });
 
@@ -202,11 +203,31 @@ test("確認箱の中のバッジ(サーバー)と下部バー(クライアン�
   );
   assert.match(serverSource, /^\s+openKnown,$/m, "件数 RPC の返り値に openKnown を入れる");
 
-  // クライアント: 下部バーの `useJudgmentBadge` は件数 RPC の値を書き換えずに出す
+  // クライアント: 下部バーの `useJudgmentBadge` は件数 RPC の **presentable**(窓口Aがいま出せる件数)を
+  // 書き換えずに出す。open 総数を出すと、窓口が出さない件まで数えて食い違う(2026-10-28 ユーザー指摘)
   const start = clientSource.indexOf("function useJudgmentBadge(");
   assert.ok(start >= 0, "useJudgmentBadge がある");
   const body = clientSource.slice(start, clientSource.indexOf("\n}\n", start));
-  assert.match(body, /setN\(r\.open\)/, "下部バーは件数 RPC の open をそのまま出す");
-  assert.match(body, /setUnknown\(!r\.openKnown\)/, "数え切れていないときは不明の印を出す");
-  assert.doesNotMatch(body, /\.filter\(/, "下部バーで独自に絞り込まない(画面と同じ数え方を使う)");
+  assert.match(
+    body,
+    /setN\(r\.presentable \?\? undefined\)/,
+    "下部バーは件数 RPC の presentable をそのまま出す",
+  );
+  assert.match(
+    body,
+    /setUnknown\(r\.presentable === null\)/,
+    "数えられないときは不明の印を出す(0件と区別)",
+  );
+  assert.doesNotMatch(body, /r\.permits/, "permit を足さない(窓口の答えを書き換えない)");
+  assert.doesNotMatch(body, /commit/, "押下でも件を先取りしない(窓口Aの台帳を書かない)");
+  assert.doesNotMatch(body, /r\.open/, "open 総数をバッジに出さない");
+  assert.doesNotMatch(body, /\.filter\(/, "下部バーで独自に絞り込まない(判定は判断窓口の1か所)");
+
+  // サーバー: バッジの数字は判断窓口の Python の答えをそのまま返す(分岐の表は presentable-count.test.ts)。
+  // `open` の空で 0 を確定しない(窓口の候補と TS 側の集合は条件が違いうる。出口レビュー2巡目 指摘1)
+  assert.match(serverSource, /computePresentable\(vaultSourceEnabled\(\), presentableCounter\)/);
+  assert.doesNotMatch(serverSource, /!open\.length/, "TS 側の集合で 0 を確定しない");
+  // 押下で台帳を書かない(件を先取りしない。2026-10-29)。`--commit` の引数の形だけを見る
+  assert.doesNotMatch(serverSource, /["']--commit["']/);
+  assert.doesNotMatch(clientSource, /commit:\s*true/);
 });

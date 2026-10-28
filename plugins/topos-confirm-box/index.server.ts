@@ -85,6 +85,11 @@ import {
 } from "./server/vault-decisions.js";
 import { isJudgmentCounted } from "./shared/judgment-open.js";
 import {
+  cachedPresentableCounter,
+  computePresentable,
+  resolvePresentableCounter,
+} from "./server/presentable-count.js";
+import {
   childThreadsArchiveRpc,
   childThreadsListRpc,
   childThreadsPinRpc,
@@ -554,7 +559,10 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.handle(confirmBoxCountRpc, async (_input, ctx) => {
+  // バッジの数字(窓口Aがいま出せる件数)は判断窓口の Python に聞く。10秒キャッシュ(3か所が30秒毎に引く)
+  const presentableCounter = cachedPresentableCounter(resolvePresentableCounter());
+
+  server.handle(confirmBoxCountRpc, async (input, ctx) => {
     const { items, sources, generatedAt } = await collect(ctx);
     // 数え方の SSOT は `countJudgmentCounted`。判断窓口の counts.open(N)と同じ対象に揃えるため、
     // Vault 判断ノート由来の項目と permit のうち state が new だけを数え、材料待ち・承認済み・既読と
@@ -571,9 +579,16 @@ export default function contribute(server: PluginServerContext) {
     } catch {
       bugs = 0;
     }
+    // サイドバーのバッジ=**窓口Aがいま出せる件数**(判定は判断窓口の Python 1か所)。承認待ち(permit)は
+    // 足さない: 窓口は permit を出さないので、足すと窓口の答えを書き換えて既存の行と二重に数える。
+    // 2026-10-28 ユーザー「そしたらバッジださないでよ。そして開くとカードあったけど？」: 判断ノートの
+    // open を全部数えていたため、裏方が検討中の件まで数えて窓口と食い違った。
+    // 上の `open` では 0 を確定しない(`computePresentable` の説明。出口レビュー2巡目 指摘1)。
+    const presentable = await computePresentable(vaultSourceEnabled(), presentableCounter);
     return {
       open: open.length,
       openKnown,
+      presentable,
       blocking: open.filter((i) => i.priority === "blocking").length,
       permits: open.filter((i) => i.kind === "permit").length,
       failedSources: sources.filter((src) => !src.ok).length,
