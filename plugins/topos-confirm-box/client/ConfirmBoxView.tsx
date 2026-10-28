@@ -1252,7 +1252,7 @@ function ItemCard({
       {/* ペイン切替は件名の押下だけ。外枠を Pressable にすると、右ペインが開いている間 react-native-web が
           disabled でカード全体を pointer-events:none にし、選択肢のボタンまで押せなくなる(6203a53 の切り分け)。
           PC幅は一覧を出したまま操作できることが前提なので、外枠はただの View にする。 */}
-      <Pressable accessibilityRole="button" onPress={headerPress} disabled={!switchPane}>
+      <Pressable accessibilityRole="button" onPress={headerPress}>
         <Text style={styles.badge}>
           {PRIORITY_LABEL[item.priority]} · {KIND_LABEL[item.kind]}
           {item.state === "approved" ? " · 決定済み" : ""}
