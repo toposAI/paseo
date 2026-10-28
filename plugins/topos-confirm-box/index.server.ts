@@ -788,12 +788,19 @@ export default function contribute(server: PluginServerContext) {
     const dir = resolveConfirmBoxDir();
     const project = findProject(dir, input.id);
     if (!project) return null;
-    const threads = readChildThreads(dir).map((t) => ({
-      agentId: t.agentId,
-      title: t.title,
-      status: t.status,
-      machineState: t.machineState,
-    }));
+    // 登録簿が読めなくても中身(説明・未決の判断)は出す。子スレ欄だけ空になる
+    let threads: { agentId: string; title: string; status: string; machineState: string | null }[] =
+      [];
+    try {
+      threads = readChildThreads(dir).map((t) => ({
+        agentId: t.agentId,
+        title: t.title,
+        status: t.status,
+        machineState: t.machineState,
+      }));
+    } catch {
+      threads = [];
+    }
     return buildPriorityDetail(project, threads, readOpenQuestions(dir, project.name));
   });
 
