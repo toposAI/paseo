@@ -177,7 +177,8 @@ interface ThreadRow {
   status: string;
   machineState: string;
   archived: boolean;
-  updatedAt: number;
+  /** 最後に更新された時刻(epoch 秒)。自己申告が無い出所(優先順位台帳だけ)では null。 */
+  updatedAt: number | null;
 }
 
 function str(v: unknown): string {
@@ -224,6 +225,40 @@ async function readJsonDetailed(file: string): Promise<JsonRead> {
 /** `child_threads.json` → id(完全と短縮の両方)で引ける表。 */
 export function readThreads(confirmBoxDir: string): Map<string, ThreadRow> | null {
   const raw = readJson(path.join(confirmBoxDir, "child_threads.json"));
+  return raw ? threadsFromChildThreads(raw) : readsAllPending(confirmBoxDir);
+}
+
+/** 子スレ一覧(自己申告の状態)が読めない／まだ無いときの保険。優先順位台帳の開発プロジェクトに
+ * 紐づくスレの ID だけ分かるので、そのスレを「進捗不明」で出す(「子スレ一覧に無い」と誤って出さない)。
+ * 状態は分からないので、完了とはしない。
+ */
+function readsAllPending(confirmBoxDir: string): Map<string, ThreadRow> | null {
+  const raw = readJson(path.join(confirmBoxDir, "priority_ledger.json"));
+  const list = raw && typeof raw === "object" ? (raw as { projects?: unknown }).projects : null;
+  if (!Array.isArray(list)) return null;
+  const out = new Map<string, ThreadRow>();
+  for (const p of list) {
+    if (!p || typeof p !== "object") continue;
+    const row = p as Record<string, unknown>;
+    const id = str(row.thread).toLowerCase();
+    if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id)) continue;
+    const thread: ThreadRow = {
+      id,
+      title: str(row.name) || str(row.title),
+      // 「完了」とは書かない(呼び出し側の語と衝突させない)。
+      status: "進捗不明",
+      // 状態が書かれていると progressOf が「作業中」と読むので、印を付けておく。
+      machineState: "unknown",
+      archived: false,
+      updatedAt: null,
+    };
+    out.set(id, thread);
+    out.set(id.slice(0, 8), thread);
+  }
+  return out.size > 0 ? out : null;
+}
+/** 確認箱の `child_threads.json` の形(`{ threads: [{ agent_id, title, declared_status, machine_state }] }`)。 */
+function threadsFromChildThreads(raw: unknown): Map<string, ThreadRow> | null {
   const list = raw && typeof raw === "object" ? (raw as { threads?: unknown }).threads : null;
   if (!Array.isArray(list)) return null;
   const out = new Map<string, ThreadRow>();
@@ -253,6 +288,7 @@ export function progressOf(thread: ThreadRow): LedgerProgress {
   // (「未完了」のような、中に完了を含むだけの語を完了と読まないため。2026-10-28 出口レビュー1巡目)。
   if (thread.status.includes("待ち")) return "waiting";
   if (thread.status.trim().startsWith("完了")) return "done";
+  if (thread.machineState === "unknown") return "unknown";
   if (thread.machineState === "running") return "working";
   if (thread.machineState === "error") return "stopped";
   if (thread.machineState === "idle" || thread.machineState === "closed") return "stopped";

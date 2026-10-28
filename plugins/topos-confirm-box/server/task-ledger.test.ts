@@ -274,6 +274,36 @@ test("子スレ一覧が読めないときは進捗「不明」で続け、notes
   assert.ok(out.rows.length > 0);
 });
 
+test("子スレ一覧が無いときは、優先順位台帳のスレを「進捗不明」で出す(一覧に無いとは出さない)", async () => {
+  const dirs = makeDirs();
+  writeJson(path.join(dirs.itemsDir, "window_b_items.json"), {
+    items: [
+      {
+        key: "10/28 21:11",
+        item_no: 1,
+        summary: "台帳を作る",
+        target: "4c50fdd9",
+        kind: "子スレ",
+        agent_id: "4c50fdd9-1111-2222-3333-444455556666",
+        status: "作業中",
+      },
+    ],
+  });
+  writeJson(path.join(dirs.confirmBoxDir, "priority_ledger.json"), {
+    projects: [
+      { id: "p1", name: "窓口Bのタスク台帳", thread: "4c50fdd9-1111-2222-3333-444455556666" },
+    ],
+  });
+  const out = await buildTaskLedger(dirs);
+  const row0 = out.rows[0];
+  const listed = row0.children[0];
+  assert.equal(listed.missing, false);
+  assert.equal(listed.title, "窓口Bのタスク台帳");
+  assert.equal(listed.progress, "unknown");
+  assert.equal(listed.status, "進捗不明");
+  assert.equal(isLedgerDone(row0), false);
+});
+
 test("一番上が最新。同じ鍵は項目番号の順で、完了は隠せる", () => {
   const rows: LedgerRow[] = [
     makeRow({ id: "a", key: "10/28 21:11", itemNo: 1, done: true }),
