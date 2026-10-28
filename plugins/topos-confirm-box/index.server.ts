@@ -55,7 +55,14 @@ import {
   sharedProjectThreadRpc,
   sharedProjectsListRpc,
 } from "./shared/shared-projects.js";
-import { fetchThread, listProjects, markRead, postMessage } from "./server/shared-projects.js";
+import { sharedProjectApiRpc } from "./shared/shared-projects-api.js";
+import {
+  callApi,
+  fetchThread,
+  listProjects,
+  markRead,
+  postMessage,
+} from "./server/shared-projects.js";
 import { feedbackReportsListRpc, countOpenReports } from "./shared/feedback.js";
 import { readFeedbackReports } from "./server/feedback.js";
 import { loadProgressContext } from "./server/feedback-progress.js";
@@ -813,6 +820,8 @@ export default function contribute(server: PluginServerContext) {
   });
   server.handle(sharedProjectPostRpc, async (input) => postMessage(input.id, input.text));
   server.handle(sharedProjectReadRpc, async (input) => markRead(input.id, input.seq));
+  // フル機能: 許可リスト(API_OPS)の操作だけを Topos へ中継する(任意パスは拒否)。
+  server.handle(sharedProjectApiRpc, async (input) => callApi(input));
 
   server.handle(coordinatorTargetRpc, async () => ({
     agentId: readGeneralCoordinatorId(),

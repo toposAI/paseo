@@ -344,7 +344,15 @@ function ConceptNoteScreen({ theme, params, navigation, host }: PluginScreenProp
 }
 
 function SharedProjectScreen({ theme, params }: PluginScreenProps) {
-  return <SharedProjectView theme={theme} projectId={params.id ?? null} />;
+  return (
+    <SharedProjectView
+      theme={theme}
+      projectId={params.id ?? null}
+      title={params.name ?? ""}
+      openScreen={openBoxScreen}
+      screenId={SHARED_PROJECT_SCREEN_ID}
+    />
+  );
 }
 
 // ホストのポップオーバー面は maxHeight 440 で、超えた分は中でスクロールになる。
