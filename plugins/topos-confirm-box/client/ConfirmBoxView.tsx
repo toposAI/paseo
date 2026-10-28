@@ -567,7 +567,6 @@ export function ConfirmBoxView({
                 styles={s}
                 colors={c}
                 open={openId === item.id}
-                active={paneCardId === item.id}
                 onToggle={toggle}
                 onBackground={openBackground}
                 onChoose={choose}
@@ -1208,7 +1207,6 @@ function ItemCard({
   styles,
   colors,
   open,
-  active,
   onToggle,
   onBackground,
   onChoose,
@@ -1222,14 +1220,12 @@ function ItemCard({
   styles: Styles;
   colors: QuestionAnswerColors;
   open: boolean;
-  /** このカードの会話ペインが開いているか(強調と件名の色に使う)。 */
-  active: boolean;
   onToggle: (id: string) => void;
   onBackground: () => void;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
   onAnswer: (item: ConfirmBoxItem, answers: Record<string, string>) => Promise<void>;
   onReject: (item: ConfirmBoxItem, comment: string) => Promise<boolean>;
-  /** このカードの会話ペインが開いているか。 */
+  /** このカードの会話ペインが開いているか(枠の強調と 💬 ボタンの表示に使う)。 */
   paneOpen: boolean;
   /** 右ペインが(どの相手でも)開いているか。開いている間だけ、件名の押下でペインの相手を切り替える。 */
   anyPaneOpen: boolean;
@@ -1264,7 +1260,7 @@ function ItemCard({
     // ペイン切替は件名の押下だけ。外枠を Pressable にすると、右ペインが開いている間 react-native-web が
     // disabled でカード全体を pointer-events:none にし、選択肢のボタンまで押せなくなる(6203a53 の切り分け)。
     // PC幅は一覧を出したまま操作できることが前提なので、外枠はただの View にする。
-    <CardShell styles={styles} active={active} open={open}>
+    <CardShell styles={styles} paneOpen={paneOpen}>
       <View>
         {item.reporter ? <Text style={styles.reporter}>報告者: {item.reporter}</Text> : null}
         <Pressable accessibilityRole="button" onPress={headerPress}>
@@ -1332,23 +1328,22 @@ function ItemCard({
 }
 
 /**
- * カードの見た目(外枠=ペインの強調、内側=展開で太くする枠)。
+ * カードの枠。強調するのは**右ペインに出ているカードだけ**(展開しただけでは変えない)。
+ * 外側が列の幅を決める入れ物(背景・枠)、内側が中身。強調で枠が1px太るぶんを内側の padding で吸収する。
  * 単なる入れ物なので、ItemCard の分岐には数えないため別の要素にしてある。
  */
 function CardShell({
   styles,
-  active,
-  open,
+  paneOpen,
   children,
 }: {
   styles: Styles;
-  active: boolean;
-  open: boolean;
+  paneOpen: boolean;
   children: ReactNode;
 }) {
   return (
-    <View style={active ? styles.cellActive : styles.cell}>
-      <View style={open ? styles.cardActive : styles.card}>{children}</View>
+    <View style={paneOpen ? styles.cellActive : styles.cell}>
+      <View style={paneOpen ? styles.cardActive : styles.card}>{children}</View>
     </View>
   );
 }
