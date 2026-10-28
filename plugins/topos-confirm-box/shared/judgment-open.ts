@@ -53,7 +53,7 @@ export function isJudgmentOpen(item: ConfirmBoxItem): boolean {
 }
 
 /**
- * バッジの N に数える項目か。**判断窓口の `counts.open` と同じ対象**に絞る:
+ * バッジの N に数える項目か。**判断窓口の `counts.open` から、窓口が出せない保留中(`onHold`)を除いたもの**に絞る:
  * Vault 判断ノート由来の項目と permit のうち `state: "new"` だけ。ノートを持たない箱・中間形式の判断行は
  * 数えない(N に出てこない)。`isJudgmentOpen` を前提に組み立てるので、数える対象は必ず判断タブにも出る。
  */
