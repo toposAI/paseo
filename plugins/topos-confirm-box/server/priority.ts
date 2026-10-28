@@ -81,7 +81,7 @@ function toProjectRow(rec: Record<string, unknown>, id: string, name: string): P
     thread: typeof rec.thread === "string" && rec.thread.trim() ? rec.thread.trim() : null,
     ...(rec.new === true ? { isNew: true } : {}),
     ...(rec.auto === true ? { auto: true } : {}),
-    ...(rec.standing === true || STANDING_NAME.test(name) ? { standing: true } : {}),
+    ...(rec.standing === true ? { standing: true } : {}),
     ...archived,
   };
 }
@@ -235,9 +235,8 @@ export function sayToLedger(dir: string, text: string): { ok: boolean; message: 
  * 優先順位の一覧から外して「常時の方針」欄で管理する行(`standing: true`)。
  * 2026-10-28 ユーザー指示:『トークン節約は今は待機してまた評価になってるはず、それは優先順位一覧には出さずに別で管理すべきでは？』。
  * 台帳に印を足すだけ(名前を変えないので、Python側の `notify_box.sort_items` の project 照合はそのまま効く)。
- * 印が台帳にまだ無いときは名前で「トークン」系の行を拾う(既存の台帳を人手で直す前から一覧から消えるように)。
+ * 判定は印だけを見る(名前から推測しない。推測すると印を外しても一覧に戻らない)。
  */
-const STANDING_NAME = /トークン/;
 
 /** 台帳の行に `standing` 印を付ける/外す。付けるときは順位の並びから外す(一覧の順位=見えている行の順)。 */
 export function markStanding(

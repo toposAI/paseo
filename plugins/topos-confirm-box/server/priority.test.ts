@@ -217,16 +217,16 @@ test("常時の方針: 一覧から外れて方針欄に移り、戻すと末尾
   }
 });
 
-test("常時の方針: 印が無くてもトークン系の名前は方針欄へ(既存台帳を直す前から一覧に出ない)", () => {
-  const rows = normalizeProjects([proj(1, { name: "トークン節約" }), proj(2)]);
+test("常時の方針: 名前ではなく印だけで決める(印を外せば一覧に戻る)", () => {
+  const rows = normalizeProjects([proj(1, { name: "トークン節約" }), proj(2, { standing: true })]);
   const { visible, standing } = splitArchived(rows ?? []);
   assert.deepEqual(
     visible.map((p) => p.id),
-    ["p2"],
+    ["p1"],
   );
   assert.deepEqual(
     standing.map((p) => p.id),
-    ["p1"],
+    ["p2"],
   );
 });
 
