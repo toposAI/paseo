@@ -1,6 +1,7 @@
 /**
  * 共有プロジェクトの取得・投稿(デーモン内サブプロセスで動く)。Topos の `/api/family-projects` を
- * **範囲つきトークン(projects 操作)**で叩く。画面から Topos へ直接は繋がない(鍵はここだけが持つ)。
+ * 家族共有プロジェクト用のトークンで叩く(閲覧のみ・旧鍵などの権限は Topos が判定し、ここでは理由を画面へ返す)。
+ * 画面から Topos へ直接は繋がない(鍵はここだけが持つ)。
  *
  * 接続設定(秘密でない部分)は `~/topos-trial/config/paseo_projects.json`(`TOPOS_PROJECTS_CONFIG` で変更):
  *   { "login": "<トークンの持ち主のログイン>", "origin": "<Topos の公開オリジン>",
@@ -127,6 +128,8 @@ export interface CallDeps {
   timeoutMs?: number;
   /** 応答をバイナリとして読み、{dataUrl, mime, size} にする(添付)。 */
   binary?: boolean;
+  /** 本文をすでに JSON 文字列にしてあるとき(二重の stringify を避ける)。`body` は有無の判定にだけ使う。 */
+  rawBody?: string;
 }
 
 /** バイナリ応答を返してよいMIME。それ以外は octet-stream に落とす(画面で開かない)。 */
@@ -143,6 +146,9 @@ async function readDetail(res: Response): Promise<string> {
   }
   return "";
 }
+
+/** 添付ダウンロードの上限(バイト)。Topos の添付上限(attach_limits)より十分大きい安全弁で、メモリを守る。 */
+export const ATTACH_DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
 
 /** 添付などバイナリの応答を、画面がそのまま使える base64 のデータURLにする(MIME は許可リストのみ)。 */
 async function binaryData(res: Response) {
@@ -165,6 +171,25 @@ async function httpFailure(res: Response, pathAndQuery: string) {
     httpStatus: res.status,
     detail,
   } as const;
+}
+
+const tooLarge = () =>
+  ({
+    ok: false,
+    status: "error",
+    message: "添付が大きすぎて開けません",
+    reason: "too_large",
+  }) as const;
+
+/** バイナリ応答を読む。読む前に宣言サイズで断り(巨大な応答をメモリに載せない)、読んだ後も確かめる。 */
+async function readBinary(res: Response) {
+  const declared = Number(res.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > ATTACH_DOWNLOAD_MAX_BYTES) {
+    void res.body?.cancel().catch(() => undefined);
+    return tooLarge();
+  }
+  const data = await binaryData(res);
+  return data.size > ATTACH_DOWNLOAD_MAX_BYTES ? tooLarge() : ({ ok: true, data } as const);
 }
 
 /** Topos へ1回呼ぶ。失敗は例外にせず理由の種類つきで返す(画面を止めない)。 */
@@ -190,11 +215,11 @@ export async function callTopos<T>(
     const res = await doFetch(`${config.baseUrl}${pathAndQuery}`, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : (deps.rawBody ?? JSON.stringify(body)),
       signal: AbortSignal.timeout(deps.timeoutMs ?? TIMEOUT_MS),
     });
     if (!res.ok) return await httpFailure(res, pathAndQuery);
-    if (deps.binary) return { ok: true, data: (await binaryData(res)) as T };
+    if (deps.binary) return (await readBinary(res)) as CallResult<T>;
     return { ok: true, data: (await res.json()) as T };
   } catch (error) {
     const name = error instanceof Error ? error.name : "";
@@ -340,7 +365,10 @@ export async function fetchThreadRaw(
   return { ok: true, data: r.data };
 }
 
-/** 投稿。宛先は付けない(全員宛・AI には聞かない)。 */
+/**
+ * 旧い単純な投稿(本文だけを全員宛に送る。AIには聞かない)。画面は使わず、旧RPC(sharedProjectPostRpc)
+ * からだけ呼ばれる。宛先・添付つきの投稿は callApi の `post` 操作。
+ */
 export async function postMessage(id: string, body: string, deps?: CallDeps) {
   const t = body.trim();
   if (!ID_RE.test(id)) return { ok: false, message: "不正なプロジェクトIDです" };
@@ -425,17 +453,21 @@ function buildQuery(spec: OpSpec, query: Record<string, string> | undefined): st
   return `?${parts.join("&")}`;
 }
 
-function checkBody(spec: OpSpec, body: unknown): string | null {
-  if (!spec.body) return body === undefined ? null : "この操作は本文を受け付けません";
-  if (!isObj(body) || Array.isArray(body)) return "本文の形が正しくありません";
-  let size: number;
+/** 本文を検査する。通れば JSON 文字列(送信にそのまま使う。stringify は1回だけ)も返す。 */
+function checkBody(
+  spec: OpSpec,
+  body: unknown,
+): { problem: string; json?: undefined } | { problem: null; json?: string } {
+  if (!spec.body) return { problem: body === undefined ? null : "この操作は本文を受け付けません" };
+  if (!isObj(body) || Array.isArray(body)) return { problem: "本文の形が正しくありません" };
+  let json: string;
   try {
-    size = JSON.stringify(body).length;
+    json = JSON.stringify(body);
   } catch {
-    return "本文の形が正しくありません";
+    return { problem: "本文の形が正しくありません" };
   }
-  if (size > BODY_MAX_CHARS[spec.body]) return "本文が大きすぎます";
-  return null;
+  if (json.length > BODY_MAX_CHARS[spec.body]) return { problem: "本文が大きすぎます" };
+  return { problem: null, json };
 }
 
 /**
@@ -453,13 +485,14 @@ export async function callApi(
   if (route === null) return badRequest("IDの形が正しくありません");
   const query = buildQuery(spec, input.query);
   if (query === null) return badRequest("指定できない条件です");
-  const bodyProblem = checkBody(spec, input.body);
-  if (bodyProblem) return badRequest(bodyProblem);
+  const checked = checkBody(spec, input.body);
+  if (checked.problem) return badRequest(checked.problem);
 
   const callDeps: CallDeps = {
     ...deps,
     timeoutMs: spec.timeoutMs ?? deps.timeoutMs,
     binary: spec.binary === true,
+    ...(checked.json !== undefined ? { rawBody: checked.json } : {}),
   };
   const r =
     spec.composite === "thread"

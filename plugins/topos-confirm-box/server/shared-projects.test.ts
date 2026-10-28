@@ -413,6 +413,21 @@ test("callApi: 添付はバイナリを許可MIMEだけデータURLにする", a
   assert.equal(r2.ok ? (r2.data as { mime: string }).mime : "", "application/octet-stream");
 });
 
+test("callApi: 添付は宣言サイズが上限超なら読まずに断る", async () => {
+  const big = () =>
+    new Response(new Uint8Array([1]), {
+      headers: { "content-type": "image/png", "content-length": String(26 * 1024 * 1024) },
+    });
+  const r = await callApi({ op: "attachment", id: PID, aid: PID }, recorder(big).deps);
+  assert.equal(!r.ok && r.reason, "too_large");
+});
+
+test("callApi: 本文のJSON文字列は1回だけ作り、そのまま送る", async () => {
+  const { seen, deps } = recorder(() => json({}));
+  await callApi({ op: "post", id: PID, body: { text: "あ" } }, deps);
+  assert.equal(seen[0].body, JSON.stringify({ text: "あ" }));
+});
+
 test("callApi: thread は件数→最新側の2回で取り、応答はそのまま返す", async () => {
   const urls: string[] = [];
   const deps = {

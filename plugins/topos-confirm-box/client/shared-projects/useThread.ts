@@ -40,11 +40,14 @@ export function useThread(call: CallApi, projectId: string, reading: boolean): T
   const [openedAtSeq, setOpenedAtSeq] = useState<number | null>(null);
   const gen = useRef(0);
   const busy = useRef(false);
+  /** 取得中に reload が呼ばれた印。完了後に1回だけ取り直す(送信直後の取りこぼし防止)。 */
+  const pending = useRef(false);
 
   // プロジェクトが変わったら前の内容・状態を持ち越さない
   useEffect(() => {
     gen.current += 1;
     busy.current = false;
+    pending.current = false;
     setView(null);
     setNames({});
     setLoading(true);
@@ -52,10 +55,14 @@ export function useThread(call: CallApi, projectId: string, reading: boolean): T
     setOpenedAtSeq(null);
   }, [projectId]);
 
-  const reload = useCallback(async () => {
-    if (busy.current) return;
+  const reload = useCallback(async (): Promise<void> => {
+    if (busy.current) {
+      pending.current = true;
+      return;
+    }
     busy.current = true;
     const my = gen.current;
+    let again = false;
     try {
       const r = await call("thread", { id: projectId });
       if (my !== gen.current) return;
@@ -71,7 +78,17 @@ export function useThread(call: CallApi, projectId: string, reading: boolean): T
         return;
       }
       setError("");
-      setView(parsed);
+      // 応答より新しい自分の投稿(append 済み)は、古い応答で消さずに残す
+      const fetchedMax = parsed.messages.reduce((m, x) => Math.max(m, x.seq), 0);
+      setView((cur) => {
+        const keep = (cur?.messages ?? []).filter((m) => m.mine && m.seq > fetchedMax);
+        if (keep.length === 0) return parsed;
+        return {
+          ...parsed,
+          messages: [...parsed.messages, ...keep].sort((a, b) => a.seq - b.seq),
+          latestSeq: Math.max(parsed.latestSeq, ...keep.map((m) => m.seq)),
+        };
+      });
       setNames(readNames(r.data));
       setOpenedAtSeq((cur) => cur ?? parsed.lastReadSeq);
       setLoading(false);
@@ -81,7 +98,12 @@ export function useThread(call: CallApi, projectId: string, reading: boolean): T
         if (done.ok && my === gen.current) emitProjectsChanged();
       }
     } finally {
-      if (my === gen.current) busy.current = false;
+      if (my === gen.current) {
+        busy.current = false;
+        again = pending.current;
+        pending.current = false;
+      }
+      if (again) void reload();
     }
   }, [call, projectId]);
 

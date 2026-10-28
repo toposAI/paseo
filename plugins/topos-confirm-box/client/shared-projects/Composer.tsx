@@ -3,7 +3,7 @@
  * 宛先の意味(省略=AI宛、空=全員宛でAIなし、指名=通知)は Topos 側。ここは選択を配列にして渡すだけ。
  * 旧鍵(本文だけの鍵)では宛先・添付・AIを隠し、全員宛てに本文だけを送る。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Image,
   Text,
@@ -30,6 +30,7 @@ import { Banner, Btn, Chip } from "./ui.js";
 const AI_VALUE = "@ai";
 const ALL_VALUE = "@all";
 const DEFAULT_CHOICE: RecipientChoice = { ai: true, people: [] };
+const TIMEOUT_NOTICE = "届いている可能性があります。スレッドを更新して確認してから再送してください";
 
 function PreviewItem({
   ctx,
@@ -120,6 +121,7 @@ export function Composer({
   const [text, setText] = useState("");
   const [choice, setChoice] = useState<RecipientChoice>(DEFAULT_CHOICE);
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const [notice, setNotice] = useState("");
   const [warn, setWarn] = useState("");
 
@@ -142,17 +144,28 @@ export function Composer({
   const aiWillAnswer = !limited && choice.ai;
 
   const send = useCallback(async () => {
-    if (sending || !hasContent) return;
+    // state は再描画まで古いので、連打(Cmd+Enter とクリック)は ref で即時に止める
+    if (sendingRef.current || !hasContent) return;
+    sendingRef.current = true;
     setSending(true);
     setNotice("");
     setWarn("");
     const to = limited ? [] : buildRecipients(choice);
-    const r = await call("post", { id, body: postBody(text, to, pick.items) });
-    setSending(false);
+    let r: Awaited<ReturnType<typeof call>>;
+    try {
+      r = await call("post", { id, body: postBody(text, to, pick.items) });
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
     if (!r.ok) {
-      setNotice(r.message);
-      // 時間切れは投稿が届いている可能性があるので取り直す
-      if (r.reason === "timeout") void thread.reload();
+      if (r.reason === "timeout") {
+        // 時間切れは投稿が届いている可能性がある。本文は残し、取り直して確認を促す
+        setNotice(TIMEOUT_NOTICE);
+        void thread.reload();
+      } else {
+        setNotice(r.message);
+      }
       return;
     }
     const parsed: PostResult | null = parsePostResult(r.data, me, thread.names);
@@ -167,20 +180,7 @@ export function Composer({
     }
     emitProjectsChanged();
     void thread.reload();
-  }, [
-    sending,
-    hasContent,
-    limited,
-    choice,
-    pick,
-    text,
-    call,
-    id,
-    me,
-    thread,
-    onFinishConfirm,
-    ctx,
-  ]);
+  }, [hasContent, limited, choice, pick, text, call, id, me, thread, onFinishConfirm, ctx]);
 
   const sendPress = useCallback(() => void send(), [send]);
 
