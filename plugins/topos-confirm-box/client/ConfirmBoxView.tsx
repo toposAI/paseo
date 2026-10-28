@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
+import type { LayoutChangeEvent } from "react-native";
 import { useHosts, useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import {
@@ -24,6 +25,7 @@ import {
   rejectComment,
 } from "../shared/contract.js";
 import { confirmBoxTabs, isWideLayout } from "../shared/footer-tabs.js";
+import { LIST_GRID_GAP, listCellWidth, listColumns } from "../shared/list-grid.js";
 import { onBoxChanged, notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
 import { BugReportsView } from "./BugReportsView.js";
@@ -144,6 +146,20 @@ export function ConfirmBoxView({
   // 幅の判定は一覧とチャットの並べ方にだけ使う(PC幅なら横並び、狭い幅は全画面で重ねる)。
   const wide = isBoxWide(containerWidth, windowSize, layout);
   const compact = !wide;
+  // 判断一覧の幅。PC幅ではカードを複数列に並べる(右ペインが開いて一覧が狭くなったら列も減らす)。
+  // 列数は箱幅ではなく一覧の実測幅で決めるので、ポップオーバー(箱幅あり)でもそのまま使える。
+  const [listWidth, setListWidth] = useState(0);
+  const onListLayout = useCallback(
+    (e: LayoutChangeEvent) => setListWidth(Math.round(e.nativeEvent.layout.width)),
+    [],
+  );
+  const listCols = listColumns(listWidth, wide);
+  const cellWidth = listCellWidth(listWidth, listCols);
+  // lint(jsx-no-new-object-as-prop)対策: 1枚ぶんの幅は幅が変わったときだけ作り直す。
+  const cellStyle = useMemo(
+    () => (cellWidth === undefined ? undefined : { width: cellWidth }),
+    [cellWidth],
+  );
   const { shownTab, tabs, selectTab } = useBoxTabs(mode, initialTab);
   // カードチャットは画面を問わずこのペインに一本化した(旧・自由記述欄は廃止=2026-10-22ユーザー決定)。
   // ヘッダのポップオーバーも幅<720なので、ペインは全画面スライドとして重なる。
@@ -319,6 +335,13 @@ export function ConfirmBoxView({
         borderRadius: 6,
         padding: 8,
         textAlignVertical: "top" as const,
+      },
+      // 判断一覧の並べ(PC幅は複数列。1枚ごとの幅は listCellWidth で決める)。
+      grid: {
+        flexDirection: "row" as const,
+        flexWrap: "wrap" as const,
+        alignItems: "flex-start" as const,
+        gap: LIST_GRID_GAP,
       },
     };
   }, [c, touch]);
@@ -525,30 +548,34 @@ export function ConfirmBoxView({
           ))}
         {notice ? <Text style={s.muted}>{notice}</Text> : null}
         {data && visible.length === 0 ? <Text style={s.muted}>判断待ちはありません</Text> : null}
-        {visible.map((item) => (
-          <ItemCard
-            key={item.id}
-            item={item}
-            styles={s}
-            colors={c}
-            open={openId === item.id}
-            onToggle={toggle}
-            onBackground={openBackground}
-            onChoose={choose}
-            onAnswer={answer}
-            onReject={reject}
-            paneOpen={paneCardId === item.id}
-            anyPaneOpen={pane !== null}
-            onOpenPane={openCard}
-          />
-        ))}
+        {/* PC幅は複数列(2026-10-28 ユーザー決定)。1列のときは今までと同じ並び。 */}
+        <View style={listCols > 1 ? s.grid : undefined}>
+          {visible.map((item) => (
+            <View key={item.id} style={cellStyle}>
+              <ItemCard
+                item={item}
+                styles={s}
+                colors={c}
+                open={openId === item.id}
+                onToggle={toggle}
+                onBackground={openBackground}
+                onChoose={choose}
+                onAnswer={answer}
+                onReject={reject}
+                paneOpen={paneCardId === item.id}
+                anyPaneOpen={pane !== null}
+                onOpenPane={openCard}
+              />
+            </View>
+          ))}
+        </View>
       </>
     );
   }
 
   return (
     <SplitLayout styles={s} compact={compact} pane={paneEl}>
-      <View style={s.flex}>
+      <View style={s.flex} onLayout={onListLayout}>
         <HeaderSlot
           show={openScreen !== undefined}
           active={shownTab}
@@ -1198,7 +1225,6 @@ function ItemCard({
   const [rejecting, setRejecting] = useState(false);
   const startReject = useCallback(() => setRejecting(true), []);
   const cancelReject = useCallback(() => setRejecting(false), []);
-  const toggle = useCallback(() => onToggle(item.id), [onToggle, item.id]);
   const toggleBg = useCallback(() => {
     setBgOpen((v) => {
       if (!v) onBackground();
@@ -1208,6 +1234,11 @@ function ItemCard({
   const openPane = useCallback(() => onOpenPane(item), [onOpenPane, item]);
   // カード本体の何もない所のタップ。内側のボタン・リンクは自分で処理する(入れ子の Pressable は内側が勝つ)。
   const switchPane = shouldSwitchPaneOnCardPress(anyPaneOpen, paneOpen) ? openPane : undefined;
+  // 件名の押下: 従来どおり展開の切替。右ペインが開いている間は、そのカードをペインの相手に切り替える。
+  const headerPress = useCallback(() => {
+    onToggle(item.id);
+    switchPane?.();
+  }, [onToggle, item.id, switchPane]);
   const deny = useCallback(() => void onChoose(item, "__deny"), [item, onChoose]);
   const answer = useCallback(
     (answers: Record<string, string>) => void onAnswer(item, answers),
@@ -1216,13 +1247,12 @@ function ItemCard({
   const created = useMemo(() => formatCreated(item.ts), [item.ts]);
   const questions = item.questions ?? NO_QUESTIONS;
   return (
-    <Pressable
-      style={paneOpen ? styles.cardActive : styles.card}
-      onPress={switchPane}
-      disabled={!switchPane}
-    >
+    <View style={paneOpen ? styles.cardActive : styles.card}>
       {item.reporter ? <Text style={styles.reporter}>報告者: {item.reporter}</Text> : null}
-      <Pressable accessibilityRole="button" onPress={toggle}>
+      {/* ペイン切替は件名の押下だけ。外枠を Pressable にすると、右ペインが開いている間 react-native-web が
+          disabled でカード全体を pointer-events:none にし、選択肢のボタンまで押せなくなる(6203a53 の切り分け)。
+          PC幅は一覧を出したまま操作できることが前提なので、外枠はただの View にする。 */}
+      <Pressable accessibilityRole="button" onPress={headerPress} disabled={!switchPane}>
         <Text style={styles.badge}>
           {PRIORITY_LABEL[item.priority]} · {KIND_LABEL[item.kind]}
           {item.state === "approved" ? " · 決定済み" : ""}
@@ -1281,6 +1311,6 @@ function ItemCard({
           {created}
         </Text>
       </View>
-    </Pressable>
+    </View>
   );
 }
