@@ -59,18 +59,13 @@ export function resolveHistoryCommitter(
         const args = [
           script,
           "commit",
-          "--vault",
-          vaultRoot,
-          "--path",
-          rel,
-          "--user-id",
-          user,
-          "--actor",
-          "paseo",
-          "--phase",
-          phase,
+          `--vault=${vaultRoot}`,
+          `--path=${rel}`,
+          `--user-id=${user}`,
+          "--actor=paseo",
+          `--phase=${phase}`,
         ];
-        if (gitDir) args.push("--git-dir", gitDir);
+        if (gitDir) args.push(`--git-dir=${gitDir}`);
         execFile(
           python,
           args,

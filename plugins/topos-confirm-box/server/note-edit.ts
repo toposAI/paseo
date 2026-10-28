@@ -149,7 +149,7 @@ async function writeLocked(
       "履歴に積めたか確認できませんでした。ノートは書き換わっている可能性があります",
     );
   }
-  return restoreOriginal(real, before, bytes, post);
+  return restoreOriginal(real, before, bytes, next, post);
 }
 
 function preMessage(state: string): string {
@@ -163,10 +163,18 @@ function restoreOriginal(
   real: string,
   before: string,
   bytes: Buffer,
+  next: string,
   post: string,
 ): SaveNoteResult {
   const why = post === "excluded" ? "履歴の対象外のため" : "履歴に積めなかったため";
   try {
+    // 履歴コミット中に外部が書き換えていたら、その内容を消さない(自分の書いた版のままのときだけ戻す)
+    if (!fs.readFileSync(real).equals(Buffer.from(next, "utf8"))) {
+      return result(
+        "rejected",
+        `${why}保存しませんでしたが、その間に別の場所で変更されたため元に戻していません。ノートを確認してください`,
+      );
+    }
     atomicWrite(real, before);
     if (fs.readFileSync(real).equals(bytes)) {
       return result("rejected", `${why}保存しませんでした(元の内容のままです)`);
