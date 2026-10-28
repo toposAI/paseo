@@ -178,9 +178,15 @@ test("常時の方針: 一覧から外れて方針欄に移り、戻すと末尾
   try {
     fs.writeFileSync(
       path.join(dir, LEDGER_FILE),
-      JSON.stringify({ version: 1, updated_ts: 1, projects: [proj(1), proj(2), proj(3)] }),
+      JSON.stringify({
+        version: 1,
+        updated_ts: 1,
+        projects: [proj(1), proj(2, { new: true }), proj(3)],
+      }),
     );
     assert.equal(markStanding(dir, "p2", true).ok, true);
+    // 方針へ移した時点で「新規(自動追加のまま)」の印は落ちる
+    assert.equal(readLedger(dir).projects.find((p) => p.id === "p2")?.isNew, undefined);
     const raw = JSON.parse(fs.readFileSync(path.join(dir, LEDGER_FILE), "utf-8"));
     assert.equal(raw.projects.length, 3); // 消えない
     assert.equal(raw.projects.find((p: { id: string }) => p.id === "p2").standing, true);
@@ -211,7 +217,8 @@ test("常時の方針: 一覧から外れて方針欄に移り、戻すと末尾
       s3.visible.map((p) => p.id),
       ["p3", "p1", "p2"],
     );
-    assert.equal(s3.standing.length, 0);
+    // 「新規」の印は、方針へ移す(人が触った)時点で落ちる。残すと担当スレが消えた時に自動で外される側へ戻る
+    assert.equal(s3.visible.find((p) => p.id === "p2")?.isNew, undefined);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

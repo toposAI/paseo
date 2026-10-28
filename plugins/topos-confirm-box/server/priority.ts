@@ -2,6 +2,9 @@
  * 開発の優先順位台帳。確認箱ディレクトリ配下の4ファイルで持つ:
  *
  * - `priority_ledger.json`          … 正本。`{version,updated_ts,projects:[{id,name,note,thread?}]}`。順位=配列の添字
+ *   ただし `standing: true`(常時の方針)と `archived: true`(アーカイブ済み)の行は数に入れない。
+ *   **順位 = その2つの印を外した行を上から並べた位置**。台帳の添字をそのまま順位に使わない
+ *   (Python側 `confirm_box_project_priority.load_ranking` と同じ規則。読む側も同じく外すこと)
  * - `priority_ledger_history.jsonl` … 変更のたびに変更前の projects を1行追記(戻す用。上書きしない)
  * - `priority_requests.jsonl`       … 自由記述の要求 `{ts,text}`(解釈担当が読む)
  * - `priority_replies.jsonl`        … 返答 `{ts,re,by,text}`(`re` = 要求の ts)。by=ack|worker|fallback
@@ -234,7 +237,9 @@ export function sayToLedger(dir: string, text: string): { ok: boolean; message: 
 /**
  * 優先順位の一覧から外して「常時の方針」欄で管理する行(`standing: true`)。
  * 2026-10-28 ユーザー指示:『トークン節約は今は待機してまた評価になってるはず、それは優先順位一覧には出さずに別で管理すべきでは？』。
- * 台帳に印を足すだけ(名前を変えないので、Python側の `notify_box.sort_items` の project 照合はそのまま効く)。
+ * 台帳に印を足すだけ(名前を変えないので、Python側の `notify_box.sort_items` の project 照合は今も当たる。
+ * ただし方針の行は一覧から外れるので、`rank_of` は最後尾側(`MAX_RANKS + 1`)を返す=そのプロジェクトの
+ * 判断は確認箱の同じ priority の中で一番下に来る。これが良いかはユーザー判断)。
  * 判定は印だけを見る(名前から推測しない。推測すると印を外しても一覧に戻らない)。
  */
 
@@ -256,7 +261,8 @@ export function markStanding(
     by: standing ? "ui-standing" : "ui-unstanding",
     before: projects,
   });
-  const { standing: _s, ...rest } = cur;
+  // `new` は「自動追加したまま動かしていない」印。方針へ移す=人が触ったので落とす(Python側 `mark_standing` と同じ)
+  const { standing: _s, isNew: _n, ...rest } = cur;
   const row = standing ? { ...rest, standing: true } : rest;
   const next = [...projects];
   next[idx] = row;

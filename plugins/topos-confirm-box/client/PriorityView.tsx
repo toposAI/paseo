@@ -74,6 +74,7 @@ function useDragReorder(
     const el = listRef.current as unknown as HTMLElement | null;
     if (!el) return;
     for (const r of Array.from(el.children) as HTMLElement[]) {
+      if (!r.hasAttribute("data-priority-row")) continue;
       r.style.transform = "";
       r.style.transition = "";
       r.style.zIndex = "";
@@ -91,7 +92,9 @@ function useDragReorder(
     if (Platform.OS !== "web") return undefined;
     const el = listRef.current as unknown as HTMLElement | null;
     if (!el) return undefined;
-    const rowEls = () => Array.from(el.children) as HTMLElement[];
+    // 行だけを拾う(中身パネルなど、行の間に挟まる要素を数に入れない)
+    const rowEls = () =>
+      (Array.from(el.children) as HTMLElement[]).filter((r) => r.hasAttribute("data-priority-row"));
 
     let from = -1;
     let target = -1;
@@ -291,6 +294,8 @@ const iconBtn = {
 } as object;
 const plainRow = [rowCard, rankRow];
 const gap4 = { gap: ROW_GAP };
+// 並べ替えが見る「行」の印(行の間に中身パネルを挟むので、行だけを拾えるようにする)
+const rowDataSet = { priorityRow: "1" };
 const gap6 = { gap: 6 };
 const gap8 = { gap: 8 };
 const detailCard = { gap: 4 };
@@ -594,6 +599,8 @@ function usePriorityLedger() {
   const [notice, setNotice] = useState("");
   const [detail, setDetail] = useState<PriorityDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  // 開くたびに番号を進め、古い番号の応答は捨てる(速く行を続けて押すと、前の行の中身が後から上書きする)
+  const detailSeq = useRef(0);
 
   const fail = useCallback(
     (e: unknown) => setNotice(e instanceof Error ? e.message : String(e)),
@@ -616,6 +623,19 @@ function usePriorityLedger() {
       off();
     };
   }, [reload]);
+
+  // ドラッグを離した瞬間に画面だけ先に並べ替える。サーバーの応答後 `reload` が正しい並びで上書きする
+  // (失敗しても既に読み直し済みなので、古い並びのまま残らない)
+  const setLocalOrder = useCallback((from: number, to: number) => {
+    setData((d) => {
+      if (!d || from === to) return d;
+      const projects = [...d.projects];
+      const [row] = projects.splice(from, 1);
+      if (!row) return d;
+      projects.splice(to, 0, row);
+      return { ...d, projects };
+    });
+  }, []);
 
   const shift = useCallback(
     async (id: string, toRank: number) => {
@@ -655,14 +675,19 @@ function usePriorityLedger() {
 
   const openDetail = useCallback(
     async (id: string) => {
+      const seq = ++detailSeq.current;
+      setDetail(null); // 前の行の中身が新しく開いた行の下に出ないよう先に消す
       setDetailLoading(true);
       try {
-        setDetail(await detailRpc({ id }));
+        const next = await detailRpc({ id });
+        if (seq === detailSeq.current) setDetail(next);
       } catch (e) {
-        setDetail(null);
-        fail(e);
+        if (seq === detailSeq.current) {
+          setDetail(null);
+          fail(e);
+        }
       }
-      setDetailLoading(false);
+      if (seq === detailSeq.current) setDetailLoading(false);
     },
     [detailRpc, fail],
   );
@@ -690,6 +715,7 @@ function usePriorityLedger() {
     detail,
     detailLoading,
     reload,
+    setLocalOrder,
     shift,
     archive,
     stand,
@@ -731,7 +757,8 @@ export function PriorityView({
     (from: number, to: number) => {
       const p = dataRef.current?.projects[from];
       if (!p) return;
-      // 楽観更新: 離した位置へ即時に並べ替え、サーバーへの反映と再読込は後から
+      // 楽観更新: 離した位置へ即時に並べ替え、サーバーへの反映と再読込は後から(失敗したら応答時の読み直しで戻る)
+      led.setLocalOrder(from, to);
       void led.shift(p.id, to + 1);
     },
     [led],
@@ -820,29 +847,31 @@ export function PriorityView({
           onNo={noConfirm}
         />
       ) : null}
-      {detailId ? (
-        <DetailPanel
-          id={detailId}
-          data={led.detail}
-          styles={styles}
-          loading={led.detailLoading}
-          standing={detailStanding}
-          onOpenThread={openRelated}
-          onSetStanding={setStandingFromDetail}
-          onClose={closeDetail}
-        />
-      ) : null}
       <View ref={listRef} style={gap4}>
         {projects.map((p, i) => (
-          <RankRow
-            key={p.id}
-            project={p}
-            index={i}
-            colors={colors}
-            styles={styles}
-            onArchive={askArchive}
-            onStanding={askStanding}
-          />
+          <View key={p.id} style={gap4} {...({ dataSet: rowDataSet } as object)}>
+            <RankRow
+              project={p}
+              index={i}
+              colors={colors}
+              styles={styles}
+              onArchive={askArchive}
+              onStanding={askStanding}
+            />
+            {/* 中身は押した行の**直下**に出す(上に出すと、下の方の行を押したとき画面の外に出る) */}
+            {detailId === p.id ? (
+              <DetailPanel
+                id={p.id}
+                data={led.detail}
+                styles={styles}
+                loading={led.detailLoading}
+                standing={detailStanding}
+                onOpenThread={openRelated}
+                onSetStanding={setStandingFromDetail}
+                onClose={closeDetail}
+              />
+            ) : null}
+          </View>
         ))}
       </View>
       <TextInput
