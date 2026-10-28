@@ -84,6 +84,8 @@ export const taskLedgerListRpc = defineRpc({
     /** 台帳ファイル(項目)を読めたか。未マージの間は false が並ぶ。 */
     sources: z.object({
       items: z.boolean(),
+      /** 台帳から14日を過ぎて落とした控え(`window_b_items_archive.jsonl`)を読めたか。 */
+      itemsArchive: z.boolean(),
       inbox: z.boolean(),
       childThreads: z.boolean(),
       priority: z.boolean(),
@@ -98,13 +100,14 @@ export type LedgerMode = "hide-done" | "show-done";
 /**
  * 完了か。台帳が完了と書いていれば完了。子スレを振った行は、振った子スレが全部完了したら完了。
  * 振っていない行(代理決定・投函・説明のみ)は `settledWithoutChild` のとおり。
- * 推測の行(受信箱から補っただけの行)は、子スレが終わっていても完了にしない
- * (台帳の正が確かめるまでは未完了として見せる。「完了は隠す」で黙って消さない)。
+ * 推測の行(受信箱から補っただけの行)は、振り先の記録が無いので「完了」とは判断しない
+ * (子スレが本文から分かっていて全部終わっていれば完了。それ以外は「振り先の記録なし」と出す)。
  */
 export function isLedgerDone(row: LedgerRow): boolean {
   if (row.done) return true;
+  // 推測の行は「台帳に記録が無い」だけなので、振り先が分からないこと(settledWithoutChild=false)を
+  // 完了の材料にはしない。子スレが全部終わっていれば完了として扱う(2026-10-28 出口レビュー1巡目)。
   if (row.kind === "子スレ") {
-    if (row.inferred) return false;
     return row.children.length > 0 && row.children.every((c) => c.progress === "done");
   }
   return row.settledWithoutChild;
@@ -123,12 +126,13 @@ export function sortLedgerRows(rows: readonly LedgerRow[]): LedgerRow[] {
   });
 }
 
-/** 鍵の並べ替え用の値。`10/28 21:49#2` → "10282149.2"(`#N` が無ければ .1)。 */
+/** 鍵の並べ替え用の値。`10/28 21:49#2` → "10282149.0002"(`#N` が無ければ .0001)。
+ * 連番は数値の桁で埋める(`#10` を `.10` の文字列で比べると `#2`(=` .2`)より小さくなる)。 */
 export function keySortValue(key: string): string {
   const m = /^(?:(\d{2})\/(\d{2})\s+)?(\d{2}):(\d{2})(?:#(\d+))?$/.exec(key.trim());
-  if (!m) return "000000000000.0";
+  if (!m) return "000000000000.0000";
   const [, md = "00", dd = "00", hh, mm, n = "1"] = m;
-  return `${md}${dd}${hh}${mm}.${Number(n)}`;
+  return `${md}${dd}${hh}${mm}.${String(Number(n)).padStart(4, "0")}`;
 }
 
 export function filterLedgerRows(rows: readonly LedgerRow[], mode: LedgerMode): LedgerRow[] {

@@ -841,12 +841,18 @@ export default function contribute(server: PluginServerContext) {
   // 何が読めなかったかを `notes` で返す(画面全体を消さない)。
   server.handle(taskLedgerListRpc, async () => {
     try {
-      return buildTaskLedger();
+      return await buildTaskLedger();
     } catch (error) {
       return {
         rows: [],
         notes: [`台帳を読めません: ${(error as Error).message}`],
-        sources: { items: false, inbox: false, childThreads: false, priority: false },
+        sources: {
+          items: false,
+          itemsArchive: false,
+          inbox: false,
+          childThreads: false,
+          priority: false,
+        },
       };
     }
   });

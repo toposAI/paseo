@@ -6,12 +6,15 @@
  *    形式は `antigravity/utils/window_b_request_items.py` の先頭(そのモジュールと同じ env に従う)。
  * 2. `coordinator_inbox.md` の `[窓口B→裏方]` 行 … 依頼の全文と受付の時刻。台帳に項目が無い依頼は
  *    ここから文を分けて「推測」の行として補う(台帳が未マージの間も画面が空にならないように)。
+ *    ただし台帳が読めているときは、台帳が受け付けた範囲の外にある依頼だけを補う(受信箱の古い行まで
+ *    全件を推測で作り直すと、片付いた依頼が「振り先の記録なし」として永久に並ぶ)。
  * 3. `confirm_box/child_threads.json` … 振った子スレの進捗(自己申告の状態と Paseo の稼働状態)。
  * 4. `confirm_box/priority_ledger.json` … 開発プロジェクト(優先順位台帳)の名前を付ける。
  *
  * どの出所も読めないときは空で続ける(1つ壊れたせいで画面全体を消さない)。読めなかったものは notes に出す。
  */
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type {
@@ -21,6 +24,7 @@ import type {
   LedgerRow,
   TaskLedgerListOutput,
 } from "../shared/task-ledger.js";
+import { keySortValue } from "../shared/task-ledger.js";
 
 export interface TaskLedgerDirs {
   /** `window_b_reply/window_b_items.json` の親(既定 `~/.local/state/toposai/window_b_reply`)。 */
@@ -190,6 +194,31 @@ function readJson(file: string): unknown {
   } catch {
     return null;
   }
+}
+
+/**
+ * 「まだ無い」と「あるが読めない」を分けて読む(`readJson` は両方 null にするため)。
+ * 書きかけ(`os.replace` 前の一時ファイルではなく、稀に起こる部分読み)を拾ったときのために、
+ * 構文エラーなら少し待って1回だけ読み直す(2026-10-28 出口レビュー1巡目)。
+ */
+type JsonRead = { kind: "ok"; value: unknown } | { kind: "missing" } | { kind: "broken" };
+
+async function readJsonDetailed(file: string): Promise<JsonRead> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let text: string;
+    try {
+      text = await fsp.readFile(file, "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "missing" };
+      return { kind: "broken" };
+    }
+    try {
+      return { kind: "ok", value: JSON.parse(text) };
+    } catch {
+      if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+  return { kind: "broken" };
 }
 
 /** `child_threads.json` → id(完全と短縮の両方)で引ける表。 */
@@ -388,27 +417,62 @@ interface ItemRowRecord {
   status: string;
 }
 
+function toItem(r: Record<string, unknown>): ItemRowRecord {
+  return {
+    key: str(r.key),
+    item_no: Number(r.item_no),
+    summary: str(r.summary),
+    source: str(r.source) || str(r.summary),
+    target: str(r.target),
+    kind: str(r.kind),
+    agent_id: str(r.agent_id) || null,
+    owner: str(r.owner),
+    received_at: typeof r.received_at === "number" ? r.received_at : null,
+    replied_at: typeof r.replied_at === "number" ? r.replied_at : null,
+    target_set_at: typeof r.target_set_at === "number" ? r.target_set_at : null,
+    status: str(r.status),
+  };
+}
+
+function usableItem(r: unknown): r is Record<string, unknown> {
+  return (
+    Boolean(r) &&
+    typeof r === "object" &&
+    Boolean(str((r as Record<string, unknown>).key)) &&
+    typeof (r as Record<string, unknown>).item_no === "number"
+  );
+}
+
 function readItems(file: string): ItemRowRecord[] | null {
   const raw = readJson(file);
   const list = raw && typeof raw === "object" ? (raw as { items?: unknown }).items : null;
   if (!Array.isArray(list)) return null;
-  return list
-    .filter((r): r is Record<string, unknown> => Boolean(r) && typeof r === "object")
-    .filter((r) => str(r.key) && typeof r.item_no === "number")
-    .map((r) => ({
-      key: str(r.key),
-      item_no: Number(r.item_no),
-      summary: str(r.summary),
-      source: str(r.source) || str(r.summary),
-      target: str(r.target),
-      kind: str(r.kind),
-      agent_id: str(r.agent_id) || null,
-      owner: str(r.owner),
-      received_at: typeof r.received_at === "number" ? r.received_at : null,
-      replied_at: typeof r.replied_at === "number" ? r.replied_at : null,
-      target_set_at: typeof r.target_set_at === "number" ? r.target_set_at : null,
-      status: str(r.status),
-    }));
+  return list.filter(usableItem).map(toItem);
+}
+
+/**
+ * 台帳が14日を過ぎて落とした記録の控え(`window_b_items_archive.jsonl`、1行1項目)。
+ * これがある鍵は「台帳に記録があった」ものとして、受信箱からの推測で作り直さない
+ * (作り直すと完了済みの依頼が「推測・振り先の記録なし」として戻り、永久に溜まる)。
+ */
+function readArchive(file: string): ItemRowRecord[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf-8");
+  } catch {
+    return [];
+  }
+  const out: ItemRowRecord[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const value: unknown = JSON.parse(line);
+      if (usableItem(value)) out.push(toItem(value));
+    } catch {
+      // 控えの1行が壊れていても他の行は読む。
+    }
+  }
+  return out;
 }
 
 const CHILD_ID_RE = /^[0-9a-f]{8,36}$/;
@@ -537,16 +601,19 @@ function rowsFromItems(
   return { rows, keys };
 }
 
-/** 台帳に項目が無い依頼を、本文の文から補う(推測の行。完了にはしない)。 */
+/** 台帳に項目が無い依頼を、本文の文から補う(推測の行。完了にはしない)。
+ * `sinceKey` を渡すと、その鍵より古い依頼は補わない(台帳が受け付けた範囲の外側だけを補う)。 */
 function rowsFromInbox(
   inbox: readonly InboxRequest[],
   keysWithItems: ReadonlySet<string>,
   threads: Map<string, ThreadRow> | null,
   ranked: readonly ProjectRow[],
+  sinceKey: string | null,
 ): LedgerRow[] {
   const rows: LedgerRow[] = [];
   for (const req of inbox) {
     if (keysWithItems.has(req.key)) continue;
+    if (sinceKey !== null && keySortValue(req.key) < sinceKey) continue;
     const sentences = extractRequestItems(req.text);
     const sources = sentences.length > 0 ? sentences : [req.text.trim()].filter(Boolean);
     const inferred = inferTarget(req.text);
@@ -580,9 +647,9 @@ function rowsFromInbox(
   return rows;
 }
 
-export function buildTaskLedger(
+export async function buildTaskLedger(
   dirs: TaskLedgerDirs = resolveTaskLedgerDirs(),
-): TaskLedgerListOutput {
+): Promise<TaskLedgerListOutput> {
   const notes: string[] = [];
 
   let items: ItemRowRecord[] | null = null;
@@ -591,10 +658,18 @@ export function buildTaskLedger(
   } catch {
     items = null;
   }
-  if (items === null)
+  if (items === null) {
+    // Python 側は一時ファイルから os.replace で書き替えるので、途中の形を読むのは稀。それでも
+    // 「まだありません」(ENOENT)と「あるが読めない」を分けて出す(後者は notes で知らせる)。
+    const broken = (await readJsonDetailed(itemsFile(dirs))).kind === "broken";
     notes.push(
-      "項目の台帳(window_b_items.json)がまだありません。受信箱から推測して表示しています。",
+      broken
+        ? "項目の台帳(window_b_items.json)を読めません。受信箱から推測して表示しています。"
+        : "項目の台帳(window_b_items.json)がまだありません。受信箱から推測して表示しています。",
     );
+  }
+  // 14日を過ぎて台帳から落とした控え(鍵だけ足して、推測で作り直さない)。
+  const archived = readArchive(path.join(dirs.itemsDir, "window_b_items_archive.jsonl"));
 
   let inboxText = "";
   let inboxOk = false;
@@ -616,13 +691,27 @@ export function buildTaskLedger(
   const ranked = projects?.filter((p) => !p.standing && !p.archived) ?? [];
 
   const fromItems = rowsFromItems(items ?? [], inboxByKey, threads, ranked);
-  const fromInbox = rowsFromInbox(inbox, fromItems.keys, threads, ranked);
+  // 台帳が読めているとき、推測で補うのは「台帳が受け付けた最も古い鍵」より新しい依頼だけにする
+  // (古い依頼まで補うと、片付いた依頼が「振り先の記録なし」で永久に並ぶ。2026-10-28 出口レビュー)。
+  const itemsKeys = [...fromItems.keys, ...archived.map((a) => a.key)];
+  const sinceKey =
+    items !== null && items.length > 0
+      ? itemsKeys.map(keySortValue).reduce((a, b) => (a < b ? a : b))
+      : null;
+  const fromInbox = rowsFromInbox(
+    inbox,
+    new Set([...fromItems.keys, ...archived.map((a) => a.key)]),
+    threads,
+    ranked,
+    sinceKey,
+  );
 
   return {
     rows: [...fromItems.rows, ...fromInbox],
     notes,
     sources: {
       items: items !== null && items.length > 0,
+      itemsArchive: archived.length > 0,
       inbox: inboxOk,
       childThreads: threads !== null,
       priority: projects !== null,

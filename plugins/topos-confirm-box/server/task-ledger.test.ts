@@ -98,7 +98,7 @@ test("子スレの進捗は自己申告を先に見て、無ければ Paseo の�
   assert.equal(progressOf(base), "unknown");
 });
 
-test("台帳の項目が無いときは受信箱から推測の行を作る(振り先は本文の『→ 子スレ <id>』)", () => {
+test("台帳の項目が無いときは受信箱から推測の行を作る(振り先は本文の『→ 子スレ <id>』)", async () => {
   const dirs = makeDirs();
   fs.writeFileSync(
     dirs.inboxPath,
@@ -115,8 +115,9 @@ test("台帳の項目が無いときは受信箱から推測の行を作る(振�
       },
     ],
   });
-  const out = buildTaskLedger(dirs);
+  const out = await buildTaskLedger(dirs);
   assert.equal(out.sources.items, false);
+  assert.equal(out.sources.itemsArchive, false);
   assert.equal(out.sources.inbox, true);
   assert.equal(out.sources.childThreads, true);
   assert.ok(out.notes.some((n) => n.includes("window_b_items.json")));
@@ -129,7 +130,7 @@ test("台帳の項目が無いときは受信箱から推測の行を作る(振�
   assert.equal(isLedgerDone(row), false);
 });
 
-test("項目の台帳があれば、それを正として受信箱の全文・子スレの進捗・プロジェクトを付ける", () => {
+test("項目の台帳があれば、それを正として受信箱の全文・子スレの進捗・プロジェクトを付ける", async () => {
   const dirs = makeDirs();
   writeJson(path.join(dirs.itemsDir, "window_b_items.json"), {
     updated_at: 0,
@@ -173,7 +174,7 @@ test("項目の台帳があれば、それを正として受信箱の全文・�
     projects: [{ id: "p1", name: "窓口Bのタスク台帳", note: "台帳を作る", thread: null }],
   });
 
-  const out = buildTaskLedger(dirs);
+  const out = await buildTaskLedger(dirs);
   assert.equal(out.sources.items, true);
   assert.equal(out.rows.length, 2);
   const first = out.rows.find((r) => r.key === "10/28 21:11")!;
@@ -216,7 +217,7 @@ test("優先順位台帳の説明とたまたま2文字止まりで似ている�
   });
 });
 
-test("「常時の方針」と片付けた開発プロジェクトは照合に使わない(優先順位画面の一覧に出ない行)", () => {
+test("「常時の方針」と片付けた開発プロジェクトは照合に使わない(優先順位画面の一覧に出ない行)", async () => {
   const projects = [
     proj({ id: "s", name: "常時の方針の名前", standing: true }),
     proj({ id: "a", name: "片付けた開発", archived: true }),
@@ -238,7 +239,7 @@ test("「常時の方針」と片付けた開発プロジェクトは照合に�
     ],
   });
   writeJson(path.join(dirs.confirmBoxDir, "priority_ledger.json"), { projects });
-  const out = buildTaskLedger(dirs);
+  const out = await buildTaskLedger(dirs);
   assert.equal(out.rows.find((r) => r.key === "10/28 21:11")?.project?.id, "live");
   assert.equal(out.rows.find((r) => r.key === "10/28 21:13")?.project, null);
 });
@@ -260,9 +261,9 @@ function proj(over: {
   };
 }
 
-test("子スレ一覧が読めないときは進捗「不明」で続け、notes に出す(画面は消さない)", () => {
+test("子スレ一覧が読めないときは進捗「不明」で続け、notes に出す(画面は消さない)", async () => {
   const dirs = makeDirs();
-  const out = buildTaskLedger(dirs);
+  const out = await buildTaskLedger(dirs);
   assert.equal(out.sources.childThreads, false);
   assert.ok(out.notes.some((n) => n.includes("child_threads.json")));
   assert.ok(out.rows.length > 0);
@@ -283,7 +284,16 @@ test("一番上が最新。同じ鍵は項目番号の順で、完了は隠せ�
     ["b", "c"],
   );
   assert.equal(filterLedgerRows(rows, "show-done").length, 3);
-  assert.equal(keySortValue("10/28 21:11#2"), "10282111.2");
+  assert.equal(keySortValue("10/28 21:11#2"), "10282111.0002");
+  // 連番は数値で比べる(#10 が #2 より後ろ=新しい)。
+  const many: LedgerRow[] = [
+    makeRow({ id: "two", key: "10/28 21:11#2" }),
+    makeRow({ id: "ten", key: "10/28 21:11#10" }),
+  ];
+  assert.deepEqual(
+    sortLedgerRows(many).map((r) => r.id),
+    ["ten", "two"],
+  );
 });
 
 test("子スレを振らない項目(代理決定・投函・説明のみ)は、振り先を書いた時点で片付いた扱い", () => {
@@ -294,8 +304,10 @@ test("子スレを振らない項目(代理決定・投函・説明のみ)は、
   assert.equal(r({ kind: "子スレ", children: [child("done")] }), true);
   assert.equal(r({ kind: "子スレ", children: [child("working")] }), false);
   assert.equal(r({ kind: "", settledWithoutChild: false }), false);
-  // 推測の行は、子スレが終わっていても完了にしない(台帳の正が確かめるまで見せる)。
-  assert.equal(r({ kind: "子スレ", children: [child("done")], inferred: true }), false);
+  // 推測の行は、振り先が書かれていないことだけでは片付いた扱いにしない(完了を隠すと黙って消えるため)。
+  assert.equal(r({ kind: "", inferred: true }), false);
+  // 子スレが全部終わっていれば、推測の行でも完了として扱う(2026-10-28 出口レビュー1巡目)。
+  assert.equal(r({ kind: "子スレ", children: [child("done")], inferred: true }), true);
 });
 
 test("子スレの一覧は短縮ID(8桁)でも引ける", () => {

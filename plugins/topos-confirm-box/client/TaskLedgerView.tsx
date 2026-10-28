@@ -70,14 +70,18 @@ const PROGRESS_COLOR: Record<
  * 子スレで片付いていなければ「完了」、子スレを振っていない行は振り先の種別で読む。
  */
 export function rowStateText(row: LedgerRow): { text: string; tone: LedgerProgress | "done" } {
+  // 完了の判定は共通の1本(`isLedgerDone`)だけを使う。「完了は隠す」で消えた行が「作業中」と
+  // 出る食い違いを避ける(2026-10-28 出口レビュー1巡目)。
+  if (isLedgerDone(row)) return { text: "完了", tone: "done" };
   if (row.children.length > 0) {
     const order: LedgerProgress[] = ["stopped", "waiting", "working", "unknown", "done"];
     const worst = order.find((p) => row.children.some((c) => c.progress === p)) ?? "unknown";
-    if (worst !== "done") return { text: LEDGER_PROGRESS_LABEL[worst], tone: worst };
+    return { text: LEDGER_PROGRESS_LABEL[worst], tone: worst };
   }
-  if (isLedgerDone(row)) return { text: "完了", tone: "done" };
   if (row.kind === "代理決定") return { text: "代理決定で処理済み", tone: "done" };
   if (row.kind === "投函" || row.kind === "説明のみ") return { text: "処理済み", tone: "done" };
+  // 受信箱から補っただけの行は、振り先が無いのではなく「記録が無い」。まだ振っていないとは言い切らない。
+  if (row.inferred) return { text: "振り先の記録なし", tone: "unknown" };
   return { text: "まだ振っていない", tone: "unknown" };
 }
 
