@@ -60,7 +60,7 @@ function BarIcon({
  * makes that row the popover anchor: the capture-phase responder check runs before the pressed
  * child claims the touch (native and web), and returns false so the child still handles it.
  */
-export function SidebarRow({ id, icon, label, onPress, active, trailing }: SidebarRowProps) {
+export function SidebarRow({ id, icon, label, onPress, active, trailing, size }: SidebarRowProps) {
   const frame = useSidebarItemFrame("SidebarRow");
   const isCompact = useIsCompactFormFactor();
   const { anchorTo, offerAnchor, releaseAnchor } = frame;
@@ -110,6 +110,7 @@ export function SidebarRow({ id, icon, label, onPress, active, trailing }: Sideb
         trailing={trailing}
         testID={id ? `${frame.testID}-${id}` : frame.testID}
         variant={frame.section === "footer" ? "inline" : "compact"}
+        size={size}
       />
     </View>
   );

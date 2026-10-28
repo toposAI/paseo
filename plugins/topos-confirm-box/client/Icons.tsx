@@ -131,6 +131,46 @@ export function BugIcon({ color, size = 24 }: IconProps) {
   );
 }
 
+/**
+ * アーカイブ(箱にしまう)。優先順位の行の右端に置く(2026-10-28 ユーザー指示
+ * 『アーカイブもアイコンでいいでしょ』)。ふた・箱・差し込み口の3つで描く。
+ */
+export function ArchiveIcon({ color, size = 16 }: IconProps) {
+  const u = size / 16;
+  const st = useMemo(
+    () => ({
+      wrap: { width: size, height: size, justifyContent: "center" as const },
+      lid: {
+        height: 3 * u,
+        borderWidth: 1.6 * u,
+        borderColor: color,
+        borderRadius: 1.2 * u,
+        marginBottom: 1.2 * u,
+      },
+      box: {
+        flex: 1,
+        borderWidth: 1.6 * u,
+        borderColor: color,
+        borderTopWidth: 0,
+        borderBottomLeftRadius: 2 * u,
+        borderBottomRightRadius: 2 * u,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
+      },
+      slot: { width: size * 0.42, height: 1.6 * u, backgroundColor: color, borderRadius: u },
+    }),
+    [color, size, u],
+  );
+  return (
+    <View style={st.wrap}>
+      <View style={st.lid} />
+      <View style={st.box}>
+        <View style={st.slot} />
+      </View>
+    </View>
+  );
+}
+
 /** 丸いチェック(子スレ完了報告)。 */
 export function CheckCircleIcon({ color, size = 24 }: IconProps) {
   const u = size / 24;

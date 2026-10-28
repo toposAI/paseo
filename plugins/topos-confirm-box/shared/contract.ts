@@ -206,6 +206,15 @@ export const confirmBoxCountRpc = defineRpc({
      * 出所(Vault・箱)のどれかが読めない、または Vault の読み取りを止める設定なら false。
      */
     openKnown: z.boolean().default(true),
+    /**
+     * **サイドバーのバッジの数字** = 窓口Aがいま出せる件数
+     * (判断窓口 `judgment_window.py badge-count` の答えをそのまま)。窓口は1問ずつなので
+     * 1=次の `next` が1件返す / 0=出せるものがない。null=数えられない(0 と区別する)。
+     * Paseo 側では判定しない(open の総数を数えると、窓口が出さない件まで数えて食い違う。2026-10-28 ユーザー指摘)。
+     * サイドバーのバッジはこの値をそのまま出す(open 総数や `permits` は足さない。窓口の答えを
+     * 画面側で書き換えると、また数える側と選ぶ側がずれる)。
+     */
+    presentable: z.number().int().nullable().default(null),
     /** うち priority=blocking。 */
     blocking: z.number().int(),
     /** うち Paseo の承認待ち。 */
@@ -323,8 +332,52 @@ export const PriorityProjectSchema = z.object({
   /** アーカイブした時刻(ms)と理由(`ui`=ユーザーが押した / `auto:…`=完了検知)。 */
   archivedTs: z.number().optional(),
   archivedBy: z.string().optional(),
+  /**
+   * 常時の方針(順位を持たない行)。一覧の順位から外し、下の「方針」欄に出す。
+   * 台帳(`priority_ledger.json`)の `standing`。2026-10-28 ユーザー指示でトークン節約を移した。
+   */
+  standing: z.boolean().optional(),
+  /**
+   * いま動いている子スレの数(一覧を作った時点)。1以上ならアーカイブ前に一度確認を出す。
+   * アーカイブしても子スレは止めない(一覧から外すだけ)。
+   */
+  running: z.number().optional(),
 });
 export type PriorityProject = z.infer<typeof PriorityProjectSchema>;
+
+/** 一覧の行の「中身」(行タップで開く)。説明・関連する子スレ・開いている確認箱の判断など。
+ * 進み具合は行に固定情報を持たせず、ここを開いたときに台帳を読んだ時点で作る(古い表示を残さない)。 */
+export const PriorityDetailSchema = z.object({
+  /** 台帳の `note`(なぜこの順位か・これまでのユーザー指示)。 */
+  note: z.string(),
+  /** 台帳の `thread` が指すスレ(子スレ登録簿の行)。見つからなければ null。 */
+  thread: z
+    .object({
+      agentId: z.string(),
+      title: z.string(),
+      status: z.string(),
+      machineState: z.string().nullable(),
+    })
+    .nullable(),
+  /** 同じ題名を持つ**ほかの**子スレ(今回の目当てがまだ動いているか)。動いている順に最大10件。 */
+  related: z.array(
+    z.object({
+      agentId: z.string(),
+      title: z.string(),
+      status: z.string(),
+      machineState: z.string().nullable(),
+    }),
+  ),
+  /** この項目名を `project` に持つ、未決の確認箱の項目(最大10件)。 */
+  pendingQuestions: z.array(z.object({ id: z.string(), subject: z.string(), ts: z.number() })),
+});
+export type PriorityDetail = z.infer<typeof PriorityDetailSchema>;
+
+export const priorityDetailRpc = defineRpc({
+  name: "topos.confirmbox.priority.detail",
+  input: z.object({ id: z.string() }),
+  output: PriorityDetailSchema.nullable(),
+});
 
 /** 自由記述に対する返答の1行。`by` は ack(即時の受領)/ worker(解釈した結果)/ fallback。 */
 export const PriorityReplySchema = z.object({
@@ -342,6 +395,8 @@ export const priorityListRpc = defineRpc({
     projects: z.array(PriorityProjectSchema),
     /** アーカイブ済みの行(新しい順)。一覧には出さず、戻す操作だけに使う。 */
     archived: z.array(PriorityProjectSchema),
+    /** 常時の方針の行(順位を持たない)。一覧の下に別枠で出す。 */
+    standing: z.array(PriorityProjectSchema),
     replies: z.array(PriorityReplySchema),
     updatedTs: z.number(),
   }),
@@ -352,6 +407,13 @@ export type PriorityListOutput = z.infer<typeof priorityListRpc.output>;
 export const priorityMoveRpc = defineRpc({
   name: "topos.confirmbox.priority.move",
   input: z.object({ id: z.string(), toRank: z.number().int() }),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
+
+/** 行を常時の方針(standing=true)/ 順位の一覧へ戻す(false)。台帳から消さず印だけ付け外しする(可逆)。 */
+export const priorityStandingRpc = defineRpc({
+  name: "topos.confirmbox.priority.standing",
+  input: z.object({ id: z.string(), standing: z.boolean() }),
   output: z.object({ ok: z.boolean(), message: z.string() }),
 });
 
@@ -526,8 +588,10 @@ export function judgmentTabRows(
   return opts.newestFirst ? [...rows].sort((a, b) => b.ts - a.ts) : rows;
 }
 
-/** バッジの「要対応」件数=確認箱の open 件数 N。数え方は `countJudgmentCounted`
- * (判断窓口の counts.open の対象である Vault ノートの open + Paseo の承認待ち)。 */
+/** 確認箱の中の「判断待ち」の行数=確認箱の open 件数 N。数え方は `countJudgmentCounted`
+ * (判断窓口の counts.open の対象である Vault ノートの open + Paseo の承認待ち)。
+ * **サイドバー下部のバッジはこの数を使わない**(窓口Aがいま出せる件数=件数 RPC の `presentable`。
+ * 2026-10-28 ユーザー「そしたらバッジださないでよ」)。 */
 export function countOpen(items: readonly ConfirmBoxItem[]): number {
   return countJudgmentCounted(items);
 }

@@ -33,9 +33,11 @@ import {
   countUrgentUnreadNotifications,
   isNotificationItem,
   priorityArchiveRpc,
+  priorityDetailRpc,
   priorityListRpc,
   priorityMoveRpc,
   prioritySayRpc,
+  priorityStandingRpc,
   REJECT_CHOICE,
 } from "./shared/contract.js";
 import { appendAck } from "./server/ack.js";
@@ -82,6 +84,11 @@ import {
   vaultSourceEnabled,
 } from "./server/vault-decisions.js";
 import { isJudgmentCounted } from "./shared/judgment-open.js";
+import {
+  cachedPresentableCounter,
+  computePresentable,
+  resolvePresentableCounter,
+} from "./server/presentable-count.js";
 import {
   childThreadsArchiveRpc,
   childThreadsListRpc,
@@ -173,14 +180,21 @@ import {
 } from "./server/cardchat.js";
 import {
   archiveProject,
+  buildPriorityDetail,
+  countRunning,
+  findProject,
+  markStanding,
   moveProject,
   readLedger,
+  readOpenQuestions,
   readReplies,
   sayToLedger,
   splitArchived,
+  type DetailThread,
 } from "./server/priority.js";
 import { buildTaskLedger } from "./server/task-ledger.js";
 import { taskLedgerListRpc } from "./shared/task-ledger.js";
+import type { PriorityProject } from "./shared/contract.js";
 import {
   answerlessAllowBlocked,
   permitQuestions,
@@ -547,7 +561,10 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.handle(confirmBoxCountRpc, async (_input, ctx) => {
+  // バッジの数字(窓口Aがいま出せる件数)は判断窓口の Python に聞く。10秒キャッシュ(3か所が30秒毎に引く)
+  const presentableCounter = cachedPresentableCounter(resolvePresentableCounter());
+
+  server.handle(confirmBoxCountRpc, async (input, ctx) => {
     const { items, sources, generatedAt } = await collect(ctx);
     // 数え方の SSOT は `countJudgmentCounted`。判断窓口の counts.open(N)と同じ対象に揃えるため、
     // Vault 判断ノート由来の項目と permit のうち state が new だけを数え、材料待ち・承認済み・既読と
@@ -564,9 +581,16 @@ export default function contribute(server: PluginServerContext) {
     } catch {
       bugs = 0;
     }
+    // サイドバーのバッジ=**窓口Aがいま出せる件数**(判定は判断窓口の Python 1か所)。承認待ち(permit)は
+    // 足さない: 窓口は permit を出さないので、足すと窓口の答えを書き換えて既存の行と二重に数える。
+    // 2026-10-28 ユーザー「そしたらバッジださないでよ。そして開くとカードあったけど？」: 判断ノートの
+    // open を全部数えていたため、裏方が検討中の件まで数えて窓口と食い違った。
+    // 上の `open` では 0 を確定しない(`computePresentable` の説明。出口レビュー2巡目 指摘1)。
+    const presentable = await computePresentable(vaultSourceEnabled(), presentableCounter);
     return {
       open: open.length,
       openKnown,
+      presentable,
       blocking: open.filter((i) => i.priority === "blocking").length,
       permits: open.filter((i) => i.kind === "permit").length,
       failedSources: sources.filter((src) => !src.ok).length,
@@ -737,8 +761,28 @@ export default function contribute(server: PluginServerContext) {
   server.handle(priorityListRpc, async () => {
     const dir = resolveConfirmBoxDir();
     const { projects: all, updatedTs } = readLedger(dir);
-    const { visible, archived } = splitArchived(all);
-    return { projects: visible, archived, replies: readReplies(dir), updatedTs };
+    const { visible, archived, standing } = splitArchived(all);
+    // 動いている子スレの件数は一覧を作るたびに数える(保存しない=古い数を出さない)
+    let threads: DetailThread[] = [];
+    try {
+      threads = readChildThreads(dir).map((t) => ({
+        agentId: t.agentId,
+        title: t.title,
+        status: t.status,
+        machineState: t.machineState,
+      }));
+    } catch {
+      threads = []; // 数えられない=0件であってもアーカイブは止めない(確認を出さないだけ)
+    }
+    const withRunning = (rows: PriorityProject[]): PriorityProject[] =>
+      rows.map((p) => ({ ...p, running: countRunning(p, threads) }));
+    return {
+      projects: withRunning(visible),
+      archived: withRunning(archived),
+      standing: withRunning(standing),
+      replies: readReplies(dir),
+      updatedTs,
+    };
   });
 
   server.handle(priorityArchiveRpc, async (input) => {
@@ -747,6 +791,34 @@ export default function contribute(server: PluginServerContext) {
     } catch (error) {
       return { ok: false, message: `アーカイブできません: ${(error as Error).message}` };
     }
+  });
+
+  server.handle(priorityStandingRpc, async (input) => {
+    try {
+      return markStanding(resolveConfirmBoxDir(), input.id, input.standing);
+    } catch (error) {
+      return { ok: false, message: `移せません: ${(error as Error).message}` };
+    }
+  });
+
+  server.handle(priorityDetailRpc, async (input) => {
+    const dir = resolveConfirmBoxDir();
+    const project = findProject(dir, input.id);
+    if (!project) return null;
+    // 登録簿が読めなくても中身(説明・未決の判断)は出す。子スレ欄だけ空になる
+    let threads: { agentId: string; title: string; status: string; machineState: string | null }[] =
+      [];
+    try {
+      threads = readChildThreads(dir).map((t) => ({
+        agentId: t.agentId,
+        title: t.title,
+        status: t.status,
+        machineState: t.machineState,
+      }));
+    } catch {
+      threads = [];
+    }
+    return buildPriorityDetail(project, threads, readOpenQuestions(dir, project.name));
   });
 
   server.handle(priorityMoveRpc, async (input) => {

@@ -112,15 +112,16 @@ function useJudgmentBadge(): { n: number | undefined; unknown: boolean } {
   useEffect(() => {
     let alive = true;
     // 一時的な失敗では前回の件数を残す(バッジが消えると「未確認が無くなった」と読めるため)。
-    // 件数は確認箱の open(N)。値は件数 RPC(サーバーで `isJudgmentCounted` に絞った数)をそのまま出し、
-    // 下部バーだけ別の数え方をしない(2026-10-27: N より大きく出る不具合の再発防止)。
-    // `openKnown` が false のときは数字を出さない(数え切れていない 0 を「判断待ちなし」と読ませない)。
+    // 数字は **窓口Aがいま出せる件数**(`presentable`)。判定は判断窓口の Python 1か所だけで、
+    // ここでは数え直さない(確認箱の open 総数を出すと、窓口が出さない件まで数えて「バッジ2件なのに
+    // 窓口Aは出せるものがない」が起きた。2026-10-28 ユーザー「そしたらバッジださないでよ」)。
+    // 0 のときは `CountBadge` が何も出さない。null(数えられない)は「!」で 0 件と区別する。
     const tick = () =>
       count({})
         .then((r) => {
           if (!alive) return null;
-          setUnknown(!r.openKnown);
-          setN(r.open);
+          setUnknown(r.presentable === null);
+          setN(r.presentable ?? undefined);
           return null;
         })
         .catch(() => {});
@@ -144,12 +145,16 @@ function useJudgmentBadge(): { n: number | undefined; unknown: boolean } {
 
 /**
  * 下部バーの「ユーザー判断」の1行(PC も iPhone も同じ)。
- * 件数は確認箱の中のバッジと同じ数え方(`open`=判断窓口の counts.open と同対象。材料待ち・承認済み・
- * ノートを持たない旧い箱行は数えない)。
+ * 件数は**窓口Aがいま出せる件数**(`presentable`。判定は判断窓口の Python 1か所)。0 件なら出さない。
  */
 function BoxTabLink({ currentScreen, openScreen }: BoxTabLinkProps) {
   const badge = useJudgmentBadge();
-  const press = useCallback(() => openScreen({ screenId: BOX_TAB_SCREEN_ID }), [openScreen]);
+  // 押しても数字を取る(RPC)ことはしない。押下で件を先取りすると窓口Aの台帳を書き、窓口Aが既に
+  // 抱えている件の期限を縮めてしまう(claim_next は抱えた件の期限を上書きする)。バッジの数字は
+  // 1/0 なので先取りの利点も無い。画面を開くだけにし、実際に出す1件は窓口Aが選ぶ(2026-10-29 出口レビュー1巡目)。
+  const press = useCallback(() => {
+    openScreen({ screenId: BOX_TAB_SCREEN_ID });
+  }, [openScreen]);
   const active = currentScreen?.screenId === BOX_TAB_SCREEN_ID;
   // jsx を prop に渡すと lint(react-perf)に当たるので、要素は一度だけ作る。
   const trailing = CountBadge({ n: badge.n, unknown: badge.unknown });

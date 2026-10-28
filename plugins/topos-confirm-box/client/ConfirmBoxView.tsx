@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
+import type { LayoutChangeEvent } from "react-native";
 import { useHosts, useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import {
@@ -24,6 +25,12 @@ import {
   rejectComment,
 } from "../shared/contract.js";
 import { confirmBoxTabs, isWideLayout } from "../shared/footer-tabs.js";
+import {
+  LIST_GRID_GAP,
+  LIST_GRID_PADDING,
+  listCellWidth,
+  listColumns,
+} from "../shared/list-grid.js";
 import { onBoxChanged, notifyBoxChanged } from "./events.js";
 import { PriorityView } from "./PriorityView.js";
 import { BugReportsView } from "./BugReportsView.js";
@@ -145,6 +152,21 @@ export function ConfirmBoxView({
   // 幅の判定は一覧とチャットの並べ方にだけ使う(PC幅なら横並び、狭い幅は全画面で重ねる)。
   const wide = isBoxWide(containerWidth, windowSize, layout);
   const compact = !wide;
+  // 判断一覧の幅。PC幅ではカードを複数列に並べる(右ペインが開いて一覧が狭くなったら列も減らす)。
+  // 測るのは**カードを並べる入れ物**の幅なので、左右の余白もスクロールバーの幅も既に引かれている。
+  // 端数は切り捨てる(切り上げると3枚目が次の行へ落ちる)。
+  const [listWidth, setListWidth] = useState(0);
+  const onListLayout = useCallback(
+    (e: LayoutChangeEvent) => setListWidth(Math.floor(e.nativeEvent.layout.width)),
+    [],
+  );
+  const listCols = listColumns(listWidth, wide);
+  const cellWidth = listCellWidth(listWidth, listCols);
+  // lint(jsx-no-new-object-as-prop)対策: 1枚ぶんの幅は幅が変わったときだけ作り直す。
+  const cellStyle = useMemo(
+    () => (cellWidth === undefined ? undefined : { width: cellWidth }),
+    [cellWidth],
+  );
   const { shownTab, tabs, selectTab } = useBoxTabs(mode, initialTab);
   // カードチャットは画面を問わずこのペインに一本化した(旧・自由記述欄は廃止=2026-10-22ユーザー決定)。
   // ヘッダのポップオーバーも幅<720なので、ペインは全画面スライドとして重なる。
@@ -173,24 +195,25 @@ export function ConfirmBoxView({
       root: { flex: 1, backgroundColor: c.surface0 },
       flex: { flex: 1 },
       splitRow: { flex: 1, flexDirection: "row" as const },
-      body: { padding: 12, gap: 8 },
-      card: {
+      body: { padding: LIST_GRID_PADDING, gap: 8 },
+      // カードの見た目(枠)。1枚の幅は親の入れ物(style={cellStyle})が決め、ここはその幅いっぱいに広がって
+      // 背景と枠だけを付ける(列の幅は揃う)。右ペインに出ているカードの強調もこの枠で行う。
+      cell: {
         backgroundColor: c.surface1,
         borderColor: c.border,
         borderWidth: 1,
         borderRadius: 8,
-        padding: 10,
-        gap: 6,
       },
-      // 右ペインに出ているカードの軽い強調(枠線と薄い背景)。
-      cardActive: {
+      // 右ペインに出ているカードの軽い強調(枠線をアクセント色に)。
+      cellActive: {
         backgroundColor: c.surface1,
         borderColor: c.accent,
         borderWidth: 2,
         borderRadius: 8,
-        padding: 9,
-        gap: 6,
       },
+      // カードの中身。枠の太さが変わっても中身の位置が動かないよう、強調時の枠の増分を padding で吸収する。
+      card: { padding: 10, gap: 6 },
+      cardActive: { padding: 9, gap: 6 },
       subject: {
         color: c.foreground,
         fontSize: 15,
@@ -320,6 +343,16 @@ export function ConfirmBoxView({
         borderRadius: 6,
         padding: 8,
         textAlignVertical: "top" as const,
+      },
+      // 判断一覧の入れ物。幅は onLayout で測る(左右の余白は body の padding が持つ)。
+      // 1列のときもカード同士のすき間を gap で入れる(従来の body の gap は外の兄弟にしか効かない)。
+      listBox: { gap: LIST_GRID_GAP },
+      // 判断一覧の並べ(PC幅は複数列。1枚ごとの幅は listCellWidth で決める)。
+      grid: {
+        flexDirection: "row" as const,
+        flexWrap: "wrap" as const,
+        alignItems: "flex-start" as const,
+        gap: LIST_GRID_GAP,
       },
     };
   }, [c, touch]);
@@ -526,23 +559,27 @@ export function ConfirmBoxView({
           ))}
         {notice ? <Text style={s.muted}>{notice}</Text> : null}
         {data && visible.length === 0 ? <Text style={s.muted}>判断待ちはありません</Text> : null}
-        {visible.map((item) => (
-          <ItemCard
-            key={item.id}
-            item={item}
-            styles={s}
-            colors={c}
-            open={openId === item.id}
-            onToggle={toggle}
-            onBackground={openBackground}
-            onChoose={choose}
-            onAnswer={answer}
-            onReject={reject}
-            paneOpen={paneCardId === item.id}
-            anyPaneOpen={pane !== null}
-            onOpenPane={openCard}
-          />
-        ))}
+        {/* PC幅は複数列(2026-10-28 ユーザー決定)。1列のときは縦に積む(すき間は listBox の gap)。 */}
+        <View style={listCols > 1 ? s.grid : s.listBox} onLayout={onListLayout}>
+          {visible.map((item) => (
+            <View key={item.id} style={cellStyle}>
+              <ItemCard
+                item={item}
+                styles={s}
+                colors={c}
+                open={openId === item.id}
+                onToggle={toggle}
+                onBackground={openBackground}
+                onChoose={choose}
+                onAnswer={answer}
+                onReject={reject}
+                paneOpen={paneCardId === item.id}
+                anyPaneOpen={pane !== null}
+                onOpenPane={openCard}
+              />
+            </View>
+          ))}
+        </View>
       </>
     );
   }
@@ -1191,9 +1228,9 @@ function ItemCard({
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
   onAnswer: (item: ConfirmBoxItem, answers: Record<string, string>) => Promise<void>;
   onReject: (item: ConfirmBoxItem, comment: string) => Promise<boolean>;
-  /** このカードの会話ペインが開いているか。 */
+  /** このカードの会話ペインが開いているか(枠の強調と 💬 ボタンの表示に使う)。 */
   paneOpen: boolean;
-  /** 右ペインが(どの相手でも)開いているか。開いている間だけ、カード本体のタップで相手を切り替える。 */
+  /** 右ペインが(どの相手でも)開いているか。開いている間だけ、件名の押下でペインの相手を切り替える。 */
   anyPaneOpen: boolean;
   onOpenPane: (item: ConfirmBoxItem) => void;
 }) {
@@ -1201,7 +1238,6 @@ function ItemCard({
   const [rejecting, setRejecting] = useState(false);
   const startReject = useCallback(() => setRejecting(true), []);
   const cancelReject = useCallback(() => setRejecting(false), []);
-  const toggle = useCallback(() => onToggle(item.id), [onToggle, item.id]);
   const toggleBg = useCallback(() => {
     setBgOpen((v) => {
       if (!v) onBackground();
@@ -1209,8 +1245,13 @@ function ItemCard({
     });
   }, [onBackground]);
   const openPane = useCallback(() => onOpenPane(item), [onOpenPane, item]);
-  // カード本体の何もない所のタップ。内側のボタン・リンクは自分で処理する(入れ子の Pressable は内側が勝つ)。
+  // ペインの相手を切り替えるのは**件名を押したときだけ**(外枠は View なので、本文の余白を押しても何も起きない)。
   const switchPane = shouldSwitchPaneOnCardPress(anyPaneOpen, paneOpen) ? openPane : undefined;
+  // 件名の押下: 従来どおり展開の切替。右ペインが開いている間は、そのカードをペインの相手に切り替える。
+  const headerPress = useCallback(() => {
+    onToggle(item.id);
+    switchPane?.();
+  }, [onToggle, item.id, switchPane]);
   const deny = useCallback(() => void onChoose(item, "__deny"), [item, onChoose]);
   const answer = useCallback(
     (answers: Record<string, string>) => void onAnswer(item, answers),
@@ -1219,71 +1260,94 @@ function ItemCard({
   const created = useMemo(() => formatCreated(item.ts), [item.ts]);
   const questions = item.questions ?? NO_QUESTIONS;
   return (
-    <Pressable
-      style={paneOpen ? styles.cardActive : styles.card}
-      onPress={switchPane}
-      disabled={!switchPane}
-    >
-      {item.reporter ? <Text style={styles.reporter}>報告者: {item.reporter}</Text> : null}
-      <Pressable accessibilityRole="button" onPress={toggle}>
-        <Text style={styles.badge}>
-          {PRIORITY_LABEL[item.priority]} · {KIND_LABEL[item.kind]}
-          {item.state === "approved" ? " · 決定済み" : ""}
-          {item.onHold ? ` · ${item.onHold}(窓口では出ません)` : ""}
-        </Text>
-        <Text style={styles.subject}>{item.subject}</Text>
-        {open || questions.length > 0 ? null : (
-          <Text style={styles.muted} numberOfLines={2}>
-            {item.summary}
+    // ペイン切替は件名の押下だけ。外枠を Pressable にすると、右ペインが開いている間 react-native-web が
+    // disabled でカード全体を pointer-events:none にし、選択肢のボタンまで押せなくなる(6203a53 の切り分け)。
+    // PC幅は一覧を出したまま操作できることが前提なので、外枠はただの View にする。
+    <CardShell styles={styles} paneOpen={paneOpen}>
+      {/* ここは素の <View> を挟まない: card の gap は直接の子にしか効かないため、挟むとカード内のすき間が消える。 */}
+      <>
+        {item.reporter ? <Text style={styles.reporter}>報告者: {item.reporter}</Text> : null}
+        <Pressable accessibilityRole="button" onPress={headerPress}>
+          <Text style={styles.badge}>
+            {PRIORITY_LABEL[item.priority]} · {KIND_LABEL[item.kind]}
+            {item.state === "approved" ? " · 決定済み" : ""}
+            {item.onHold ? ` · ${item.onHold}(窓口では出ません)` : ""}
           </Text>
-        )}
-      </Pressable>
-      {questions.length > 0 ? (
-        <QuestionAnswer
-          questions={questions}
-          colors={colors}
-          disabled={false}
-          onAnswer={answer}
-          onDeny={deny}
-        />
-      ) : (
-        <PlainOptions item={item} styles={styles} onChoose={onChoose} />
-      )}
-      {rejecting ? (
-        <RejectPanel item={item} styles={styles} onReject={onReject} onCancel={cancelReject} />
-      ) : null}
-      {open && questions.length === 0 ? <Text style={styles.text}>{item.summary}</Text> : null}
-      {bgOpen && item.background ? <Text style={styles.text}>{item.background}</Text> : null}
-      <View style={styles.footRow}>
-        {item.background ? (
-          <Pressable accessibilityRole="button" style={styles.footBtn} onPress={toggleBg}>
-            <Text style={styles.footText}>{bgOpen ? "▼背景" : "▶背景"}</Text>
-          </Pressable>
-        ) : null}
-        {/* 会話ボタンは1つだけ(2026-10-23 ユーザー指示)。押すと投函元スレの会話を右ペイン(狭い幅は全画面)で開く。
-            実スレ画面への全面遷移(旧 ↩ スレ)は、単独ボタンからの「スレを開く」としてペインのヘッダーだけに残している。 */}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="投函元スレの会話を右に開く"
-          style={styles.footBtn}
-          onPress={openPane}
-        >
-          <Text style={styles.footText}>{paneOpen ? "▼会話" : "💬 会話"}</Text>
+          <Text style={styles.subject}>{item.subject}</Text>
+          {open || questions.length > 0 ? null : (
+            <Text style={styles.muted} numberOfLines={2}>
+              {item.summary}
+            </Text>
+          )}
         </Pressable>
-        {canRejectItem(item) && !rejecting ? (
+        {questions.length > 0 ? (
+          <QuestionAnswer
+            questions={questions}
+            colors={colors}
+            disabled={false}
+            onAnswer={answer}
+            onDeny={deny}
+          />
+        ) : (
+          <PlainOptions item={item} styles={styles} onChoose={onChoose} />
+        )}
+        {rejecting ? (
+          <RejectPanel item={item} styles={styles} onReject={onReject} onCancel={cancelReject} />
+        ) : null}
+        {open && questions.length === 0 ? <Text style={styles.text}>{item.summary}</Text> : null}
+        {bgOpen && item.background ? <Text style={styles.text}>{item.background}</Text> : null}
+        <View style={styles.footRow}>
+          {item.background ? (
+            <Pressable accessibilityRole="button" style={styles.footBtn} onPress={toggleBg}>
+              <Text style={styles.footText}>{bgOpen ? "▼背景" : "▶背景"}</Text>
+            </Pressable>
+          ) : null}
+          {/* 会話ボタンは1つだけ(2026-10-23 ユーザー指示)。押すと投函元スレの会話を右ペイン(狭い幅は全画面)で開く。
+            実スレ画面への全面遷移(旧 ↩ スレ)は、単独ボタンからの「スレを開く」としてペインのヘッダーだけに残している。 */}
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="この判断を却下する(コメント必須)"
+            accessibilityLabel="投函元スレの会話を右に開く"
             style={styles.footBtn}
-            onPress={startReject}
+            onPress={openPane}
           >
-            <Text style={styles.footText}>✕ 却下</Text>
+            <Text style={styles.footText}>{paneOpen ? "▼会話" : "💬 会話"}</Text>
           </Pressable>
-        ) : null}
-        <Text style={styles.created} numberOfLines={1}>
-          {created}
-        </Text>
-      </View>
-    </Pressable>
+          {canRejectItem(item) && !rejecting ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="この判断を却下する(コメント必須)"
+              style={styles.footBtn}
+              onPress={startReject}
+            >
+              <Text style={styles.footText}>✕ 却下</Text>
+            </Pressable>
+          ) : null}
+          <Text style={styles.created} numberOfLines={1}>
+            {created}
+          </Text>
+        </View>
+      </>
+    </CardShell>
+  );
+}
+
+/**
+ * カードの枠。強調するのは**右ペインに出ているカードだけ**(展開しただけでは変えない)。
+ * 幅は親の cellStyle が決める。外側は背景と枠、内側は余白と中身のすき間。強調で枠が1px太るぶんを内側の padding で吸収する。
+ * 単なる入れ物なので、ItemCard の分岐には数えないため別の要素にしてある。
+ */
+function CardShell({
+  styles,
+  paneOpen,
+  children,
+}: {
+  styles: Styles;
+  paneOpen: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <View style={paneOpen ? styles.cellActive : styles.cell}>
+      <View style={paneOpen ? styles.cardActive : styles.card}>{children}</View>
+    </View>
   );
 }
