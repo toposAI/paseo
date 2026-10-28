@@ -15,8 +15,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { SharedMessage, SharedProject } from "../shared/shared-projects.js";
+import { z } from "zod";
 import {
   API_OPS,
+  aiStartInputSchema,
   classifyFailure,
   failureText,
   isApiOp,
@@ -117,6 +119,8 @@ export type CallResult<T> =
       reason?: FailureReason;
       httpStatus?: number;
       detail?: string;
+      /** 429 のとき、再開できるまでの秒数。 */
+      retryAfter?: number;
     };
 
 const TIMEOUT_MS = 10_000;
@@ -136,15 +140,29 @@ export interface CallDeps {
 const SAFE_BINARY_MIME =
   /^(image\/(png|jpe?g|gif|webp|heic|heif|avif)|application\/pdf|text\/plain)$/;
 
-/** Topos の FastAPI エラー本文 {detail: "コード"} から理由コードだけを取り出す(それ以外は捨てる)。 */
-async function readDetail(res: Response): Promise<string> {
+/**
+ * Topos のエラー本文から理由コードと待ち秒数だけを取り出す(それ以外は捨てる)。
+ * FastAPI の {detail: "コード"} と、AI上限の 429 {reason: "rate_limited", retry_after: 秒}(Retry-After ヘッダも見る)。
+ */
+async function readErrorBody(res: Response): Promise<{ detail: string; retryAfter?: number }> {
+  let detail = "";
+  let retryAfter: number | undefined;
   try {
     const j = (await res.json()) as unknown;
-    if (isObj(j) && typeof j.detail === "string") return j.detail.slice(0, 200);
+    if (isObj(j)) {
+      if (typeof j.detail === "string") detail = j.detail.slice(0, 200);
+      else if (typeof j.reason === "string") detail = j.reason.slice(0, 200);
+      if (typeof j.retry_after === "number" && Number.isFinite(j.retry_after) && j.retry_after > 0)
+        retryAfter = Math.ceil(j.retry_after);
+    }
   } catch {
     // 本文が無い・JSONでない
   }
-  return "";
+  if (retryAfter === undefined) {
+    const h = Number(res.headers.get("retry-after") ?? "");
+    if (Number.isFinite(h) && h > 0) retryAfter = Math.ceil(h);
+  }
+  return { detail, ...(retryAfter !== undefined ? { retryAfter } : {}) };
 }
 
 /** 添付ダウンロードの上限(バイト)。Topos の添付上限(attach_limits)より十分大きい安全弁で、メモリを守る。 */
@@ -160,9 +178,13 @@ async function binaryData(res: Response) {
 
 /** HTTP エラーを理由の種類つきの失敗にする。権限の理由は具体的な文言、それ以外は従来の文言。 */
 async function httpFailure(res: Response, pathAndQuery: string) {
-  const detail = await readDetail(res);
+  const { detail, retryAfter } = await readErrorBody(res);
   const reason = classifyFailure(res.status, detail);
-  const specific = reason === "scope" || reason === "viewer" || reason === "author_only";
+  const specific =
+    reason === "scope" ||
+    reason === "viewer" ||
+    reason === "author_only" ||
+    reason === "rate_limited";
   return {
     ok: false,
     status: "error",
@@ -170,6 +192,7 @@ async function httpFailure(res: Response, pathAndQuery: string) {
     reason,
     httpStatus: res.status,
     detail,
+    ...(retryAfter !== undefined ? { retryAfter } : {}),
   } as const;
 }
 
@@ -413,6 +436,7 @@ export type ApiOutcome =
       message: string;
       httpStatus?: number;
       detail?: string;
+      retryAfter?: number;
     };
 
 const badRequest = (message: string): ApiOutcome => ({
@@ -453,13 +477,33 @@ function buildQuery(spec: OpSpec, query: Record<string, string> | undefined): st
   return `?${parts.join("&")}`;
 }
 
+/** commit に渡せる本文の上限(Topos の AI_TEXT_MAX と同じ)。 */
+export const AI_TEXT_MAX = 20_000;
+
+/** AI生成の2段API(prepare/commit)の本文の形。Topos の上限に合わせ、余計なキーは通さない。 */
+const AI_BODY_SCHEMAS = {
+  aiPrepare: aiStartInputSchema.omit({ id: true }).strict(),
+  aiCommit: z
+    .object({
+      ticket: z.string().min(1).max(200),
+      text: z.string().max(AI_TEXT_MAX),
+      provider: z.string().max(80).nullable(),
+      model: z.string().max(120).nullable(),
+      failed: z.boolean(),
+    })
+    .strict(),
+} as const;
+
 /** 本文を検査する。通れば JSON 文字列(送信にそのまま使う。stringify は1回だけ)も返す。 */
 function checkBody(
   spec: OpSpec,
   body: unknown,
+  op?: string,
 ): { problem: string; json?: undefined } | { problem: null; json?: string } {
   if (!spec.body) return { problem: body === undefined ? null : "この操作は本文を受け付けません" };
   if (!isObj(body) || Array.isArray(body)) return { problem: "本文の形が正しくありません" };
+  const schema = op ? AI_BODY_SCHEMAS[op as keyof typeof AI_BODY_SCHEMAS] : undefined;
+  if (schema && !schema.safeParse(body).success) return { problem: "本文の形が正しくありません" };
   let json: string;
   try {
     json = JSON.stringify(body);
@@ -477,15 +521,19 @@ function checkBody(
 export async function callApi(
   input: SharedProjectApiInput,
   deps: CallDeps = {},
+  /** `internal: true` はサーバー内部(AIジョブ)だけ。画面からの RPC は渡さない。 */
+  options: { internal?: boolean } = {},
 ): Promise<ApiOutcome> {
   if (!isApiOp(input.op)) return badRequest("不明な操作です");
   const op: ApiOp = input.op;
   const spec: OpSpec = API_OPS[op];
+  if ((spec as OpSpec).internal === true && options.internal !== true)
+    return badRequest("不明な操作です");
   const route = fillPath(spec, input);
   if (route === null) return badRequest("IDの形が正しくありません");
   const query = buildQuery(spec, input.query);
   if (query === null) return badRequest("指定できない条件です");
-  const checked = checkBody(spec, input.body);
+  const checked = checkBody(spec, input.body, op);
   if (checked.problem) return badRequest(checked.problem);
 
   const callDeps: CallDeps = {
@@ -508,5 +556,6 @@ export async function callApi(
     message: reason === "timeout" ? failureText("timeout") : r.message,
     ...(r.httpStatus ? { httpStatus: r.httpStatus } : {}),
     ...(r.detail ? { detail: r.detail } : {}),
+    ...(r.retryAfter !== undefined ? { retryAfter: r.retryAfter } : {}),
   };
 }

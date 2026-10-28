@@ -26,6 +26,7 @@ import type { ProjectCtx } from "./types.js";
 import type { ThreadState } from "./useThread.js";
 import { usePickFiles, type PickedItem } from "./usePickFiles.js";
 import { Banner, Btn, Chip } from "./ui.js";
+import { useAiRunner } from "./useAiRunner.js";
 
 const AI_VALUE = "@ai";
 const ALL_VALUE = "@all";
@@ -124,6 +125,7 @@ export function Composer({
   const sendingRef = useRef(false);
   const [notice, setNotice] = useState("");
   const [warn, setWarn] = useState("");
+  const ai = useAiRunner(id);
 
   const attachOn = !limited && config?.attach === true;
   const pick = usePickFiles({ maxBytes: config?.maxBytes ?? 0, maxCount: config?.maxCount ?? 0 });
@@ -180,7 +182,20 @@ export function Composer({
     }
     emitProjectsChanged();
     void thread.reload();
-  }, [hasContent, limited, choice, pick, text, call, id, me, thread, onFinishConfirm, ctx]);
+    // AI生成は Paseo 側。Topos が ai_pending を返したときだけ、サーバーのジョブで作って保存する
+    if (parsed?.aiPending) {
+      const pending = parsed.aiPending;
+      void ai.run(pending).then((res) => {
+        if (res.stale) return null;
+        if (!res.ok) {
+          if (res.message) setWarn(res.message);
+        } else if (pending.kind === "followup") void ctx.reloadDetail();
+        void thread.reload();
+        emitProjectsChanged();
+        return null;
+      });
+    }
+  }, [hasContent, limited, choice, pick, text, call, id, me, thread, onFinishConfirm, ctx, ai]);
 
   const sendPress = useCallback(() => void send(), [send]);
 
@@ -254,7 +269,7 @@ export function Composer({
           disabled={sending || !hasContent}
         />
       </View>
-      {sending && aiWillAnswer ? <Text style={s.muted}>AIが考えています…</Text> : null}
+      {(sending && aiWillAnswer) || ai.thinking ? <Text style={s.muted}>AIが考え中…</Text> : null}
       <Banner s={s} text={notice} error />
       <Banner s={s} text={warn} error />
     </View>

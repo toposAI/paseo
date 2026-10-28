@@ -5,9 +5,11 @@
  */
 import { useCallback, useState } from "react";
 import { Text, TextInput, View } from "react-native";
+import { parseAiPending } from "../../shared/shared-projects-api.js";
 import { Markdown } from "./Markdown.js";
 import type { ProjectCtx } from "./types.js";
 import { Banner, Btn } from "./ui.js";
+import { useAiRunner } from "./useAiRunner.js";
 
 interface Turn {
   id: string;
@@ -34,6 +36,7 @@ export function CatchupBox({ ctx, sinceSeq }: { ctx: ProjectCtx; sinceSeq: numbe
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const ai = useAiRunner(id);
 
   const ask = useCallback(
     async (q: string) => {
@@ -46,12 +49,30 @@ export function CatchupBox({ ctx, sinceSeq }: { ctx: ProjectCtx; sinceSeq: numbe
         id,
         body: { since_seq: sinceSeq, question: q.trim(), chat },
       });
-      setBusy(false);
       if (!r.ok) {
+        setBusy(false);
         setError(r.message);
         return;
       }
-      const { text, error: llmError } = asText(r.data);
+      let data: unknown = r.data;
+      const pending = parseAiPending(r.data);
+      if (pending) {
+        // 要約の生成は Paseo 側。ジョブで作って保存した結果を使う
+        const res = await ai.run(pending, {
+          since_seq: sinceSeq,
+          question: q.trim(),
+          chat,
+        });
+        if (res.stale) return;
+        if (!res.ok) {
+          setBusy(false);
+          setError(res.message || "AIの要約に失敗しました。もう一度お試しください");
+          return;
+        }
+        data = res.result;
+      }
+      setBusy(false);
+      const { text, error: llmError } = asText(data);
       if (llmError) setError("AIの要約に失敗しました。時間をおいてもう一度お試しください");
       setTurns((cur) => [
         ...cur,
@@ -60,7 +81,7 @@ export function CatchupBox({ ctx, sinceSeq }: { ctx: ProjectCtx; sinceSeq: numbe
       ]);
       setQuestion("");
     },
-    [call, id, sinceSeq, turns],
+    [call, id, sinceSeq, turns, ai],
   );
 
   const toggle = useCallback(() => {
@@ -94,7 +115,7 @@ export function CatchupBox({ ctx, sinceSeq }: { ctx: ProjectCtx; sinceSeq: numbe
           )}
         </View>
       ))}
-      {busy ? <Text style={s.muted}>AIがまとめています…</Text> : null}
+      {busy ? <Text style={s.muted}>AIが考え中…</Text> : null}
       <Banner s={s} text={error} error />
       <TextInput
         style={s.inputLine}

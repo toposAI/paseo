@@ -55,7 +55,12 @@ import {
   sharedProjectThreadRpc,
   sharedProjectsListRpc,
 } from "./shared/shared-projects.js";
-import { sharedProjectApiRpc } from "./shared/shared-projects-api.js";
+import {
+  sharedProjectAiPollRpc,
+  sharedProjectAiStartRpc,
+  sharedProjectApiRpc,
+} from "./shared/shared-projects-api.js";
+import { createAiJobs, createPaseoGenerator } from "./server/shared-projects-ai.js";
 import {
   callApi,
   fetchThread,
@@ -822,6 +827,23 @@ export default function contribute(server: PluginServerContext) {
   server.handle(sharedProjectReadRpc, async (input) => markRead(input.id, input.seq));
   // フル機能: 許可リスト(API_OPS)の操作だけを Topos へ中継する(任意パスは拒否)。
   server.handle(sharedProjectApiRpc, async (input) => callApi(input));
+  // AI生成はPaseo側(Toposは projects_full 鍵ではLLMを呼ばない)。start=prepareまで行いジョブIDを即返す /
+  // poll=結果を待つ。生成はこのプロセス内で背景実行(RPCの30秒上限より長いため)。
+  let paseoForAi: PluginHandlerContext["paseo"] | null = null;
+  const aiJobs = createAiJobs({
+    call: (input) => callApi(input, {}, { internal: true }),
+    generate: createPaseoGenerator(() => {
+      if (!paseoForAi) throw new Error("paseo_unavailable");
+      return paseoForAi;
+    }),
+    // ticket・本文・プロンプト・鍵は渡さない(ジョブ短縮ID・種類・段階・理由コードだけ)
+    log: (line) => console.warn(`[topos-confirm-box] ${line}`),
+  });
+  server.handle(sharedProjectAiStartRpc, async (input, ctx) => {
+    paseoForAi = ctx.paseo;
+    return aiJobs.start(input);
+  });
+  server.handle(sharedProjectAiPollRpc, async (input) => aiJobs.poll(input.jobId));
 
   server.handle(coordinatorTargetRpc, async () => ({
     agentId: readGeneralCoordinatorId(),

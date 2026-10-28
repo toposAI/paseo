@@ -12,6 +12,7 @@ import {
   canWrite,
   isCreator,
   isId32,
+  parseAiPending,
   parseConfig,
   parseDetail,
   type ProjectConfig,
@@ -25,6 +26,7 @@ import { NotesPane } from "./NotesPane.js";
 import { ThreadPane } from "./ThreadPane.js";
 import type { OpenScreen, ProjectCtx } from "./types.js";
 import { Banner, makeStyles, type S } from "./ui.js";
+import { useAiRunner } from "./useAiRunner.js";
 import { useThread } from "./useThread.js";
 
 export const SCREEN_NEW = "new";
@@ -86,7 +88,9 @@ function ProjectScreen({
   const [limited, setLimited] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [kicking, setKicking] = useState(false);
+  const [kickError, setKickError] = useState("");
   const kicked = useRef("");
+  const ai = useAiRunner(id);
   const thread = useThread(call, id, tab === "thread");
 
   // プロジェクトが変わったら前の内容を持ち越さない
@@ -97,6 +101,7 @@ function ProjectScreen({
     setLimited(false);
     setDetailError("");
     setKicking(false);
+    setKickError("");
   }, [id]);
 
   const reloadDetail = useCallback(async () => {
@@ -136,13 +141,20 @@ function ProjectScreen({
     if (kicked.current === id) return;
     kicked.current = id;
     setKicking(true);
-    void call("kickoff", { id }).then(async () => {
+    void call("kickoff", { id }).then(async (r) => {
+      // 最初の質問の生成は Paseo 側。Topos が ai_pending を返したときだけジョブで作って保存する
+      const pending = r.ok ? parseAiPending(r.data) : null;
+      if (pending) {
+        const res = await ai.run(pending);
+        if (res.stale) return null;
+        if (!res.ok && res.message) setKickError(res.message);
+      }
       setKicking(false);
       await thread.reload();
       await reloadDetail();
       return null;
     });
-  }, [detail?.overviewPending, creator, limited, latest, id, call, thread, reloadDetail]);
+  }, [detail?.overviewPending, creator, limited, latest, id, call, thread, reloadDetail, ai]);
 
   const ctx: ProjectCtx = useMemo(
     () => ({
@@ -180,7 +192,8 @@ function ProjectScreen({
             text="この鍵では本文の読み書きだけ使えます。宛先・添付・AI・ノート・メンバー管理はフル機能用の鍵(projects_full)が必要です"
           />
         ) : null}
-        {kicking ? <Banner s={s} text="AIが最初の質問を考えています…" /> : null}
+        {kicking ? <Banner s={s} text="AIが考え中…(最初の質問を作っています)" /> : null}
+        <Banner s={s} text={kickError} error />
       </View>
       <View style={s.tabs}>
         {TABS.map((t) => (

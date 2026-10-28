@@ -29,6 +29,11 @@ export interface OpSpec {
   timeoutMs?: number;
   /** 画面側の複合操作(サーバーが複数回呼んで1つにまとめる)。 */
   composite?: "thread";
+  /**
+   * サーバー内部(AIジョブ)だけが呼ぶ操作。画面からの RPC(`topos.projects.api`)では拒否する
+   * (画面が AI の本文を自分で commit して「AIの発言」を偽造できないようにする)。
+   */
+  internal?: boolean;
 }
 
 const BASE = "/api/family-projects";
@@ -73,6 +78,22 @@ export const API_OPS = {
   noteHistory: { method: "GET", path: `${BASE}/{id}/shared-notes/{nid}/history` },
   noteVersion: { method: "GET", path: `${BASE}/{id}/shared-notes/{nid}/history/{v}` },
   noteRestore: { method: "POST", path: `${BASE}/{id}/shared-notes/{nid}/history/{v}/restore` },
+  // AIの外部生成(projects_full 鍵だけ)。prepare=文脈とプロンプトを取る / commit=Paseo で作った本文を保存する。
+  // どちらもサーバーのAIジョブだけが呼ぶ(internal)。画面は aiStart / aiPoll を使う
+  aiPrepare: {
+    method: "POST",
+    path: `${BASE}/{id}/ai/prepare`,
+    body: "json",
+    timeoutMs: 15_000,
+    internal: true,
+  },
+  aiCommit: {
+    method: "POST",
+    path: `${BASE}/{id}/ai/commit`,
+    body: "json",
+    timeoutMs: 20_000,
+    internal: true,
+  },
 } as const satisfies Record<string, OpSpec>;
 
 export type ApiOp = keyof typeof API_OPS;
@@ -112,7 +133,109 @@ export const sharedProjectApiRpc = defineRpc({
   }),
 });
 
+// ── AI生成(Paseo側)のジョブ RPC ───────────────────────────────────────
+// Topos は projects_full 鍵ではLLMを呼ばず `ai_pending` を返す。画面は aiStart でジョブを始め、aiPoll で結果を待つ。
+// 生成は RPC の上限(30秒)より長いので、サーバー内でバックグラウンド実行する。
+
+export const AI_KINDS = ["reply", "followup", "kickoff", "catchup"] as const;
+export type AiKind = (typeof AI_KINDS)[number];
+
+export function isAiKind(v: unknown): v is AiKind {
+  return typeof v === "string" && (AI_KINDS as readonly string[]).includes(v);
+}
+
+/** 要約チャットの1発言あたりの最大文字数・往復数(Topos の上限に合わせる。超えた分は画面側で切る)。 */
+export const AI_CHAT_CHARS = 1500;
+export const AI_CHAT_TURNS = 10;
+export const AI_QUESTION_MAX = 2000;
+
+export const aiStartInputSchema = z.object({
+  id: z.string(),
+  kind: z.enum(AI_KINDS),
+  seq: z.number().int().min(1).max(2_000_000_000).optional(),
+  question: z
+    .string()
+    .max(AI_QUESTION_MAX * 2)
+    .optional(),
+  since_seq: z.number().int().min(0).max(2_000_000_000).optional(),
+  chat: z
+    .array(z.object({ role: z.enum(["user", "ai"]), text: z.string().max(AI_CHAT_CHARS * 2) }))
+    .max(AI_CHAT_TURNS * 2 + 2)
+    .optional(),
+});
+export type AiStartInput = z.infer<typeof aiStartInputSchema>;
+
+export const sharedProjectAiStartRpc = defineRpc({
+  name: "topos.projects.ai.start",
+  input: aiStartInputSchema,
+  output: z.object({
+    ok: z.boolean(),
+    jobId: z.string().optional(),
+    /** 失敗の種類(rate_limited / busy / conflict / bad_request / unconfigured / network / …)。 */
+    reason: z.string().optional(),
+    message: z.string().optional(),
+    /** rate_limited のとき、再開できるまでの秒数。 */
+    retryAfter: z.number().optional(),
+  }),
+});
+
+export const sharedProjectAiPollRpc = defineRpc({
+  name: "topos.projects.ai.poll",
+  input: z.object({ jobId: z.string() }),
+  output: z.object({
+    status: z.enum(["running", "done", "failed"]),
+    kind: z.enum(AI_KINDS).optional(),
+    /** done のとき、commit の応答(Topos の形のまま)。 */
+    result: z.unknown().optional(),
+    error: z.string().optional(),
+    reason: z.string().optional(),
+    retryAfter: z.number().optional(),
+  }),
+});
+
+/** 応答の `ai_pending`。非nullなら、画面は aiStart でAI生成を始める。通常ユーザー/旧鍵にはキー自体が出ない。 */
+export interface AiPending {
+  kind: AiKind;
+  seq?: number;
+}
+
+export function parseAiPending(raw: unknown): AiPending | null {
+  if (!isObj(raw) || !isObj(raw.ai_pending)) return null;
+  const p = raw.ai_pending;
+  if (!isAiKind(p.kind)) return null;
+  const seq = typeof p.seq === "number" && Number.isInteger(p.seq) && p.seq >= 1 ? p.seq : null;
+  return seq === null ? { kind: p.kind } : { kind: p.kind, seq };
+}
+
+/** 「N分後に再開できます」付きの上限到達の文言。 */
+export function rateLimitText(retryAfterSec: number | undefined): string {
+  const base = "AIの利用が上限(1時間30回)に達しました。";
+  if (typeof retryAfterSec !== "number" || !Number.isFinite(retryAfterSec) || retryAfterSec <= 0)
+    return `${base}しばらくしてからもう一度お試しください`;
+  return `${base}${Math.max(1, Math.ceil(retryAfterSec / 60))}分後に再開できます`;
+}
+
+/** AI生成の失敗を画面に出す日本語にする。空文字=黙ってスレッドを取り直すだけ(すでにAIが処理済み)。 */
+export function aiFailureText(
+  kind: AiKind,
+  reason: string,
+  message: string,
+  retryAfterSec?: number,
+): string {
+  if (reason === "already_done") return "";
+  if (reason === "rate_limited") return rateLimitText(retryAfterSec);
+  if (reason === "timeout")
+    return kind === "catchup"
+      ? "AIの要約がまだ届きません。しばらくしてからもう一度お試しください"
+      : "AIの返信がまだ届きません(投稿は届いています)。しばらくしてから開き直してください";
+  if (reason === "busy" && message) return message;
+  return kind === "catchup"
+    ? "AIの要約に失敗しました。もう一度お試しください"
+    : "AIの返信に失敗しました(投稿は届いています)";
+}
+
 export type FailureReason =
+  | "rate_limited"
   | "unconfigured"
   | "config"
   | "unauthorized"
@@ -144,6 +267,7 @@ export function classifyFailure(httpStatus: number, detail: string): FailureReas
   if (httpStatus === 413) return "too_large";
   if (httpStatus === 415) return "unsupported";
   if (httpStatus === 409) return "conflict";
+  if (httpStatus === 429) return "rate_limited";
   if (httpStatus === 400 || httpStatus === 422) return "invalid";
   return httpStatus >= 500 ? "server" : "invalid";
 }
@@ -159,6 +283,7 @@ export function failureText(reason: string, detail = ""): string {
 const DETAIL_FIRST = new Set(["too_large", "unsupported", "conflict", "invalid"]);
 
 const FAILURE_TEXT: Record<string, string> = {
+  rate_limited: "AIの利用が上限(1時間30回)に達しました。しばらくしてからもう一度お試しください",
   unconfigured: "共有プロジェクトの接続設定がありません",
   config: "接続設定に問題があります",
   unauthorized: "Topos に鍵を拒否されました(鍵の期限切れか失効)",
@@ -350,6 +475,8 @@ export interface PostResult {
   llmError: string | null;
   overviewSaved: boolean;
   finishConfirm: boolean;
+  /** projects_full 鍵: AIの返信/深掘りの質問はこのあと Paseo 側で作る。無ければ null。 */
+  aiPending: AiPending | null;
 }
 
 /** 投稿の応答 {message, reply, llm_error, overview_saved, finish_confirm}。 */
@@ -363,6 +490,7 @@ export function parsePostResult(raw: unknown, me: string, names: Record<string, 
     llmError: typeof raw.llm_error === "string" ? raw.llm_error : null,
     overviewSaved: raw.overview_saved === true,
     finishConfirm: raw.finish_confirm === true,
+    aiPending: parseAiPending(raw),
   };
   return r;
 }

@@ -14,6 +14,8 @@
  * 失敗の再現(プロジェクト別):
  *   「閲覧のみの家計」 ... あなたは viewer(書き込みは 403 viewer)
  *   本文に「[413]」を含めて投稿 ... 413、「[404]」... 404、「[500]」... 500、「[slow]」... 応答を70秒遅らせる
+ *   AI生成: 投稿・作成・キックオフ・要約は LLM を呼ばず ai_pending を返す(Paseo が ai/prepare→生成→ai/commit)。
+ *   本文に「[429]」... prepare が 429 rate_limited(retry_after=1800)、「[followup]」... 概要の聞き取り(overview_saved)
  */
 import http from "node:http";
 import crypto from "node:crypto";
@@ -41,7 +43,11 @@ function makeProject(name, description, members, opts = {}) {
     name,
     description,
     created_by: opts.createdBy ?? ME,
-    members: members.map((m) => ({ user_id: m, display_name: USERS[m], role: opts.viewer && m === ME ? "viewer" : "member" })),
+    members: members.map((m) => ({
+      user_id: m,
+      display_name: USERS[m],
+      role: opts.viewer && m === ME ? "viewer" : "member",
+    })),
     archived: false,
     overview_pending: opts.overviewPending ?? false,
     messages: [],
@@ -69,7 +75,19 @@ function addNote(p, title, body, author = ME) {
     author,
     created_at: now(300),
     updated_at: now(30),
-    versions: [{ v: 1, ts: now(300), actor: author, op: "create", added: body.split("\n").length, removed: 0, restored_from: null, title, body }],
+    versions: [
+      {
+        v: 1,
+        ts: now(300),
+        actor: author,
+        op: "create",
+        added: body.split("\n").length,
+        removed: 0,
+        restored_from: null,
+        title,
+        body,
+      },
+    ],
   };
   p.notes.push(note);
   return note;
@@ -82,7 +100,11 @@ function seed() {
   const img = id32();
   a.attachments.set(img, { name: "hakodate.png", mime: "image/png", data: PNG });
   const pdf = id32();
-  a.attachments.set(pdf, { name: "plan.pdf", mime: "application/pdf", data: Buffer.from("%PDF-1.1 mock") });
+  a.attachments.set(pdf, {
+    name: "plan.pdf",
+    mime: "application/pdf",
+    data: Buffer.from("%PDF-1.1 mock"),
+  });
   addMsg(a, {
     author: "hanako",
     text: "候補の写真と日程表です",
@@ -104,14 +126,37 @@ function seed() {
   note1.updated_at = now(20);
   const note2 = addNote(a, "持ち物リスト", "- パスポート不要\n- 上着\n- 日焼け止め", "hanako");
   note2.body = "- パスポート不要\n- 上着\n- 日焼け止め\n- 酔い止め";
-  note2.versions.push({ v: 2, ts: now(120), actor: "taro", op: "update", added: 1, removed: 0, restored_from: null, title: note2.title, body: note2.body });
+  note2.versions.push({
+    v: 2,
+    ts: now(120),
+    actor: "taro",
+    op: "update",
+    added: 1,
+    removed: 0,
+    restored_from: null,
+    title: note2.title,
+    body: note2.body,
+  });
   const gone = addNote(a, "古い案", "札幌だけ2泊", "taro");
   a.notes = a.notes.filter((n) => n !== gone);
   gone.archived_at = now(90);
-  gone.versions.push({ v: 2, ts: now(90), actor: "taro", op: "delete", added: 0, removed: 1, restored_from: null, title: gone.title, body: gone.body });
+  gone.versions.push({
+    v: 2,
+    ts: now(90),
+    actor: "taro",
+    op: "delete",
+    added: 0,
+    removed: 1,
+    restored_from: null,
+    title: gone.title,
+    body: gone.body,
+  });
   a.deletedNotes.push(gone);
 
-  const b = makeProject("閲覧のみの家計", "あなたは閲覧のみのメンバー", [ME, "hanako"], { createdBy: "hanako", viewer: true });
+  const b = makeProject("閲覧のみの家計", "あなたは閲覧のみのメンバー", [ME, "hanako"], {
+    createdBy: "hanako",
+    viewer: true,
+  });
   addMsg(b, { author: "hanako", text: "今月の支出をまとめました" });
   addNote(b, "概要", "家計の共有メモ", "hanako");
   b.lastRead = 1;
@@ -129,12 +174,18 @@ seed();
 // ── ヘルパ ───────────────────────────────────────────────────────────
 
 class HttpError extends Error {
-  constructor(status, detail) {
+  constructor(status, detail, extra = {}) {
     super(detail);
     this.status = status;
     this.detail = detail;
+    this.extra = extra;
   }
 }
+
+// ── AI 生成の二段階API(Topos 側は LLM を呼ばない。Paseo が prepare→生成→commit する) ──
+const tickets = new Map(); // ticket -> {pid, kind, seq, expires, used}
+const TICKET_TTL_MS = 600_000;
+const MAX_CHARS = { reply: 8000, followup: 8000, kickoff: 300, catchup: 8000 };
 
 const find = (pid) => {
   const p = state.projects.find((x) => x.id === pid);
@@ -154,16 +205,27 @@ const noteOf = (p, nid) => {
   if (!n) throw new HttpError(404, "note_not_found");
   return n;
 };
-const names = (p) => ({ ...USERS, ...Object.fromEntries(p.members.map((m) => [m.user_id, m.display_name])) });
+const names = (p) => ({
+  ...USERS,
+  ...Object.fromEntries(p.members.map((m) => [m.user_id, m.display_name])),
+});
 
 function lastOf(p) {
   const m = p.messages.at(-1);
   if (!m) return null;
-  return { author: m.author, author_name: m.kind === "llm" ? "AI" : USERS[m.author] ?? m.author, text: m.text, ts: m.ts, attachments_only: !m.text && m.attachments.length > 0 };
+  return {
+    author: m.author,
+    author_name: m.kind === "llm" ? "AI" : (USERS[m.author] ?? m.author),
+    text: m.text,
+    ts: m.ts,
+    attachments_only: !m.text && m.attachments.length > 0,
+  };
 }
 function summary(p) {
   const unread = p.messages.filter((m) => m.seq > p.lastRead && m.author !== ME).length;
-  const mentions = p.messages.filter((m) => m.seq > p.lastRead && m.author !== ME && m.to.includes(ME)).length;
+  const mentions = p.messages.filter(
+    (m) => m.seq > p.lastRead && m.author !== ME && m.to.includes(ME),
+  ).length;
   return {
     id: p.id,
     name: p.name,
@@ -185,16 +247,27 @@ function detail(p) {
     overview_pending: p.overview_pending,
   };
 }
-const noteSummary = (n) => ({ id: n.id, title: n.title, author: n.author, author_name: USERS[n.author] ?? n.author, updated_at: n.updated_at, created_at: n.created_at, ...(n.archived_at ? { archived_at: n.archived_at } : {}) });
+const noteSummary = (n) => ({
+  id: n.id,
+  title: n.title,
+  author: n.author,
+  author_name: USERS[n.author] ?? n.author,
+  updated_at: n.updated_at,
+  created_at: n.created_at,
+  ...(n.archived_at ? { archived_at: n.archived_at } : {}),
+});
 
 /** 行単位の増減(同じ行は数えない)。実 Topos の差分に近い数え方。 */
 function lineDiff(oldText, newText) {
   const a = oldText.split("\n");
   const b = newText.split("\n");
-  return { added: b.filter((l) => !a.includes(l)).length, removed: a.filter((l) => !b.includes(l)).length };
+  return {
+    added: b.filter((l) => !a.includes(l)).length,
+    removed: a.filter((l) => !b.includes(l)).length,
+  };
 }
 
-const sleep =(ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const mimeOk = (m) => /^(image\/|application\/pdf|text\/plain)/.test(m);
 
 // ── ルーティング ─────────────────────────────────────────────────────
@@ -211,29 +284,47 @@ async function route(req, body, fullKey) {
   if (!fullKey) {
     const isId = rest[0] && /^[0-9a-f]{32}$/.test(rest[0]);
     const tail = isId ? rest.slice(1).join("/") : rest.join("/");
-    const ok = (isId ? limitedPaths.has(tail) && tail !== "" : tail === "") ;
+    const ok = isId ? limitedPaths.has(tail) && tail !== "" : tail === "";
     if (!ok) throw new HttpError(404, "not_found");
   }
 
   if (rest.length === 0) {
-    if (m === "GET") return state.projects.filter((p) => p.archived === (url.searchParams.get("archived") === "true")).map(summary);
+    if (m === "GET")
+      return state.projects
+        .filter((p) => p.archived === (url.searchParams.get("archived") === "true"))
+        .map(summary);
     if (m === "POST") {
-      if (!body?.name || String(body.name).length > 80) throw new HttpError(422, "名前は1〜80文字で入力してください");
-      const ids = [ME, ...(Array.isArray(body.invitees) ? body.invitees.filter((u) => USERS[u] && u !== ME) : [])];
-      const p = makeProject(String(body.name), String(body.description ?? "").slice(0, 200), ids, { overviewPending: true });
+      if (!body?.name || String(body.name).length > 80)
+        throw new HttpError(422, "名前は1〜80文字で入力してください");
+      const ids = [
+        ME,
+        ...(Array.isArray(body.invitees) ? body.invitees.filter((u) => USERS[u] && u !== ME) : []),
+      ];
+      const p = makeProject(String(body.name), String(body.description ?? "").slice(0, 200), ids, {
+        overviewPending: true,
+      });
       state.projects.unshift(p);
-      return { id: p.id, name: p.name };
+      return { id: p.id, name: p.name, ...(fullKey ? { ai_pending: { kind: "kickoff" } } : {}) };
     }
   }
   if (rest[0] === "config" && m === "GET") {
-    return { create_v2: true, mention_notify: true, attach: true, attach_limits: { max_bytes: 5 * 1024 * 1024, max_count: 4 } };
+    return {
+      create_v2: true,
+      mention_notify: true,
+      attach: true,
+      attach_limits: { max_bytes: 5 * 1024 * 1024, max_count: 4 },
+    };
   }
   if (rest[0] === "candidates" && m === "GET") {
-    return Object.entries(USERS).filter(([u]) => u !== ME).map(([user_id, display_name]) => ({ user_id, display_name }));
+    return Object.entries(USERS)
+      .filter(([u]) => u !== ME)
+      .map(([user_id, display_name]) => ({ user_id, display_name }));
   }
   if (rest[0] === "order" && m === "PUT") {
     const order = Array.isArray(body?.ids) ? body.ids : [];
-    state.projects.sort((a, b) => (order.indexOf(a.id) + 1 || 999) - (order.indexOf(b.id) + 1 || 999));
+    state.projects.sort(
+      (a, b) => (order.indexOf(a.id) + 1 || 999) - (order.indexOf(b.id) + 1 || 999),
+    );
     return { ok: true };
   }
 
@@ -265,13 +356,15 @@ async function route(req, body, fullKey) {
     needCreator(p);
     const u = String(body?.user_id ?? "");
     if (!USERS[u]) throw new HttpError(404, "user_not_found");
-    if (!p.members.some((x) => x.user_id === u)) p.members.push({ user_id: u, display_name: USERS[u], role: "member" });
+    if (!p.members.some((x) => x.user_id === u))
+      p.members.push({ user_id: u, display_name: USERS[u], role: "member" });
     return p.members;
   }
   if (sub[0] === "members" && sub.length === 2 && m === "DELETE") {
     const uid = sub[1];
     if (uid !== ME) needCreator(p);
-    if (uid === p.created_by) throw new HttpError(409, "作成者は脱退できません。プロジェクトをアーカイブしてください");
+    if (uid === p.created_by)
+      throw new HttpError(409, "作成者は脱退できません。プロジェクトをアーカイブしてください");
     p.members = p.members.filter((x) => x.user_id !== uid);
     if (uid === ME) state.projects = state.projects.filter((x) => x !== p);
     return { ok: true };
@@ -281,9 +374,11 @@ async function route(req, body, fullKey) {
     return n ? { note_id: n.id } : { note_id: null };
   }
   if (key === "kickoff" && m === "POST") {
-    if (p.messages.length === 0) addMsg(p, { kind: "llm", author: LLM, text: "はじめまして。このプロジェクトは何を目指しますか?(目的・期限・関わる人を教えてください)", to: [ME] });
-    return { ok: true };
+    if (p.messages.length > 0) throw new HttpError(409, "already_started");
+    return { message: null, fallback: false, ai_pending: { kind: "kickoff" } };
   }
+  if (key === "ai/prepare" && m === "POST") return aiPrepare(p, body);
+  if (key === "ai/commit" && m === "POST") return aiCommit(p, body);
   if (key === "overview/finish" && m === "POST") {
     needCreator(p);
     p.overview_pending = false;
@@ -315,11 +410,7 @@ async function route(req, body, fullKey) {
     return { __binary: a };
   }
   if (key === "catchup" && m === "POST") {
-    await sleep(600);
-    const since = Number(body?.since_seq) || 0;
-    const n = p.messages.filter((x) => x.seq > since).length;
-    const q = String(body?.question ?? "").trim();
-    return { text: q ? `(模擬回答)「${q}」について: ${n}件の新しい投稿があり、見積もりの話が出ています。` : `(模擬要約)前回から${n}件の投稿があります。函館の宿と見積もりの話が中心です。` };
+    return { text: null, llm_error: null, ai_pending: { kind: "catchup" } };
   }
   return notes(p, sub, key, m, body);
 }
@@ -329,7 +420,8 @@ async function post(p, body, fullKey) {
   const text = String(body?.text ?? "");
   const attachments = Array.isArray(body?.attachments) ? body.attachments : [];
   const hasTo = Array.isArray(body?.to) && body.to.length > 0;
-  if (!fullKey && (hasTo || attachments.length > 0)) throw new HttpError(403, "scope_post_text_only");
+  if (!fullKey && (hasTo || attachments.length > 0))
+    throw new HttpError(403, "scope_post_text_only");
   if (!text.trim() && attachments.length === 0) throw new HttpError(422, "本文か添付が必要です");
   if (text.length > 8000) throw new HttpError(413, "本文が長すぎます(8000文字まで)");
   if (text.includes("[413]")) throw new HttpError(413, "添付が大きすぎます(1件 5MB まで)");
@@ -338,37 +430,109 @@ async function post(p, body, fullKey) {
   if (text.includes("[slow]")) await sleep(70_000);
   const saved = [];
   for (const a of attachments) {
-    if (!mimeOk(String(a.mime_type))) throw new HttpError(415, "この種類のファイルは添付できません");
+    if (!mimeOk(String(a.mime_type)))
+      throw new HttpError(415, "この種類のファイルは添付できません");
     const data = Buffer.from(String(a.data_base64 ?? ""), "base64");
     if (data.length > 5 * 1024 * 1024) throw new HttpError(413, "添付が大きすぎます(1件 5MB まで)");
     const aid = id32();
     p.attachments.set(aid, { name: String(a.filename), mime: String(a.mime_type), data });
-    saved.push({ id: aid, name: String(a.filename), kind: String(a.mime_type).startsWith("image/") ? "image" : "file", mime: String(a.mime_type), size: data.length });
+    saved.push({
+      id: aid,
+      name: String(a.filename),
+      kind: String(a.mime_type).startsWith("image/") ? "image" : "file",
+      mime: String(a.mime_type),
+      size: data.length,
+    });
   }
-  const aiAsked = body?.to === undefined || body.to === null || (Array.isArray(body.to) && body.to.includes(LLM));
+  const aiAsked =
+    body?.to === undefined || body.to === null || (Array.isArray(body.to) && body.to.includes(LLM));
   const to = Array.isArray(body?.to) ? body.to : [LLM];
   const message = addMsg(p, { author: ME, text, to, attachments: saved });
-  const result = { message, reply: null, llm_error: null, overview_saved: false, finish_confirm: false };
-  if (!aiAsked) return result;
-  await sleep(1200);
-  if (text.includes("[llm_error]")) return { ...result, llm_error: "llm_failed" };
-  const reply = addMsg(p, { kind: "llm", author: LLM, text: `(模擬AI)受け取りました。\n\n1. 「${text.slice(0, 30)}」\n2. 続きを **Markdown** で返します`, to: [ME] });
-  result.reply = reply;
+  const result = {
+    message,
+    reply: null,
+    llm_error: null,
+    overview_saved: false,
+    finish_confirm: false,
+    ai_pending: null,
+  };
+  // 投稿では LLM を呼ばない。AIに聞く投稿(フル鍵)は ai_pending を返し、Paseo が prepare→生成→commit する
+  if (!aiAsked || !fullKey) return result;
   if (p.overview_pending && text.includes("[finish]")) result.finish_confirm = true;
+  const followup = text.includes("[followup]");
+  if (followup) result.overview_saved = true;
+  result.ai_pending = { kind: followup ? "followup" : "reply", seq: message.seq };
   return result;
+}
+
+function aiPrepare(p, body) {
+  needWriter(p);
+  const kind = String(body?.kind ?? "");
+  if (!(kind in MAX_CHARS)) throw new HttpError(400, "invalid_kind");
+  const seq = Number(body?.seq) || 0;
+  if (
+    (kind === "reply" || kind === "followup") &&
+    p.messages.some((x) => x.kind === "llm" && x.seq > seq)
+  ) {
+    throw new HttpError(409, "already_replied");
+  }
+  if (kind === "kickoff" && p.messages.length > 0) throw new HttpError(409, "already_started");
+  if (
+    String(body?.question ?? "").includes("[429]") ||
+    p.messages.at(seq - 1)?.text?.includes("[429]")
+  ) {
+    throw new HttpError(429, "rate_limited", { reason: "rate_limited", retry_after: 1800 });
+  }
+  const ticket = crypto.randomBytes(24).toString("hex");
+  tickets.set(ticket, { pid: p.id, kind, seq, expires: Date.now() + TICKET_TTL_MS, used: false });
+  const lastText = p.messages.at(seq - 1)?.text ?? "";
+  return {
+    ticket,
+    system: "あなたは家族の共有プロジェクトを手伝うアシスタントです。日本語で簡潔に答えます。",
+    prompt: `(模擬プロンプト kind=${kind})\n投稿: ${lastText.slice(0, 200)}`,
+    kind,
+    max_chars: MAX_CHARS[kind],
+    needs_llm: true,
+  };
+}
+
+function aiCommit(p, body) {
+  needWriter(p);
+  const t = tickets.get(String(body?.ticket ?? ""));
+  if (!t || t.pid !== p.id) throw new HttpError(403, "invalid_ticket");
+  if (t.used) throw new HttpError(409, "ticket_used");
+  if (Date.now() > t.expires) throw new HttpError(410, "ticket_expired");
+  const failed = body?.failed === true;
+  const text = String(body?.text ?? "").trim();
+  if (!failed && (text === "" || text.length > MAX_CHARS[t.kind]))
+    throw new HttpError(400, "invalid_text"); // ticket は消費しない
+  t.used = true;
+  if (t.kind === "catchup")
+    return failed ? { text: null, llm_error: "llm_failed" } : { text, llm_error: null };
+  if (failed) return { reply: null, llm_error: "llm_failed" };
+  if (t.kind === "kickoff") {
+    if (p.messages.length > 0) throw new HttpError(409, "already_started");
+    const reply = addMsg(p, { kind: "llm", author: LLM, text, to: [ME] });
+    return { reply, message: reply, llm_error: null, fallback: false };
+  }
+  const reply = addMsg(p, { kind: "llm", author: LLM, text, to: [ME] });
+  return { reply, llm_error: null, ...(t.kind === "followup" ? { overview_saved: true } : {}) };
 }
 
 function notes(p, sub, key, m, body) {
   if (key === "notes" && m === "GET") return { notes: p.notes.map(noteSummary) };
-  if (sub[0] === "notes" && sub.length === 2 && m === "GET") return { ...noteSummary(noteOf(p, sub[1])), body: noteOf(p, sub[1]).body };
+  if (sub[0] === "notes" && sub.length === 2 && m === "GET")
+    return { ...noteSummary(noteOf(p, sub[1])), body: noteOf(p, sub[1]).body };
   if (key === "shared-notes" && m === "POST") {
     needWriter(p);
     const title = String(body?.title ?? "").trim();
-    if (!title || title.length > 200) throw new HttpError(422, "題名は1〜200文字で入力してください");
+    if (!title || title.length > 200)
+      throw new HttpError(422, "題名は1〜200文字で入力してください");
     const n = addNote(p, title, String(body?.body ?? ""));
     return { ...noteSummary(n), body: n.body };
   }
-  if (key === "shared-notes/deleted" && m === "GET") return { notes: p.deletedNotes.map(noteSummary) };
+  if (key === "shared-notes/deleted" && m === "GET")
+    return { notes: p.deletedNotes.map(noteSummary) };
   if (sub[0] === "shared-notes" && sub.length === 2 && m === "PUT") {
     needWriter(p);
     const n = noteOf(p, sub[1]);
@@ -376,7 +540,16 @@ function notes(p, sub, key, m, body) {
     n.title = String(body?.title ?? n.title);
     n.body = String(body?.body ?? n.body);
     n.updated_at = now();
-    n.versions.push({ v: n.versions.length + 1, ts: now(), actor: ME, op: "update", ...lineDiff(before, n.body), restored_from: null, title: n.title, body: n.body });
+    n.versions.push({
+      v: n.versions.length + 1,
+      ts: now(),
+      actor: ME,
+      op: "update",
+      ...lineDiff(before, n.body),
+      restored_from: null,
+      title: n.title,
+      body: n.body,
+    });
     return { ...noteSummary(n), body: n.body };
   }
   if (sub[0] === "shared-notes" && sub.length === 2 && m === "DELETE") {
@@ -384,7 +557,17 @@ function notes(p, sub, key, m, body) {
     const n = noteOf(p, sub[1]);
     p.notes = p.notes.filter((x) => x !== n);
     n.archived_at = now();
-    n.versions.push({ v: n.versions.length + 1, ts: now(), actor: ME, op: "delete", added: 0, removed: 1, restored_from: null, title: n.title, body: n.body });
+    n.versions.push({
+      v: n.versions.length + 1,
+      ts: now(),
+      actor: ME,
+      op: "delete",
+      added: 0,
+      removed: 1,
+      restored_from: null,
+      title: n.title,
+      body: n.body,
+    });
     p.deletedNotes.push(n);
     return { ok: true };
   }
@@ -408,7 +591,16 @@ function notes(p, sub, key, m, body) {
     delete n.archived_at;
     p.deletedNotes = p.deletedNotes.filter((x) => x !== n);
     if (!p.notes.includes(n)) p.notes.push(n);
-    n.versions.push({ v: n.versions.length + 1, ts: now(), actor: ME, op: "restore", ...lineDiff(n.body, v.body), restored_from: v.v, title: n.title, body: n.body });
+    n.versions.push({
+      v: n.versions.length + 1,
+      ts: now(),
+      actor: ME,
+      op: "restore",
+      ...lineDiff(n.body, v.body),
+      restored_from: v.v,
+      title: n.title,
+      body: n.body,
+    });
     return { ...noteSummary(n), body: n.body };
   }
   throw new HttpError(404, "not_found");
@@ -427,7 +619,8 @@ const server = http.createServer((req, res) => {
         const auth = req.headers.authorization ?? "";
         const key = auth.replace(/^Bearer\s+/i, "");
         if (key !== FULL_KEY && key !== OLD_KEY) throw new HttpError(401, "invalid_token");
-        if (req.headers["tailscale-user-login"] !== "me@mock.local") throw new HttpError(401, "identity");
+        if (req.headers["tailscale-user-login"] !== "me@mock.local")
+          throw new HttpError(401, "identity");
         let body;
         if (chunks.length > 0) {
           try {
@@ -449,7 +642,8 @@ const server = http.createServer((req, res) => {
         const status = e instanceof HttpError ? e.status : 500;
         const detail = e instanceof HttpError ? e.detail : "internal";
         res.writeHead(status, { "content-type": "application/json" });
-        res.end(JSON.stringify({ detail }));
+        const extra = e instanceof HttpError ? e.extra : {};
+        res.end(JSON.stringify({ detail, ...extra }));
         console.log(`${req.method} ${short} -> ${status} ${detail}`);
       }
     })();
@@ -457,5 +651,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`mock-topos: http://127.0.0.1:${PORT}  (full key: ${FULL_KEY} / old key: ${OLD_KEY})`);
+  console.log(
+    `mock-topos: http://127.0.0.1:${PORT}  (full key: ${FULL_KEY} / old key: ${OLD_KEY})`,
+  );
 });
