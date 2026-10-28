@@ -389,6 +389,13 @@ const CLAUDE_ROOT_ONLY_COMMANDS = new Set([
 ]);
 const INTERRUPT_TOOL_USE_PLACEHOLDER = "[Request interrupted by user for tool use]";
 const INTERRUPT_PLACEHOLDER_PATTERN = /^\[Request interrupted by user(?:[^\]]*)\]$/;
+/**
+ * Claude's own account of a turn it stopped in flight (an interrupt that reached it while the
+ * prompt was still being checked). It is the same event a user interrupt ends a turn with, so it
+ * is read as one: a failure would paint the whole thread red for a turn Paseo had nothing to do.
+ */
+const PROMPT_CHECK_INTERRUPT_PATTERN =
+  /^prompt_check: the turn was stopped before its prompt was checked$/i;
 const NO_RESPONSE_REQUESTED_PLACEHOLDER = "No response requested.";
 const STEER_SUPERSEDED_PERMISSION_MESSAGE =
   "The user answered with a message instead of approving. Their message follows.";
@@ -3688,6 +3695,31 @@ class ClaudeAgentSession implements AgentSession {
     return errors.some((e: string) => /\baborted\b/i.test(e));
   }
 
+  /** A result whose only reason is that the prompt check never finished, i.e. a stopped turn. */
+  private isPromptCheckInterruptResult(message: Extract<SDKMessage, { type: "result" }>): boolean {
+    if (message.subtype === "success") {
+      return false;
+    }
+    const errors = "errors" in message && Array.isArray(message.errors) ? message.errors : [];
+    if (
+      errors.some(
+        (e: unknown) =>
+          typeof e === "string" &&
+          /\bprompt_check\b/i.test(e) &&
+          !this.isPromptCheckInterruptText(e),
+      )
+    ) {
+      // A prompt_check error this check does not recognize. It stays a failure (the safe side),
+      // but either the wording drifted or Claude reported a different prompt-check problem.
+      this.logger.warn({ errors }, "prompt_check result not classified as a stopped turn");
+    }
+    return errors.length > 0 && errors.every((e: unknown) => this.isPromptCheckInterruptText(e));
+  }
+
+  private isPromptCheckInterruptText(error: unknown): boolean {
+    return typeof error === "string" && PROMPT_CHECK_INTERRUPT_PATTERN.test(error.trim());
+  }
+
   private buildTurnFailedEvent(
     errorMessage: string,
   ): Extract<AgentStreamEvent, { type: "turn_failed" }> {
@@ -4773,6 +4805,24 @@ class ClaudeAgentSession implements AgentSession {
         });
       }
       events.push({ type: "turn_completed", provider: "claude", usage });
+      return;
+    }
+    if (this.isPromptCheckInterruptResult(message)) {
+      this.logger.debug(
+        {
+          errors: "errors" in message ? message.errors : undefined,
+          closedTurn: Boolean(this.activeForegroundTurnId || this.autonomousTurn),
+        },
+        "Classifying prompt-check stop as a canceled turn",
+      );
+      // Only a turn that was open here is closed: left open, its liveness would stay "running"
+      // and every later frame of this turn would be dropped as output of a closed turn, the
+      // prompt's reply included. A stop of a turn already closed is trailing output, as with any
+      // interrupt.
+      if (this.activeForegroundTurnId || this.autonomousTurn) {
+        events.push(...this.sidechainTracker.finishAll("canceled"));
+        events.push({ type: "turn_canceled", provider: "claude", reason: "Interrupted" });
+      }
       return;
     }
     const errorMessage =
