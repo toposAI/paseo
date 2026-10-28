@@ -144,11 +144,23 @@ export function CompactExplorerSidebarHost({
     });
   }, [model, openCompactFileExplorer]);
 
-  // 幕の中の「右の欄の面板」からファイル一覧へ戻る。選んだ中身(面板)は覚えたままなので、
-  // 次に左端からスワイプしたらまた面板が出る。
+  // 幕の中の「右の欄の面板」からファイル一覧へ戻る。これは幕を閉じるまでの一時的な切り替えで、
+  // 幕を閉じたら面板に戻す(そうしないと、次の左端スワイプでファイル一覧が出て、台帳に戻れなくなる。
+  // 2026-10-28 出口レビュー1巡目)。面板のタブは右の欄に残っているので、戻すのは表示の切り替えだけでよい。
+  const showMobileAgentRef = useRef(showMobileAgent);
+  showMobileAgentRef.current = showMobileAgent;
   const handleShowFiles = useCallback(() => {
     usePanelStore.getState().setCompactExplorerView("files");
   }, []);
+  useEffect(
+    () => () => {
+      if (usePanelStore.getState().compactExplorerView === "files") {
+        usePanelStore.getState().setCompactExplorerView("plugin");
+      }
+      showMobileAgentRef.current();
+    },
+    [],
+  );
 
   const handleOpenFile = useCallback(
     (filePath: string) => {

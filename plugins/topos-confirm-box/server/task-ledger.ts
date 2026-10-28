@@ -249,8 +249,10 @@ export function readThreads(confirmBoxDir: string): Map<string, ThreadRow> | nul
 
 /** 子スレの進捗。自己申告の状態を先に見て、無ければ Paseo の稼働状態で決める。 */
 export function progressOf(thread: ThreadRow): LedgerProgress {
-  if (thread.status.includes("完了")) return "done";
-  if (thread.status.includes("判断待ち")) return "waiting";
+  // 先に「待ち」を見る(「ユーザー判断待ち」「完了待ち」)。完了は先頭一致にする
+  // (「未完了」のような、中に完了を含むだけの語を完了と読まないため。2026-10-28 出口レビュー1巡目)。
+  if (thread.status.includes("待ち")) return "waiting";
+  if (thread.status.trim().startsWith("完了")) return "done";
   if (thread.machineState === "running") return "working";
   if (thread.machineState === "error") return "stopped";
   if (thread.machineState === "idle" || thread.machineState === "closed") return "stopped";

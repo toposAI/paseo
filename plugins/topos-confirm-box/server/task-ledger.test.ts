@@ -92,6 +92,11 @@ test("子スレの進捗は自己申告を先に見て、無ければ Paseo の�
   const base = { id: "a", title: "t", status: "", machineState: "", archived: false, updatedAt: 0 };
   assert.equal(progressOf({ ...base, status: "完了" }), "done");
   assert.equal(progressOf({ ...base, status: "ユーザー判断待ち" }), "waiting");
+  // 中に「完了」を含むだけの語は完了にしない(「未完了」「完了待ち」など)。
+  assert.equal(progressOf({ ...base, status: "未完了" }), "working");
+  assert.equal(progressOf({ ...base, status: "完了待ち" }), "waiting");
+  assert.equal(progressOf({ ...base, status: "完了(ユーザーの判断待ち)" }), "waiting");
+  assert.equal(progressOf({ ...base, status: "完了(2026-10-28)" }), "done");
   assert.equal(progressOf({ ...base, machineState: "running" }), "working");
   assert.equal(progressOf({ ...base, machineState: "idle" }), "stopped");
   assert.equal(progressOf({ ...base, machineState: "closed" }), "stopped");
