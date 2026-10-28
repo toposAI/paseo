@@ -1,5 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 
+import pino from "pino";
+
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import { ClaudeAgentClient } from "./agent.js";
 import { streamSession } from "../test-utils/session-stream-adapter.js";
@@ -445,6 +447,15 @@ function buildAbortedResult(sessionId: string) {
   };
 }
 
+function buildPromptCheckInterruptResult(sessionId: string) {
+  return {
+    type: "result",
+    subtype: "error_during_execution",
+    errors: ["prompt_check: the turn was stopped before its prompt was checked"],
+    session_id: sessionId,
+  };
+}
+
 function buildRejectedToolResult(sessionId: string) {
   return {
     type: "user",
@@ -464,6 +475,242 @@ function buildRejectedToolResult(sessionId: string) {
     session_id: sessionId,
   };
 }
+
+test("Claude's own account of a stopped turn settles as canceled, not failed", async () => {
+  const logger = createTestLogger();
+  let queryRef: ScriptedQuery | null = null;
+
+  queryFactory.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+    queryRef = createScriptedQuery({ prompt, sessionId: "prompt-check-canceled-session" });
+    return queryRef;
+  });
+
+  const client = new ClaudeAgentClient({
+    logger,
+    queryFactory,
+    resolveBinary: async () => "/test/claude/bin",
+  });
+  const session = await client.createSession({
+    provider: "claude",
+    cwd: process.cwd(),
+  });
+
+  const turn = streamSession(session, "first prompt");
+  await turn.next();
+  await waitFor(() => queryRef?.prompts.length === 1);
+  await waitForInitRouted(() => queryRef);
+
+  // The turn starts, then stops before the prompt is checked, all before Paseo's own cancel lands.
+  queryRef?.emit(buildTurnInit("prompt-check-canceled-session"));
+  queryRef?.emit(buildPromptCheckInterruptResult("prompt-check-canceled-session"));
+
+  const events = await collectUntilTerminal(turn);
+  expect(events.find((event) => event.type === "turn_canceled")).toMatchObject({
+    type: "turn_canceled",
+    provider: "claude",
+    reason: "Interrupted",
+  });
+  expect(events.some((event) => event.type === "turn_failed")).toBe(false);
+
+  await session.close();
+});
+
+test("a prompt-check stop rescues an autonomous turn instead of failing it", async () => {
+  const logger = createTestLogger();
+  let queryRef: ScriptedQuery | null = null;
+  const sessionId = "prompt-check-autonomous-session";
+
+  queryFactory.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+    queryRef = createScriptedQuery({
+      prompt,
+      sessionId,
+      async handlePrompt({ promptRecord, query }) {
+        if (promptRecord.text !== "seed prompt") {
+          return;
+        }
+        query.emit({
+          type: "assistant",
+          message: { content: "SEED_RESPONSE" },
+          session_id: sessionId,
+        });
+        query.emit(buildSuccessResult(sessionId));
+      },
+    });
+    return queryRef;
+  });
+
+  const client = new ClaudeAgentClient({
+    logger,
+    queryFactory,
+    resolveBinary: async () => "/test/claude/bin",
+  });
+  const session = await client.createSession({
+    provider: "claude",
+    cwd: process.cwd(),
+  });
+  await collectUntilTerminal(streamSession(session, "seed prompt"));
+
+  const events: AgentStreamEvent[] = [];
+  const unsubscribe = session.subscribe((event) => {
+    events.push(event);
+  });
+
+  // Claude starts a turn of its own (e.g. a follow-up) and stops before its prompt is checked.
+  queryRef?.emit(buildTurnInit(sessionId));
+  await waitFor(() => events.some((event) => event.type === "turn_started"));
+  queryRef?.emit(buildPromptCheckInterruptResult(sessionId));
+  await waitFor(() => events.some((event) => event.type === "turn_canceled"));
+
+  unsubscribe();
+
+  // A stopped turn ends as stopped, so a thread nobody was waiting on is not marked failed.
+  expect(events.filter((event) => event.type === "turn_canceled")).toEqual([
+    expect.objectContaining({ type: "turn_canceled", provider: "claude", reason: "Interrupted" }),
+  ]);
+  expect(events.some((event) => event.type === "turn_failed")).toBe(false);
+
+  await session.close();
+});
+
+test("a stop after Paseo canceled the turn ends the follow-up turn as canceled", async () => {
+  // The cancel lands first and closes the turn; Claude then opens a turn of its own and stops it
+  // before checking the prompt. Left as a failure, that follow-up turn painted the thread red.
+  const logger = createTestLogger();
+  let queryRef: ScriptedQuery | null = null;
+  const sessionId = "prompt-check-after-cancel-session";
+
+  queryFactory.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+    queryRef = createScriptedQuery({ prompt, sessionId });
+    return queryRef;
+  });
+
+  const client = new ClaudeAgentClient({
+    logger,
+    queryFactory,
+    resolveBinary: async () => "/test/claude/bin",
+  });
+  const session = await client.createSession({
+    provider: "claude",
+    cwd: process.cwd(),
+  });
+
+  const turn = streamSession(session, "prompt to stop");
+  await turn.next();
+  await waitFor(() => queryRef?.prompts.length === 1);
+  await waitForInitRouted(() => queryRef);
+
+  await session.interrupt();
+  expect((await collectUntilTerminal(turn)).some((event) => event.type === "turn_canceled")).toBe(
+    true,
+  );
+
+  const events: AgentStreamEvent[] = [];
+  const unsubscribe = session.subscribe((event) => {
+    events.push(event);
+  });
+  queryRef?.emit(buildTurnInit(sessionId));
+  await waitFor(() => events.some((event) => event.type === "turn_started"));
+  queryRef?.emit(buildPromptCheckInterruptResult(sessionId));
+  await waitFor(() => events.some((event) => event.type === "turn_canceled"));
+
+  unsubscribe();
+  expect(events.filter((event) => event.type === "turn_canceled")).toHaveLength(1);
+  expect(events.some((event) => event.type === "turn_failed")).toBe(false);
+
+  await session.close();
+});
+
+test("a rewording of Claude's prompt-check stop is reported as a failure and flagged", async () => {
+  const warnings: Array<Record<string, unknown>> = [];
+  const logger = pino({
+    level: "warn",
+    hooks: {
+      logMethod(args, method) {
+        warnings.push(args[0] as Record<string, unknown>);
+        method.apply(this, args);
+      },
+    },
+  });
+  let queryRef: ScriptedQuery | null = null;
+  const sessionId = "prompt-check-reworded-session";
+
+  queryFactory.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+    queryRef = createScriptedQuery({ prompt, sessionId });
+    return queryRef;
+  });
+
+  const session = await new ClaudeAgentClient({
+    logger,
+    queryFactory,
+    resolveBinary: async () => "/test/claude/bin",
+  }).createSession({ provider: "claude", cwd: process.cwd() });
+
+  const turn = streamSession(session, "first prompt");
+  await turn.next();
+  await waitFor(() => queryRef?.prompts.length === 1);
+  await waitForInitRouted(() => queryRef);
+
+  queryRef?.emit(buildTurnInit(sessionId));
+  queryRef?.emit({
+    ...buildPromptCheckInterruptResult(sessionId),
+    errors: ["prompt_check: the turn was stopped in a way Paseo does not know yet"],
+  });
+
+  const events = await collectUntilTerminal(turn);
+  expect(events.some((event) => event.type === "turn_canceled")).toBe(false);
+  expect(events.some((event) => event.type === "turn_failed")).toBe(true);
+  // pino fires the hook before it merges the msg into the record, so match on the payload.
+  expect(warnings).toEqual([
+    { errors: ["prompt_check: the turn was stopped in a way Paseo does not know yet"] },
+  ]);
+
+  await session.close();
+});
+
+test("a prompt-check stop reported alongside another error stays a failure", async () => {
+  const logger = createTestLogger();
+  let queryRef: ScriptedQuery | null = null;
+  const sessionId = "prompt-check-mixed-errors-session";
+
+  queryFactory.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+    queryRef = createScriptedQuery({ prompt, sessionId });
+    return queryRef;
+  });
+
+  const client = new ClaudeAgentClient({
+    logger,
+    queryFactory,
+    resolveBinary: async () => "/test/claude/bin",
+  });
+  const session = await client.createSession({
+    provider: "claude",
+    cwd: process.cwd(),
+  });
+
+  const turn = streamSession(session, "first prompt");
+  await turn.next();
+  await waitFor(() => queryRef?.prompts.length === 1);
+  await waitForInitRouted(() => queryRef);
+
+  queryRef?.emit(buildTurnInit(sessionId));
+  queryRef?.emit({
+    ...buildPromptCheckInterruptResult(sessionId),
+    errors: [
+      "prompt_check: the turn was stopped before its prompt was checked",
+      "API Error: 500 internal error",
+    ],
+  });
+
+  const events = await collectUntilTerminal(turn);
+  expect(events.some((event) => event.type === "turn_canceled")).toBe(false);
+  expect(events.find((event) => event.type === "turn_failed")).toMatchObject({
+    type: "turn_failed",
+    error:
+      "prompt_check: the turn was stopped before its prompt was checked\nAPI Error: 500 internal error",
+  });
+
+  await session.close();
+});
 
 async function startInterruptedToolTurn(sessionId: string): Promise<{
   session: AgentSession;
