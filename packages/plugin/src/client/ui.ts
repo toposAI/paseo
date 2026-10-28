@@ -79,6 +79,12 @@ export interface SidebarRowProps {
   active?: boolean;
   /** Right slot. Renders beside the row's pressable, so a button here presses on its own. */
   trailing?: ReactNode;
+  /**
+   * "compact" (default): unchanged — the host's short 28px sidebar row.
+   * "roomy": a touch target of at least 44px (48px at narrow widths) with the label clipped to two
+   * lines. Use it for list rows inside an item's panel, where a thumb has to hit the row.
+   */
+  size?: "compact" | "roomy";
 }
 /** A sidebar navigation row. Render it from a sidebar item's `Component`. */
 export declare const SidebarRow: ComponentType<SidebarRowProps>;

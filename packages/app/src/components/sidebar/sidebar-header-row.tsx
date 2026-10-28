@@ -14,6 +14,13 @@ import type { Theme } from "@/styles/theme";
 import { Shortcut } from "@/components/ui/shortcut";
 import type { ShortcutKey } from "@/utils/format-shortcut";
 
+/**
+ * Roomy row height by breakpoint: finger-sized on the phone drawer / narrow web view, and still
+ * 44px (the smallest comfortable touch target) on desktop. A two-line roomy label (40px) grows
+ * the row to 40 + 2 × 6px padding = 52px.
+ */
+const ROOMY_MIN_HEIGHT = { xs: 48, md: 44 } as const;
+
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
@@ -46,6 +53,28 @@ interface SidebarHeaderRowProps {
    */
   trailing?: ReactNode;
   rowRef?: Ref<View>;
+  /**
+   * "compact" (default): unchanged — the 28px row, label wraps as before.
+   * "roomy": a finger-sized row (≥44px) whose label is clipped to two lines, for plugin list rows.
+   */
+  size?: "compact" | "roomy";
+}
+
+// Style lists are prepared outside the component so its branch count stays low (oxlint complexity).
+function rowStyle(roomy: boolean, isHighlighted: boolean) {
+  return [styles.row, roomy && styles.rowRoomy, isHighlighted && styles.rowHighlighted];
+}
+function buttonStyle(roomy: boolean) {
+  return [styles.button, roomy && styles.buttonRoomy];
+}
+function labelStyle(roomy: boolean, isHighlighted: boolean) {
+  return [styles.label, roomy && styles.labelRoomy, isHighlighted && styles.labelHighlighted];
+}
+function trailingStyle(roomy: boolean) {
+  return roomy ? styles.trailingRoomy : styles.trailing;
+}
+function iconSpacerStyle(variant: SidebarHeaderRowVariant) {
+  return variant === "header" ? styles.iconSpacer : styles.iconSpacerCompact;
 }
 
 export function SidebarHeaderRow({
@@ -60,6 +89,7 @@ export function SidebarHeaderRow({
   shortcutKeys = null,
   trailing,
   rowRef,
+  size = "compact",
 }: SidebarHeaderRowProps) {
   const [isHovered, setIsHovered] = useState(false);
   const handlePointerEnter = useCallback(() => setIsHovered(true), []);
@@ -67,6 +97,7 @@ export function SidebarHeaderRow({
   const ThemedIcon = useMemo(() => (Icon ? withUnistyles(Icon) : null), [Icon]);
   const isHighlighted = isHovered || isActive;
   const iconSize = variant === "header" ? ICON_SIZE.md : ICON_SIZE.sm;
+  const roomy = size === "roomy";
 
   let right = trailing ?? null;
   if (right === null && shortcutKeys && isHovered) {
@@ -76,7 +107,7 @@ export function SidebarHeaderRow({
   return (
     <View ref={rowRef} collapsable={false} style={getContainerStyle(variant)}>
       <View
-        style={[styles.row, isHighlighted && styles.rowHighlighted]}
+        style={rowStyle(roomy, isHighlighted)}
         onPointerEnter={handlePointerEnter}
         onPointerLeave={handlePointerLeave}
       >
@@ -89,7 +120,7 @@ export function SidebarHeaderRow({
           accessibilityLabel={accessibilityLabel ?? label}
           accessibilityState={isActive ? SELECTED_STATE : undefined}
           aria-selected={isActive}
-          style={styles.button}
+          style={buttonStyle(roomy)}
         >
           {ThemedIcon ? (
             <ThemedIcon
@@ -97,12 +128,19 @@ export function SidebarHeaderRow({
               uniProps={isHighlighted ? foregroundColorMapping : foregroundMutedColorMapping}
             />
           ) : (
-            <View style={variant === "header" ? styles.iconSpacer : styles.iconSpacerCompact} />
+            <View style={iconSpacerStyle(variant)} />
           )}
-          <Text style={[styles.label, isHighlighted && styles.labelHighlighted]}>{label}</Text>
+          <Text style={labelStyle(roomy, isHighlighted)} numberOfLines={roomy ? 2 : undefined}>
+            {label}
+          </Text>
         </Pressable>
         {right === null ? null : (
-          <Pressable onPress={onPress} accessible={false} focusable={false} style={styles.trailing}>
+          <Pressable
+            onPress={onPress}
+            accessible={false}
+            focusable={false}
+            style={trailingStyle(roomy)}
+          >
             {right}
           </Pressable>
         )}
@@ -146,6 +184,10 @@ const styles = StyleSheet.create((theme) => ({
   rowHighlighted: {
     backgroundColor: theme.colors.surfaceSidebarHover,
   },
+  // Finger-sized list row (plugin items).
+  rowRoomy: {
+    minHeight: ROOMY_MIN_HEIGHT,
+  },
   button: {
     flex: 1,
     minWidth: 0,
@@ -158,6 +200,10 @@ const styles = StyleSheet.create((theme) => ({
     // edge with the list below.
     paddingHorizontal: theme.spacing[2],
   },
+  buttonRoomy: {
+    minHeight: ROOMY_MIN_HEIGHT,
+    paddingVertical: theme.spacing[1.5],
+  },
   iconSpacer: { width: ICON_SIZE.md, height: ICON_SIZE.md },
   iconSpacerCompact: { width: ICON_SIZE.sm, height: ICON_SIZE.sm },
   label: {
@@ -166,12 +212,25 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.normal,
     color: theme.colors.foregroundMuted,
   },
+  // A roomy label may wrap: up to two lines of 20px.
+  labelRoomy: {
+    lineHeight: 20,
+  },
   labelHighlighted: {
     color: theme.colors.foreground,
   },
   trailing: {
     flexDirection: "row",
     alignItems: "center",
+    gap: theme.spacing[1],
+    paddingRight: theme.spacing[2],
+  },
+  // Stretch to the row's full height so the right end (and a trailing badge) is pressable too.
+  trailingRoomy: {
+    alignSelf: "stretch",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: theme.spacing[1],
     paddingRight: theme.spacing[2],
   },
