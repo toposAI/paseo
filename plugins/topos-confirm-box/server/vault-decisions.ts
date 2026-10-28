@@ -290,8 +290,14 @@ export function readHeldNotes(
       { window?: string; expires_at?: number; hold_reason?: string } | null
     >;
     for (const [id, c] of Object.entries(claims)) {
-      if (!c || !HELD_WINDOWS.has(c.window ?? "")) continue;
-      if (!(Number(c.expires_at ?? 0) * 1000 > nowMs)) continue;
+      if (!c) continue;
+      const why0 = (c.hold_reason ?? "").trim();
+      // 保留理由つきは窓口側(`judgment_window.py` の claim_next の `held`)が期限・窓口名に関わらず出さない
+      // (期限切れの印も台帳に残る)ので、同じ条件で数えない。理由なしは検討中/回し中の有効な印だけ。
+      if (!why0) {
+        if (!HELD_WINDOWS.has(c.window ?? "")) continue;
+        if (!(Number(c.expires_at ?? 0) * 1000 > nowMs)) continue;
+      }
       const why = (c.hold_reason ?? "").replace(/\s+/g, " ").trim();
       held.set(id, why ? `保留中: ${why.slice(0, 40)}` : "裏方で検討中");
     }

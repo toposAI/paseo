@@ -63,6 +63,15 @@ test("検討中・回し中の有効な印だけ保留として返す(窓口A・
   assert.equal(held.get("j-hold"), "保留中: 壁打ちスレで決めるまで 保留");
 });
 
+test("保留理由つきの印は期限切れ・窓口名違いでも保留(窓口Aの held と同じ)", () => {
+  const env = claimsDir({
+    "j-old": { window: "consulting", expires_at: NOW / 1000 - 5, hold_reason: "決めるまで" },
+    "j-a-hold": { window: "A", expires_at: NOW / 1000 + 60, hold_reason: "保留" },
+    "j-plain-expired": { window: "consulting", expires_at: NOW / 1000 - 5 },
+  });
+  assert.deepEqual([...readHeldNotes(env, NOW).keys()].sort(), ["j-a-hold", "j-old"]);
+});
+
 test("台帳が無い・壊れているときは空(従来どおり全部数える)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "held-notes-"));
   assert.equal(readHeldNotes({ TOPOS_JUDGMENT_WINDOW_DIR: dir } as NodeJS.ProcessEnv, NOW).size, 0);
