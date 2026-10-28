@@ -195,8 +195,8 @@ export function ConfirmBoxView({
       flex: { flex: 1 },
       splitRow: { flex: 1, flexDirection: "row" as const },
       body: { padding: LIST_GRID_PADDING, gap: 8 },
-      // カードの見た目(枠)。PC幅の列では1枚の幅を cellWidth で決めるので、背景・枠はこの入れ物に付ける
-      // (右ペインに出ているカードの強調を中身側に付けると、列の幅が揃わなくなる)。
+      // カードの見た目(枠)。1枚の幅は親の入れ物(style={cellStyle})が決め、ここはその幅いっぱいに広がって
+      // 背景と枠だけを付ける(列の幅は揃う)。右ペインに出ているカードの強調もこの枠で行う。
       cell: {
         backgroundColor: c.surface1,
         borderColor: c.border,
@@ -1261,7 +1261,8 @@ function ItemCard({
     // disabled でカード全体を pointer-events:none にし、選択肢のボタンまで押せなくなる(6203a53 の切り分け)。
     // PC幅は一覧を出したまま操作できることが前提なので、外枠はただの View にする。
     <CardShell styles={styles} paneOpen={paneOpen}>
-      <View>
+      {/* ここは素の <View> を挟まない: card の gap は直接の子にしか効かないため、挟むとカード内のすき間が消える。 */}
+      <>
         {item.reporter ? <Text style={styles.reporter}>報告者: {item.reporter}</Text> : null}
         <Pressable accessibilityRole="button" onPress={headerPress}>
           <Text style={styles.badge}>
@@ -1322,14 +1323,14 @@ function ItemCard({
             {created}
           </Text>
         </View>
-      </View>
+      </>
     </CardShell>
   );
 }
 
 /**
  * カードの枠。強調するのは**右ペインに出ているカードだけ**(展開しただけでは変えない)。
- * 外側が列の幅を決める入れ物(背景・枠)、内側が中身。強調で枠が1px太るぶんを内側の padding で吸収する。
+ * 幅は親の cellStyle が決める。外側は背景と枠、内側は余白と中身のすき間。強調で枠が1px太るぶんを内側の padding で吸収する。
  * 単なる入れ物なので、ItemCard の分岐には数えないため別の要素にしてある。
  */
 function CardShell({
