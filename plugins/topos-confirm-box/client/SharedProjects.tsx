@@ -130,13 +130,17 @@ function ProjectRow({ project, openScreen }: { project: SharedProject; openScree
   const badge = unreadLabel(project.unread);
   const mention = project.mentions > 0;
   const trailing = UnreadBadge({ label: badge && mention ? `@${badge}` : badge, mention });
+  // 名前は改行・連続空白を1つに詰めてから渡す(行の側が2行で切る)。長すぎる名前は切り詰めて
+  // おく: 万一ホストが roomy を知らない版でも、行が無限に伸びないようにするため。
+  // 押せる行を指で当てやすい高さにするのは 2026-10-28 ユーザー「共有プロジェクト名の縦幅が小さすぎる」
   return (
     <SidebarRow
       id={`shared-project-${project.id}`}
       icon="Users"
-      label={oneLine(project.name)}
+      label={oneLine(project.name, 120)}
       onPress={press}
       trailing={trailing}
+      size="roomy"
     />
   );
 }
@@ -158,7 +162,7 @@ function ActionRow({
     () => openScreen({ screenId: SHARED_PROJECT_SCREEN_ID, params: { id: screen } }),
     [openScreen, screen],
   );
-  return <SidebarRow id={id} icon={icon} label={label} onPress={press} />;
+  return <SidebarRow id={id} icon={icon} label={label} onPress={press} size="roomy" />;
 }
 
 export function SharedProjectsList({ openScreen }: { openScreen: OpenScreen }) {
@@ -172,6 +176,7 @@ export function SharedProjectsList({ openScreen }: { openScreen: OpenScreen }) {
           icon="CircleAlert"
           label={oneLine(message || emptyProjectsLabel(status), 80)}
           onPress={noop}
+          size="roomy"
         />
       ) : null}
       {status === "ok" ? (
@@ -192,6 +197,7 @@ export function SharedProjectsList({ openScreen }: { openScreen: OpenScreen }) {
           icon="Users"
           label={emptyProjectsLabel("ok")}
           onPress={noop}
+          size="roomy"
         />
       ) : null}
       {status === "ok" ? (
