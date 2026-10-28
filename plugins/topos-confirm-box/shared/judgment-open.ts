@@ -58,6 +58,9 @@ export function isJudgmentOpen(item: ConfirmBoxItem): boolean {
  * 数えない(N に出てこない)。`isJudgmentOpen` を前提に組み立てるので、数える対象は必ず判断タブにも出る。
  */
 export function isJudgmentCounted(item: ConfirmBoxItem): boolean {
+  // 裏方が検討中・保留中の件(`onHold`)は窓口Aも出せないので数えない(一覧には「保留中」として出す)。
+  // 2026-10-28 ユーザー指摘「そしたらバッジださないでよ」: バッジ2なのに窓口は0件だった。
+  if (item.onHold) return false;
   return isJudgmentOpen(item) && (item.kind === "permit" || isVaultNoteItem(item));
 }
 

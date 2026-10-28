@@ -12,6 +12,7 @@
  * - 箱側の既存 judgment 行(旧項目)は画面に出さない。消さず、読み込み時に隠すだけ(復元可能)。
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { ConfirmBoxItem, ConfirmBoxOption } from "../shared/contract.js";
 import { isLegacyOptionItem } from "../shared/contract.js";
@@ -266,6 +267,40 @@ function claimableKeys(text: string): string[] {
   return splitFrontmatter(text)?.front.state ? parseLegacyKeys(text) : [];
 }
 
+/** 窓口が出せない印の窓口名(`judgment_window.py` の CONSULT_WINDOW / PARK_WINDOW)。 */
+const HELD_WINDOWS = new Set(["consulting", "escalated"]);
+
+/**
+ * 判断窓口の台帳(`claims.json`)から、裏方が検討中・保留中の判断ノートを {note id → 理由} で返す。
+ * 窓口A/A'/Bが持っている件・記録中の件は対象外(それは窓口が出している/答えを書いている最中)。
+ * 読めない時は空(=従来どおり全部数える。保留が見えないだけで、判断が画面から消えることはない)。
+ */
+export function readHeldNotes(
+  env: NodeJS.ProcessEnv = process.env,
+  nowMs: number = Date.now(),
+): Map<string, string> {
+  const held = new Map<string, string>();
+  try {
+    const override = env.TOPOS_JUDGMENT_WINDOW_DIR?.trim();
+    const dir = override
+      ? override
+      : path.join(os.homedir(), ".local/state/toposai/judgment_window");
+    const claims = JSON.parse(fs.readFileSync(path.join(dir, "claims.json"), "utf8")) as Record<
+      string,
+      { window?: string; expires_at?: number; hold_reason?: string } | null
+    >;
+    for (const [id, c] of Object.entries(claims)) {
+      if (!c || !HELD_WINDOWS.has(c.window ?? "")) continue;
+      if (!(Number(c.expires_at ?? 0) * 1000 > nowMs)) continue;
+      const why = (c.hold_reason ?? "").replace(/\s+/g, " ").trim();
+      held.set(id, why ? `保留中: ${why.slice(0, 40)}` : "裏方で検討中");
+    }
+  } catch {
+    // 台帳が無い/壊れている: 保留は不明として扱う
+  }
+  return held;
+}
+
 /** 判断ノートを読む。**例外を投げない**(読めない時は error に理由を入れる)。 */
 export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultDecisionRead {
   let dir = "";
@@ -278,6 +313,7 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
       .toReversed() // 上限を超えたら古い(日付の小さい)ノートから落とす
       .slice(0, MAX_NOTES);
     const routing = readRoutingContext(env);
+    const heldNotes = readHeldNotes(env);
     const items: ConfirmBoxItem[] = [];
     const skipped: { name: string; reason: string }[] = [];
     const seen = new Set<string>();
@@ -308,7 +344,8 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
           waiting += 1;
           continue;
         }
-        items.push(item);
+        const onHold = heldNotes.get(name.replace(/\.md$/, ""));
+        items.push(onHold ? { ...item, onHold } : item);
       } catch {
         skipped.push({ name, reason: "読めない" });
       }

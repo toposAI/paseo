@@ -1226,6 +1226,7 @@ function ItemCard({
         <Text style={styles.badge}>
           {PRIORITY_LABEL[item.priority]} · {KIND_LABEL[item.kind]}
           {item.state === "approved" ? " · 決定済み" : ""}
+          {item.onHold ? ` · ${item.onHold}(窓口では出ません)` : ""}
         </Text>
         <Text style={styles.subject}>{item.subject}</Text>
         {open || questions.length > 0 ? null : (

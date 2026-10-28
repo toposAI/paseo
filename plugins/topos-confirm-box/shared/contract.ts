@@ -113,6 +113,11 @@ export const ConfirmBoxItemSchema = z.object({
   threadCandidates: z.array(z.string()).optional(),
   /** 「この欄に答えるスレ」の表示(短ID+題名。未登録の投函元は明示)。判断ノート由来のカードだけ入る。 */
   answerLabel: z.string().optional(),
+  /**
+   * 窓口が出せない理由(裏方で検討中・保留中)。判断窓口の台帳(claims.json)に有効な検討中/回し中の印がある
+   * 判断ノートだけ入る。入っている項目は一覧には出すが、バッジの件数には数えない(窓口Aも出せない件だから)。
+   */
+  onHold: z.string().optional(),
   stoppedCount: z.number().int(),
   /** 新着バグ報告などの報告者表示名(投函側が `reporter` に入れた場合のみ)。 */
   reporter: z.string().optional(),
