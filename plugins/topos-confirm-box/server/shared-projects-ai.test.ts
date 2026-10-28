@@ -13,7 +13,10 @@ import {
 import { callApi, type ApiOutcome, type Loaded } from "./shared-projects.js";
 import {
   chooseSafeMode,
+  CLAUDE_BUILTIN_TOOLS,
   composeAgentPrompt,
+  findSuspiciousOutput,
+  isClaudeProvider,
   createAiJobs,
   createPaseoGenerator,
   SAFETY_PREAMBLE,
@@ -439,7 +442,13 @@ test("composeAgentPrompt: 規律 → system → 空行 → prompt の順", () =>
 // ── 既定の生成器: ctx.paseo のモックで安全設定を確かめる ─────────────────────────
 
 interface CreateArg {
-  config: { provider: string; thinkingOptionId?: string; modeId?: string };
+  config: {
+    provider: string;
+    thinkingOptionId?: string;
+    modeId?: string;
+    mcpServers?: Record<string, unknown>;
+    options?: unknown;
+  };
   cwd: string;
   title?: string;
   labels?: Record<string, string>;
@@ -453,6 +462,9 @@ function mockPaseo(
     lastMessage?: string | null;
     modes?: { id: string }[];
     waitHangs?: boolean;
+    timelineItems?: { type: string }[];
+    timelineFails?: boolean;
+    claudeModels?: { id: string; isSelectable: boolean }[];
   } = {},
 ) {
   const rec = {
@@ -464,17 +476,20 @@ function mockPaseo(
   };
   const paseo = {
     providers: {
-      listModels: async () => ({
-        models: [
-          {
-            id: "deepseek-v4-flash",
-            label: "DeepSeek V4 Flash",
-            isSelectable: true,
-            thinkingOptions: [{ id: "low" }, { id: "high" }],
-          },
-        ],
-        error: null,
-      }),
+      listModels: async (provider: string) => {
+        if (provider === "claude") return { models: opts.claudeModels ?? [], error: null };
+        return {
+          models: [
+            {
+              id: "deepseek-v4-flash",
+              label: "DeepSeek V4 Flash",
+              isSelectable: true,
+              thinkingOptions: [{ id: "low" }, { id: "high" }],
+            },
+          ],
+          error: null,
+        };
+      },
       listModes: async () => ({
         modes: opts.modes ?? [{ id: "bypassPermissions" }, { id: "default" }, { id: "plan" }],
         error: null,
@@ -486,6 +501,18 @@ function mockPaseo(
         rec.cwdExistedAtCreate = fs.existsSync(arg.cwd) && fs.readdirSync(arg.cwd).length === 0;
         return {
           workspaceId: "ws-temp",
+          timeline: {
+            refetch: async () => {
+              if (opts.timelineFails) throw new Error("boom");
+              return {
+                error: null,
+                hasOlder: false,
+                entries: (opts.timelineItems ?? [{ type: "assistant_message" }]).map((item) => ({
+                  item,
+                })),
+              };
+            },
+          },
           waitForFinish: async (ms: number) => {
             rec.waitTimeouts.push(ms);
             if (opts.waitHangs) {
@@ -570,4 +597,85 @@ test("生成器: 時間切れでも archive する", async () => {
   // waitForFinish は渡された残り時間だけ待つので、短い期限で失敗させる
   await assert.rejects(gen({ ...REQ, timeoutMs: 30 }));
   assert.equal(rec.archived, 1);
+});
+
+test("生成器: 外部MCPは渡さない(mcpServers は空)。非Claudeには options を渡さない", async () => {
+  const { rec, paseo } = mockPaseo();
+  const gen = createPaseoGenerator(() => paseo as never);
+  await gen(REQ);
+  const c = rec.created[0] as CreateArg;
+  assert.deepEqual(c.config.mcpServers, {});
+  assert.equal(c.config.options, undefined);
+});
+
+test("生成器: Claude の haiku が選べるなら優先し、組み込みツールを全部 disallowedTools に渡す", async () => {
+  const { rec, paseo } = mockPaseo({
+    claudeModels: [
+      { id: "claude-sonnet-5-5", isSelectable: true },
+      { id: "claude-haiku-5-5", isSelectable: true },
+    ],
+  });
+  const gen = createPaseoGenerator(() => paseo as never);
+  const out = await gen(REQ);
+  assert.equal(out.provider, "claude");
+  const c = rec.created[0] as CreateArg;
+  assert.equal(c.config.provider, "claude/claude-haiku-5-5");
+  assert.equal(c.config.thinkingOptionId, undefined);
+  assert.deepEqual(c.config.mcpServers, {});
+  const opts = c.config.options as { disallowedTools: string[] };
+  assert.deepEqual(Object.keys(c.config.options as object), ["disallowedTools"]);
+  for (const t of [
+    "Read",
+    "Write",
+    "Edit",
+    "Glob",
+    "Grep",
+    "Bash",
+    "WebFetch",
+    "WebSearch",
+    "Task",
+  ])
+    assert.ok(opts.disallowedTools.includes(t), t);
+  assert.deepEqual(opts.disallowedTools, [...CLAUDE_BUILTIN_TOOLS]);
+});
+
+test("isClaudeProvider", () => {
+  assert.equal(isClaudeProvider("claude"), true);
+  assert.equal(isClaudeProvider("claude/claude-haiku-5-5"), true);
+  assert.equal(isClaudeProvider("deepseek"), false);
+  assert.equal(isClaudeProvider("claudex"), false);
+});
+
+test("生成器: ツール呼び出しが1件でもあれば失敗(tool_used)。確認できなくても失敗。archive する", async () => {
+  for (const o of [
+    { timelineItems: [{ type: "assistant_message" }, { type: "tool_call" }] },
+    { timelineFails: true },
+  ]) {
+    const { rec, paseo } = mockPaseo(o);
+    const gen = createPaseoGenerator(() => paseo as never);
+    await assert.rejects(gen(REQ));
+    assert.equal(rec.archived, 1);
+  }
+});
+
+test("findSuspiciousOutput: 鍵・秘密鍵・絶対パス3つ以上", () => {
+  assert.equal(findSuspiciousOutput("こんにちは。よい提案ですね"), null);
+  assert.equal(findSuspiciousOutput("鍵は tps_abcdEFGH1234 です"), "key_like");
+  assert.equal(findSuspiciousOutput("tpu_0123456789abcdef"), "key_like");
+  assert.equal(findSuspiciousOutput("-----BEGIN OPENSSH PRIVATE KEY-----"), "private_key");
+  assert.equal(findSuspiciousOutput("-----BEGIN RSA PRIVATE KEY-----"), "private_key");
+  assert.equal(findSuspiciousOutput("/Users/a/x と /Users/b/y"), null);
+  assert.equal(findSuspiciousOutput("/Users/a/x と /Users/b/y と ~/.ssh/id"), "paths");
+  assert.equal(findSuspiciousOutput("tps_ だけ"), null);
+});
+
+test("ジョブ: 鍵らしき語を含む生成文は failed:true・空本文で commit する", async () => {
+  const calls: Calls = { inputs: [] };
+  const generate: Generate = async () => ({ text: "tps_abcdEFGH1234", provider: "p", model: "m" });
+  const aiJobs = createAiJobs({ call: fakeCall(calls), generate });
+  await aiJobs.start({ id: PID, kind: "reply", seq: 1 });
+  await aiJobs.idle();
+  const commit = calls.inputs.find((i) => i.op === "aiCommit") as { body: Record<string, unknown> };
+  assert.equal(commit.body.failed, true);
+  assert.equal(commit.body.text, "");
 });

@@ -190,7 +190,10 @@ export function createAiJobs(deps: AiJobsDeps): AiJobs {
     const tooLong =
       text.length > AI_TEXT_MAX ||
       (job.kind === "reply" && p.maxChars !== null && text.length > p.maxChars);
-    let failed = gen === null || !text || tooLong;
+    // 鍵・秘密鍵・端末の絶対パスらしきものを含む生成文は共有スレッドへ載せない
+    const leaky = text.length > 0 && findSuspiciousOutput(text) !== null;
+    if (leaky) log(job, "output-rejected", findSuspiciousOutput(text) ?? "");
+    let failed = gen === null || !text || tooLong || leaky;
     const send = (f: boolean) =>
       deps.call({
         op: "aiCommit",
@@ -383,6 +386,56 @@ export function chooseSafeMode(modes: readonly { id: string }[] | null | undefin
   return null;
 }
 
+/**
+ * Claude 系の組み込みツール(全部)。一時エージェントは文章を作るだけなので、承認の有無に関わらず使わせない。
+ * (disallowedTools はモードより優先され、ツールがモデルの文脈から外れる)
+ */
+export const CLAUDE_BUILTIN_TOOLS: readonly string[] = [
+  "Agent",
+  "AskUserQuestion",
+  "Bash",
+  "BashOutput",
+  "Edit",
+  "EnterPlanMode",
+  "ExitPlanMode",
+  "Glob",
+  "Grep",
+  "KillBash",
+  "KillShell",
+  "ListMcpResourcesTool",
+  "LS",
+  "MultiEdit",
+  "Monitor",
+  "NotebookEdit",
+  "NotebookRead",
+  "Read",
+  "ReadMcpResourceTool",
+  "SlashCommand",
+  "Skill",
+  "Task",
+  "TaskOutput",
+  "TaskStop",
+  "TodoWrite",
+  "ToolSearch",
+  "WebFetch",
+  "WebSearch",
+  "Write",
+];
+
+/** Claude 系の provider id か(`claude/<model>` または `claude`)。他のプロバイダには上のツール制限を渡せない。 */
+export function isClaudeProvider(provider: string): boolean {
+  return provider === "claude" || provider.startsWith("claude/");
+}
+
+/** 生成文の出口検査。怪しければ理由コード、問題なければ null。本文はログに出さない。 */
+export function findSuspiciousOutput(text: string): string | null {
+  if (/\bt(?:ps|pu)_[A-Za-z0-9_-]{4,}/.test(text)) return "key_like";
+  if (/BEGIN [A-Z ]*PRIVATE KEY/.test(text)) return "private_key";
+  const paths = text.match(/(?:\/Users\/|\/home\/|~\/\.ssh|\.ssh\/|~\/\.[A-Za-z])/g);
+  if (paths && paths.length >= 3) return "paths";
+  return null;
+}
+
 export function composeAgentPrompt(system: string, prompt: string): string {
   return [SAFETY_PREAMBLE, system.trim(), prompt].filter((x) => x.length > 0).join("\n\n");
 }
@@ -424,8 +477,26 @@ export function createPaseoGenerator(
 
   async function choose(paseo: ReturnType<typeof getPaseo>, cwd: string): Promise<ModelPick> {
     if (cached && Date.now() - cached.at < pickTtlMs) return cached.pick;
-    const model = await chooseConceptModel(
-      async (provider): Promise<ConceptModelOption[] | null> => {
+    // Claude 系なら組み込みツールを丸ごと禁止できる(disallowedTools)ので、選べるなら最優先する。
+    // 最も安価な haiku 系だけを見る。無ければ従来の選び方(DeepSeek 系)へ落ちる。
+    const claudeModels = await withTimeout(
+      paseo.providers.listModels("claude", { cwd }),
+      catalogTimeoutMs,
+    )
+      .then((r) => (r && !r.error ? (r.models ?? []) : []))
+      .catch(() => []);
+    const haiku = claudeModels.find((m) => m.isSelectable !== false && /haiku/i.test(m.id));
+    const claudeModel: Omit<ModelPick, "modeId"> | null = haiku
+      ? {
+          providerModel: `claude/${haiku.id}`,
+          provider: "claude",
+          model: haiku.id,
+          thinkingOptionId: null,
+        }
+      : null;
+    const model =
+      claudeModel ??
+      (await chooseConceptModel(async (provider): Promise<ConceptModelOption[] | null> => {
         const result = await withTimeout(
           paseo.providers.listModels(provider, { cwd }),
           catalogTimeoutMs,
@@ -438,8 +509,7 @@ export function createPaseoGenerator(
           isSelectable: m.isSelectable,
           thinkingOptions: m.thinkingOptions?.map((o) => ({ id: o.id })),
         }));
-      },
-    );
+      }));
     const modes = await withTimeout(
       paseo.providers.listModes(model.provider, { cwd }),
       catalogTimeoutMs,
@@ -459,8 +529,22 @@ export function createPaseoGenerator(
     let handle: Awaited<ReturnType<typeof paseo.agents.create>> | null = null;
     let closed = false;
 
+    const usedTools = async (h: NonNullable<typeof handle>): Promise<boolean> => {
+      try {
+        const page = await withTimeout(
+          h.timeline.refetch({ direction: "tail", limit: 500, projection: "canonical" }),
+          Math.min(remaining(), 10_000),
+        );
+        if (page.error || page.hasOlder) return true; // 確認できない=安全側(失敗)
+        return page.entries.some((e) => e.item.type === "tool_call");
+      } catch {
+        return true;
+      }
+    };
+
     const cleanup = async (h: NonNullable<typeof handle>) => {
       const workspaceId = h.workspaceId;
+      // PaseoAgentHandle に cancel/interrupt 相当の API は無いので、archive だけを必ず行う
       await h.archive().catch(() => undefined);
       // この一時ワークスペースは自分の空ディレクトリ専用なので、片付けてよい
       if (workspaceId) await paseo.workspaces.archive(workspaceId).catch(() => undefined);
@@ -474,6 +558,14 @@ export function createPaseoGenerator(
             provider: pick.providerModel,
             ...(pick.thinkingOptionId ? { thinkingOptionId: pick.thinkingOptionId } : {}),
             modeId: pick.modeId,
+            // 外部MCPは渡さない。Claude 系は組み込みツールも全部禁止する。
+            // Claude 系以外(DeepSeek 等)はプロバイダ固有の options 形式が分からず、ツールを
+            // 個別に禁止できない。その場合は 制限モード・空cwd・承認待ち=失敗・ツール使用の事後検知
+            // (tool_used)で守る。
+            mcpServers: {},
+            ...(isClaudeProvider(pick.provider)
+              ? { options: { disallowedTools: [...CLAUDE_BUILTIN_TOOLS] } }
+              : {}),
           },
           cwd,
           title: `${TEMP_AGENT_TITLE_PREFIX} ${req.kind}`,
@@ -490,6 +582,8 @@ export function createPaseoGenerator(
       const created = await withTimeout(creating, remaining());
       const finished = await created.waitForFinish(remaining());
       if (finished.status !== "idle") throw new Error(`not_idle:${finished.status}`);
+      // 文章だけを作る係なので、ツール呼び出しが1件でもあれば(確認できなくても)失敗にする
+      if (await usedTools(created)) throw new Error("tool_used");
       const text = finished.lastMessage?.trim();
       if (!text) throw new Error("empty");
       return { text, provider: pick.provider, model: pick.model };
