@@ -123,6 +123,7 @@ import {
 } from "./shared/notes.js";
 import { readNoteRpc, resolveNoteLinkRpc, saveNoteRpc } from "./shared/note-view.js";
 import { saveVaultNote } from "./server/note-edit.js";
+import { HISTORY_OFF_MESSAGE, historyEnabled } from "./server/note-history.js";
 import { readVaultNote, resolveVaultLink } from "./server/note-view.js";
 import type {
   ConceptModelOption,
@@ -1338,7 +1339,12 @@ export default function contribute(server: PluginServerContext) {
   }
 
   // ノートの閲覧(読むだけ)。live Vault の中のノートだけを返す。
-  server.handle(readNoteRpc, async (input) => readVaultNote(resolveVaultDir(), input.path));
+  server.handle(readNoteRpc, async (input) => {
+    const note = readVaultNote(resolveVaultDir(), input.path);
+    // 変更履歴(Topos のローカル git)が未設定なら編集させない(履歴なしの上書きはしない)。
+    if (!note.editable || historyEnabled()) return note;
+    return { ...note, editable: false, editBlock: HISTORY_OFF_MESSAGE, raw: "", version: "" };
+  });
   // 既存ノートの編集(競合検知・履歴つき。新規作成・削除・名前変更はしない)。
   server.handle(saveNoteRpc, async (input) =>
     saveVaultNote(resolveVaultDir(), input.path, input.text, input.base),

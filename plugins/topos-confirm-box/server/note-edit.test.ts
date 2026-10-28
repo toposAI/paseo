@@ -1,22 +1,36 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { saveVaultNote } from "./note-edit.js";
+import { type HistoryState, resolveHistoryCommitter } from "./note-history.js";
 import { noteVersion, readVaultNote } from "./note-view.js";
+
+/** 呼ばれた時点のファイルの中身を記録する履歴の代役。state で結果を差し替える。 */
+function fakeHistory(states: { pre?: HistoryState; post?: HistoryState } = {}) {
+  const calls: { rel: string; phase: string; content: string }[] = [];
+  return {
+    calls,
+    async commit(root: string, rel: string, phase: "pre" | "post") {
+      calls.push({ rel, phase, content: fs.readFileSync(path.join(root, rel), "utf8") });
+      return (phase === "pre" ? states.pre : states.post) ?? "committed";
+    },
+  };
+}
 
 function setup() {
   const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "note-edit-")));
   const vault = path.join(tmp, "Vault");
-  const hist = path.join(tmp, "hist");
+  const hist = fakeHistory();
   fs.mkdirSync(path.join(vault, "構想"), { recursive: true });
   const note = path.join(vault, "構想", "a.md");
   fs.writeFileSync(note, "# 題\n本文\n");
   return { tmp, vault, hist, note };
 }
 
-test("保存: 版が一致すれば書き換わり、前の全文が履歴に残る", async () => {
+test("保存: 版が一致すれば書き換わり、前の版と新しい版が履歴に積まれる", async () => {
   const { vault, hist, note } = setup();
   const r0 = readVaultNote(vault, note);
   assert.equal(r0.editable, true);
@@ -24,11 +38,13 @@ test("保存: 版が一致すれば書き換わり、前の全文が履歴に残
   assert.equal(r.status, "saved");
   assert.equal(fs.readFileSync(note, "utf8"), "# 題\n新しい\n");
   assert.equal(r.version, noteVersion("# 題\n新しい\n"));
-  const dirs = fs.readdirSync(hist);
-  assert.equal(dirs.length, 1);
-  const snaps = fs.readdirSync(path.join(hist, dirs[0])).filter((n) => n.endsWith(".md"));
-  assert.equal(snaps.length, 1);
-  assert.equal(fs.readFileSync(path.join(hist, dirs[0], snaps[0]), "utf8"), "# 題\n本文\n");
+  assert.deepEqual(
+    hist.calls.map((c) => [c.phase, c.content]),
+    [
+      ["pre", "# 題\n本文\n"],
+      ["post", "# 題\n新しい\n"],
+    ],
+  );
 });
 
 test("競合: 開いた後に別で変わっていたら上書きせず今の全文を返す", async () => {
@@ -39,7 +55,7 @@ test("競合: 開いた後に別で変わっていたら上書きせず今の全
   assert.equal(r.status, "conflict");
   assert.equal(r.current, "# 題\n他で編集\n");
   assert.equal(fs.readFileSync(note, "utf8"), "# 題\n他で編集\n");
-  assert.equal(fs.existsSync(hist), false);
+  assert.equal(hist.calls.length, 0);
 });
 
 test("変更なし・base 空・NUL・大きすぎは書かない", async () => {
@@ -107,42 +123,54 @@ test("CRLF は保存後も CRLF のまま。混在・非UTF-8 は保存しない
   assert.equal((await saveVaultNote(vault, note, "z", "v", hist)).status, "rejected");
 });
 
-test("履歴を残せない(Vault内・書けない)なら保存しない", async () => {
-  const { tmp, vault, note } = setup();
+test("履歴が未設定なら保存しない", async () => {
+  const { vault, note } = setup();
   const base = readVaultNote(vault, note).version;
-  const inside = await saveVaultNote(vault, note, "# 題\nx\n", base, path.join(vault, "hist"));
-  assert.equal(inside.status, "rejected");
-  const blocker = path.join(tmp, "file-not-dir");
-  fs.writeFileSync(blocker, "");
-  const bad = await saveVaultNote(vault, note, "# 題\nx\n", base, path.join(blocker, "h"));
-  assert.equal(bad.status, "rejected");
-  assert.equal(fs.readFileSync(note, "utf8"), "# 題\n本文\n");
-  const bk = await saveVaultNote(
-    vault,
-    note,
-    "# 題\nx\n",
-    base,
-    path.join(tmp, "Obsidian-Git", "h"),
-  );
-  assert.equal(bk.status, "rejected");
+  const r = await saveVaultNote(vault, note, "# 題\nx\n", base, null);
+  assert.equal(r.status, "rejected");
   assert.equal(fs.readFileSync(note, "utf8"), "# 題\n本文\n");
 });
 
-test("履歴は世代数の上限で古いものから消える", async () => {
-  const { vault, hist, note } = setup();
-  let text = "# 題\n0\n";
-  fs.writeFileSync(note, text);
-  for (let i = 1; i <= 53; i++) {
+test("書く前の控えが積めなければ書かない", async () => {
+  for (const pre of ["excluded", "not_committed", "unknown", "unavailable"] as const) {
+    const { vault, note } = setup();
+    const h = fakeHistory({ pre });
     const base = readVaultNote(vault, note).version;
-    text = `# 題\n${i}\n`;
-    const r = await saveVaultNote(vault, note, text, base, hist);
-    assert.equal(r.status, "saved");
+    const r = await saveVaultNote(vault, note, "# 題\nx\n", base, h);
+    assert.equal(r.status, "rejected", pre);
+    assert.equal(fs.readFileSync(note, "utf8"), "# 題\n本文\n", pre);
+    assert.deepEqual(
+      h.calls.map((c) => c.phase),
+      ["pre"],
+      pre,
+    );
   }
-  const d = fs.readdirSync(hist)[0];
-  assert.equal(fs.readdirSync(path.join(hist, d)).filter((n) => n.endsWith(".md")).length, 50);
 });
 
-test("BOM は保存後も残り、履歴は生バイトのまま", async () => {
+test("書いた後に履歴へ積めなければ元へ戻す(積めたか不明なら戻さず失敗と伝える)", async () => {
+  for (const post of ["excluded", "not_committed", "unavailable"] as const) {
+    const { vault, note } = setup();
+    const base = readVaultNote(vault, note).version;
+    const r = await saveVaultNote(vault, note, "# 題\nx\n", base, fakeHistory({ post }));
+    assert.equal(r.status, "rejected", post);
+    assert.equal(fs.readFileSync(note, "utf8"), "# 題\n本文\n", post);
+  }
+  const { vault, note } = setup();
+  const base = readVaultNote(vault, note).version;
+  const r = await saveVaultNote(vault, note, "# 題\nx\n", base, fakeHistory({ post: "unknown" }));
+  assert.equal(r.status, "rejected");
+  assert.equal(fs.readFileSync(note, "utf8"), "# 題\nx\n");
+});
+
+test("設定が無ければ resolveHistoryCommitter は null(編集は無効)", () => {
+  assert.equal(resolveHistoryCommitter({}), null);
+  assert.equal(
+    resolveHistoryCommitter({ TOPOS_CONFIRM_BOX_VAULT_HISTORY_CLI_DIR: "/nonexistent" }),
+    null,
+  );
+});
+
+test("BOM は保存後も残り、書く前の控えにも残る", async () => {
   const { vault, hist, note } = setup();
   fs.writeFileSync(
     note,
@@ -155,10 +183,8 @@ test("BOM は保存後も残り、履歴は生バイトのまま", async () => {
   const after = fs.readFileSync(note);
   assert.deepEqual([...after.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
   assert.equal(r.version, noteVersion(after));
-  const d = fs.readdirSync(hist)[0];
-  const snap = fs.readdirSync(path.join(hist, d)).find((n) => n.endsWith(".md")) as string;
   assert.deepEqual(
-    [...fs.readFileSync(path.join(hist, d, snap)).subarray(0, 3)],
+    [...Buffer.from(hist.calls[0].content, "utf8").subarray(0, 3)],
     [0xef, 0xbb, 0xbf],
   );
 });
@@ -172,15 +198,29 @@ test("単独の CR を含む入力でも混在ファイルにならない", asyn
   assert.equal(readVaultNote(vault, note).editable, true);
 });
 
-test("履歴の置き場がバックアップへの symlink なら拒否", async () => {
-  const { tmp, vault, note } = setup();
-  const backup = path.join(tmp, "Obsidian-Git");
-  fs.mkdirSync(backup);
-  const link = path.join(tmp, "histlink");
-  fs.symlinkSync(backup, link);
-  const base = readVaultNote(vault, note).version;
-  const r = await saveVaultNote(vault, note, "# 題\nx\n", base, link);
-  assert.equal(r.status, "rejected");
-  assert.equal(fs.readdirSync(backup).length, 0);
-  assert.equal(fs.readFileSync(note, "utf8"), "# 題\n本文\n");
-});
+const TOPOS_CLI_DIR = "/Users/user/repos/topos-ai-wt/paseo-history-cli";
+const hasCli = fs.existsSync(
+  path.join(TOPOS_CLI_DIR, "backend", "tools", "vault_history_commit.py"),
+);
+
+test(
+  "実CLI: Topos の履歴に、書く前の版と新しい版の2コミットが積まれる",
+  { skip: !hasCli },
+  async () => {
+    const { tmp, vault, note } = setup();
+    const gitDir = path.join(tmp, "g", "v.git");
+    const h = resolveHistoryCommitter({
+      TOPOS_CONFIRM_BOX_VAULT_HISTORY_CLI_DIR: TOPOS_CLI_DIR,
+      TOPOS_CONFIRM_BOX_VAULT_HISTORY_GIT_DIR: gitDir,
+    });
+    assert.ok(h);
+    const base = readVaultNote(vault, note).version;
+    const r = await saveVaultNote(vault, note, "# 題\n新しい\n", base, h);
+    assert.equal(r.status, "saved");
+    const show = (ref: string) =>
+      execFileSync("git", ["--git-dir", gitDir, "show", ref], { encoding: "utf8" });
+    assert.equal(show("HEAD:構想/a.md"), "# 題\n新しい\n");
+    assert.equal(show("HEAD~1:構想/a.md"), "# 題\n本文\n");
+    assert.match(show("--format=%B%n%an HEAD").split("\n").join(" "), /Topos-Actor: paseo/);
+  },
+);
