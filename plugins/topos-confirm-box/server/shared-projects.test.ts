@@ -4,6 +4,27 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  buildRecipients,
+  canWrite,
+  checkAttachAdd,
+  classifyFailure,
+  failureText,
+  formatBytes,
+  moveId,
+  opLabel,
+  parseAttachmentData,
+  parseConfig,
+  parseDetail,
+  parseNoteList,
+  parsePostResult,
+  parseProjectRows,
+  parseVersions,
+  recipientSummary,
+  splitMentions,
+  type SharedProjectApiInput,
+} from "../shared/shared-projects-api.js";
+import {
+  callApi,
   callTopos,
   fetchThread,
   listProjects,
@@ -279,4 +300,250 @@ test("投稿が時間切れなら『送れたか不明』と返す", async () =>
   const r = await postMessage(PID, "a", deps);
   assert.equal(r.ok, false);
   assert.match(String(r.message), /送れたか不明/);
+});
+
+// ── 許可リスト方式の汎用呼び出し(callApi) ───────────────────────────
+
+interface Seen {
+  url: string;
+  method: string;
+  body: string | undefined;
+}
+
+function recorder(res: () => Response) {
+  const seen: Seen[] = [];
+  const deps = {
+    load: () => OK,
+    fetchImpl: async (url: string, init: RequestInit) => {
+      seen.push({ url, method: String(init.method), body: init.body as string | undefined });
+      return res();
+    },
+  };
+  return { seen, deps };
+}
+
+test("callApi: 許可リスト外の操作・不正なID・不正な条件・不正な本文は送らない", async () => {
+  const { seen, deps } = recorder(() => json({}));
+  const bad: SharedProjectApiInput[] = [
+    { op: "constructor" },
+    { op: "../../admin" },
+    { op: "project", id: "zz" },
+    { op: "project", id: `${PID}/../x` },
+    { op: "removeMember", id: PID, uid: "a/b" },
+    { op: "list", query: { evil: "1" } },
+    { op: "list", query: { archived: "maybe" } },
+    { op: "project", id: PID, body: { x: 1 } },
+    { op: "rename", id: PID, body: "text" },
+    { op: "rename", id: PID, body: [1] },
+    { op: "noteVersion", id: PID, nid: PID, v: 0 },
+    { op: "noteVersion", id: PID, nid: PID, v: 1.5 },
+  ];
+  for (const input of bad) {
+    const r = await callApi(input, deps);
+    assert.equal(r.ok, false, JSON.stringify(input));
+    assert.equal(r.reason, "bad_request");
+  }
+  assert.equal(seen.length, 0);
+});
+
+test("callApi: メソッドとパスは固定の雛形から組み立てる(PUT/DELETE/クエリ)", async () => {
+  const { seen, deps } = recorder(() => json({ ok: true }));
+  await callApi({ op: "rename", id: PID, body: { name: "新" } }, deps);
+  await callApi({ op: "unarchive", id: PID }, deps);
+  await callApi(
+    { op: "removeMember", id: PID, uid: "hanako", query: { withdraw_copies: "false" } },
+    deps,
+  );
+  await callApi({ op: "list", query: { archived: "true" } }, deps);
+  await callApi({ op: "noteRestore", id: PID, nid: PID, v: 3 }, deps);
+  const got = seen.map((s) => `${s.method} ${s.url.replace("http://127.0.0.1:8777", "")}`);
+  assert.deepEqual(got, [
+    `PUT /api/family-projects/${PID}/name`,
+    `DELETE /api/family-projects/${PID}/archive`,
+    `DELETE /api/family-projects/${PID}/members/hanako?withdraw_copies=false`,
+    "GET /api/family-projects?archived=true",
+    `POST /api/family-projects/${PID}/shared-notes/${PID}/history/3/restore`,
+  ]);
+  assert.equal(seen[0].body, JSON.stringify({ name: "新" }));
+});
+
+test("callApi: 失敗の種類(旧鍵・閲覧のみ・413・404・時間切れ)を画面が出せる形で返す", async () => {
+  const cases: [number, string, string][] = [
+    [403, "scope_post_text_only", "scope"],
+    [403, "viewer_cannot_write", "viewer"],
+    [403, "author_only", "author_only"],
+    [413, "大きすぎます", "too_large"],
+    [404, "not_found", "not_found"],
+    [401, "x", "unauthorized"],
+    [500, "internal", "server"],
+  ];
+  for (const [status, detail, reason] of cases) {
+    const { deps } = recorder(() => json({ detail }, status));
+    const r = await callApi({ op: "post", id: PID, body: { text: "a", to: ["llm"] } }, deps);
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, reason);
+    assert.equal(r.httpStatus, status);
+    assert.equal(r.detail, detail);
+  }
+  const timeout = {
+    load: () => OK,
+    fetchImpl: async () => {
+      const e = new Error("t");
+      e.name = "TimeoutError";
+      throw e;
+    },
+  };
+  const t = await callApi({ op: "post", id: PID, body: { text: "a" } }, timeout);
+  assert.equal(!t.ok && t.reason, "timeout");
+  assert.match(String(!t.ok && t.message), /時間がかかっています/);
+});
+
+test("callApi: 添付はバイナリを許可MIMEだけデータURLにする", async () => {
+  const png = () =>
+    new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } });
+  const r1 = await callApi({ op: "attachment", id: PID, aid: PID }, recorder(png).deps);
+  assert.equal(r1.ok, true);
+  assert.deepEqual(r1.ok && r1.data, {
+    dataUrl: "data:image/png;base64,AQID",
+    mime: "image/png",
+    size: 3,
+  });
+  const html = () => new Response("<script>", { headers: { "content-type": "text/html" } });
+  const r2 = await callApi({ op: "attachment", id: PID, aid: PID }, recorder(html).deps);
+  assert.equal(r2.ok ? (r2.data as { mime: string }).mime : "", "application/octet-stream");
+});
+
+test("callApi: 添付は宣言サイズが上限超なら読まずに断る", async () => {
+  const big = () =>
+    new Response(new Uint8Array([1]), {
+      headers: { "content-type": "image/png", "content-length": String(26 * 1024 * 1024) },
+    });
+  const r = await callApi({ op: "attachment", id: PID, aid: PID }, recorder(big).deps);
+  assert.equal(!r.ok && r.reason, "too_large");
+});
+
+test("callApi: 本文のJSON文字列は1回だけ作り、そのまま送る", async () => {
+  const { seen, deps } = recorder(() => json({}));
+  await callApi({ op: "post", id: PID, body: { text: "あ" } }, deps);
+  assert.equal(seen[0].body, JSON.stringify({ text: "あ" }));
+});
+
+test("callApi: thread は件数→最新側の2回で取り、応答はそのまま返す", async () => {
+  const urls: string[] = [];
+  const deps = {
+    load: () => OK,
+    fetchImpl: async (url: string) => {
+      urls.push(url);
+      return json({ messages: [], latest_seq: 5, me: "me" });
+    },
+  };
+  const r = await callApi({ op: "thread", id: PID }, deps);
+  assert.equal(r.ok, true);
+  assert.equal(urls.length, 2);
+  assert.match(urls[1], /after=0&limit=100/);
+});
+
+test("callApi: 設定が無ければ unconfigured(取りに行かない)", async () => {
+  const r = await callApi(
+    { op: "list" },
+    {
+      load: () => ({ ok: false, status: "unconfigured", message: "x" }),
+      fetchImpl: async () => {
+        throw new Error("called");
+      },
+    },
+  );
+  assert.equal(r.status, "unconfigured");
+});
+
+// ── shared の純粋関数 ─────────────────────────────────────────────────
+
+test("宛先: 省略=AI宛、AIなし全員=[]、指名=['llm', ...]", () => {
+  assert.equal(buildRecipients({ ai: true, people: [] }), null);
+  assert.deepEqual(buildRecipients({ ai: false, people: [] }), []);
+  assert.deepEqual(buildRecipients({ ai: true, people: ["hanako"] }), ["llm", "hanako"]);
+  assert.deepEqual(buildRecipients({ ai: false, people: ["taro"] }), ["taro"]);
+  const members = [{ userId: "hanako", name: "花子", role: "member" as const, isCreator: false }];
+  assert.equal(recipientSummary({ ai: true, people: ["hanako"] }, members), "AI・花子");
+  assert.match(recipientSummary({ ai: false, people: [] }, members), /全員/);
+});
+
+test("@メンション分割: 長い名前を先に拾い、IDはindexに依存しない", () => {
+  const parts = splitMentions("@あい さん と @あ さん", ["あ", "あい", ""]);
+  const hits = parts.filter((p) => p.mention).map((p) => p.text);
+  assert.deepEqual(hits, ["@あい", "@あ"]);
+  assert.equal(new Set(parts.map((p) => p.id)).size, parts.length);
+});
+
+test("添付の検査・並べ替え・書込権・容量表示", () => {
+  const lim = { maxBytes: 1024, maxCount: 2 };
+  assert.equal(checkAttachAdd([], 100, lim), null);
+  assert.match(String(checkAttachAdd([{ size: 1 }, { size: 1 }], 1, lim)), /2件/);
+  assert.match(String(checkAttachAdd([], 2048, lim)), /1KB/);
+  assert.deepEqual(moveId(["a", "b", "c"], "b", -1), ["b", "a", "c"]);
+  assert.deepEqual(moveId(["a", "b", "c"], "a", -1), ["a", "b", "c"]);
+  assert.deepEqual(moveId(["a", "b", "c"], "c", 1), ["a", "b", "c"]);
+  const ms = [
+    { userId: "me", name: "あなた", role: "viewer" as const, isCreator: false },
+    { userId: "x", name: "x", role: "member" as const, isCreator: true },
+  ];
+  assert.equal(canWrite(ms, "me"), false);
+  assert.equal(canWrite(ms, "x"), true);
+  assert.equal(canWrite(ms, "nobody"), false);
+  assert.equal(formatBytes(5 * 1024 * 1024), "5.0MB");
+  assert.equal(formatBytes(2048), "2KB");
+});
+
+test("Topos 応答の読み取り: 形が違うものは捨てて落ちない", () => {
+  assert.equal(parseDetail(null), null);
+  const d = parseDetail({
+    id: PID,
+    name: "n",
+    created_by: "me",
+    members: [{ user_id: "me", display_name: "あなた", role: "viewer" }, 5],
+    overview_pending: true,
+  });
+  assert.equal(d?.members.length, 1);
+  assert.equal(d?.members[0].isCreator, true);
+  assert.equal(d?.overviewPending, true);
+  assert.deepEqual(
+    parseProjectRows({ projects: [{ id: PID, name: "a", member_count: 2 }, { id: "bad" }] }).map(
+      (r) => r.memberCount,
+    ),
+    [2],
+  );
+  const cfg = parseConfig({ attach: true, attach_limits: { max_bytes: 10, max_count: 2 } });
+  assert.deepEqual([cfg?.attach, cfg?.maxBytes, cfg?.maxCount], [true, 10, 2]);
+  const pr = parsePostResult(
+    {
+      message: { seq: 1, author: "me", text: "a" },
+      reply: { seq: 2, kind: "llm", author: "llm", text: "b" },
+      llm_error: "llm_failed",
+      finish_confirm: true,
+    },
+    "me",
+    {},
+  );
+  assert.equal(pr?.message?.mine, true);
+  assert.equal(pr?.reply?.ai, true);
+  assert.equal(pr?.llmError, "llm_failed");
+  assert.equal(pr?.finishConfirm, true);
+  assert.equal(parseNoteList({ notes: [{ id: PID, title: "概要" }, { id: "x" }] }).length, 1);
+  assert.equal(parseNoteList([{ id: PID, title: "概要" }])[0].overview, true);
+  assert.equal(
+    parseVersions({ versions: [{ v: 2, op: "restore", restored_from: 1 }, { op: "x" }] }).length,
+    1,
+  );
+  assert.equal(opLabel("append"), "AIが追記");
+  assert.equal(parseAttachmentData({ dataUrl: "javascript:1" }), null);
+});
+
+test("失敗の文言: 権限の理由は具体的に、日本語の説明があれば添える", () => {
+  assert.match(failureText("scope"), /この鍵では使えません/);
+  assert.match(failureText("viewer"), /閲覧のみ/);
+  assert.equal(failureText("too_large", "添付が大きすぎます"), "添付が大きすぎます");
+  assert.match(failureText("too_large", "too big"), /大きすぎる/);
+  assert.equal(failureText("???"), "失敗しました");
+  assert.equal(classifyFailure(403, "scope_post_text_only"), "scope");
+  assert.equal(classifyFailure(404, "attachments_disabled"), "disabled");
 });

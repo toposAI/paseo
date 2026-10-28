@@ -1,32 +1,29 @@
 /**
- * サイドバーの「共有プロジェクト」タブの中身(`SharedProjectsList`)と、押して開く画面(`SharedProjectView`)。
+ * サイドバーの「共有プロジェクト」タブの中身(`SharedProjectsList`)。押して開く画面は `shared-projects/ProjectView.tsx`。
  *
  * 参加している共有プロジェクトだけが出る(参加していないものは Topos 側が返さない。2026-10-27 ユーザー確認済み)。
  * 取得は Paseo のサーバー部が Topos の範囲つきトークンで行う(`server/shared-projects.ts`)。
  * 設定が無い/繋がらないときは、0件と区別して理由を行で出す。
+ * 作成・名前変更・アーカイブ・並べ替え・既読の後は、画面側の合図(onProjectsChanged)で一覧を取り直す。
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
+import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { Text, View } from "react-native";
+import { useRpc } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import {
-  POST_TEXT_MAX,
-  canPost,
   emptyProjectsLabel,
-  sharedProjectPostRpc,
-  sharedProjectReadRpc,
-  sharedProjectThreadRpc,
   sharedProjectsListRpc,
-  shortTime,
   totalUnread,
   unreadLabel,
-  type SharedMessage,
   type SharedProject,
 } from "../shared/shared-projects.js";
+import { onProjectsChanged } from "./shared-projects/api.js";
+import { SCREEN_ARCHIVED, SCREEN_NEW, SCREEN_ORDER } from "./shared-projects/ProjectView.js";
+
+export { SharedProjectView } from "./shared-projects/ProjectView.js";
 
 export const SHARED_PROJECT_SCREEN_ID = "shared-project";
 const POLL_MS = 60_000;
-const THREAD_POLL_MS = 15_000;
 
 type Status = "ok" | "unconfigured" | "error";
 
@@ -67,9 +64,12 @@ export function useSharedProjects(): SharedProjectsState {
         });
     void tick();
     const timer = setInterval(tick, POLL_MS);
+    // 画面側の変更(作成・既読・アーカイブ・並べ替え)をすぐ映す
+    const off = onProjectsChanged(() => void tick());
     return () => {
       alive = false;
       clearInterval(timer);
+      off();
     };
   }, [list]);
   return state;
@@ -88,26 +88,48 @@ function oneLine(s: string, max = 56): string {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
-const badgeStyle = { color: "#ffffff", fontSize: 10, fontWeight: "700" as const };
+const badgeStyle = { color: "#ffffff", fontSize: 12, fontWeight: "700" as const, lineHeight: 16 };
+// 未読は青、自分宛てのメンションがあれば赤。白文字が読めるコントラストにする
+const badgeBox = {
+  minWidth: 22,
+  paddingHorizontal: 6,
+  borderRadius: 9,
+  backgroundColor: "#2f6fed",
+  alignItems: "center" as const,
+};
+const badgeBoxMention = { ...badgeBox, backgroundColor: "#c0392b" };
+
+type OpenScreen = (input: { screenId: string; params?: Record<string, string> }) => void;
 
 /** 未読バッジ。要素は関数呼び出しで作る(JSX を prop に直書きしない lint 規約)。 */
-function UnreadBadge({ label }: { label: string }): ReactElement | undefined {
-  return label ? <Text style={badgeStyle}>{label}</Text> : undefined;
+function UnreadBadge({
+  label,
+  mention,
+}: {
+  label: string;
+  mention: boolean;
+}): ReactElement | undefined {
+  if (!label) return undefined;
+  return (
+    <View style={mention ? badgeBoxMention : badgeBox}>
+      <Text style={badgeStyle}>{label}</Text>
+    </View>
+  );
 }
 
-function ProjectRow({
-  project,
-  openScreen,
-}: {
-  project: SharedProject;
-  openScreen: (input: { screenId: string; params?: Record<string, string> }) => void;
-}) {
+function ProjectRow({ project, openScreen }: { project: SharedProject; openScreen: OpenScreen }) {
   const press = useCallback(
-    () => openScreen({ screenId: SHARED_PROJECT_SCREEN_ID, params: { id: project.id } }),
-    [openScreen, project.id],
+    () =>
+      openScreen({
+        screenId: SHARED_PROJECT_SCREEN_ID,
+        params: { id: project.id, name: project.name },
+      }),
+    [openScreen, project.id, project.name],
   );
+  // 自分宛てのメンションがあれば「@」を添える(件数は未読バッジ側)
   const badge = unreadLabel(project.unread);
-  const trailing = UnreadBadge({ label: badge });
+  const mention = project.mentions > 0;
+  const trailing = UnreadBadge({ label: badge && mention ? `@${badge}` : badge, mention });
   return (
     <SidebarRow
       id={`shared-project-${project.id}`}
@@ -119,11 +141,27 @@ function ProjectRow({
   );
 }
 
-export function SharedProjectsList({
+function ActionRow({
+  id,
+  icon,
+  label,
+  screen,
   openScreen,
 }: {
-  openScreen: (input: { screenId: string; params?: Record<string, string> }) => void;
+  id: string;
+  icon: "Plus" | "Archive" | "ArrowUpDown";
+  label: string;
+  screen: string;
+  openScreen: OpenScreen;
 }) {
+  const press = useCallback(
+    () => openScreen({ screenId: SHARED_PROJECT_SCREEN_ID, params: { id: screen } }),
+    [openScreen, screen],
+  );
+  return <SidebarRow id={id} icon={icon} label={label} onPress={press} />;
+}
+
+export function SharedProjectsList({ openScreen }: { openScreen: OpenScreen }) {
   // このタブを開いている間だけ取得する(表示中のみ購読)。
   const { projects, status, message } = useSharedProjects();
   return (
@@ -134,6 +172,15 @@ export function SharedProjectsList({
           icon="CircleAlert"
           label={oneLine(message || emptyProjectsLabel(status), 80)}
           onPress={noop}
+        />
+      ) : null}
+      {status === "ok" ? (
+        <ActionRow
+          id="shared-projects-new"
+          icon="Plus"
+          label="新しい共有プロジェクト"
+          screen={SCREEN_NEW}
+          openScreen={openScreen}
         />
       ) : null}
       {projects.map((p) => (
@@ -147,188 +194,26 @@ export function SharedProjectsList({
           onPress={noop}
         />
       ) : null}
+      {status === "ok" ? (
+        <>
+          {projects.length > 1 ? (
+            <ActionRow
+              id="shared-projects-order"
+              icon="ArrowUpDown"
+              label="並び順を変える"
+              screen={SCREEN_ORDER}
+              openScreen={openScreen}
+            />
+          ) : null}
+          <ActionRow
+            id="shared-projects-archived"
+            icon="Archive"
+            label="アーカイブ済み"
+            screen={SCREEN_ARCHIVED}
+            openScreen={openScreen}
+          />
+        </>
+      ) : null}
     </>
-  );
-}
-
-function MessageBubble({
-  m,
-  colors,
-}: {
-  m: SharedMessage;
-  colors: PluginHostProps["theme"]["colors"];
-}) {
-  const box = useMemo(
-    () => ({
-      alignSelf: m.mine ? ("flex-end" as const) : ("flex-start" as const),
-      maxWidth: "88%" as const,
-      backgroundColor: m.mine ? colors.surface2 : colors.surface1,
-      borderColor: colors.border,
-      borderWidth: 1,
-      borderRadius: 8,
-      padding: 8,
-      gap: 2,
-    }),
-    [m.mine, colors],
-  );
-  const head = useMemo(() => ({ color: colors.foregroundMuted, fontSize: 11 }), [colors]);
-  const body = useMemo(() => ({ color: colors.foreground, fontSize: 14 }), [colors]);
-  const to = m.to.length > 0 ? ` → ${m.to.join("・")}` : "";
-  const att = m.attachments > 0 ? `(添付${m.attachments}件はToposで)` : "";
-  return (
-    <View style={box}>
-      <Text style={head}>{`${m.author}${to} ・ ${shortTime(m.ts)}`}</Text>
-      <Text style={body}>{`${m.text}${att ? ` ${att}` : ""}`}</Text>
-    </View>
-  );
-}
-
-function threadHeader(status: Status | "loading", count: number, note: string): string {
-  if (status === "loading") return "読み込み中…";
-  if (status === "ok") return count === 0 ? "まだ投稿はありません" : "";
-  return note || emptyProjectsLabel(status);
-}
-
-export function SharedProjectView({
-  theme,
-  projectId,
-}: Pick<PluginHostProps, "theme"> & { projectId: string | null }) {
-  const thread = useRpc(sharedProjectThreadRpc);
-  const post = useRpc(sharedProjectPostRpc);
-  const markRead = useRpc(sharedProjectReadRpc);
-  const [messages, setMessages] = useState<SharedMessage[]>([]);
-  const [status, setStatus] = useState<Status | "loading">("loading");
-  const [note, setNote] = useState("");
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const c = theme.colors;
-  const seqRef = useRef(0);
-  const busyRef = useRef(false);
-
-  // プロジェクトが変わったら前の画面の内容・入力・状態を持ち越さない
-  useEffect(() => {
-    seqRef.current += 1;
-    busyRef.current = false;
-    setMessages([]);
-    setStatus("loading");
-    setNote("");
-    setText("");
-  }, [projectId]);
-
-  const reload = useCallback(async () => {
-    if (!projectId || busyRef.current) return;
-    busyRef.current = true;
-    const mySeq = seqRef.current;
-    try {
-      const r = await thread({ id: projectId });
-      if (mySeq !== seqRef.current) return; // 別プロジェクトへ切り替わった後の古い応答は捨てる
-      setStatus(r.status);
-      setNote(r.message ?? "");
-      if (r.status === "ok") {
-        setMessages(r.messages);
-        // 実際に表示した最新の投稿まで既読にする(読み込み中に届いた分は未読のまま。失敗しても表示は続ける)
-        if (r.unread > 0 && r.shownMaxSeq > 0) {
-          void markRead({ id: projectId, seq: r.shownMaxSeq }).catch(() => {});
-        }
-      }
-    } catch (e) {
-      if (mySeq !== seqRef.current) return;
-      setStatus("error");
-      setNote(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (mySeq === seqRef.current) busyRef.current = false;
-    }
-  }, [projectId, thread, markRead]);
-
-  useEffect(() => {
-    void reload();
-    const timer = setInterval(() => void reload(), THREAD_POLL_MS);
-    return () => clearInterval(timer);
-  }, [reload]);
-
-  const send = useCallback(async () => {
-    if (!projectId || sending || !canPost(text)) return;
-    setSending(true);
-    try {
-      const r = await post({ id: projectId, text });
-      if (r.ok) {
-        setText("");
-        setNote("");
-        await reload();
-      } else {
-        setNote(r.message ?? "");
-      }
-    } catch (e) {
-      setNote(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSending(false);
-    }
-  }, [projectId, sending, text, post, reload]);
-
-  const sendPress = useCallback(() => {
-    void send();
-  }, [send]);
-
-  const s = useMemo(
-    () => ({
-      root: { flex: 1, backgroundColor: c.surface0 },
-      list: { padding: 12, gap: 8 },
-      note: { color: c.foregroundMuted, fontSize: 12, paddingHorizontal: 12, paddingTop: 8 },
-      bar: {
-        flexDirection: "row" as const,
-        gap: 8,
-        padding: 8,
-        borderTopWidth: 1,
-        borderTopColor: c.border,
-        alignItems: "flex-end" as const,
-      },
-      input: {
-        flex: 1,
-        color: c.foreground,
-        borderColor: c.border,
-        borderWidth: 1,
-        borderRadius: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        minHeight: 40,
-        maxHeight: 140,
-      },
-      btn: {
-        paddingHorizontal: 14,
-        paddingVertical: 10,
-        borderRadius: 8,
-        backgroundColor: canPost(text) && !sending ? c.accent : c.surface2,
-      },
-      btnText: { color: "#ffffff", fontWeight: "700" as const },
-    }),
-    [c, text, sending],
-  );
-
-  if (!projectId) return <Text style={s.note}>プロジェクトが選ばれていません</Text>;
-  const header = threadHeader(status, messages.length, note);
-  return (
-    <View style={s.root}>
-      {header ? <Text style={s.note}>{header}</Text> : null}
-      <ScrollView contentContainerStyle={s.list}>
-        {messages.map((m) => (
-          <MessageBubble key={m.seq} m={m} colors={c} />
-        ))}
-      </ScrollView>
-      {status === "ok" && note ? <Text style={s.note}>{note}</Text> : null}
-      <View style={s.bar}>
-        <TextInput
-          style={s.input}
-          value={text}
-          onChangeText={setText}
-          placeholder="全員宛てに投稿(AIには聞きません)"
-          placeholderTextColor={c.foregroundMuted}
-          multiline
-          maxLength={POST_TEXT_MAX}
-        />
-        <Pressable style={s.btn} onPress={sendPress} disabled={!canPost(text) || sending}>
-          <Text style={s.btnText}>送信</Text>
-        </Pressable>
-      </View>
-    </View>
   );
 }
