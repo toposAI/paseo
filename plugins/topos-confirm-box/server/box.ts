@@ -119,6 +119,7 @@ function applyItem(items: Map<string, ConfirmBoxItem>, e: Record<string, unknown
     threadId: str(e.thread_id).trim() || null,
     stoppedCount: normalizeStoppedCount(e.stopped_count),
     ...reporterField(e.reporter),
+    ...imagesField(e.images),
     options,
     recommended: normalizeRecommended(e.recommended, options),
     state: "new",
@@ -227,6 +228,30 @@ function reporterField(value: unknown): { reporter?: string } {
   return name ? { reporter: name } : {};
 }
 
+const MAX_ITEM_IMAGES = 4;
+const MAX_ITEM_IMAGE_BYTES = 2 * 1024 * 1024;
+const ITEM_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+// data URI にそのまま差し込むので、base64 以外の文字(空白・記号)は受け付けない。
+const BASE64_CHARS = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/** Keeps at most 4 well-formed images; anything else is dropped rather than failing the item. */
+function imagesField(value: unknown): Pick<ConfirmBoxItem, "images"> {
+  if (!Array.isArray(value)) return {};
+  const images: Array<{ data: string; mimeType: (typeof ITEM_IMAGE_MIME_TYPES)[number] }> = [];
+  for (const entry of value) {
+    if (images.length >= MAX_ITEM_IMAGES) break;
+    if (!entry || typeof entry !== "object") continue;
+    const { data, mimeType } = entry as { data?: unknown; mimeType?: unknown };
+    if (typeof data !== "string" || data.length === 0 || !BASE64_CHARS.test(data)) continue;
+    if (typeof mimeType !== "string") continue;
+    if (!ITEM_IMAGE_MIME_TYPES.includes(mimeType as never)) continue;
+    // base64 is ~4/3 of the decoded size; reject anything that decodes past the cap.
+    if (Math.floor((data.length * 3) / 4) > MAX_ITEM_IMAGE_BYTES) continue;
+    images.push({ data, mimeType: mimeType as (typeof ITEM_IMAGE_MIME_TYPES)[number] });
+  }
+  return images.length > 0 ? { images } : {};
+}
+
 export interface PendingParseResult {
   items: ConfirmBoxItem[];
   decidedKeys: Set<string>;
@@ -277,6 +302,7 @@ export function parsePendingRecords(
       threadId: str(r.thread_id).trim() || null,
       stoppedCount: normalizeStoppedCount(r.stopped_count),
       ...reporterField(r.reporter),
+      ...imagesField(r.images),
       options,
       recommended: normalizeRecommended(r.recommended, options),
       state: "new",
