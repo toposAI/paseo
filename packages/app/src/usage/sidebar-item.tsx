@@ -18,6 +18,7 @@ import {
 import { StyleSheet } from "react-native-unistyles";
 import { builtinSidebarNavLabelKey } from "@/sidebar-nav/model";
 import { useUsagePreferences } from "./display";
+import { usageCopy } from "./copy";
 import { useUsageHostId } from "./hosts";
 import { useUsageHostReports } from "./queries";
 import { UsageSourceIcon } from "./source-icon";
@@ -33,20 +34,36 @@ import {
   type PinnedUsageSource,
 } from "./pinned";
 import { UsageModal } from "./usage-modal";
+import type { UsageReportEntry } from "./types";
+
+/** The usage host and its reports, the one read the sidebar's usage item goes by. */
+function useUsageHostUsage(): { serverId: string | null; reports: UsageReportEntry[] } {
+  const serverId = useUsageHostId();
+  return { serverId, reports: useUsageHostReports(serverId) };
+}
 
 /** Each summary window with data on the usage host, under its source; empty while none has. */
 function useUsageSummary(): readonly PinnedUsageSource[] {
   const { preferences } = useUsagePreferences();
-  const reports = useUsageHostReports(useUsageHostId());
-  return useMemo(() => resolvePinnedUsage(reports, preferences), [preferences, reports]);
+  const { serverId, reports } = useUsageHostUsage();
+  return useMemo(
+    () => resolvePinnedUsage(reports, preferences, new Date(), serverId),
+    [preferences, reports, serverId],
+  );
 }
 
 /** The summary split into one line per provider (Claude, then OpenCode Go). */
 function useUsageRows(): readonly PinnedUsageRow[] {
   const { preferences } = useUsagePreferences();
-  const reports = useUsageHostReports(useUsageHostId());
-  const sources = useMemo(() => resolvePinnedUsage(reports, preferences), [preferences, reports]);
-  return useMemo(() => splitPinnedUsageRows(sources, reports), [sources, reports]);
+  const { serverId, reports } = useUsageHostUsage();
+  const sources = useMemo(
+    () => resolvePinnedUsage(reports, preferences, new Date(), serverId),
+    [preferences, reports, serverId],
+  );
+  return useMemo(
+    () => splitPinnedUsageRows(sources, reports, preferences),
+    [sources, reports, preferences],
+  );
 }
 
 /** Whether the sidebar Usage item has anything to show. */
@@ -56,8 +73,8 @@ export function useHasUsageSummary(): boolean {
 
 /**
  * The sidebar footer's usage entry: one line per provider (Claude, then OpenCode Go), each with
- * its windows' percents, and nothing while no summary window has data, since the footer's Usage
- * icon already opens Usage. Pressing it opens the Usage modal.
+ * its windows' percents, and a dash that still opens Usage while no line has anything to show.
+ * Pressing it opens the Usage modal.
  */
 export function UsageSidebarItem() {
   const { t } = useTranslation();
@@ -114,10 +131,12 @@ export function useOpenSidebarUsage(): () => void {
 }
 
 function pinnedUsageLabel(label: string, rows: readonly PinnedUsageRow[]): string {
-  return `${label}: ${rows
-    .flatMap((row) => row.sources.flatMap((source) => source.windows))
-    .map((window) => window.label)
-    .join(", ")}`;
+  const windows = rows.flatMap((row) =>
+    row.sources.flatMap((source) => source.windows.map((window) => window.label)),
+  );
+  // Why a line has no current numbers belongs in the label too, since the sidebar shows no tooltip.
+  const problems = rows.flatMap((row) => (row.problem ? [usageCopy.fetchFailed(row.problem)] : []));
+  return `${label}: ${[...windows, ...problems].join(", ")}`;
 }
 
 function triggerStyle({ hovered }: PressableStateCallbackType & { hovered?: boolean }) {
@@ -181,11 +200,30 @@ function PinnedUsageRowView({ row }: { row: PinnedUsageRow }) {
     percentsWidth,
     windowCount: row.sources.reduce((count, source) => count + source.windows.length, 0),
   });
+  // A line with no numbers to keep says why in one short line, where the icon and percents would be.
+  if (row.sources.length === 0 && row.problem) {
+    return (
+      <View style={styles.row}>
+        <View style={styles.line} onLayout={handleAvailableLayout}>
+          <Text
+            style={styles.failedText}
+            numberOfLines={1}
+            testID="sidebar-usage-failed"
+          >{`! ${usageCopy.fetchFailed(row.problem)}`}</Text>
+        </View>
+      </View>
+    );
+  }
   return (
     <View style={styles.row}>
       <View style={styles.line} onLayout={handleAvailableLayout}>
         <PinnedUsageLine sources={row.sources} layout={layout} />
       </View>
+      {row.problem ? (
+        <Text style={styles.warning} testID="sidebar-usage-partial-failure">
+          {"!"}
+        </Text>
+      ) : null}
       <View
         style={styles.measure}
         pointerEvents="none"
@@ -235,7 +273,11 @@ function PinnedUsageLine({
               </View>
             ) : null}
             <Text
-              style={[styles.percent, layout === "meters" ? null : leadStyle]}
+              style={[
+                styles.percent,
+                window.stale ? styles.stalePercent : null,
+                layout === "meters" ? null : leadStyle,
+              ]}
               numberOfLines={1}
               testID={measuring ? undefined : "sidebar-usage-pinned-window"}
             >
@@ -247,6 +289,11 @@ function PinnedUsageLine({
           </Fragment>
         );
       })}
+      {source.staleAgo ? (
+        <Text style={styles.note} numberOfLines={1}>
+          {usageCopy.staleNote(source.staleAgo)}
+        </Text>
+      ) : null}
     </Fragment>
   ));
 }
@@ -328,5 +375,29 @@ const styles = StyleSheet.create((theme) => ({
   },
   windowLabel: {
     color: theme.colors.foregroundMuted,
+  },
+  // Numbers kept from a report that is no longer current read as secondary to the live ones.
+  stalePercent: {
+    color: theme.colors.foregroundMuted,
+  },
+  // How old the kept numbers are, after them; it never wraps, and shrinks before the percents do.
+  note: {
+    flexShrink: 1,
+    minWidth: 0,
+    marginLeft: theme.spacing[1],
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+  },
+  failedText: {
+    flexShrink: 1,
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+  },
+  // Some of a line's accounts have no current numbers; what they are is in its spoken label.
+  warning: {
+    flexShrink: 0,
+    marginLeft: theme.spacing[1],
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
   },
 }));

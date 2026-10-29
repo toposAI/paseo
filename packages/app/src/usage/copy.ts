@@ -37,4 +37,10 @@ export const usageCopy = {
   displayRemaining: "Remaining",
   showInSidebar: "Summary in sidebar",
   showInSidebarHint: "Pinned windows show in the sidebar footer",
+  /** Beside numbers kept from the last good report: "3h ago · not updating". */
+  staleNote: (ago: string) => `${ago} · not updating`,
+  /** On a line with no numbers to keep, in place of an icon: "Not updating: <reason>". */
+  fetchFailed: (reason: string) => `Not updating: ${reason}`,
+  /** On a line kept only from a host that no longer lists the account at all. */
+  noReport: "Not reporting usage",
 } as const;
