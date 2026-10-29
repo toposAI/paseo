@@ -24,6 +24,9 @@ const WEBP_BYTES = new Uint8Array([
 const GIF_BYTES = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 2]);
 
 const PUBLIC_LOOKUP: ChatImageLookup = async () => [{ address: "93.184.216.34", family: 4 }];
+const UNRESOLVABLE_LOOKUP: ChatImageLookup = async () => {
+  throw Object.assign(new Error("not found"), { code: "ENOTFOUND" });
+};
 
 function imageResponse(bytes: Uint8Array, init: ResponseInit = {}) {
   return new Response(new Uint8Array(bytes), {
@@ -421,6 +424,22 @@ describe("createPinnedFetch", () => {
     const fetchImpl = createPinnedFetch(lookupImpl);
     await expect(fetchImpl("https://internal.example:9/a.png", {})).rejects.toThrow(/non-public/);
     expect(lookupImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("fetchRemoteImage with the default transport", () => {
+  // HTTPS on port 9 (discard) to a local address: if the transport connected to
+  // the name before checking the answer, this would hang or answer instead.
+  it.each([
+    ["https://127.0.0.1:9/a.png", "private_address"],
+    ["https://localhost:9/a.png", "unresolved_host"],
+  ])("refuses %s before connecting", async (url, reason) => {
+    // `lookup` here only answers assertPublicHost; localhost did not resolve.
+    const result = await fetchRemoteImage(url, {
+      env: {},
+      lookup: url.includes("localhost") ? UNRESOLVABLE_LOOKUP : PUBLIC_LOOKUP,
+    });
+    expect(result).toEqual({ status: "error", reason });
   });
 });
 
