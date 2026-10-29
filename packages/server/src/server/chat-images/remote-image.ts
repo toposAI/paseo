@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { promises as fs } from "node:fs";
+import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
+import type { LookupFunction } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { PRIVATE_DIRECTORY_MODE, PRIVATE_FILE_MODE } from "../private-files.js";
 
 /**
@@ -42,7 +45,7 @@ export type ChatImageLookup = (
   options: { all: true },
 ) => Promise<Array<{ address: string; family: number }>>;
 
-type FetchImpl = (input: string, init: RequestInit) => Promise<Response>;
+type FetchImpl = (input: string, init: RequestInit) => Promise<ChatImageResponse>;
 type Now = () => number;
 
 export interface RemoteImageOptions {
@@ -228,6 +231,195 @@ export function isPublicIpAddress(input: string): boolean {
 
 async function defaultLookup(host: string): Promise<Array<{ address: string; family: number }>> {
   return await lookup(host, { all: true });
+}
+
+interface ResolvedAddress {
+  address: string;
+  family: number;
+}
+
+/** Lower-cased, brackets and the trailing root dot removed (`example.com.` === `example.com`). */
+function normalizeHostname(hostname: string): string {
+  return hostname
+    .replace(/^\[|\]$/g, "")
+    .toLowerCase()
+    .replace(/\.$/, "");
+}
+
+/**
+ * Resolves the connection targets for a host so that the name is resolved only
+ * once: the address check and the socket connect to the same answers.
+ *
+ * Checking a name with `lookup()` and then handing the name to `fetch()` would
+ * leave a DNS-rebinding gap (the second resolution could answer a private
+ * address). Callers connect to the pinned address and send the original host
+ * name as `Host`/SNI, so virtual hosting and certificate checks are unchanged.
+ * Literal IPs are used as they are (no name to rebind).
+ */
+export function createPinnedLookup(
+  lookupImpl: ChatImageLookup,
+): (hostname: string, options: { all: true }) => Promise<ResolvedAddress[]> {
+  const cache = new Map<string, Promise<ResolvedAddress[]>>();
+  return (hostname, options) => {
+    const normalized = normalizeHostname(hostname);
+    if (isIP(normalized)) {
+      return Promise.resolve([{ address: normalized, family: isIP(normalized) as 4 | 6 }]);
+    }
+    const cached = cache.get(normalized);
+    if (cached) {
+      return cached;
+    }
+    const pending = (async () => {
+      try {
+        const addresses = await lookupImpl(normalized, options);
+        // Refuse when *any* answer is non-public (fail closed on mixed answers).
+        const unsafe = addresses.find(({ address }) => !isPublicIpAddress(address));
+        if (unsafe) {
+          throw Object.assign(new Error(`non-public address for ${normalized}`), {
+            // `assertPublicHost` has already reported private/unresolved hosts by
+            // the time this can fire, so the result is unchanged either way.
+            code: "ENOTFOUND",
+          });
+        }
+        return addresses;
+      } catch (error) {
+        // Only successful answers are kept, so a transient DNS failure is retried
+        // on the next request instead of failing until the process restarts.
+        cache.delete(normalized);
+        throw error;
+      }
+    })();
+    cache.set(normalized, pending);
+    return pending;
+  };
+}
+
+type LookupCallback = (
+  error: (Error & { code?: string }) | null,
+  address?: string | ResolvedAddress[],
+  family?: number,
+) => void;
+
+/** Adapts a multi-answer lookup to Node's `LookupFunction` (one connection target per socket). */
+function connectLookup(lookupImpl: ChatImageLookup): LookupFunction {
+  return ((hostname: string, options: unknown, callback: LookupCallback) => {
+    const wantsAll =
+      typeof options === "object" &&
+      options !== null &&
+      (options as { all?: unknown }).all === true;
+    const answer = async (): Promise<void> => {
+      try {
+        const addresses = await lookupImpl(hostname, { all: true });
+        const first = addresses[0];
+        if (!first) {
+          callback(Object.assign(new Error(`no address for ${hostname}`), { code: "ENOTFOUND" }));
+        } else if (wantsAll) {
+          callback(null, addresses);
+        } else {
+          callback(null, first.address, first.family);
+        }
+      } catch (error) {
+        callback(error as Error);
+      }
+    };
+    void answer();
+  }) as LookupFunction;
+}
+
+function headerPairs(headers: NodeJS.Dict<string | string[]>): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  for (const [name, value] of Object.entries(headers)) {
+    if (value === undefined) continue;
+    for (const single of Array.isArray(value) ? value : [value]) {
+      pairs.push([name, single]);
+    }
+  }
+  return pairs;
+}
+
+/** Just the parts of `Response` this module reads, so the pinned transport can stand in for fetch. */
+export interface ChatImageResponse {
+  status: number;
+  ok: boolean;
+  headers: Headers;
+  body: ReadableStream<Uint8Array> | null;
+}
+
+function requestPinned(
+  url: URL,
+  lookupImpl: ChatImageLookup,
+  init: RequestInit,
+): Promise<ChatImageResponse> {
+  return new Promise<ChatImageResponse>((resolve, reject) => {
+    const request = httpsRequest(
+      {
+        method: init.method ?? "GET",
+        hostname: url.hostname.replace(/^\[|\]$/g, ""),
+        port: url.port || 443,
+        path: `${url.pathname}${url.search}`,
+        headers: Object.fromEntries(new Headers(init.headers).entries()),
+        // The socket connects to an address that was just checked, not to a
+        // fresh resolution of the name (see createPinnedLookup).
+        lookup: connectLookup(lookupImpl),
+        ...(init.signal ? { signal: init.signal } : {}),
+      },
+      (incoming) => {
+        const status = incoming.statusCode ?? 0;
+        resolve({
+          status,
+          ok: status >= 200 && status < 300,
+          headers: new Headers(headerPairs(incoming.headers)),
+          body: Readable.toWeb(incoming) as ReadableStream<Uint8Array>,
+        });
+      },
+    );
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+/** Rejects with `signal`'s reason as soon as it aborts (`dns.lookup` does not take a signal). */
+function withSignal<T>(promise: Promise<T>, signal: AbortSignal | null | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    const settle = async (): Promise<void> => {
+      try {
+        resolve(await promise);
+      } catch (error) {
+        reject(error as Error);
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+      }
+    };
+    void settle();
+  });
+}
+
+/**
+ * Default transport: resolves once, checks the answers, then connects to the
+ * checked address. `fetch()` cannot take a lookup function, so the request goes
+ * through `https.request` directly.
+ */
+export function createPinnedFetch(lookupImpl: ChatImageLookup): FetchImpl {
+  const pinned = createPinnedLookup(lookupImpl);
+  return async (input, init) => {
+    // Malformed input is a fetch-shaped failure, not a crash inside the renderer proxy.
+    let url: URL;
+    try {
+      url = new URL(input);
+    } catch {
+      throw new TypeError(`invalid URL ${input}`);
+    }
+    // Throws (private address / unresolvable) before any socket is opened. The
+    // signal is forwarded so the connection timeout also covers DNS.
+    const addresses = await withSignal(pinned(url.hostname, { all: true }), init.signal);
+    return await requestPinned(url, async () => addresses, init);
+  };
 }
 
 /** `PASEO_CHAT_IMAGES=off` makes the daemon decline every proxy request (kill switch). */
@@ -529,7 +721,7 @@ export async function assertPublicHost(
   return { ok: true };
 }
 
-function cancelBody(response: Response): void {
+function cancelBody(response: ChatImageResponse): void {
   void response.body?.cancel().catch(() => undefined);
 }
 
@@ -537,7 +729,7 @@ function failure(reason: string): ChatImageFetchResult {
   return { status: "error", reason };
 }
 
-function declaredContentType(response: Response): string {
+function declaredContentType(response: ChatImageResponse): string {
   return (response.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
 }
 
@@ -547,7 +739,7 @@ type InspectedResponse =
   | { kind: "error"; result: ChatImageFetchResult };
 
 /** Checks status, redirect and the declared headers before the body is read. */
-function inspectResponse(response: Response, url: URL, hop: number): InspectedResponse {
+function inspectResponse(response: ChatImageResponse, url: URL, hop: number): InspectedResponse {
   if (isRedirectStatus(response.status)) {
     cancelBody(response);
     const location = response.headers.get("location");
@@ -582,7 +774,7 @@ function inspectResponse(response: Response, url: URL, hop: number): InspectedRe
 
 /** Reads the body within the size cap and checks it really is one of the allowed image types. */
 async function readImageResponse(
-  response: Response,
+  response: ChatImageResponse,
   declared: string,
 ): Promise<ChatImageFetchResult> {
   const body = await readBody(response.body, CHAT_IMAGE_MAX_BYTES);
@@ -605,14 +797,14 @@ async function readImageResponse(
 async function requestImage(
   url: URL,
   fetchImpl: FetchImpl,
-): Promise<{ response: Response } | { result: ChatImageFetchResult }> {
+): Promise<{ response: ChatImageResponse } | { result: ChatImageFetchResult }> {
   try {
-    const response = await fetchImpl(url.toString(), {
+    const response = (await fetchImpl(url.toString(), {
       method: "GET",
       redirect: "manual",
       signal: AbortSignal.timeout(CHAT_IMAGE_TIMEOUT_MS),
       headers: { accept: "image/*", "user-agent": CHAT_IMAGE_USER_AGENT },
-    });
+    })) as ChatImageResponse;
     return { response };
   } catch (error) {
     return {
@@ -635,8 +827,8 @@ export async function fetchRemoteImage(
   if (isChatImageProxyDisabled(env)) {
     return { status: "direct", reason: "disabled" };
   }
-  const fetchImpl: FetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
   const lookupImpl: ChatImageLookup = options.lookup ?? defaultLookup;
+  const fetchImpl: FetchImpl = options.fetchImpl ?? createPinnedFetch(lookupImpl);
 
   let current: URL;
   try {

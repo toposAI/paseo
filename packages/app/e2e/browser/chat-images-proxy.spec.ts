@@ -51,7 +51,9 @@ test("a remote chat image is fetched by the daemon, not by the device", async ({
 
   // The daemon refuses the unreachable host, and the message says so instead of
   // leaving a broken image behind.
-  await expect(page.getByText("画像が利用できません").first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Image preview unavailable.").first()).toBeVisible({
+    timeout: 30_000,
+  });
   await page.waitForTimeout(1_500);
   expect(imageRequests).toEqual([]);
 });

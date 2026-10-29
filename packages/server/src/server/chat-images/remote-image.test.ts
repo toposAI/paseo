@@ -6,6 +6,8 @@ import {
   CHAT_IMAGE_MAX_BYTES,
   assertPublicHost,
   createChatImageRequestHandler,
+  createPinnedFetch,
+  createPinnedLookup,
   createRemoteImageFileCache,
   fetchRemoteImage,
   isConnectionFailure,
@@ -380,6 +382,45 @@ describe("fetchRemoteImage", () => {
       ok: false,
       reason: "unresolved_host",
     });
+  });
+});
+
+describe("createPinnedLookup", () => {
+  it("resolves a name once so the check and the connect see the same answer", async () => {
+    const lookupImpl = vi.fn<ChatImageLookup>(async () => [
+      { address: "93.184.216.34", family: 4 },
+    ]);
+    const pinned = createPinnedLookup(lookupImpl);
+    await pinned("example.com", { all: true });
+    await pinned("EXAMPLE.com.", { all: true });
+    expect(lookupImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a host with any non-public answer", async () => {
+    const pinned = createPinnedLookup(async () => [
+      { address: "93.184.216.34", family: 4 },
+      { address: "10.0.0.5", family: 4 },
+    ]);
+    await expect(pinned("mixed.example", { all: true })).rejects.toThrow(/non-public/);
+  });
+
+  it("uses a literal address without asking DNS", async () => {
+    const lookupImpl = vi.fn<ChatImageLookup>(async () => []);
+    const pinned = createPinnedLookup(lookupImpl);
+    await expect(pinned("93.184.216.34", { all: true })).resolves.toEqual([
+      { address: "93.184.216.34", family: 4 },
+    ]);
+    expect(lookupImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("createPinnedFetch", () => {
+  it("never opens a connection when the name resolves to a private address", async () => {
+    const lookupImpl = vi.fn<ChatImageLookup>(async () => [{ address: "127.0.0.1", family: 4 }]);
+    // Port 9 (discard) is reachable in neither case, so this proves no socket is attempted.
+    const fetchImpl = createPinnedFetch(lookupImpl);
+    await expect(fetchImpl("https://internal.example:9/a.png", {})).rejects.toThrow(/non-public/);
+    expect(lookupImpl).toHaveBeenCalledTimes(1);
   });
 });
 
