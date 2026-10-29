@@ -410,8 +410,7 @@ export function useAssistantImage({
   const fileLocated = useAttachmentAcquisition(fileAcquisition);
   const dataImageAttachment = useAttachmentAcquisition(dataImageAcquisition);
   const located = fileLocated.status === "loaded" ? fileLocated.located : null;
-  const fileAttachment = located?.kind === "attachment" ? located.attachment : null;
-  const remoteDirectUri = located?.kind === "direct" ? located.uri : null;
+  const fileAttachment = located?.attachment ?? null;
   const filePreview = usePreviewUrl(fileAttachment);
   const dataImagePreview = usePreviewUrl(
     dataImageAttachment.status === "loaded" && dataImageAttachment.located.kind === "attachment"
@@ -421,7 +420,7 @@ export function useAssistantImage({
   const directUri = resolution?.kind === "direct" && !dataImage ? resolution.uri : null;
   const preview = dataImage ? dataImagePreview : filePreview;
   const previewUri = preview.status === "loaded" ? preview.uri : null;
-  const uri = directUri ?? remoteDirectUri ?? previewUri;
+  const uri = directUri ?? previewUri;
   const cachedAspectRatio = useMemo(
     () => getAssistantImageMetadata({ source, workspaceRoot, serverId })?.aspectRatio ?? null,
     [serverId, source, workspaceRoot],

@@ -131,30 +131,24 @@ describe("assistant image file acquisition", () => {
       expect(port.persisted[0]?.fileName).toBe("image.png");
     });
 
-    it("loads the URL directly when the daemon declines to proxy", async () => {
+    it("reports unavailable when the proxy is disabled instead of loading the URL", async () => {
       const port = new MemoryFileAcquisitionPort();
       port.chatImageResult = { status: "direct", reason: "disabled" };
       const acquisition = createAssistantImageFileAcquisition({ ...remote(), port });
-      await expect(acquisition?.locate()).resolves.toEqual({
-        kind: "direct",
-        uri: "https://cdn.example.com/photos/product-1.png",
-      });
+      await expect(acquisition?.locate()).rejects.toThrow("Image unavailable");
       expect(port.persisted).toHaveLength(0);
     });
 
-    it("falls back to direct when an old daemon rejects the request", async () => {
+    it("reports unavailable when an old daemon rejects the request", async () => {
       const port = new MemoryFileAcquisitionPort();
       port.chatImageResult = new Error("Unknown request type chat_image_request");
       const acquisition = createAssistantImageFileAcquisition({ ...remote(), port });
-      await expect(acquisition?.locate()).resolves.toMatchObject({ kind: "direct" });
+      await expect(acquisition?.locate()).rejects.toThrow("Image unavailable");
     });
 
-    it("falls back to direct without a connection", async () => {
+    it("reports unavailable without a connection", async () => {
       const acquisition = createAssistantImageFileAcquisition({ ...remote(), port: null });
-      await expect(acquisition?.locate()).resolves.toEqual({
-        kind: "direct",
-        uri: "https://cdn.example.com/photos/product-1.png",
-      });
+      await expect(acquisition?.locate()).rejects.toThrow("Image unavailable");
     });
 
     it("throws the unavailable message when the fetch fails", async () => {

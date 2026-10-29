@@ -25,9 +25,13 @@
 2. `packages/server/src/server/chat-images/remote-image.ts`(新規)
    - `fetchRemoteImage(url)` → `{status:"ok", bytes, mimeType}` | `{status:"direct", reason}` | `{status:"error", reason}`
    - 画面で読んでよい場所の上限 = この関数だけが外部へ出る。Vault やホームのパスには触れない。
-   - https のみ。`PASEO_CHAT_IMAGES=off` なら `direct`(クライアントは従来どおり直接表示=戻し道)。
+   - https のみ。`PASEO_CHAT_IMAGES=off` なら `direct`(代理しない)。クライアントはこれを表示不可として扱う
+     (端末が外部URLを取りに行く道は塞いである)。戻すときは旧ビルドへ戻す。
    - ホスト名は DNS で全アドレス解決し、プライベート/ループバック/リンクローカル/ULA/CGNAT/`::ffff:` マップを拒否。
-   - `fetch` は `AbortSignal.timeout(10_000)`、`redirect:"manual"` で最大3回(各ホップを再検査)。
+   - **検査したアドレスへ実際に接続する**(`createPinnedFetch`): 解決は1回だけ、公共アドレス以外が混ざれば拒否し、
+     その同じアドレスへ `node:https` の `lookup` 差し替えで接続する(SNI/Host は元のホスト名のまま)。
+     DNS 再解決によるすり替え(DNSリバインディング)の隙間を閉じるため。解決結果は成功分のみプロセス内で再利用し、失敗は捨てる。
+   - タイムアウトは DNS 解決を含む10秒(`AbortSignal.timeout`)で、`redirect:"manual"` により最大3回(各ホップを再検査)。
    - `accept: image/*`、UA は一般的なブラウザ相当。本文はストリームで読み **5MB を超えたら中断**。
    - Content-Type は png/jpeg/webp/gif のみ + **先頭バイトで再検査**(宣言だけ信じない)。
    - キャッシュ: `$PASEO_HOME/chat-images/<sha256(url)>.<ext>` + 同名 `.json`(url,mime,size,fetchedAt)。30日で失効。書込時に最大50件へ剪定。ワークスペース外に置く。
@@ -40,9 +44,9 @@
    - `assistant-image-source.ts`: `^https?://` → `{kind:"remote", url}`。
    - `assistant-image/file-acquisition.ts`: `kind:"remote"` 用の取得を追加(鍵は url)。
      - `ok` → 既存の `persist` に流す。
-     - `direct` → そのまま `{uri:url}` で直接表示(従来動作)。
-     - `error` → 取得失敗として扱い、既存の `unavailableMessage` 表示に落とす。
-     - デーモンが新しい要求を知らない/失敗する場合も `direct` に倒す(古いデーモンとの互換)。
+     - `direct`(代理無効・到達不可)/`error`(上限・拒否)/要求自体の失敗/未接続 → **すべて表示不可**
+       (`unavailableMessage`)。端末が外部URLを直接読みに行く道は残さない(2026-10-29 変更)。
+       古いデーモンに繋いだ場合も画像は出ないが、端末の外部アクセスは起きない。
    - `use-assistant-image.ts`: port に `fetchChatImage` を足して配線。
    - `packages/client/src/daemon-client.ts`: `fetchChatImage(url)` を `requestFileExplorer` と同じ形で追加。
 
@@ -59,3 +63,21 @@
 
 - 画像の内容判定(不適切画像の除外)。取得元URLはAIが選ぶ。
 - 確認箱の項目本文のMarkdown化(案Cは画像フィールドの追加と表示のみ)。
+
+## 案A: 窓口Bへの依頼に付いた画像を窓口へ画像として渡す(2026-10-29)
+
+- 窓口B(`window_b_request.py`)が受け取る添付は `ATTACH_DIR` 配下の写しだけを読む(任意のホーム/リポジトリのパスは読まない)。
+- 写しは本文に `![](…)` かファイル一覧として載せ、窓口(受け取った側のスレ)はその画像を `Read` して内容を確認できる。
+  家族の写真なので、画像のパス・中身をログやVault、子スレへ渡さない(窓口Bのコピーは子スレに渡さない)。
+
+## 案C: 確認箱の項目に画像を出す(2026-10-29)
+
+- プロトコル: `ConfirmBoxItemSchema.images = [{data: base64, mimeType: "image/png"|"image/jpeg"|"image/webp"|"image/gif"}]`(任意)。
+- プラグイン `topos-confirm-box` は **最大4枚・1枚2MiB**、形式は宣言と先頭バイトの両方を検査し、不正な1枚だけを落とす。
+  画面は 96×96 の data URI サムネイル(端末は外部へ取りに行かない)。
+- 投函側(ToposAI): `scripts/confirm_box_deposit.py --image <画像ファイル>`(推奨)/ `notify_box.py` の `images`。
+
+## 残っている制約(既知)
+
+- 画像の内容判定はしない。取得元URLはAIが選ぶ。失敗した画像は本文にalt文として残る(`Image preview unavailable.`)。
+- 到達不能(`unreachable`)は誤って「表示不可」で固定されうる(取得結果は成功分だけキャッシュするので、次の描画時に再試行)。

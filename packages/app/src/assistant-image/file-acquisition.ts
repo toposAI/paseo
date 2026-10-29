@@ -10,13 +10,14 @@ import {
 } from "./acquisition-cache";
 
 /**
- * Acquisition outcome for one assistant image. `directUri` is set when the
- * daemon declines to proxy (old daemon, or proxy disabled) and the image is
- * loaded straight from its URL, matching the pre-proxy behaviour.
+ * Acquisition outcome for one assistant image. Remote URLs only ever produce a
+ * persisted attachment: when the daemon cannot fetch one the image is reported
+ * unavailable rather than loaded from the third-party URL by the device.
  */
-export type AssistantImageLocated =
-  | { kind: "attachment"; attachment: AttachmentMetadata }
-  | { kind: "direct"; uri: string };
+export interface AssistantImageLocated {
+  kind: "attachment";
+  attachment: AttachmentMetadata;
+}
 
 export interface AssistantImageFileAcquisitionPort {
   readFile(cwd: string, path: string): Promise<FileReadResult>;
@@ -69,12 +70,9 @@ async function locateRemoteImage(input: {
     result = await input.port.fetchChatImage(input.url);
   } catch {
     // Old daemons reject unknown requests and timeouts surface here too.
-    return { kind: "direct", uri: input.url };
+    throw new Error(input.unavailableMessage);
   }
-  if (result.status === "direct") {
-    return { kind: "direct", uri: input.url };
-  }
-  if (result.status === "error") {
+  if (result.status !== "ok") {
     throw new Error(input.unavailableMessage);
   }
   return {
@@ -111,8 +109,7 @@ export function createAssistantImageFileAcquisition(input: {
       }),
       locate: async () => {
         if (!port) {
-          // No connection yet: behave like the daemon declining the proxy.
-          return { kind: "direct", uri: resolution.url };
+          throw new Error(input.unavailableMessage);
         }
         return await locateRemoteImage({
           port,
