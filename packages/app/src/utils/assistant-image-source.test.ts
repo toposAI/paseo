@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import { resolveAssistantImageSource } from "./assistant-image-source";
 
 describe("resolveAssistantImageSource", () => {
-  it("passes through direct image URIs", () => {
+  it("routes remote images through the daemon but keeps inline URIs direct", () => {
     expect(resolveAssistantImageSource({ source: "https://example.com/image.png" })).toEqual({
-      kind: "direct",
-      uri: "https://example.com/image.png",
+      kind: "remote",
+      url: "https://example.com/image.png",
+    });
+    expect(resolveAssistantImageSource({ source: "http://example.com/image.png" })).toEqual({
+      kind: "remote",
+      url: "http://example.com/image.png",
     });
     expect(resolveAssistantImageSource({ source: "data:image/png;base64,abc" })).toEqual({
       kind: "direct",

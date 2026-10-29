@@ -2769,6 +2769,12 @@ export const FileExplorerRequestSchema = z.object({
   maxBytes: z.number().int().positive().optional(),
 });
 
+export const ChatImageRequestSchema = z.object({
+  type: z.literal("chat_image_request"),
+  url: z.string(),
+  requestId: z.string(),
+});
+
 export const FileVersionSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("ready"),
@@ -3358,6 +3364,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   WorkspaceClearAttentionRequestSchema,
   WorkspaceMarkUnreadRequestSchema,
   FileExplorerRequestSchema,
+  ChatImageRequestSchema,
   FileSubscribeRequestSchema,
   FileUnsubscribeRequestSchema,
   FileWriteRequestSchema,
@@ -6001,6 +6008,18 @@ export const FileExplorerResponseSchema = z.object({
   }),
 });
 
+export const ChatImageResponseSchema = z.object({
+  type: z.literal("chat_image_response"),
+  payload: z.object({
+    requestId: z.string(),
+    url: z.string(),
+    status: z.enum(["ok", "direct", "error"]),
+    data: z.string().optional(),
+    mimeType: z.string().optional(),
+    reason: z.string().optional(),
+  }),
+});
+
 export const FileSubscribeResponseSchema = z.object({
   type: z.literal("fs.file.subscribe.response"),
   payload: z.object({
@@ -7019,6 +7038,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   PaseoWorktreeArchiveResponseSchema,
   CreatePaseoWorktreeResponseSchema,
   FileExplorerResponseSchema,
+  ChatImageResponseSchema,
   FileSubscribeResponseSchema,
   FileUnsubscribeResponseSchema,
   FileWriteResponseSchema,
@@ -7458,6 +7478,8 @@ export type WorkspaceClearAttentionRequest = z.infer<typeof WorkspaceClearAttent
 export type WorkspaceMarkUnreadRequest = z.infer<typeof WorkspaceMarkUnreadRequestSchema>;
 export type FileExplorerRequest = z.infer<typeof FileExplorerRequestSchema>;
 export type FileExplorerResponse = z.infer<typeof FileExplorerResponseSchema>;
+export type ChatImageRequest = z.infer<typeof ChatImageRequestSchema>;
+export type ChatImageResponse = z.infer<typeof ChatImageResponseSchema>;
 export type FileVersion = z.infer<typeof FileVersionSchema>;
 export type FileSubscribeRequest = z.infer<typeof FileSubscribeRequestSchema>;
 export type FileSubscribeResponse = z.infer<typeof FileSubscribeResponseSchema>;

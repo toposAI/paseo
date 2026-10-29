@@ -549,6 +549,11 @@ export interface FileReadResult {
   modifiedAt: string;
   revision?: string;
 }
+/** Result of proxying a remote chat image through the daemon. */
+export type ChatImageFetchResult =
+  | { status: "ok"; bytes: Uint8Array; mimeType: string }
+  | { status: "direct"; reason?: string }
+  | { status: "error"; reason: string };
 export interface FileUploadInput {
   fileName: string;
   mimeType: string;
@@ -4807,6 +4812,33 @@ export class DaemonClient {
       this.pendingBinaryFileReads.delete(resolvedRequestId);
       this.activeBinaryFileTransfers.delete(resolvedRequestId);
     }
+  }
+
+  /**
+   * Asks the daemon to fetch a remote image on the client's behalf. Throws when
+   * the daemon does not know the request (old daemon), the response is
+   * malformed, or the request times out; callers treat that as "direct".
+   */
+  async fetchChatImage(url: string, requestId?: string): Promise<ChatImageFetchResult> {
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "chat_image_request", url },
+      responseType: "chat_image_response",
+    });
+    if (payload.status === "ok") {
+      if (typeof payload.data !== "string" || typeof payload.mimeType !== "string") {
+        throw new Error("Invalid chat image response.");
+      }
+      return {
+        status: "ok",
+        bytes: decodeBase64ToBytes(payload.data),
+        mimeType: payload.mimeType,
+      };
+    }
+    if (payload.status === "direct") {
+      return { status: "direct", ...(payload.reason ? { reason: payload.reason } : {}) };
+    }
+    return { status: "error", reason: payload.reason ?? "error" };
   }
 
   observeFile(input: {

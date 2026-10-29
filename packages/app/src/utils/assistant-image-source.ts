@@ -3,6 +3,7 @@ import { resolveFilePreviewReadTarget } from "@/file-explorer/preview-target";
 
 export type AssistantImageSourceResolution =
   | { kind: "direct"; uri: string }
+  | { kind: "remote"; url: string }
   | { kind: "file_rpc"; cwd: string; path: string };
 
 export function resolveAssistantImageSource(input: {
@@ -14,7 +15,12 @@ export function resolveAssistantImageSource(input: {
     return null;
   }
 
-  if (/^(https?:|data:|blob:)/i.test(source)) {
+  // Remote images go through the daemon so the device never talks to third parties.
+  if (/^https?:\/\//i.test(source)) {
+    return { kind: "remote", url: source };
+  }
+
+  if (/^(data:|blob:)/i.test(source)) {
     return { kind: "direct", uri: source };
   }
 

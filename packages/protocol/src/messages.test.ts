@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import {
   AgentTimelineItemPayloadSchema,
+  ChatImageRequestSchema,
+  ChatImageResponseSchema,
   FileExplorerRequestSchema,
   PaseoWorktreeArchiveRequestSchema,
   parseServerInfoStatusPayload,
@@ -435,6 +437,50 @@ describe("file explorer request compatibility", () => {
       requestId: "req-new",
       acceptBinary: true,
     });
+  });
+});
+
+describe("chat image request and response", () => {
+  test("request parses and round-trips through the inbound union", () => {
+    const request = {
+      type: "chat_image_request",
+      url: "https://example.com/item.png",
+      requestId: "req-image",
+    };
+    expect(ChatImageRequestSchema.parse(request)).toEqual(request);
+    expect(SessionInboundMessageSchema.parse(request)).toEqual(request);
+    expect(SessionInboundMessageSchema.safeParse({ ...request, url: undefined }).success).toBe(
+      false,
+    );
+  });
+
+  test("response parses for ok, direct and error statuses", () => {
+    const base = {
+      type: "chat_image_response",
+      payload: { requestId: "req-image", url: "https://example.com/item.png" },
+    };
+    const ok = {
+      ...base,
+      payload: { ...base.payload, status: "ok", data: "iVBORw0KGgo=", mimeType: "image/png" },
+    };
+    expect(ChatImageResponseSchema.parse(ok)).toEqual(ok);
+    expect(SessionOutboundMessageSchema.parse(ok)).toEqual(ok);
+
+    const direct = { ...base, payload: { ...base.payload, status: "direct", reason: "disabled" } };
+    expect(SessionOutboundMessageSchema.parse(direct)).toEqual(direct);
+
+    const error = {
+      ...base,
+      payload: { ...base.payload, status: "error", reason: "rate_limited" },
+    };
+    expect(SessionOutboundMessageSchema.parse(error)).toEqual(error);
+
+    expect(
+      SessionOutboundMessageSchema.safeParse({
+        ...base,
+        payload: { ...base.payload, status: "missing" },
+      }).success,
+    ).toBe(false);
   });
 });
 

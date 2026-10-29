@@ -31,6 +31,7 @@ import {
   createAssistantImageFileAcquisition,
   type AssistantImageAcquisition,
   type AssistantImageFileAcquisitionPort,
+  type AssistantImageLocated,
 } from "./file-acquisition";
 import {
   createAssistantImageLifecycle,
@@ -90,10 +91,10 @@ type PreviewUrlState =
   | { status: "loaded"; uri: string }
   | { status: "failed"; error: unknown };
 
-type AttachmentAcquisitionState =
+type FileAcquisitionState =
   | { status: "waiting" }
   | { status: "loading" }
-  | { status: "loaded"; attachment: AttachmentMetadata }
+  | { status: "loaded"; located: AssistantImageLocated }
   | { status: "failed"; error: unknown };
 
 interface DataImage {
@@ -102,9 +103,12 @@ interface DataImage {
   cacheKey: string;
 }
 
-const attachmentAcquisitionCache = createAssistantImageAcquisitionCache<AttachmentMetadata>({
+const acquisitionCache = createAssistantImageAcquisitionCache<AssistantImageLocated>({
   capacity: 500,
-  onRetain: (attachment) => retainAttachmentForGarbageCollection(attachment.id),
+  onRetain: (located) =>
+    located.kind === "attachment"
+      ? retainAttachmentForGarbageCollection(located.attachment.id)
+      : () => undefined,
 });
 
 interface CachedPreviewUrl {
@@ -148,16 +152,16 @@ function rememberLoadedImage(uri: string, aspectRatio: number): void {
 
 function useAttachmentAcquisition(
   acquisition: AssistantImageAcquisition | null,
-): AttachmentAcquisitionState {
+): FileAcquisitionState {
   const acquisitionKey = acquisition?.key ?? null;
   const [entry, setEntry] = useState<{
     key: string | null;
-    state: AttachmentAcquisitionState;
+    state: FileAcquisitionState;
   }>(() => {
-    const cached = acquisitionKey ? attachmentAcquisitionCache.peek(acquisitionKey) : undefined;
+    const cached = acquisitionKey ? acquisitionCache.peek(acquisitionKey) : undefined;
     return {
       key: acquisitionKey,
-      state: cached ? { status: "loaded", attachment: cached } : { status: "waiting" },
+      state: cached ? { status: "loaded", located: cached } : { status: "waiting" },
     };
   });
 
@@ -171,16 +175,13 @@ function useAttachmentAcquisition(
 
     const acquireCurrent = () => {
       releaseCurrent?.();
-      const retained = attachmentAcquisitionCache.acquireRetained(
-        acquisitionKey,
-        acquisition.locate,
-      );
+      const retained = acquisitionCache.acquireRetained(acquisitionKey, acquisition.locate);
       releaseCurrent = retained.release;
       return retained;
     };
     const initial = acquireCurrent();
     if (initial.value) {
-      setEntry({ key: acquisitionKey, state: { status: "loaded", attachment: initial.value } });
+      setEntry({ key: acquisitionKey, state: { status: "loaded", located: initial.value } });
       return () => {
         disposed = true;
         releaseCurrent?.();
@@ -191,7 +192,7 @@ function useAttachmentAcquisition(
     void (async () => {
       let firstAttempt: ReturnType<typeof acquireCurrent> | null = initial;
       try {
-        const attachment = await runAssistantImageOperationWithRetry({
+        const located = await runAssistantImageOperationWithRetry({
           operation: async () => {
             const retained = firstAttempt ?? acquireCurrent();
             firstAttempt = null;
@@ -200,7 +201,7 @@ function useAttachmentAcquisition(
           shouldStop: () => disposed,
         });
         if (!disposed) {
-          setEntry({ key: acquisitionKey, state: { status: "loaded", attachment } });
+          setEntry({ key: acquisitionKey, state: { status: "loaded", located } });
         }
       } catch (error) {
         if (!disposed) {
@@ -217,9 +218,9 @@ function useAttachmentAcquisition(
   if (!acquisitionKey) {
     return { status: "waiting" };
   }
-  const cached = attachmentAcquisitionCache.peek(acquisitionKey);
+  const cached = acquisitionCache.peek(acquisitionKey);
   if (cached) {
-    return { status: "loaded", attachment: cached };
+    return { status: "loaded", located: cached };
   }
   return entry.key === acquisitionKey ? entry.state : { status: "waiting" };
 }
@@ -234,8 +235,9 @@ function createDataImageAcquisition(input: {
   const { dataImage, source } = input;
   return {
     key: dataImage.cacheKey,
-    locate: async () =>
-      await persistAttachmentFromDataUrl({
+    locate: async () => ({
+      kind: "attachment",
+      attachment: await persistAttachmentFromDataUrl({
         id: createPreviewAttachmentId({
           mimeType: dataImage.mimeType,
           contentLength: dataImage.base64.length,
@@ -244,6 +246,7 @@ function createDataImageAcquisition(input: {
         dataUrl: source,
         mimeType: dataImage.mimeType,
       }),
+    }),
   };
 }
 
@@ -341,8 +344,8 @@ function getAcquisitionFailure(input: {
   hasResolution: boolean;
   isFileSource: boolean;
   isDataImage: boolean;
-  fileAttachment: AttachmentAcquisitionState;
-  dataImageAttachment: AttachmentAcquisitionState;
+  fileAcquisition: FileAcquisitionState;
+  dataImageAttachment: FileAcquisitionState;
   preview: PreviewUrlState;
   hasDirectUri: boolean;
   fallbackMessage: string;
@@ -350,10 +353,10 @@ function getAcquisitionFailure(input: {
   if (!input.hasResolution) {
     return { status: "failed", message: input.fallbackMessage };
   }
-  if (input.isFileSource && input.fileAttachment.status === "failed") {
+  if (input.isFileSource && input.fileAcquisition.status === "failed") {
     return {
       status: "failed",
-      message: errorMessage(input.fileAttachment.error, input.fallbackMessage),
+      message: errorMessage(input.fileAcquisition.error, input.fallbackMessage),
     };
   }
   if (input.isDataImage && input.dataImageAttachment.status === "failed") {
@@ -388,6 +391,7 @@ export function useAssistantImage({
     const port: AssistantImageFileAcquisitionPort | null = client
       ? {
           readFile: async (cwd, path) => await client.readFile(cwd, path),
+          fetchChatImage: async (url) => await client.fetchChatImage(url),
           persist: persistAttachmentFromBytes,
         }
       : null;
@@ -403,18 +407,21 @@ export function useAssistantImage({
     () => createDataImageAcquisition({ source, dataImage }),
     [dataImage, source],
   );
-  const fileAttachment = useAttachmentAcquisition(fileAcquisition);
+  const fileLocated = useAttachmentAcquisition(fileAcquisition);
   const dataImageAttachment = useAttachmentAcquisition(dataImageAcquisition);
-  const filePreview = usePreviewUrl(
-    fileAttachment.status === "loaded" ? fileAttachment.attachment : null,
-  );
+  const located = fileLocated.status === "loaded" ? fileLocated.located : null;
+  const fileAttachment = located?.kind === "attachment" ? located.attachment : null;
+  const remoteDirectUri = located?.kind === "direct" ? located.uri : null;
+  const filePreview = usePreviewUrl(fileAttachment);
   const dataImagePreview = usePreviewUrl(
-    dataImageAttachment.status === "loaded" ? dataImageAttachment.attachment : null,
+    dataImageAttachment.status === "loaded" && dataImageAttachment.located.kind === "attachment"
+      ? dataImageAttachment.located.attachment
+      : null,
   );
   const directUri = resolution?.kind === "direct" && !dataImage ? resolution.uri : null;
   const preview = dataImage ? dataImagePreview : filePreview;
   const previewUri = preview.status === "loaded" ? preview.uri : null;
-  const uri = directUri ?? previewUri;
+  const uri = directUri ?? remoteDirectUri ?? previewUri;
   const cachedAspectRatio = useMemo(
     () => getAssistantImageMetadata({ source, workspaceRoot, serverId })?.aspectRatio ?? null,
     [serverId, source, workspaceRoot],
@@ -500,9 +507,9 @@ export function useAssistantImage({
 
   const acquisitionFailure = getAcquisitionFailure({
     hasResolution: resolution !== null,
-    isFileSource: resolution?.kind === "file_rpc",
+    isFileSource: resolution?.kind === "file_rpc" || resolution?.kind === "remote",
     isDataImage: dataImage !== null,
-    fileAttachment,
+    fileAcquisition: fileLocated,
     dataImageAttachment,
     preview,
     hasDirectUri: directUri !== null,
@@ -511,34 +518,49 @@ export function useAssistantImage({
   if (acquisitionFailure) {
     return acquisitionFailure;
   }
+  return resolveAssistantImageResult({
+    lifecycle,
+    uri,
+    cachedAspectRatio,
+    onRef: handleImageRef,
+    onLoad: handleImageLoad,
+    onError: handleImageError,
+  });
+}
+
+/** Maps the lifecycle to the render result. Kept out of the hook to keep its branching small. */
+function resolveAssistantImageResult(input: {
+  lifecycle: AssistantImageLifecycle;
+  uri: string | null;
+  cachedAspectRatio: number | null;
+  onRef: (instance: unknown) => void;
+  onLoad: (event: ImageLoadEvent) => void;
+  onError: () => void;
+}): AssistantImageResult {
+  const { lifecycle, uri, cachedAspectRatio } = input;
   const hasCurrentLifecycleUri = lifecycle.status !== "failed" && lifecycle.uri === uri;
-  let binding: AssistantImageRenderBinding | null = null;
-  if (hasCurrentLifecycleUri && lifecycle.uri) {
-    binding = {
-      uri: lifecycle.uri,
-      onRef: handleImageRef,
-      onLoad: handleImageLoad,
-      onError: handleImageError,
-    };
+  const currentBinding: AssistantImageRenderBinding | null =
+    hasCurrentLifecycleUri && lifecycle.uri
+      ? { uri: lifecycle.uri, onRef: input.onRef, onLoad: input.onLoad, onError: input.onError }
+      : null;
+  if (lifecycle.status === "failed") {
+    return lifecycle;
   }
   if (lifecycle.status === "loaded" && lifecycle.uri === uri) {
     return {
       status: "loaded",
       binding: {
         uri: lifecycle.uri,
-        onRef: handleImageRef,
-        onLoad: handleImageLoad,
-        onError: handleImageError,
+        onRef: input.onRef,
+        onLoad: input.onLoad,
+        onError: input.onError,
       },
       aspectRatio: lifecycle.aspectRatio,
     };
   }
-  if (lifecycle.status === "failed") {
-    return lifecycle;
-  }
   return {
     status: "loading",
-    binding,
+    binding: currentBinding,
     aspectRatio: (hasCurrentLifecycleUri ? lifecycle.aspectRatio : null) ?? cachedAspectRatio,
   };
 }
