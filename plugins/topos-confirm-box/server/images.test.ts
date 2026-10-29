@@ -32,12 +32,14 @@ test("画像2枚つきの項目はそのまま残る", () => {
 });
 
 test("5枚以上あっても4枚で頭打ちにする", () => {
-  const six = Array.from({ length: 6 }, (_, i) => image(`QUJD${i}`));
+  const six = Array.from({ length: 6 }, (_, i) =>
+    image(`QUJD${["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF"][i]}`),
+  ); // 8文字=復号6バイト(base64 は4文字単位)
   const item = boxItem(six);
   assert.equal(item?.images?.length, 4);
   assert.deepEqual(
     item?.images?.map((i) => i.data),
-    ["QUJD0", "QUJD1", "QUJD2", "QUJD3"],
+    ["QUJDAAAA", "QUJDBBBB", "QUJDCCCC", "QUJDDDDD"],
   );
 });
 
@@ -55,9 +57,10 @@ test("知らない mimeType・空の data・オブジェクトでない要素は
 });
 
 test("復号後が2MiBを超える画像は落とし、他は残す", () => {
-  // base64 4文字 = 3バイト。2MiB(=2,097,152バイト)を1バイト超える長さを作る。
-  const justUnder = "A".repeat(Math.floor((2 * 1024 * 1024 * 4) / 3));
-  const tooBig = `${justUnder}AAAA`;
+  const cap = 2 * 1024 * 1024;
+  // ちょうど上限(=の付く長さで、素朴に長さ×3/4で測ると1バイト超えに見える境界)と、1バイト超え。
+  const justUnder = Buffer.alloc(cap).toString("base64");
+  const tooBig = Buffer.alloc(cap + 1).toString("base64");
   const item = boxItem([image(tooBig), image(justUnder)]);
   assert.deepEqual(item?.images, [{ data: justUnder, mimeType: "image/png" }]);
 });
