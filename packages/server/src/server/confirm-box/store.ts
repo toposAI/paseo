@@ -60,6 +60,13 @@ export interface ConfirmBoxItem {
   depth: ConfirmBoxDepth | null;
   chosen: string | null;
   chatQuestion: string | null;
+  /** 投函側が添えた画像(base64)。Paseoの確認箱ページ(HTML)で表示する。 */
+  images?: ConfirmBoxItemImage[];
+}
+
+export interface ConfirmBoxItemImage {
+  data: string;
+  mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
 }
 
 /**
@@ -152,6 +159,27 @@ export function normalizeGroup(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const group = value.trim().slice(0, GROUP_MAX);
   return group.length > 0 ? group : null;
+}
+
+const ITEM_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+const MAX_ITEM_IMAGES = 4;
+const MAX_ITEM_IMAGE_BYTES = 2 * 1024 * 1024;
+
+/** Keeps at most 4 well-formed images (same limits as the投函側); anything else is dropped. */
+export function normalizeItemImages(value: unknown): ConfirmBoxItemImage[] {
+  if (!Array.isArray(value)) return [];
+  const images: ConfirmBoxItemImage[] = [];
+  for (const entry of value) {
+    if (images.length >= MAX_ITEM_IMAGES) break;
+    if (!entry || typeof entry !== "object") continue;
+    const { data, mimeType } = entry as { data?: unknown; mimeType?: unknown };
+    if (typeof data !== "string" || data.length === 0) continue;
+    if (typeof mimeType !== "string") continue;
+    if (!(ITEM_IMAGE_MIME_TYPES as readonly string[]).includes(mimeType)) continue;
+    if (Buffer.from(data, "base64").byteLength > MAX_ITEM_IMAGE_BYTES) continue;
+    images.push({ data, mimeType: mimeType as ConfirmBoxItemImage["mimeType"] });
+  }
+  return images;
 }
 
 export function normalizeOptions(value: unknown): ConfirmBoxOption[] {
@@ -363,6 +391,8 @@ export class ConfirmBoxStore {
       chosen: null,
       chatQuestion: null,
     });
+    const images = normalizeItemImages(e.images);
+    if (images.length > 0) this.items.get(e.id)!.images = images;
     this.order.push(e.id);
     return true;
   }

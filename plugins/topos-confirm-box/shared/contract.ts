@@ -140,6 +140,15 @@ export const ConfirmBoxItemSchema = z.object({
   workspaceId: z.string().nullable(),
   /** permit かつ質問の時だけ入る(選択肢ボタンの代わりに質問フォームを描く)。 */
   questions: z.array(ConfirmBoxQuestionSchema).optional(),
+  /** 投函側が添えた画像(base64)。カードに小さく並べる。無い項目は undefined。 */
+  images: z
+    .array(
+      z.object({
+        data: z.string(),
+        mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+      }),
+    )
+    .optional(),
   /** 通知の束ね: 同一source+同一内容の未読をまとめた件数(2件以上のときだけ入る)。 */
   dupCount: z.number().int().optional(),
   /** 束ねた全項目の id(代表を含む)。既読にするときは全部に ack する。 */

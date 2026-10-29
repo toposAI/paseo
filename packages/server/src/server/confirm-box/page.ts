@@ -71,6 +71,9 @@ export function renderConfirmBoxPage(options: { serverId?: string } = {}): strin
   .stop { background: #e8710a; color: #fff; border-radius: 999px; padding: 1px 8px; font-size: .75em; font-weight: 700; }
   .detail { margin-top: 8px; border-top: 1px solid #8883; padding-top: 8px; }
   .summary { font-size: .95em; }
+  .imgs { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  .imgs img { width: 96px; height: 96px; object-fit: cover; border-radius: 6px; border: 1px solid #8884; cursor: zoom-in; }
+  .imgs img.full { width: auto; height: auto; max-width: 100%; max-height: 70vh; cursor: zoom-out; }
   .options { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
   .options button { margin: 0; text-align: left; }
   .options button.rec { border-color: #2e9d4f; border-width: 2px; }
@@ -333,6 +336,24 @@ export function renderConfirmBoxPage(options: { serverId?: string } = {}): strin
     return box;
   }
 
+  var apiBase = "/api/confirm-box";  // api() と同じ出所
+
+  /** 項目の画像(最大4枚)。同じ origin の /items/<id>/image/<n> から読む(外部へは出ない)。 */
+  function imagesBlock(it) {
+    var count = it.imageCount | 0;
+    if (count <= 0) return null;
+    var box = el("div", "imgs");
+    for (var i = 0; i < count; i++) {
+      var img = el("img");
+      img.alt = "項目の画像";
+      img.loading = "lazy";
+      img.src = apiBase + "/items/" + encodeURIComponent(it.id) + "/image/" + i;
+      img.onclick = function () { this.classList.toggle("full"); };
+      box.appendChild(img);
+    }
+    return box;
+  }
+
   function optionsBlock(it) {
     var box = el("div", "options");
     if (!it.options.length) {
@@ -359,6 +380,8 @@ export function renderConfirmBoxPage(options: { serverId?: string } = {}): strin
   function detailBlock(it) {
     var detail = el("div", "detail");
     if (it.summary) detail.appendChild(el("pre", "summary", it.summary));
+    var imgs = imagesBlock(it);
+    if (imgs) detail.appendChild(imgs);
     detail.appendChild(optionsBlock(it));
 
     if (it.background) {
