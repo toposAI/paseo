@@ -22,6 +22,8 @@ import { PRIVATE_DIRECTORY_MODE, PRIVATE_FILE_MODE } from "../private-files.js";
 
 export const CHAT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const CHAT_IMAGE_TIMEOUT_MS = 10_000;
+/** Only the four formats the renderer can show, so a CDN does not answer with AVIF. */
+export const CHAT_IMAGE_ACCEPT = "image/webp,image/jpeg,image/png,image/gif;q=0.9";
 export const CHAT_IMAGE_MAX_REDIRECTS = 3;
 export const CHAT_IMAGE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const CHAT_IMAGE_CACHE_MAX_ENTRIES = 50;
@@ -256,13 +258,22 @@ function normalizeHostname(hostname: string): string {
  * name as `Host`/SNI, so virtual hosting and certificate checks are unchanged.
  * Literal IPs are used as they are (no name to rebind).
  */
-export function createPinnedLookup(
-  lookupImpl: ChatImageLookup,
-): (hostname: string, options: { all: true }) => Promise<ResolvedAddress[]> {
+export type PinnedLookup = (hostname: string, options: { all: true }) => Promise<ResolvedAddress[]>;
+
+export function createPinnedLookup(lookupImpl: ChatImageLookup): PinnedLookup {
+  // The cache lives for one `fetchRemoteImage` call (check + every redirect hop),
+  // so an answer is never reused beyond the request that checked it.
   const cache = new Map<string, Promise<ResolvedAddress[]>>();
   return (hostname, options) => {
     const normalized = normalizeHostname(hostname);
     if (isIP(normalized)) {
+      if (!isPublicIpAddress(normalized)) {
+        return Promise.reject(
+          Object.assign(new Error(`non-public address for ${normalized}`), {
+            code: PRIVATE_ADDRESS_CODE,
+          }),
+        );
+      }
       return Promise.resolve([{ address: normalized, family: isIP(normalized) as 4 | 6 }]);
     }
     const cached = cache.get(normalized);
@@ -272,13 +283,15 @@ export function createPinnedLookup(
     const pending = (async () => {
       try {
         const addresses = await lookupImpl(normalized, options);
+        // An empty answer verifies nothing, so it is refused like a private one.
         // Refuse when *any* answer is non-public (fail closed on mixed answers).
-        const unsafe = addresses.find(({ address }) => !isPublicIpAddress(address));
+        const unsafe =
+          addresses.length === 0
+            ? { address: "" }
+            : addresses.find(({ address }) => !isPublicIpAddress(address));
         if (unsafe) {
           throw Object.assign(new Error(`non-public address for ${normalized}`), {
-            // `assertPublicHost` has already reported private/unresolved hosts by
-            // the time this can fire, so the result is unchanged either way.
-            code: "ENOTFOUND",
+            code: PRIVATE_ADDRESS_CODE,
           });
         }
         return addresses;
@@ -361,6 +374,9 @@ function requestPinned(
         // The socket connects to an address that was just checked, not to a
         // fresh resolution of the name (see createPinnedLookup).
         lookup: connectLookup(lookupImpl),
+        // No shared keep-alive pool: a pooled socket is keyed by host name, so it
+        // could have been opened at an address this request never checked.
+        agent: false,
         ...(init.signal ? { signal: init.signal } : {}),
       },
       (incoming) => {
@@ -400,25 +416,62 @@ function withSignal<T>(promise: Promise<T>, signal: AbortSignal | null | undefin
   });
 }
 
+/** Raised by {@link createPinnedLookup} when any answer is non-public. */
+const PRIVATE_ADDRESS_CODE = "ECHATIMAGE_PRIVATE";
+
+/** How a failed name resolution is reported to {@link fetchRemoteImage}. */
+const RESOLUTION_FAILURE_CODES: Record<string, string> = {
+  [PRIVATE_ADDRESS_CODE]: "private_address",
+  ENOTFOUND: "unresolved_host",
+  EAI_AGAIN: "dns_failed",
+};
+
+function isResolutionFailure(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; current && typeof current === "object" && depth < 5; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string" && code in RESOLUTION_FAILURE_CODES) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+function resolutionReason(error: unknown): string {
+  const code = (error as { code?: unknown })?.code;
+  return typeof code === "string" ? (RESOLUTION_FAILURE_CODES[code] ?? "dns_failed") : "dns_failed";
+}
+
 /**
- * Default transport: resolves once, checks the answers, then connects to the
- * checked address. `fetch()` cannot take a lookup function, so the request goes
- * through `https.request` directly.
+ * Default transport: resolves the name once per redirect hop, refuses any
+ * non-public or unresolvable answer before a socket is opened, and connects to
+ * the checked addresses. `fetch()` cannot take a lookup function, so the
+ * request goes through `https.request` directly. Resolution failures surface as
+ * fetch-shaped errors carrying `reason` (see {@link fetchRemoteImage}).
  */
-export function createPinnedFetch(lookupImpl: ChatImageLookup): FetchImpl {
-  const pinned = createPinnedLookup(lookupImpl);
+export function createPinnedFetch(pinned: PinnedLookup): FetchImpl {
   return async (input, init) => {
-    // Malformed input is a fetch-shaped failure, not a crash inside the renderer proxy.
     let url: URL;
     try {
       url = new URL(input);
     } catch {
       throw new TypeError(`invalid URL ${input}`);
     }
-    // Throws (private address / unresolvable) before any socket is opened. The
-    // signal is forwarded so the connection timeout also covers DNS.
-    const addresses = await withSignal(pinned(url.hostname, { all: true }), init.signal);
-    return await requestPinned(url, async () => addresses, init);
+    const hopSignal = init.signal ?? null;
+    let addresses: ResolvedAddress[];
+    try {
+      addresses = await withSignal(pinned(url.hostname, { all: true }), hopSignal);
+    } catch (error) {
+      if (isResolutionFailure(error)) {
+        throw Object.assign(new Error(`cannot use ${url.hostname}`), {
+          reason: resolutionReason(error),
+        });
+      }
+      throw error;
+    }
+    return await requestPinned(url, async () => addresses, {
+      ...init,
+      ...(hopSignal ? { signal: hopSignal } : {}),
+    });
   };
 }
 
@@ -691,6 +744,8 @@ export function createRemoteImageFileCache(input: {
 /**
  * Checks every resolved address for a host. Literal IPs are judged without DNS;
  * a host that cannot be resolved is refused, because no address was verified.
+ * The proxy itself no longer calls this (its transport performs the same check
+ * on the one answer it connects to); it stays for direct checks.
  */
 export async function assertPublicHost(
   url: URL,
@@ -700,26 +755,36 @@ export async function assertPublicHost(
   if (isIP(host)) {
     return isPublicIpAddress(host) ? { ok: true } : { ok: false, reason: "private_address" };
   }
-  let addresses: Array<{ address: string; family: number }>;
   try {
-    addresses = await options.lookup(host, { all: true });
+    await options.lookup(host, { all: true });
+    return { ok: true };
   } catch (error) {
-    const code = (error as { code?: unknown })?.code;
-    if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
-      return { ok: false, reason: "unresolved_host" };
+    if (isResolutionFailure(error)) {
+      return { ok: false, reason: resolutionReason(error) };
     }
     return { ok: false, reason: "dns_failed" };
   }
-  if (addresses.length === 0) {
-    return { ok: false, reason: "unresolved_host" };
-  }
-  for (const { address } of addresses) {
-    if (!isPublicIpAddress(address)) {
-      return { ok: false, reason: "private_address" };
-    }
-  }
-  return { ok: true };
 }
+
+/** Every `reason` a chat-image result can carry (see the failure taxonomy below). */
+const CHAT_IMAGE_FAILURE_REASONS: Record<string, true> = {
+  private_address: true,
+  unresolved_host: true,
+  dns_failed: true,
+  // Dynamic: `http_<status>` for non-2xx answers.
+  too_many_redirects: true,
+  body_error: true,
+  empty_body: true,
+  too_large: true,
+  unsupported_type: true,
+  content_type_mismatch: true,
+  invalid_url: true,
+  unsupported_protocol: true,
+  invalid_redirect: true,
+  fetch_failed: true,
+  rate_limited: true,
+  unreachable: true,
+};
 
 function cancelBody(response: ChatImageResponse): void {
   void response.body?.cancel().catch(() => undefined);
@@ -782,7 +847,7 @@ async function readImageResponse(
     return failure("too_large");
   }
   if (body.kind === "failed") {
-    return body.connection ? { status: "direct", reason: "unreachable" } : failure(body.reason);
+    return failure(body.connection ? "unreachable" : body.reason);
   }
   const mimeType = sniffImageMimeType(body.bytes);
   if (!mimeType) {
@@ -797,20 +862,28 @@ async function readImageResponse(
 async function requestImage(
   url: URL,
   fetchImpl: FetchImpl,
+  signal: AbortSignal,
 ): Promise<{ response: ChatImageResponse } | { result: ChatImageFetchResult }> {
   try {
     const response = (await fetchImpl(url.toString(), {
       method: "GET",
       redirect: "manual",
-      signal: AbortSignal.timeout(CHAT_IMAGE_TIMEOUT_MS),
-      headers: { accept: "image/*", "user-agent": CHAT_IMAGE_USER_AGENT },
+      signal,
+      headers: { accept: CHAT_IMAGE_ACCEPT, "user-agent": CHAT_IMAGE_USER_AGENT },
     })) as ChatImageResponse;
     return { response };
   } catch (error) {
+    // The transport already refused non-public or unresolvable hosts: no
+    // separate name check runs, so the checked answer is the connected one.
+    const reason = (error as { reason?: unknown })?.reason;
+    if (
+      typeof reason === "string" &&
+      (reason in CHAT_IMAGE_FAILURE_REASONS || /^http_\d{3}$/.test(reason))
+    ) {
+      return { result: failure(reason) };
+    }
     return {
-      result: isConnectionFailure(error)
-        ? { status: "direct", reason: "unreachable" }
-        : failure("fetch_failed"),
+      result: failure(isConnectionFailure(error) ? "unreachable" : "fetch_failed"),
     };
   }
 }
@@ -828,7 +901,10 @@ export async function fetchRemoteImage(
     return { status: "direct", reason: "disabled" };
   }
   const lookupImpl: ChatImageLookup = options.lookup ?? defaultLookup;
-  const fetchImpl: FetchImpl = options.fetchImpl ?? createPinnedFetch(lookupImpl);
+  // One resolver for this fetch: the host check and the socket connect read the
+  // same answer, and each host is resolved once even across redirect hops.
+  const pinned = createPinnedLookup(lookupImpl);
+  const fetchImpl: FetchImpl = options.fetchImpl ?? createPinnedFetch(pinned);
 
   let current: URL;
   try {
@@ -837,16 +913,18 @@ export async function fetchRemoteImage(
     return failure("invalid_url");
   }
 
+  // One budget for the whole fetch: DNS, every hop, and the body read.
+  const signal = AbortSignal.timeout(CHAT_IMAGE_TIMEOUT_MS);
   for (let hop = 0; hop <= CHAT_IMAGE_MAX_REDIRECTS; hop += 1) {
     // Only https is proxied; the parsed URL guarantees a protocol, so a non-match is final.
     if (current.protocol !== "https:") {
       return failure("unsupported_protocol");
     }
-    const hostCheck = await assertPublicHost(current, { lookup: lookupImpl });
+    const hostCheck = await assertPublicHost(current, { lookup: pinned });
     if (!hostCheck.ok) {
       return failure(hostCheck.reason);
     }
-    const requested = await requestImage(current, fetchImpl);
+    const requested = await requestImage(current, fetchImpl, signal);
     if ("result" in requested) {
       return requested.result;
     }
@@ -908,9 +986,7 @@ export function createChatImageRequestHandler(options: ChatImageRequestHandlerOp
     if (isChatImageProxyDisabled(env)) {
       return { status: "direct", reason: "disabled" };
     }
-    if (isRateLimited()) {
-      return { status: "error", reason: "rate_limited" };
-    }
+    // A cached image costs no network, so it does not spend the burst budget.
     const cached = cache ? await cache.read(url).catch(() => null) : null;
     if (cached) {
       return {
@@ -918,6 +994,9 @@ export function createChatImageRequestHandler(options: ChatImageRequestHandlerOp
         data: Buffer.from(cached.bytes).toString("base64"),
         mimeType: cached.mimeType,
       };
+    }
+    if (isRateLimited()) {
+      return { status: "error", reason: "rate_limited" };
     }
     const result = await fetchRemoteImage(url, {
       env,

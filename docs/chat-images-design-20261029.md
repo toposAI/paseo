@@ -28,17 +28,27 @@
    - https のみ。`PASEO_CHAT_IMAGES=off` なら `direct`(代理しない)。クライアントはこれを表示不可として扱う
      (端末が外部URLを取りに行く道は塞いである)。戻すときは旧ビルドへ戻す。
    - ホスト名は DNS で全アドレス解決し、プライベート/ループバック/リンクローカル/ULA/CGNAT/`::ffff:` マップを拒否。
-   - **検査したアドレスへ実際に接続する**(`createPinnedFetch`): 解決は1回だけ、公共アドレス以外が混ざれば拒否し、
-     その同じアドレスへ `node:https` の `lookup` 差し替えで接続する(SNI/Host は元のホスト名のまま)。
-     DNS 再解決によるすり替え(DNSリバインディング)の隙間を閉じるため。解決結果は成功分のみプロセス内で再利用し、失敗は捨てる。
-   - タイムアウトは DNS 解決を含む10秒(`AbortSignal.timeout`)で、`redirect:"manual"` により最大3回(各ホップを再検査)。
+   - **検査したアドレスへ実際に接続する**(`createPinnedLookup` + `createPinnedFetch`): 取得1回につき解決器は1つで、
+     ホストの検査と接続は同じ答えを使う(同名ホストはリダイレクトをまたいでも1回だけ引く。答えはその取得の間だけ保持)。
+     公共アドレス以外が混ざる・空・解決できない場合は接続前に拒否し、接続は検査したアドレスへ `node:https` の
+     `lookup` 差し替えで行う(SNI/Host は元のホスト名のまま)。再接続の使い回し(`agent:false`)もしない。
+   - 時間の上限は**取得1回で10秒**。DNS・全リダイレクト・本文の読み取りを1つの `AbortSignal` で縛る。
+     リダイレクトは `redirect:"manual"` で最大3回(各ホップを同じ解決器で再検査)。
+   - 受け取る形式は4種のみを明示(`accept: image/webp,image/jpeg,image/png,image/gif`)。CDN が AVIF を返して
+     表示できない事故を避けるため。
+   - 失敗の分類: **`direct` を返すのは代理が無効(`PASEO_CHAT_IMAGES=off`)のときだけ**。接続不能・時間切れは
+     `error`(`reason:"unreachable"`)、検査で拒否は `error`(理由つき)。`direct` は「端末が直接取ってよい」の
+     意味ではなく、クライアントは表示不可として扱う。
+   - 連射の上限(12件/10秒)は**キャッシュに当たった分を数えない**(履歴の画像を開き直して13枚目以降が
+     エラーになる事故を防ぐ)。
    - `accept: image/*`、UA は一般的なブラウザ相当。本文はストリームで読み **5MB を超えたら中断**。
    - Content-Type は png/jpeg/webp/gif のみ + **先頭バイトで再検査**(宣言だけ信じない)。
    - キャッシュ: `$PASEO_HOME/chat-images/<sha256(url)>.<ext>` + 同名 `.json`(url,mime,size,fetchedAt)。30日で失効。書込時に最大50件へ剪定。ワークスペース外に置く。
 
 3. `packages/server/src/server/session.ts`
    - `case "chat_image_request"` を追加し、応答を要求元へ返す(`file_explorer_request` と同じ source 指定)。
-   - 連射の上限: 直近10秒で12件を超えたら `error`(`reason:"rate_limited"`)。
+   - 連射の上限: 直近10秒で12件を超えたら `error`(`reason:"rate_limited"`)。ハンドラ(`remote-image.ts`)が
+     持つ(セッション破棄で消える。開いた資源は無いので後始末は要らない)。
 
 4. クライアント
    - `assistant-image-source.ts`: `^https?://` → `{kind:"remote", url}`。
@@ -58,6 +68,14 @@
 - 通信: https のみ / タイムアウト10秒 / リダイレクト3回 / 5MB / png・jpeg・webp・gif。
 - 枚数: 返答あたり4枚(出し方の決まり)＋ サーバー側の連射上限12件/10秒。
 - 場所: 外部URLのみ。ローカルの任意パスは読まない。
+
+## 確認箱(案C)の上限
+
+- 投函: 最大4枚・1枚2MiB(base64)・png/jpeg/webp/gif。上限は `notify_box.normalize_images()`(Python)と
+  `box.ts imagesField()`(プラグイン)の2か所にある。**揃えるのはテストではなく運用**(同じ値を両方に書いている)。
+- 一覧(`GET /items`)は画像の中身を返さず `imageCount` だけ返し、ページは `/items/<id>/image/<n>` から読む
+  (15秒ごとの再取得で数MBを運ばないため)。同じ origin なので端末は外部へ出ない。
+- 不正な1枚は落として残りを表示する(項目ごと失敗させない)。
 
 ## やらないこと(今回の範囲外)
 
@@ -80,4 +98,9 @@
 ## 残っている制約(既知)
 
 - 画像の内容判定はしない。取得元URLはAIが選ぶ。失敗した画像は本文にalt文として残る(`Image preview unavailable.`)。
+- 極端に縦横の大きい画像(5MiB以内でも展開すると重い)は検査していない。
+- 同じURLの同時取得を1本にまとめていない(同時実行数の全体上限も無い)。
+- キャッシュのメタデータ(`.json`)に取得元URLを平文で残す(署名付きURLのクエリも含む)。
+- Topos の `web_images.py` が持つ robots.txt の尊重は無い(チャット本文の画像1枚を取るだけで、巡回はしない)。
+- キャッシュ書込・読込の失敗は黙って握りつぶす(ディスク満杯でも気づかず毎回取り直す)。
 - 到達不能(`unreachable`)は誤って「表示不可」で固定されうる(取得結果は成功分だけキャッシュするので、次の描画時に再試行)。

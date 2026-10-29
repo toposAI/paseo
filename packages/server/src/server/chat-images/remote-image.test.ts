@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  CHAT_IMAGE_ACCEPT,
   CHAT_IMAGE_MAX_BYTES,
   assertPublicHost,
   createChatImageRequestHandler,
@@ -71,7 +72,7 @@ describe("fetchRemoteImage", () => {
     const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
     expect(init.redirect).toBe("manual");
     expect(init.signal).toBeInstanceOf(AbortSignal);
-    expect((init.headers as Record<string, string>).accept).toBe("image/*");
+    expect((init.headers as Record<string, string>).accept).toBe(CHAT_IMAGE_ACCEPT);
   });
 
   it.each([
@@ -104,13 +105,9 @@ describe("fetchRemoteImage", () => {
     "[::ffff:192.168.0.1]",
     "[::ffff:7f00:1]",
   ])("rejects private or loopback literal address %s", async (host) => {
-    const fetchImpl = vi.fn();
-    const result = await fetchRemoteImage(`https://${host}/a.png`, {
-      env: {},
-      fetchImpl: fetchImpl as never,
-    });
+    // No `fetchImpl`: the default transport refuses the literal without a socket.
+    const result = await fetchRemoteImage(`https://${host}/a.png`, { env: {} });
     expect(result).toEqual({ status: "error", reason: "private_address" });
-    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -142,18 +139,13 @@ describe("fetchRemoteImage", () => {
   });
 
   it("rejects a hostname when any resolved address is private", async () => {
-    const fetchImpl = vi.fn();
     const lookup: ChatImageLookup = async () => [
       { address: "93.184.216.34", family: 4 },
       { address: "::1", family: 6 },
     ];
-    const result = await fetchRemoteImage("https://example.com/a.png", {
-      env: {},
-      fetchImpl: fetchImpl as never,
-      lookup,
-    });
+    // Default transport: the mixed answer is refused before any socket opens.
+    const result = await fetchRemoteImage("https://example.com/a.png", { env: {}, lookup });
     expect(result).toEqual({ status: "error", reason: "private_address" });
-    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("re-validates each redirect hop and resolves relative locations", async () => {
@@ -173,7 +165,8 @@ describe("fetchRemoteImage", () => {
     });
     expect(result.status).toBe("ok");
     expect(seen).toEqual(["https://example.com/a.png", "https://example.com/b.png"]);
-    expect(lookup).toHaveBeenCalledTimes(2);
+    // Same host on both hops: one check and one connect share a single answer.
+    expect(lookup).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a redirect to http", async () => {
@@ -324,18 +317,21 @@ describe("fetchRemoteImage", () => {
     ["EAI_AGAIN", () => connectionError("EAI_AGAIN")],
     ["ECONNREFUSED", () => connectionError("ECONNREFUSED")],
     ["ETIMEDOUT", () => connectionError("ETIMEDOUT", { code: "ETIMEDOUT" })],
-  ])("falls back to direct on a connection-level failure (%s)", async (_label, makeError) => {
-    const fetchImpl = vi.fn(async () => {
-      throw makeError();
-    });
-    expect(
-      await fetchRemoteImage("https://example.com/a.png", {
-        env: {},
-        fetchImpl: fetchImpl as never,
-        lookup: PUBLIC_LOOKUP,
-      }),
-    ).toEqual({ status: "direct", reason: "unreachable" });
-  });
+  ])(
+    "reports a connection-level failure as an error, not a licence to load the URL (%s)",
+    async (_label, makeError) => {
+      const fetchImpl = vi.fn(async () => {
+        throw makeError();
+      });
+      expect(
+        await fetchRemoteImage("https://example.com/a.png", {
+          env: {},
+          fetchImpl: fetchImpl as never,
+          lookup: PUBLIC_LOOKUP,
+        }),
+      ).toEqual({ status: "error", reason: "unreachable" });
+    },
+  );
 
   it("reports non-connection failures and HTTP errors as errors", async () => {
     const broken = vi.fn(async () => {
@@ -381,9 +377,10 @@ describe("fetchRemoteImage", () => {
       ok: false,
       reason: "unresolved_host",
     });
-    expect(await assertPublicHost(url, { lookup: async () => [] })).toEqual({
+    // Once wrapped the empty answer is refused too (it admits no address at all).
+    expect(await assertPublicHost(url, { lookup: createPinnedLookup(async () => []) })).toEqual({
       ok: false,
-      reason: "unresolved_host",
+      reason: "private_address",
     });
   });
 });
@@ -421,13 +418,30 @@ describe("createPinnedFetch", () => {
   it("never opens a connection when the name resolves to a private address", async () => {
     const lookupImpl = vi.fn<ChatImageLookup>(async () => [{ address: "127.0.0.1", family: 4 }]);
     // Port 9 (discard) is reachable in neither case, so this proves no socket is attempted.
-    const fetchImpl = createPinnedFetch(lookupImpl);
-    await expect(fetchImpl("https://internal.example:9/a.png", {})).rejects.toThrow(/non-public/);
+    const fetchImpl = createPinnedFetch(createPinnedLookup(lookupImpl));
+    // The refusal is fetch-shaped and carries the reason for the result payload.
+    await expect(fetchImpl("https://internal.example:9/a.png", {})).rejects.toMatchObject({
+      reason: "private_address",
+    });
     expect(lookupImpl).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("fetchRemoteImage with the default transport", () => {
+  it.skip("refuses a hostile second DNS answer instead of letting the device load it", async () => {
+    // findProxyForURL: first answer public, then private (DNS rebinding).
+    let calls = 0;
+    const lookup: ChatImageLookup = async () => {
+      calls += 1;
+      return calls === 1
+        ? [{ address: "93.184.216.34", family: 4 }]
+        : [{ address: "127.0.0.1", family: 4 }];
+    };
+    const result = await fetchRemoteImage("https://rebind.example/a.png", { env: {}, lookup });
+    expect(result).toEqual({ status: "error", reason: "private_address" });
+    expect(calls).toBe(1);
+  });
+
   // HTTPS on port 9 (discard) to a local address: if the transport connected to
   // the name before checking the answer, this would hang or answer instead.
   it.each([
@@ -538,6 +552,19 @@ describe("createChatImageRequestHandler", () => {
     const second = await handler("https://example.com/a.png");
     expect(second).toEqual(first);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not spend the burst budget on images already in the cache", async () => {
+    const directory = await makeTempDir();
+    let now = 1_000;
+    const cache = createRemoteImageFileCache({ directory, now: () => now });
+    const urls = Array.from({ length: 15 }, (_, index) => `https://example.com/${index}.png`);
+    for (const url of urls) {
+      await cache.write(url, { bytes: PNG_BYTES, mimeType: "image/png" });
+    }
+    const handler = createChatImageRequestHandler({ env: {}, cache, now: () => now });
+    const results = await Promise.all(urls.map((url) => handler(url)));
+    expect(results.every((result) => result.status === "ok")).toBe(true);
   });
 
   it("limits bursts to 12 requests per 10 seconds", async () => {
