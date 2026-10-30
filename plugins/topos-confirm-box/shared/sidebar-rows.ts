@@ -285,7 +285,11 @@ export function groupThreadRowsBySide<T extends GroupableThread>(
   return {
     walltalk: group(walltalkRows),
     aux: group(auxRows),
-    auxWaiting: auxRows.filter((r) => r.statusLabel === "判断待ち").length,
+    // 判断待ちに加え、承認待ち(needs_input)と失敗の点も数える(畳んだ中で止まっているのを見落とさない)。
+    auxWaiting: auxRows.filter((r) => {
+      const dot = (r.thread as { stateDot?: string | null }).stateDot;
+      return r.statusLabel === "判断待ち" || dot === "needs_input" || dot === "failed";
+    }).length,
   };
 }
 

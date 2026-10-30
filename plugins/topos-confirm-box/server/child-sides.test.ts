@@ -78,10 +78,13 @@ test("振り分けの保存: 書く→読める、null で自動へ戻る、壊�
   assert.equal(readChildThreadSides(dir).size, 0);
   writeChildThreadSide(dir, "x", "aux");
   writeChildThreadSide(dir, "y", "walltalk");
-  assert.deepEqual([...readChildThreadSides(dir)], [
-    ["x", "aux"],
-    ["y", "walltalk"],
-  ]);
+  assert.deepEqual(
+    [...readChildThreadSides(dir)],
+    [
+      ["x", "aux"],
+      ["y", "walltalk"],
+    ],
+  );
   writeChildThreadSide(dir, "x", null);
   assert.deepEqual([...readChildThreadSides(dir).keys()], ["y"]);
   assert.throws(() => writeChildThreadSide(dir, "", "aux"));
@@ -94,8 +97,10 @@ test("振り分けの保存: 書く→読める、null で自動へ戻る、壊�
   assert.deepEqual([...readChildThreadSides(dir)], [["a", "aux"]]);
 });
 
-const rowOf = (t: ChildThread, statusLabel: SidebarRowView<ChildThread>["statusLabel"] = "実装中") =>
-  ({ thread: t, statusLabel, title: t.title }) as unknown as SidebarRowView<ChildThread>;
+const rowOf = (
+  t: ChildThread,
+  statusLabel: SidebarRowView<ChildThread>["statusLabel"] = "実装中",
+) => ({ thread: t, statusLabel, title: t.title }) as unknown as SidebarRowView<ChildThread>;
 
 test("2群へ分ける: 壁打ちの親なしは見出し無し(キー空)、補助側の判断待ちを数える", () => {
   const sides = groupThreadRowsBySide(
@@ -111,11 +116,17 @@ test("2群へ分ける: 壁打ちの親なしは見出し無し(キー空)、補
     "ピン止め",
     "",
   );
-  assert.deepEqual(sides.walltalk.map((g) => [g.key, g.rows.length]), [["", 1]]);
-  assert.deepEqual(sides.aux.map((g) => [g.key, g.rows.length]), [
-    ["p", 2],
-    ["", 1],
-  ]);
+  assert.deepEqual(
+    sides.walltalk.map((g) => [g.key, g.rows.length]),
+    [["", 1]],
+  );
+  assert.deepEqual(
+    sides.aux.map((g) => [g.key, g.rows.length]),
+    [
+      ["p", 2],
+      ["", 1],
+    ],
+  );
   assert.equal(sides.auxWaiting, 1);
 });
 
@@ -128,4 +139,28 @@ test("メニュー: 移動項目の文言と遷移(司令塔・見出しの親�
   assert.equal(nextMenu(OPEN_MENU, "toggle-side").intent, "toggle-side");
   assert.equal(nextMenu(OPEN_MENU, "toggle-side").state.open, false);
   assert.equal(nextMenu({ open: false, confirmingArchive: false }, "toggle-side").intent, null);
+});
+
+test("承認待ち(needs_input)・失敗の点も補助スレの要対応件数に数える", () => {
+  const sides = groupThreadRowsBySide(
+    [
+      rowOf(thread({ agentId: "x1", aux: true, stateDot: "needs_input" })),
+      rowOf(thread({ agentId: "x2", aux: true, stateDot: "failed" })),
+      rowOf(thread({ agentId: "x3", aux: true, stateDot: "running" })),
+    ],
+    new Set(),
+    "__c",
+    "__p",
+    "ピン止め",
+    "",
+  );
+  assert.equal(sides.auxWaiting, 2);
+});
+
+test("壊れた保存ファイルは上書き前に退避する", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sides-corrupt-"));
+  fs.writeFileSync(path.join(dir, CHILD_THREAD_SIDES_FILE), "{not json", "utf8");
+  writeChildThreadSide(dir, "a", "aux");
+  assert.ok(fs.readdirSync(dir).some((f) => f.includes(".corrupt-")));
+  assert.equal(readChildThreadSides(dir).get("a"), "aux");
 });

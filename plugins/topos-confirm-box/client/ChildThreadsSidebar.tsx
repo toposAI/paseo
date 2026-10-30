@@ -302,10 +302,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
       ),
     [rows, coordinatorIds],
   );
-  const reorderable = useMemo(
-    () => reorderableIds([...sides.walltalk, ...sides.aux]),
-    [sides],
-  );
+  const reorderable = useMemo(() => reorderableIds([...sides.walltalk, ...sides.aux]), [sides]);
   const onReorderGroup = useCallback(
     (side: SidebarSide, groupKey: string, keys: string[]) => {
       const queue = [...keys];
@@ -474,13 +471,10 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
       const toAux = !t.aux;
       gatePoll(5_000);
       const apply = (aux: boolean) => (prev: ChildThread[]) =>
-        prev.map((x) =>
-          x.agentId === t.agentId
-            ? aux
-              ? { ...x, aux }
-              : { ...x, aux, parentAgentId: null, parentTitle: null }
-            : x,
-        );
+        prev.map((x) => {
+          if (x.agentId !== t.agentId) return x;
+          return aux ? { ...x, aux } : { ...x, aux, parentAgentId: null, parentTitle: null };
+        });
       setThreads(apply(toAux));
       setNotice("保存しています…");
       const revert = () => {
@@ -1015,7 +1009,7 @@ function SidebarContents({
 
 /**
  * 「壁打ち」「補助スレ」の1群(2026-10-30)。見出しの行末に件数と開閉のシェブロンを置く。
- * 補助スレは折りたたんでいても、判断待ちが1件でもあれば見出しに「判断待ち N」を出す(見落とさない)。
+ * 補助スレは折りたたんでいても、判断待ちが1件でもあれば見出しに「要対応 N」(判断待ち・承認待ち・失敗)を出す(見落とさない)。
  * 群が空なら見出しごと出さない。
  */
 function SideSection({
@@ -1059,7 +1053,7 @@ function SideSection({
       <View style={styles.trailing}>
         {waiting > 0 ? (
           <StatusBadge
-            text={`判断待ち ${waiting}`}
+            text={`要対応 ${waiting}`}
             kind="waiting"
             testID={`child-side-waiting-${side}`}
           />
@@ -1184,13 +1178,13 @@ function ThreadGroupSection({
   return (
     <>
       {group.key === "" ? null : (
-      <SidebarRow
-        id={`child-group-${group.key || "other"}`}
-        icon="ListTodo"
-        label={group.title}
-        onPress={openCoordinator}
-        trailing={trailing}
-      />
+        <SidebarRow
+          id={`child-group-${group.key || "other"}`}
+          icon="ListTodo"
+          label={group.title}
+          onPress={openCoordinator}
+          trailing={trailing}
+        />
       )}
       {shown ? (
         <SidebarReorderableList

@@ -48,6 +48,21 @@ export function writeChildThreadSide(
   const id = normalizeChildThreadOrder([agentId])[0];
   if (!id) throw new Error("agentId が空です");
   const next = readChildThreadSides(dir);
+  // 壊れたファイルを黙って上書きしない(手動の振り分けを復元できるよう退避する)
+  const existing = path.join(dir, CHILD_THREAD_SIDES_FILE);
+  if (next.size === 0 && fs.existsSync(existing)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(existing, "utf8")) as { sides?: unknown } | null;
+      const ok = parsed && typeof parsed === "object" && typeof parsed.sides === "object";
+      if (!ok) fs.renameSync(existing, `${existing}.corrupt-${Date.now()}`);
+    } catch {
+      try {
+        fs.renameSync(existing, `${existing}.corrupt-${Date.now()}`);
+      } catch {
+        // 退避できなくても保存は続ける
+      }
+    }
+  }
   if (side === null) next.delete(id);
   else next.set(id, side);
   fs.mkdirSync(dir, { recursive: true });
