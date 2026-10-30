@@ -95,6 +95,7 @@ import {
   childThreadsArchiveRpc,
   childThreadsListRpc,
   childThreadsPinRpc,
+  childThreadsSideRpc,
   childThreadsSetOrderRpc,
 } from "./shared/child-threads.js";
 import type { ThreadAccess } from "./shared/child-threads.js";
@@ -133,6 +134,7 @@ import {
   standbyForCoreClosed,
 } from "./server/closed-rows.js";
 import { applyWindowUnread, readWindowId } from "./server/window-unread.js";
+import { applyAuxGroup, readChildThreadSides, writeChildThreadSide } from "./server/child-sides.js";
 import { mergeUnregisteredThreads } from "./server/unregistered-threads.js";
 import type { ListedAgentLike } from "./server/unregistered-threads.js";
 import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
@@ -426,6 +428,12 @@ export default function contribute(server: PluginServerContext) {
       parentsUnknown = true;
       threadsIncomplete = true;
     }
+    // 壁打ち/補助スレの振り分けは最後に付ける(登録簿の id は取り込み前の `rows` + 既知 id)。
+    threads = applyAuxGroup(
+      threads,
+      new Set([...rows.map((t) => t.agentId), ...readKnownChildThreadIds(dir)]),
+      readChildThreadSides(dir),
+    );
     return {
       threads,
       dir: readDir,
@@ -548,6 +556,16 @@ export default function contribute(server: PluginServerContext) {
         pins: [],
         message: `ピン止めを保存できません: ${(error as Error).message}`,
       };
+    }
+  });
+
+  // 壁打ち⇔補助スレの振り分け。保存先は `child_threads_sides.json` だけ(登録簿は触らない)。
+  server.handle(childThreadsSideRpc, async (input) => {
+    try {
+      writeChildThreadSide(resolveConfirmBoxDir(), input.agentId, input.side);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: `振り分けを保存できません: ${(error as Error).message}` };
     }
   });
 

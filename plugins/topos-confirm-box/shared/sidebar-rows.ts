@@ -164,6 +164,7 @@ export function rowGroupKeyOf(
 /** グループ割りに要る行の項目(画面の行と、テストの緩い行の両方を受ける)。 */
 export interface GroupableThread {
   agentId: string;
+  aux?: boolean;
   parentAgentId?: string | null;
   parentTitle?: string | null;
   machineState?: string | null;
@@ -246,6 +247,46 @@ export function groupThreadRows<T extends GroupableThread>(
     if (g.key !== pinnedGroup && g.key !== coordinatorGroup) ordered.push(g);
   }
   return ordered.filter((g) => g.rows.length > 0 || g.heading !== null);
+}
+
+/** サイドバーの2群(壁打ち・補助スレ)。 */
+export type SidebarSide = "walltalk" | "aux";
+
+/** 行の所属する群(サーバーが付けた `aux`。未指定は壁打ち=見落とさない側)。 */
+export function sideOfThread(t: { aux?: boolean }): SidebarSide {
+  return t.aux === true ? "aux" : "walltalk";
+}
+
+/** 2群それぞれのグループ割りと、補助スレ側の「判断待ち」件数(見出しに出す)。 */
+export interface SidebarSides<T> {
+  walltalk: ThreadGroup<T>[];
+  aux: ThreadGroup<T>[];
+  auxWaiting: number;
+}
+
+/**
+ * 行を「壁打ち」「補助スレ」に分け、それぞれ `groupThreadRows` でグループ割りする
+ * (2026-10-30 ユーザー指示)。司令塔・子司令塔の見出しは補助スレ側の入れ子になる
+ * (サーバーが司令塔と見出しの親を補助側に固定する)。
+ * 親なしのグループ(キー "")は見出しを出さない(旧「その他」の廃止。呼び出し側で平らに描く)。
+ */
+export function groupThreadRowsBySide<T extends GroupableThread>(
+  rows: readonly SidebarRowView<T>[],
+  coordinatorIds: ReadonlySet<string>,
+  coordinatorGroup: string,
+  pinnedGroup: string,
+  pinnedLabel: string,
+  otherLabel: string,
+): SidebarSides<T> {
+  const walltalkRows = rows.filter((r) => sideOfThread(r.thread) === "walltalk");
+  const auxRows = rows.filter((r) => sideOfThread(r.thread) === "aux");
+  const group = (list: readonly SidebarRowView<T>[]) =>
+    groupThreadRows(list, coordinatorIds, coordinatorGroup, pinnedGroup, pinnedLabel, otherLabel);
+  return {
+    walltalk: group(walltalkRows),
+    aux: group(auxRows),
+    auxWaiting: auxRows.filter((r) => r.statusLabel === "判断待ち").length,
+  };
 }
 
 /** グループ見出しを押したときの動作。 */

@@ -33,6 +33,7 @@ import {
   childThreadsListRpc,
   childThreadsPinRpc,
   childThreadsSetOrderRpc,
+  childThreadsSideRpc,
 } from "../shared/child-threads.js";
 import { boxSignalRpc } from "../shared/contract.js";
 import type { ChildThread } from "../shared/child-threads.js";
@@ -42,7 +43,8 @@ import {
   coordinatorIdSet,
   countStatusLabels,
   groupPressAction,
-  groupThreadRows,
+  groupThreadRowsBySide,
+  sideOfThread,
   openableParentIds,
   reorderableIds,
   rowGroupKeyOf,
@@ -53,7 +55,7 @@ import {
   PINNED_GROUP,
   PINNED_GROUP_LABEL,
 } from "../shared/sidebar-section-mode.js";
-import type { SidebarRowView, ThreadGroup } from "../shared/sidebar-rows.js";
+import type { SidebarRowView, SidebarSide, ThreadGroup } from "../shared/sidebar-rows.js";
 import type { SidebarNote } from "../shared/notes.js";
 import type { SidebarPlace, ZoneCounts } from "../shared/concept-places.js";
 import { emptySectionLabel } from "../shared/sidebar-section-mode.js";
@@ -76,7 +78,33 @@ import { watchBoxSignal } from "./change-signal.js";
 
 const POLL_MS = 30_000;
 const COLLAPSED_KEY = "topos-child-groups-collapsed";
-const OTHER_LABEL = "その他";
+// 親なしのグループの題名(見出しは出さない。`ThreadGroupSection` が平らに描く。旧「その他」は廃止)。
+const OTHER_LABEL = "";
+const SIDE_OPEN_KEY = "topos-side-sections-open";
+const SIDE_LABEL: Record<SidebarSide, string> = { walltalk: "壁打ち", aux: "補助スレ" };
+/** 既定の開閉: 壁打ちは開く、補助スレは折りたたむ(2026-10-30 ユーザー指示。端末ごとに保存)。 */
+const SIDE_OPEN_DEFAULT: Record<SidebarSide, boolean> = { walltalk: true, aux: false };
+
+function readSideOpen(): Record<SidebarSide, boolean> {
+  try {
+    const raw: unknown = JSON.parse(globalThis.localStorage?.getItem(SIDE_OPEN_KEY) ?? "{}");
+    const o = (raw && typeof raw === "object" ? raw : {}) as Partial<Record<SidebarSide, unknown>>;
+    return {
+      walltalk: typeof o.walltalk === "boolean" ? o.walltalk : SIDE_OPEN_DEFAULT.walltalk,
+      aux: typeof o.aux === "boolean" ? o.aux : SIDE_OPEN_DEFAULT.aux,
+    };
+  } catch {
+    return { ...SIDE_OPEN_DEFAULT };
+  }
+}
+
+function writeSideOpen(open: Record<SidebarSide, boolean>): void {
+  try {
+    globalThis.localStorage?.setItem(SIDE_OPEN_KEY, JSON.stringify(open));
+  } catch {
+    // 保存できなくても画面上の開閉は動く
+  }
+}
 /** ドラッグ中は取得結果で一覧を差し替えない(キャンセル時に固まらないよう期限付き)。 */
 const DRAG_POLL_GATE_MS = 60_000;
 /** PC 幅で自分で描くメニューの幅の上限(サイドバーが広くても間延びさせない)。 */
@@ -164,6 +192,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   const setOrder = useRpc(childThreadsSetOrderRpc);
   const archive = useRpc(childThreadsArchiveRpc);
   const pin = useRpc(childThreadsPinRpc);
+  const setSide = useRpc(childThreadsSideRpc);
   // ドラッグ中は取得結果で一覧を差し替えない(ノート側の取得でも同じゲートを使う)。
   const dragGateUntilRef = useRef(0);
   const {
@@ -183,6 +212,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   const [saveFailed, setSaveFailed] = useState(false);
   const [orderIsManual, setOrderIsManual] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(readCollapsed);
+  const [sideOpen, setSideOpen] = useState<Record<SidebarSide, boolean>>(readSideOpen);
   const [notice, setNotice] = useState("");
   const colors = theme.colors;
   // 状態文字は行の背景に対して WCAG AA(4.5:1)を満たす色を選ぶ(グループ見出しの件数・ケアット用)。
@@ -260,9 +290,9 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   // ピン止めグループの並べ替えも全体順への書き戻しなので、変わるのはピン同士の順だけ。
   // 並べ替えの置換先は描画と同じグループ分けの出力から作る(見出しになる行は含まない。
   // 出口レビュー round1 R1-4 / round2 R2-1)。
-  const groups = useMemo(
+  const sides = useMemo(
     () =>
-      groupThreadRows(
+      groupThreadRowsBySide(
         rows,
         coordinatorIds,
         COORDINATOR_GROUP,
@@ -272,11 +302,16 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
       ),
     [rows, coordinatorIds],
   );
-  const reorderable = useMemo(() => reorderableIds(groups), [groups]);
+  const reorderable = useMemo(
+    () => reorderableIds([...sides.walltalk, ...sides.aux]),
+    [sides],
+  );
   const onReorderGroup = useCallback(
-    (groupKey: string, keys: string[]) => {
+    (side: SidebarSide, groupKey: string, keys: string[]) => {
       const queue = [...keys];
+      // 群ごとに同じキー(ピン止め・親なし)が出るので、群(side)も合わせて当てる。
       const flat = threads.map((t) =>
+        sideOfThread(t) === side &&
         rowGroupKeyOf(t, coordinatorIds, COORDINATOR_GROUP, PINNED_GROUP) === groupKey &&
         reorderable.has(t.agentId)
           ? (queue.shift() ?? t.agentId)
@@ -294,6 +329,13 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
       const next = new Set(prev);
       if (!next.delete(key)) next.add(key);
       writeCollapsed(next);
+      return next;
+    });
+  }, []);
+  const toggleSideOpen = useCallback((side: SidebarSide) => {
+    setSideOpen((prev) => {
+      const next = { ...prev, [side]: !prev[side] };
+      writeSideOpen(next);
       return next;
     });
   }, []);
@@ -426,6 +468,40 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     [coordinatorIds, gatePoll, pin],
   );
 
+  // 壁打ち⇔補助スレの移動。保存はサーバー(全端末共通)。先に画面へ反映し、失敗したら戻す。
+  const onToggleSide = useCallback(
+    (t: ChildThread) => {
+      const toAux = !t.aux;
+      gatePoll(5_000);
+      const apply = (aux: boolean) => (prev: ChildThread[]) =>
+        prev.map((x) =>
+          x.agentId === t.agentId
+            ? aux
+              ? { ...x, aux }
+              : { ...x, aux, parentAgentId: null, parentTitle: null }
+            : x,
+        );
+      setThreads(apply(toAux));
+      setNotice("保存しています…");
+      const revert = () => {
+        // 親の印も落としているので、元の行そのものを書き戻す(この行だけ)。
+        setThreads((prev) => prev.map((x) => (x.agentId === t.agentId ? t : x)));
+        dragGateUntilRef.current = 0;
+        setNotice("移動を保存できませんでした");
+      };
+      void setSide({ agentId: t.agentId, side: toAux ? "aux" : "walltalk" })
+        .then((r) => {
+          if (r.ok) {
+            setNotice(toAux ? "補助スレへ移しました" : "壁打ちへ戻しました");
+            dragGateUntilRef.current = 0;
+          } else revert();
+          return null;
+        })
+        .catch(() => revert());
+    },
+    [gatePoll, setSide],
+  );
+
   /**
    * 状態の帯を押した: その行のメニューを**小さなポップアップ**で開く。
    *
@@ -466,13 +542,14 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   const applyMenuIntent = useCallback(
     (t: ChildThread, canArchiveNow: boolean, intent: ThreadMenuIntent) => {
       if (intent === "toggle-pin") onTogglePin(t);
+      else if (intent === "toggle-side") onToggleSide(t);
       // 司令塔はアーカイブしない。メニューから項目を消すだけだと、他の入口(将来のショートカット等)が
       // 増えたときに破られるので、実行側でも止める(出口レビュー round2 指摘3)。
       else if (intent === "archive") {
         if (canArchiveNow) onArchive(t);
       } else if (intent === "open-thread") openThread(t.agentId, t.access);
     },
-    [onArchive, onTogglePin, openThread],
+    [onArchive, onTogglePin, onToggleSide, openThread],
   );
   // 本体へ渡す操作ハンドラ(毎回新しい関数を JSX に渡さない。react-perf)。
   const menuActionProps = useMemo(() => {
@@ -629,6 +706,8 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
         orderIsManual={orderIsManual}
         failed={failed}
         onOpenList={openList}
+        sideOpen={sideOpen}
+        onToggleSide={toggleSideOpen}
         onToggleGroup={toggleGroup}
         onOpenGroup={openGroup}
         onDragBegin={onDragBegin}
@@ -784,6 +863,8 @@ function SidebarContents({
   rows,
   coordinatorIds,
   collapsed,
+  sideOpen,
+  onToggleSide,
   statusNotice,
   notice,
   noticeColor,
@@ -812,6 +893,9 @@ function SidebarContents({
   /** 司令塔の id 集合(全スレから作ったもの。呼び出し元の並べ替えと同じ集合)。 */
   coordinatorIds: ReadonlySet<string>;
   collapsed: ReadonlySet<string>;
+  /** 壁打ち・補助スレそれぞれの開閉(端末ごと)。 */
+  sideOpen: Record<SidebarSide, boolean>;
+  onToggleSide: (side: SidebarSide) => void;
   /** 取得の失敗など、一覧が欠けていることの通知(空なら出さない)。 */
   statusNotice: string;
   notice: string;
@@ -823,7 +907,7 @@ function SidebarContents({
   onToggleGroup: (key: string) => void;
   onOpenGroup: (key: string) => void;
   onDragBegin: () => void;
-  onReorderGroup: (key: string, keys: string[]) => void;
+  onReorderGroup: (side: SidebarSide, key: string, keys: string[]) => void;
   renderThread: (row: SidebarRowView<ChildThread>) => React.ReactElement;
   onResetOrder: () => void;
   /** 構想一覧の材料(`ConceptNotesList` へ渡す)。 */
@@ -841,9 +925,9 @@ function SidebarContents({
 }) {
   // `coordinatorIds` は呼び出し元から受ける(上段に出ている行だけで作ると、上段から外れた司令塔の
   // 子スレが「司令塔」から漏れ、並べ替え側のキーとずれる。出口レビュー round3 指摘3)。
-  const groups = useMemo(
+  const sides = useMemo(
     () =>
-      groupThreadRows(
+      groupThreadRowsBySide(
         rows,
         coordinatorIds,
         COORDINATOR_GROUP,
@@ -887,13 +971,17 @@ function SidebarContents({
         </View>
       ) : null}
       <StatusCountChips rows={rows} openScreen={openScreen} />
-      {groups.map((g) => (
-        <ThreadGroupSection
-          key={g.key}
-          group={g}
-          open={!collapsed.has(g.key)}
-          onToggle={onToggleGroup}
-          onOpenCoordinator={onOpenGroup}
+      {(["walltalk", "aux"] as const).map((side) => (
+        <SideSection
+          key={side}
+          side={side}
+          groups={sides[side]}
+          waiting={side === "aux" ? sides.auxWaiting : 0}
+          open={sideOpen[side]}
+          collapsed={collapsed}
+          onToggleSide={onToggleSide}
+          onToggleGroup={onToggleGroup}
+          onOpenGroup={onOpenGroup}
           onDragBegin={onDragBegin}
           onReorderGroup={onReorderGroup}
           renderThread={renderThread}
@@ -921,6 +1009,101 @@ function SidebarContents({
           onPress={onResetOrder}
         />
       ) : null}
+    </>
+  );
+}
+
+/**
+ * 「壁打ち」「補助スレ」の1群(2026-10-30)。見出しの行末に件数と開閉のシェブロンを置く。
+ * 補助スレは折りたたんでいても、判断待ちが1件でもあれば見出しに「判断待ち N」を出す(見落とさない)。
+ * 群が空なら見出しごと出さない。
+ */
+function SideSection({
+  side,
+  groups,
+  waiting,
+  open,
+  collapsed,
+  onToggleSide,
+  onToggleGroup,
+  onOpenGroup,
+  onDragBegin,
+  onReorderGroup,
+  renderThread,
+  statusColor,
+}: {
+  side: SidebarSide;
+  groups: ThreadGroup<ChildThread>[];
+  waiting: number;
+  open: boolean;
+  collapsed: ReadonlySet<string>;
+  onToggleSide: (side: SidebarSide) => void;
+  onToggleGroup: (key: string) => void;
+  onOpenGroup: (key: string) => void;
+  onDragBegin: () => void;
+  onReorderGroup: (side: SidebarSide, key: string, keys: string[]) => void;
+  renderThread: (row: SidebarRowView<ChildThread>) => React.ReactElement;
+  statusColor: string;
+}) {
+  const toggle = useCallback(() => onToggleSide(side), [onToggleSide, side]);
+  const reorder = useCallback(
+    (key: string, keys: string[]) => onReorderGroup(side, key, keys),
+    [onReorderGroup, side],
+  );
+  const textStyle = useMemo(() => ({ color: statusColor }), [statusColor]);
+  const chevronStyle = useMemo(() => [styles.chevron, { color: statusColor }], [statusColor]);
+  const count = groups.reduce((n, g) => n + g.rows.length, 0);
+  const label = SIDE_LABEL[side];
+  const trailing = useMemo(
+    () => (
+      <View style={styles.trailing}>
+        {waiting > 0 ? (
+          <StatusBadge
+            text={`判断待ち ${waiting}`}
+            kind="waiting"
+            testID={`child-side-waiting-${side}`}
+          />
+        ) : null}
+        <Text style={textStyle}>{count}</Text>
+        <Pressable
+          onPress={toggle}
+          testID={`child-side-toggle-${side}`}
+          accessibilityRole="button"
+          accessibilityLabel={open ? `${label}をたたむ` : `${label}を開く`}
+          hitSlop={8}
+          style={styles.toggleHit}
+        >
+          <Text style={chevronStyle}>{open ? "▾" : "▸"}</Text>
+        </Pressable>
+      </View>
+    ),
+    [chevronStyle, count, label, open, side, textStyle, toggle, waiting],
+  );
+  if (groups.length === 0) return null;
+  return (
+    <>
+      <SidebarRow
+        id={`child-side-${side}`}
+        icon={side === "aux" ? "Archive" : "MessageSquare"}
+        label={label}
+        onPress={toggle}
+        trailing={trailing}
+      />
+      {open
+        ? groups.map((g) => (
+            <ThreadGroupSection
+              key={g.key}
+              group={g}
+              open={!collapsed.has(g.key)}
+              onToggle={onToggleGroup}
+              onOpenCoordinator={onOpenGroup}
+              onDragBegin={onDragBegin}
+              onReorderGroup={reorder}
+              renderThread={renderThread}
+              statusColor={statusColor}
+            />
+          ))
+        : null}
     </>
   );
 }
@@ -997,9 +1180,10 @@ function ThreadGroupSection({
       ),
     [chevronStyle, count, group.key, group.title, headingStatus, open, pinned, textStyle, toggle],
   );
-  const shown = pinned || open;
+  const shown = pinned || open || group.key === "";
   return (
     <>
+      {group.key === "" ? null : (
       <SidebarRow
         id={`child-group-${group.key || "other"}`}
         icon="ListTodo"
@@ -1007,6 +1191,7 @@ function ThreadGroupSection({
         onPress={openCoordinator}
         trailing={trailing}
       />
+      )}
       {shown ? (
         <SidebarReorderableList
           testID={`child-threads-list-${group.key || "other"}`}

@@ -17,10 +17,10 @@ export interface ThreadMenuState {
   confirmingArchive: boolean;
 }
 
-export type ThreadMenuAction = "open" | "close" | "toggle-pin" | "archive" | "open-thread";
+export type ThreadMenuAction = "open" | "close" | "toggle-pin" | "toggle-side" | "archive" | "open-thread";
 
 /** 画面側が実行する副作用。状態遷移だけの操作では null。 */
-export type ThreadMenuIntent = "toggle-pin" | "archive" | "open-thread";
+export type ThreadMenuIntent = "toggle-pin" | "toggle-side" | "archive" | "open-thread";
 
 export interface ThreadMenuStep {
   state: ThreadMenuState;
@@ -58,6 +58,8 @@ export function nextMenu(state: ThreadMenuState, action: ThreadMenuAction): Thre
       return { state: CLOSED_MENU, intent: null };
     case "toggle-pin":
       return { state: CLOSED_MENU, intent: "toggle-pin" };
+    case "toggle-side":
+      return { state: CLOSED_MENU, intent: "toggle-side" };
     case "open-thread":
       return { state: CLOSED_MENU, intent: "open-thread" };
     case "archive":
@@ -94,4 +96,16 @@ export function archiveMenuLabel(confirmingArchive: boolean): string {
 /** メニューのピン項目の文言(現在の状態で切り替える)。 */
 export function pinMenuLabel(pinned: boolean): string {
   return pinned ? "ピン止めを外す" : "ピン止めする";
+}
+
+/**
+ * 壁打ち⇔補助スレの移動項目の文言(2026-10-30)。司令塔と見出しの親は移せない(`null` = 項目を出さない)。
+ */
+export function sideMenuLabel(thread: {
+  aux?: boolean;
+  coordinator?: boolean;
+  groupingParent?: boolean;
+}): string | null {
+  if (thread.coordinator === true || thread.groupingParent === true) return null;
+  return thread.aux === true ? "壁打ちへ戻す" : "補助スレへ移す";
 }

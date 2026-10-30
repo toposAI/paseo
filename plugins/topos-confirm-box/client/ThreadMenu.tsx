@@ -21,6 +21,7 @@ import {
   archiveMenuLabel,
   nextMenu,
   pinMenuLabel,
+  sideMenuLabel,
   type ThreadMenuAction,
   type ThreadMenuIntent,
   type ThreadMenuState,
@@ -101,7 +102,9 @@ export function ThreadMenu({
     },
     [state, onAction, onClose],
   );
+  const sideLabel = sideMenuLabel(thread);
   const togglePin = useCallback(() => run("toggle-pin"), [run]);
+  const toggleSide = useCallback(() => run("toggle-side"), [run]);
   const archive = useCallback(() => run("archive"), [run]);
   const openThread = useCallback(() => run("open-thread"), [run]);
 
@@ -166,6 +169,17 @@ export function ThreadMenu({
         textStyle={pinTextStyle}
         onPress={togglePin}
       />
+      {sideLabel ? (
+        <MenuItem
+          testID={`child-thread-menu-side-${thread.agentId}`}
+          label={sideLabel}
+          accessibilityLabel={`${title}を${sideLabel}`}
+          style={itemStyle}
+          pressedStyle={pressedItemStyle}
+          textStyle={textStyle}
+          onPress={toggleSide}
+        />
+      ) : null}
       {canArchive ? (
         <MenuItem
           testID={`child-thread-menu-archive-${thread.agentId}`}

@@ -83,6 +83,12 @@ export const ChildThreadSchema = z.object({
   /** ピン止め(そのグループの先頭に固定)。 */
   pinned: z.boolean().default(false),
   /**
+   * 「補助スレ」群に出すか(サーバーが決める。2026-10-30 ユーザー指示)。ユーザーが移した保存値が最優先、
+   * 無ければ自動判定(登録簿の子スレ・司令塔・見出しの親=補助、登録簿に無い人が建てたスレ=壁打ち)。
+   * 古い応答(未指定)は偽=壁打ち側。
+   */
+  aux: z.boolean().optional(),
+  /**
    * 司令塔スレそのもの(登録簿ではなく起こしデーモンの `coordinator_id` から出した行)。
    * 一覧の先頭に「司令塔」グループとして並べる。
    */
@@ -215,6 +221,26 @@ export const childThreadsPinRpc = defineRpc({
   }),
 });
 export type ChildThreadsPinOutput = z.infer<typeof childThreadsPinRpc.output>;
+
+/** 壁打ち⇔補助スレの手動の振り分け。`null` は手動指定を外して自動判定へ戻す。 */
+export const CHILD_THREAD_SIDES = ["aux", "walltalk"] as const;
+export type ChildThreadSide = (typeof CHILD_THREAD_SIDES)[number];
+
+/** 壁打ち⇔補助スレの振り分けの保存先(確認箱ディレクトリ直下。全端末で共通)。 */
+export const CHILD_THREAD_SIDES_FILE = "child_threads_sides.json";
+
+export const childThreadsSideRpc = defineRpc({
+  name: "topos.childthreads.side",
+  input: z.object({
+    agentId: z.string().min(1).max(CHILD_THREAD_ID_LIMIT),
+    side: z.enum(CHILD_THREAD_SIDES).nullable(),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    message: z.string().optional(),
+  }),
+});
+export type ChildThreadsSideOutput = z.infer<typeof childThreadsSideRpc.output>;
 
 /**
  * 並びの優先度(小さいほど上)。`待機中` は「動いていない」なので実装中の後・完了の前に置く
