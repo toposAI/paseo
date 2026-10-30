@@ -28,6 +28,7 @@ import {
   type PluginSidebarItemProps,
 } from "@getpaseo/plugin/client";
 import { SidebarReorderableList, SidebarRow } from "@getpaseo/plugin/client/ui";
+import { onBoxChanged } from "./events.js";
 import { SIDE_DRAG_ENABLED, SideDragRow, SideDropZone } from "./SideDrag.js";
 import {
   childThreadsArchiveRpc,
@@ -36,7 +37,7 @@ import {
   childThreadsSetOrderRpc,
   childThreadsSideRpc,
 } from "../shared/child-threads.js";
-import { boxSignalRpc } from "../shared/contract.js";
+import { boxSignalRpc, confirmBoxCountRpc } from "../shared/contract.js";
 import type { ChildThread } from "../shared/child-threads.js";
 import { blockedMessage } from "../shared/child-threads.js";
 import {
@@ -50,7 +51,7 @@ import {
   reorderableIds,
   rowGroupKeyOf,
 } from "../shared/sidebar-rows.js";
-import { BOX_TAB_SCREEN_ID } from "../shared/footer-tabs.js";
+import { BOX_TAB_SCREEN_ID, chipJudgmentCount } from "../shared/footer-tabs.js";
 import {
   COORDINATOR_GROUP,
   PINNED_GROUP,
@@ -1298,6 +1299,31 @@ function rowIcon(row: SidebarRowView<ChildThread>, t: ChildThread): string {
  * 2026-10-26 に「完了待ち」を廃止したので、完了待ちの件数チップは無い。
  * 0件の状態は出さない(件数の無いチップは情報にならない)。
  */
+/** 確認箱の未回答の合計(下部バーのバッジと同じ出所 `presentableTotal`)。取れないうちは undefined。 */
+function useBoxTotal(): number | undefined {
+  const count = useRpc(confirmBoxCountRpc);
+  const [total, setTotal] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    let alive = true;
+    const tick = () =>
+      count({})
+        .then((r) => {
+          if (alive) setTotal(r.presentableTotal ?? undefined);
+          return null;
+        })
+        .catch(() => {});
+    void tick();
+    const timer = setInterval(tick, 30_000);
+    const off = onBoxChanged(() => void tick());
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      off();
+    };
+  }, [count]);
+  return total;
+}
+
 function StatusCountChips({
   rows,
   openScreen,
@@ -1305,10 +1331,9 @@ function StatusCountChips({
   rows: readonly SidebarRowView<ChildThread>[];
   openScreen: (input: { screenId: string; params?: Record<string, string> }) => void;
 }) {
-  const { judgment, running, coordinator, idle, closed } = useMemo(
-    () => countStatusLabels(rows),
-    [rows],
-  );
+  const counted = useMemo(() => countStatusLabels(rows), [rows]);
+  const { running, coordinator, idle, closed } = counted;
+  const judgment = chipJudgmentCount(counted.judgment, useBoxTotal());
   const openJudgment = useCallback(() => openScreen({ screenId: BOX_TAB_SCREEN_ID }), [openScreen]);
   if (judgment + running + coordinator + idle + closed === 0) return null;
   return (

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  chipJudgmentCount,
   FOOTER_TABS,
   bugBadgeCount,
   confirmBoxTabs,
@@ -89,4 +90,11 @@ test("確認箱の内訳1行は「いま聞ける・裏方が書き直し中・�
   );
   assert.equal(judgmentBreakdownLabel(1, 0, 0), null, "0件は出さない");
   assert.equal(judgmentBreakdownLabel(1, 0, null), null, "総数が不明なら出さない");
+});
+
+test("チップの判断待ちは確認箱の合計に揃え、合計が取れないときだけ行数に戻す", () => {
+  assert.equal(chipJudgmentCount(12, 11), 11);
+  assert.equal(chipJudgmentCount(12, 0), 0);
+  assert.equal(chipJudgmentCount(12, null), 12);
+  assert.equal(chipJudgmentCount(12, undefined), 12);
 });

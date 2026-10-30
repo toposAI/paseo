@@ -76,6 +76,15 @@ export function judgmentBadgeLabel(
 }
 
 /**
+ * サイドバーのチップ「判断待ち N」の数。下部バーのバッジと同じ数(確認箱の未回答の合計 `total`)を出す
+ * (2026-10-30 ユーザーが 1/15 の食い違いを指摘。チップは判断待ちのスレ行を数えており、バッジと1件ずれていた)。
+ * 総数が取れていないとき(null/undefined)だけ従来の行数に戻す。
+ */
+export function chipJudgmentCount(rowCount: number, total: number | null | undefined): number {
+  return total === null || total === undefined ? rowCount : total;
+}
+
+/**
  * 確認箱の中の内訳1行「いま聞ける N・裏方が書き直し中 N・残り N」。
  * 残り = 合計 − いま聞ける − 裏方が書き直し中(負にならない)。総数が分からなければ null(出さない)。
  * 裏方の件数が分からない(古い Python)ときは、その項目だけ省く。
