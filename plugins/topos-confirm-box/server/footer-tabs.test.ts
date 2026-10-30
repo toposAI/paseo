@@ -82,7 +82,7 @@ test("確認箱の内訳1行は「いま聞ける・裏方が書き直し中・�
     "いま聞ける 1・残り 4",
     "裏方の件数が不明ならその項目を省く",
   );
-  assert.equal(judgmentBreakdownLabel(null, 1, 4), "いま聞ける 0・裏方が書き直し中 1・残り 3");
+  assert.equal(judgmentBreakdownLabel(null, 1, 4), "いま聞ける ?・裏方が書き直し中 1・残り 3");
   assert.equal(
     judgmentBreakdownLabel(3, 5, 4),
     "いま聞ける 3・裏方が書き直し中 5・残り 0",
@@ -97,4 +97,8 @@ test("チップの判断待ちは確認箱の合計に揃え、合計が取れ�
   assert.equal(chipJudgmentCount(12, 0), 0);
   assert.equal(chipJudgmentCount(12, null), 12);
   assert.equal(chipJudgmentCount(12, undefined), 12);
+});
+
+test("内訳: 窓口Aの件数が数えられないときは 0 と偽らず ? と出す", () => {
+  assert.equal(judgmentBreakdownLabel(null, 2, 10), "いま聞ける ?・裏方が書き直し中 2・残り 8");
 });

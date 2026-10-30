@@ -909,7 +909,8 @@ function useBreakdownLine(): string | null {
     const tick = async () => {
       try {
         const r = await count({});
-        if (alive) {
+        // 合計が数えられなかった(null)応答では前回の行を残す。消すと「件が無くなった」と読めるため
+        if (alive && r.presentableTotal !== null) {
           setLine(
             judgmentBreakdownLabel(r.presentable, r.presentableConsulting, r.presentableTotal),
           );

@@ -95,9 +95,9 @@ export function judgmentBreakdownLabel(
   total: number | null | undefined,
 ): string | null {
   if (total === null || total === undefined || total <= 0) return null;
-  const ask = presentable ?? 0;
-  const rest = Math.max(0, total - ask - (consulting ?? 0));
-  const parts = [`いま聞ける ${ask}`];
+  // 窓口Aが数えられていない(null)ときは 0 と偽らず「?」と出す(出口レビュー 指摘2)
+  const rest = Math.max(0, total - (presentable ?? 0) - (consulting ?? 0));
+  const parts = [`いま聞ける ${presentable ?? "?"}`];
   if (consulting !== null && consulting !== undefined) parts.push(`裏方が書き直し中 ${consulting}`);
   parts.push(`残り ${rest}`);
   return parts.join("・");
