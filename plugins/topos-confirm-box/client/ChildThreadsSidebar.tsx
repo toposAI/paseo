@@ -28,6 +28,7 @@ import {
   type PluginSidebarItemProps,
 } from "@getpaseo/plugin/client";
 import { SidebarReorderableList, SidebarRow } from "@getpaseo/plugin/client/ui";
+import { SIDE_DRAG_ENABLED, SideDragRow, SideDropZone } from "./SideDrag.js";
 import {
   childThreadsArchiveRpc,
   childThreadsListRpc,
@@ -496,6 +497,17 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     [gatePoll, setSide],
   );
 
+  // PC 幅のドラッグ移動: 運んでいる行と、離した先の側(違う側のときだけ移す)。
+  const [dragThread, setDragThread] = useState<ChildThread | null>(null);
+  const endSideDrag = useCallback(() => setDragThread(null), []);
+  const onDropSide = useCallback(
+    (t: ChildThread, side: SidebarSide) => {
+      setDragThread(null);
+      if ((side === "aux") !== (t.aux === true)) onToggleSide(t);
+    },
+    [onToggleSide],
+  );
+
   /**
    * 状態の帯を押した: その行のメニューを**小さなポップアップ**で開く。
    *
@@ -680,9 +692,22 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
         dotIcons={dotIcons}
         onOpen={openThread}
         onOpenMenu={onMenuOpenAnchor}
+        onSideDragStart={compact || !SIDE_DRAG_ENABLED ? undefined : setDragThread}
+        onSideDragEnd={compact || !SIDE_DRAG_ENABLED ? undefined : endSideDrag}
+        gripColor={statusColor}
       />
     ),
-    [dotIcons, failed, focusId, onMenuOpenAnchor, onScreen, openThread],
+    [
+      compact,
+      dotIcons,
+      endSideDrag,
+      failed,
+      focusId,
+      onMenuOpenAnchor,
+      onScreen,
+      openThread,
+      statusColor,
+    ],
   );
 
   return (
@@ -707,6 +732,8 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
         onDragBegin={onDragBegin}
         onReorderGroup={onReorderGroup}
         renderThread={renderThread}
+        dragThread={compact ? null : dragThread}
+        onDropSide={onDropSide}
         onResetOrder={resetOrder}
         notes={notes}
         notesError={notesError}
@@ -871,6 +898,8 @@ function SidebarContents({
   onDragBegin,
   onReorderGroup,
   renderThread,
+  dragThread,
+  onDropSide,
   onResetOrder,
   notes,
   notesError,
@@ -903,6 +932,9 @@ function SidebarContents({
   onDragBegin: () => void;
   onReorderGroup: (side: SidebarSide, key: string, keys: string[]) => void;
   renderThread: (row: SidebarRowView<ChildThread>) => React.ReactElement;
+  /** PC 幅で運んでいる行(無ければ null)と、2群のどちらかへ離したときの処理。 */
+  dragThread: ChildThread | null;
+  onDropSide: (thread: ChildThread, side: SidebarSide) => void;
   onResetOrder: () => void;
   /** 構想一覧の材料(`ConceptNotesList` へ渡す)。 */
   notes: readonly SidebarNote[];
@@ -979,6 +1011,8 @@ function SidebarContents({
           onDragBegin={onDragBegin}
           onReorderGroup={onReorderGroup}
           renderThread={renderThread}
+          dragThread={dragThread}
+          onDropSide={onDropSide}
           statusColor={statusColor}
         />
       ))}
@@ -1024,6 +1058,8 @@ function SideSection({
   onDragBegin,
   onReorderGroup,
   renderThread,
+  dragThread,
+  onDropSide,
   statusColor,
 }: {
   side: SidebarSide;
@@ -1037,6 +1073,8 @@ function SideSection({
   onDragBegin: () => void;
   onReorderGroup: (side: SidebarSide, key: string, keys: string[]) => void;
   renderThread: (row: SidebarRowView<ChildThread>) => React.ReactElement;
+  dragThread: ChildThread | null;
+  onDropSide: (thread: ChildThread, side: SidebarSide) => void;
   statusColor: string;
 }) {
   const toggle = useCallback(() => onToggleSide(side), [onToggleSide, side]);
@@ -1073,9 +1111,10 @@ function SideSection({
     ),
     [chevronStyle, count, label, open, side, textStyle, toggle, waiting],
   );
-  if (groups.length === 0) return null;
+  // 空の側も、行を運んでいる間は見出しだけ出す(空の側へ移せなくなるのを避ける)。
+  if (groups.length === 0 && dragThread === null) return null;
   return (
-    <>
+    <SideDropZone side={side} dragThread={dragThread} onDropSide={onDropSide} accent={statusColor}>
       <SidebarRow
         id={`child-side-${side}`}
         icon={side === "aux" ? "Archive" : "MessageSquare"}
@@ -1098,7 +1137,7 @@ function SideSection({
             />
           ))
         : null}
-    </>
+    </SideDropZone>
   );
 }
 
@@ -1332,9 +1371,16 @@ function ThreadRow({
   dotIcons,
   onOpen,
   onOpenMenu,
+  onSideDragStart,
+  onSideDragEnd,
+  gripColor,
 }: {
   row: SidebarRowView<ChildThread>;
   failed: boolean;
+  /** PC 幅だけ: 行の「つかみ」を持って2群の見出しへ運んで移す。未指定ならつかみを出さない。 */
+  onSideDragStart?: (t: ChildThread) => void;
+  onSideDragEnd?: () => void;
+  gripColor?: string;
   active: boolean;
   /** 状態の点(左端のアイコンの位置に出す。明暗は呼び出し元が選ぶ)。 */
   dotIcons: Record<StateDotKind, StateDotIcon>;
@@ -1370,7 +1416,7 @@ function ThreadRow({
     [badgeKind, badgeText, pressBadge, testID],
   );
   // メニューは行の中に差し込まない(ホストのポップアップに出す)。行の高さは開いても変わらない。
-  return (
+  const sidebarRow = (
     <SidebarRow
       id={t.agentId}
       // 点が出せる行は先頭のアイコンを点に置き換える(純正と同じ意味・色)。点の材料が無い行
@@ -1381,6 +1427,17 @@ function ThreadRow({
       onPress={onPress}
       trailing={trailing}
     />
+  );
+  if (!onSideDragStart || !onSideDragEnd) return sidebarRow;
+  return (
+    <SideDragRow
+      thread={t}
+      onStart={onSideDragStart}
+      onEnd={onSideDragEnd}
+      color={gripColor ?? "#888"}
+    >
+      {sidebarRow}
+    </SideDragRow>
   );
 }
 
