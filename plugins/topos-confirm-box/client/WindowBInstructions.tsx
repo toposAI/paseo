@@ -68,30 +68,21 @@ export function openWindowBInstructions(
 function useInstructions(): {
   data: WindowBInstructionsOutput | null;
   error: string | null;
-  receivedAt: number;
 } {
   const list = useRpc(windowBInstructionsRpc);
   const [state, setState] = useState<{
     data: WindowBInstructionsOutput | null;
     error: string | null;
-    receivedAt: number;
   }>({
     data: null,
     error: null,
-    receivedAt: 0,
   });
   useEffect(() => {
     let alive = true;
     const apply = (
       next: { ok: true; data: WindowBInstructionsOutput } | { ok: false; error: string },
     ) => {
-      if (alive)
-        setState((prev) => ({
-          ...keepLastOnFailure(prev.data, next),
-          // 読み出しの時刻は Python が返す `generatedAt`(読んだ瞬間)。届いた時刻で測ると、待たされた分
-          // 「新しく見える」ので使わない。読めなかったときは前回のまま(古い物ほど古く見える)。
-          receivedAt: next.ok ? next.data.generatedAt : prev.receivedAt,
-        }));
+      if (alive) setState((prev) => keepLastOnFailure(prev.data, next));
     };
     const tick = () =>
       list({ limit: 40 })

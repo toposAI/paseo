@@ -2131,6 +2131,8 @@ function WorkspaceScreenContent({
     workspaceId: normalizedWorkspaceId,
     agentId: autoOpenAgentId,
     enabled: isRouteFocused,
+    // 並びの保存を読み終える前に入れると、読み込み後の内容で置き換わって消える(2026-10-30 出口レビュー1巡目)。
+    ready: hasHydratedWorkspaceLayoutStore,
   });
 
   const tabs = useMemo<WorkspaceTabDescriptor[]>(

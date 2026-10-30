@@ -35,7 +35,9 @@ export function createPluginNavigation(input: {
     if (location === "right") {
       // 右カラム(2026-10-30)。無ければ作る。欄に別の物が開いているときは、`focus: false` なら
       // その物を隠さず後ろへ足し(自動で出す面用)、既定なら前に出す(ボタンで開いたとき)。
-      return rightColumnPlacement(store.ensureSidePane(workspaceKey), focus ? "front" : "behind");
+      // `focus` は欄を作るときにも渡す(渡さないと新しい欄へ焦点が移り、`focus:false` が効かない)。
+      const paneId = store.ensureSidePane(workspaceKey, { focus });
+      return rightColumnPlacement(paneId, focus ? "front" : "behind");
     }
     const paneId = store.showExplorerSidebar(workspaceKey);
     if (!paneId) throw new Error("Explorer is unavailable");
