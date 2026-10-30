@@ -6,7 +6,7 @@
  *
  * Node/React のどちらのAPIも使わない(両ランタイムが import する)。
  */
-import type { WindowBInstructionsOutput } from "./contract.js";
+import { WINDOW_B_KIND, type WindowBInstructionsOutput } from "./contract.js";
 
 /** PC幅の下限(ホストの compact 境界と同じ720px)。 */
 export const WIDE_MIN_WIDTH = 720;
@@ -47,10 +47,34 @@ export function rowOrder<T extends { alert: string | null; warn: string | null; 
 /** 並びの群(小さいほど上)。 */
 function rank(row: { alert: string | null; warn: string | null; kind: string }): number {
   if (row.alert) return 0;
-  if (row.kind === "判断待ち(確認箱)") return 1;
-  if (row.warn) return 2;
-  if (row.kind === "完了") return 4;
-  return 3;
+  if (row.kind === WINDOW_B_KIND.judgment) return 1;
+  // 「届いたか」そのものが知りたいことなので、届いたか不明・返事なしは状態の順で後ろへ回さない。
+  if (row.kind === WINDOW_B_KIND.unknown || row.kind === WINDOW_B_KIND.noReply) return 2;
+  if (row.warn) return 3;
+  if (row.kind === WINDOW_B_KIND.done) return 5;
+  return 4;
+}
+
+/** 一覧のうち何件を出しているか。上限で切ったと分からないと「出ている範囲で赤が無い」と読み違える。 */
+export function truncationNote(data: WindowBInstructionsOutput): string | null {
+  if (data.total <= data.items.length) return null;
+  return `表示は上位${data.items.length}件(全${data.total}件。赤と届いたか不明・返事なしは先に出しています)`;
+}
+
+function clock(ms: number): string {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/**
+ * 「いつ時点の一覧か」。台帳の更新が止まると古い「作業中」がそのまま正常に見えるので、
+ * 読み出した時刻と台帳の更新時刻を両方出す(台帳の更新時刻はミリ秒・0 は「まだ無い」)。
+ */
+export function freshnessText(data: WindowBInstructionsOutput): string {
+  const at = `読み出し ${clock(data.generatedAt)}`;
+  return data.ledgerUpdatedAt > 0
+    ? `${at} / 台帳 ${clock(data.ledgerUpdatedAt)}`
+    : `${at} / 台帳の更新時刻なし`;
 }
 
 /** 一覧を開く場所。PC幅は右カラム、iPhone幅は主ペイン(全画面。戻るで閉じる)。 */

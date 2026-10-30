@@ -47,8 +47,12 @@ const EMPTY = {
   notices: [],
 };
 
-test("チェックアウトが無いときは null(空の一覧として出さない)", () => {
-  assert.equal(resolveWindowBRunner({ TOPOS_CONFIRM_BOX_JUDGMENT_CLI_DIR: "/nonexistent" }), null);
+test("スクリプトが無ければ呼んだときに、探したパスつきで失敗する(起動時に固定しない)", async () => {
+  const runner = resolveWindowBRunner({ TOPOS_CONFIRM_BOX_JUDGMENT_CLI_DIR: "/nonexistent" });
+  await assert.rejects(
+    () => runner(40),
+    /スクリプトがありません\(\/nonexistent\/antigravity\/utils\/window_b_instruction_panel\.py\)/,
+  );
 });
 
 test("--limit を渡し、最後の行の JSON を読む(前に警告が出ても壊れない)", async () => {
@@ -58,7 +62,6 @@ test("--limit を渡し、最後の行の JSON を読む(前に警告が出て�
     TOPOS_CONFIRM_BOX_JUDGMENT_CLI_DIR: checkout,
     TOPOS_WINDOWB_PANEL_PYTHON: path.join(py.dir, "python3"),
   });
-  assert.ok(runner);
   assert.deepEqual(await runner(40), EMPTY);
   const argv = fs.readFileSync(py.log, "utf8").trim().split("\n");
   // 1つ目は流すスクリプト(チェックアウト側)、そのあとが引数
@@ -76,7 +79,6 @@ test("読めない出力は失敗として投げる(0件に丸めない)", async
     TOPOS_CONFIRM_BOX_JUDGMENT_CLI_DIR: checkout,
     TOPOS_WINDOWB_PANEL_PYTHON: path.join(py.dir, "python3"),
   });
-  assert.ok(runner);
   await assert.rejects(() => runner(40));
 });
 
@@ -88,7 +90,6 @@ test("短い間は同じ結果を返し、同じ上限の同時呼び出しは1�
     return { ...EMPTY, total: calls };
   };
   const cached = cachedWindowBRunner(runner, 8_000, () => clock);
-  assert.ok(cached);
   // 同時に2回 → python は1回
   const [a, b] = await Promise.all([cached(40), cached(40)]);
   assert.equal(a.total, 1);

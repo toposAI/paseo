@@ -66,6 +66,13 @@ function normalizePanelLocations(
   if (new Set(normalized).size !== normalized.length) {
     throw new Error(`Workspace panel ${panelId} has duplicate locations`);
   }
+  // 右カラム(`right`)は主ペインと対で使う。`right` だけだとホスト上は main 扱いなのでどこにも置けず、
+  // 既定の開き先(workspace)も不正になるため、workspace との併記を必須にする。
+  if (normalized.includes("right") && !normalized.includes("workspace")) {
+    throw new Error(
+      `Workspace panel ${panelId} must also support the workspace location with right`,
+    );
+  }
   return normalized;
 }
 

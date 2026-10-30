@@ -106,7 +106,8 @@ export interface PluginIconProps {
  * パネルを開く場所。
  * - `workspace` … 主ペイン(中央)。狭い画面では全画面。
  * - `explorer`  … 左のサイドバー(K のペイン)。
- * - `right`     … 右カラム(無ければ作る)。PC で会話の右に並べる用。
+ * - `right`     … 右カラム(無ければ作る)。PC で会話の右に並べる用。**`workspace` との併記が必須**
+ *                 (右カラムはホスト上は主ペイン扱いなので、`right` だけだとどこにも置けない)。
  */
 export type PluginPanelLocation = "workspace" | "explorer" | "right";
 

@@ -7,10 +7,12 @@ import test from "node:test";
 import type { WindowBInstructionsOutput } from "../shared/contract.js";
 import {
   WIDE_MIN_WIDTH,
+  freshnessText,
   keepLastOnFailure,
   paneLocation,
   rowOrder,
   summarize,
+  truncationNote,
 } from "../shared/windowb-instructions.js";
 
 function out(total: number, alerts = 0, warns = 0): WindowBInstructionsOutput {
@@ -44,7 +46,7 @@ test("要約は件数と赤・未登録だけを短く出す", () => {
   assert.equal(summarize(out(5, 2, 1)), "5件 / 赤 2 / 未登録 1");
 });
 
-test("並びは 赤 → 判断待ち → 未登録 → その他 → 完了。同じ群は元の順", () => {
+test("並びは 赤 → 判断待ち → 届いたか不明/返事なし → 橙 → その他 → 完了。同じ群は元の順", () => {
   const rows = [
     { key: "done", alert: null, warn: null, kind: "完了" },
     { key: "working", alert: null, warn: null, kind: "作業中" },
@@ -52,11 +54,30 @@ test("並びは 赤 → 判断待ち → 未登録 → その他 → 完了。�
     { key: "wait", alert: null, warn: null, kind: "判断待ち(確認箱)" },
     { key: "y", alert: "unassigned", warn: null, kind: "受付済み" },
     { key: "unl", alert: null, warn: "unledgered", kind: "未登録" },
+    { key: "unknown", alert: null, warn: null, kind: "届いたか不明" },
     { key: "working2", alert: null, warn: null, kind: "作業中" },
   ];
   assert.deepEqual(
     rowOrder(rows).map((r) => r.key),
-    ["x", "y", "wait", "unl", "working", "working2", "done"],
+    ["x", "y", "wait", "unknown", "unl", "working", "working2", "done"],
+  );
+});
+
+test("上限で切ったときは何件出しているかを言う(切ったと分からないと赤が無いと読み違える)", () => {
+  assert.equal(truncationNote({ ...out(3), items: [{}, {}, {}] as never }), null);
+  assert.equal(
+    truncationNote({ ...out(60), items: Array.from({ length: 40 }, () => ({})) as never }),
+    "表示は上位40件(全60件。赤と届いたか不明・返事なしは先に出しています)",
+  );
+});
+
+test("いつ時点の一覧かを出す(台帳の更新時刻はミリ秒。0 は「更新時刻なし」)", () => {
+  const t = new Date(2026, 9, 30, 10, 5).getTime();
+  const data = { ...out(1), generatedAt: t, ledgerUpdatedAt: t - 60_000 };
+  assert.equal(freshnessText(data), "読み出し 10:05 / 台帳 10:04");
+  assert.equal(
+    freshnessText({ ...data, ledgerUpdatedAt: 0 }),
+    "読み出し 10:05 / 台帳の更新時刻なし",
   );
 });
 

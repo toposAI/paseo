@@ -10,6 +10,7 @@ import {
   type PluginSidebarItemProps,
 } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
+import { useToast } from "@getpaseo/plugin/client/react-native";
 import { ChildThreadsSidebar, CHILD_THREADS_SCREEN_ID } from "./client/ChildThreadsSidebar";
 import { ChildThreadsView } from "./client/ChildThreadsView";
 import { ConceptNoteView } from "./client/ConceptNoteView";
@@ -214,6 +215,7 @@ function SidebarWithHeaderButton({
   n,
 }: Pick<PluginSidebarItemProps, "currentScreen" | "openScreen"> & { n: number | undefined }) {
   const hosts = useHosts();
+  const toast = useToast();
   const open = useCallback(() => openScreen({ screenId: SCREEN_ID }), [openScreen]);
   const { registered, tick } = useRegisteredHeaderButtons();
 
@@ -242,8 +244,8 @@ function SidebarWithHeaderButton({
                 },
               }),
             );
-            // 窓口Bの右側の「ぼくの指示」(2026-10-30)。PC は右カラムに常時、iPhone はこのボタンで開閉する
-            // (狭い画面では一覧が全画面で開き、戻ると会話に戻る)。
+            // 窓口Bの右側の「ぼくの指示」(2026-10-30)。PC はこのボタンで右カラムを開く(いまは常時表示ではない)、
+            // iPhone は同じボタンで全画面に開く(戻ると会話に戻る)。
             windowBHeaderButtons.set(
               workspaceId,
               client.addHeaderButton({
@@ -260,6 +262,9 @@ function SidebarWithHeaderButton({
                       openWindowBInstructions(
                         (id, options) => openPanel(id, { workspaceId, location: options.location }),
                         workspaceId,
+                        // 開けなかったとき、押したのに何も起きない状態を残さない
+                        () =>
+                          toast.show("「ぼくの指示」を開けませんでした", { variant: "warning" }),
                       );
                     },
                   },
@@ -274,7 +279,7 @@ function SidebarWithHeaderButton({
     return () => {
       alive = false;
     };
-  }, [hosts, registered, tick]);
+  }, [hosts, registered, tick, toast]);
 
   const trailing = CountBadge({ n });
   return (

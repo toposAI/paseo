@@ -17,14 +17,17 @@ import { useRpc } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import {
   windowBInstructionsRpc,
+  WINDOW_B_KIND,
   type WindowBInstruction,
   type WindowBInstructionsOutput,
 } from "../shared/contract.js";
 import {
+  freshnessText,
   keepLastOnFailure,
   paneLocation,
   rowOrder,
   summarize,
+  truncationNote,
 } from "../shared/windowb-instructions.js";
 
 export const WINDOWB_PANEL_ID = "window-b-instructions";
@@ -34,12 +37,13 @@ const REFRESH_MS = 30_000;
 
 /**
  * 一覧を開く。PC 幅は右カラム、狭い画面は主ペイン(全画面。戻ると元の会話に戻る)。
- * 開けなかった(レイアウト未読み込み・窓口Bのワークスペースでない)ときは false を返すだけで、
- * 押したのに何も起きない状態を作らないよう、呼び出し側が知らせを出す。
+ * 開けなかった(レイアウト未読み込みなど)ときは false を返すだけで、押したのに何も起きない状態を作らないよう、
+ * 呼び出し側が知らせを出す。
  */
 export function openWindowBInstructions(
   openPanel: (id: string, options: { location: "right" | "workspace" }) => void,
   workspaceId: string,
+  onError?: () => void,
 ): boolean {
   try {
     openPanel(WINDOWB_PANEL_ID, {
@@ -47,6 +51,7 @@ export function openWindowBInstructions(
     });
   } catch (e) {
     console.warn("[topos] window B instructions were not opened", workspaceId, e);
+    onError?.();
     return false;
   }
   return true;
@@ -97,19 +102,25 @@ const ALERT_TEXT: Record<string, string> = {
   unassigned: "担当が1時間たっても決まっていない",
 };
 
-/** 状態の文字の色。赤=返事なし/担当未定(alert)、橙=台帳に載っていない(warn)、他は状態ごと。 */
+/** 状態の文字の色。赤=返事なし/担当未定(alert)、橙=台帳にない・未投函・届いたか不明・知らない語、他は状態ごと。 */
 function kindColor(c: PluginTheme["colors"], kind: string, urgent: boolean, warn: boolean): string {
   if (urgent) return c.statusDanger;
   if (warn) return c.statusWarning;
-  if (kind === "完了") return c.statusSuccess;
-  if (kind === "判断待ち(確認箱)") return c.accent;
+  if (kind === WINDOW_B_KIND.unknown || kind === WINDOW_B_KIND.noReply) return c.statusWarning;
+  if (kind === WINDOW_B_KIND.done) return c.statusSuccess;
+  if (kind === WINDOW_B_KIND.judgment) return c.accent;
   return c.foreground;
+}
+
+/** 知っている語か(Python が語を足したら、読めなくするのではなく橙で出す)。 */
+function isKnownKind(kind: string): boolean {
+  return (Object.values(WINDOW_B_KIND) as string[]).includes(kind);
 }
 
 /** 1行。赤=返事なし/担当未定、橙=台帳に載っていない。それ以外は状態の文字で見せる。 */
 function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginTheme["colors"] }) {
   const urgent = item.alert !== null;
-  const warn = item.warn !== null;
+  const warn = item.warn !== null || !isKnownKind(item.kind);
   const accent = kindColor(c, item.kind, urgent, warn);
   const s = useMemo(
     () => ({
@@ -184,6 +195,8 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
   } else if (data && data.notices.length > 0) {
     notice = <Text style={s.notice}>{data.notices.join(" / ")}</Text>;
   }
+  const truncated = data ? truncationNote(data) : null;
+  const truncate = truncated ? <Text style={s.muted}>{truncated}</Text> : null;
   return (
     <View style={s.root} testID="windowb-instructions">
       <View style={s.head}>
@@ -191,16 +204,18 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
           <Text style={s.headTitle}>ぼくの指示</Text>
           <Text style={s.muted}>{summarize(data)}</Text>
         </View>
+        {data ? <Text style={s.muted}>{freshnessText(data)}</Text> : null}
         {data && data.warns > 0 ? (
           <Text style={s.muted}>
-            橙=受信箱には届いているが、依頼台帳に載っていない(状態を引けない)
+            橙=受信箱には届いているが、依頼台帳に載っていないか、判断が確認箱に投函されていない(状態を引けない)
           </Text>
         ) : null}
+        {truncate}
         {notice}
       </View>
       <ScrollView contentContainerStyle={s.list}>
         {!data && !error ? <Text style={s.muted}>読み込み中…</Text> : null}
-        {data && rows.length === 0 ? <Text style={s.muted}>直近3日の指示はありません</Text> : null}
+        {data && rows.length === 0 ? <Text style={s.muted}>直近の指示はありません</Text> : null}
         {rows.map((item) => (
           <Row key={item.key} item={item} colors={c} />
         ))}
