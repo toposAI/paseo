@@ -15,6 +15,16 @@ export function newestSeqOf(items: readonly StreamItem[], epoch: string | null):
   return newest;
 }
 
+// Rows that are the agent working rather than a message to read: thinking, tool calls and the like.
+const NON_MESSAGE_KINDS: ReadonlySet<string> = new Set([
+  "thought",
+  "tool_call",
+  "todo_list",
+  "compaction",
+  "plugin",
+  "notification",
+]);
+
 /**
  * Messages newer than the baseline. Older history loading in above the reader has smaller seqs, so
  * it is never counted as news. An assistant message is several rows, so rows are counted once per
@@ -29,7 +39,7 @@ export function countArrivalsAfter(
   const messages = new Set<string>();
   for (const item of items) {
     const cursor = item.timelineCursor;
-    if (item.kind === "user_message") continue;
+    if (item.kind === "user_message" || NON_MESSAGE_KINDS.has(item.kind)) continue;
     if (cursor && cursor.epoch === epoch && cursor.seq > baselineSeq) {
       messages.add(getStreamItemMessageId(item));
     }

@@ -43,4 +43,23 @@ describe("new arrivals", () => {
     ];
     expect(countArrivalsAfter(items, "e1", 1)).toBe(1);
   });
+
+  it("does not count thinking, tool calls or other non-message rows", () => {
+    const of = (kind: string, seq: number) =>
+      ({
+        id: `${kind}${seq}`,
+        kind,
+        timelineCursor: { epoch: "e1", seq },
+      }) as unknown as StreamItem;
+    const items = [
+      of("thought", 2),
+      of("tool_call", 3),
+      of("todo_list", 4),
+      of("assistant_message", 5),
+      of("thought", 6),
+      of("tool_call", 7),
+      of("assistant_message", 8),
+    ];
+    expect(countArrivalsAfter(items, "e1", 1)).toBe(2);
+  });
 });
