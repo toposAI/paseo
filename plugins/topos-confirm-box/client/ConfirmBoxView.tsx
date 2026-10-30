@@ -32,7 +32,7 @@ import {
   judgmentTabRows,
   rejectComment,
 } from "../shared/contract.js";
-import { confirmBoxTabs, isWideLayout } from "../shared/footer-tabs.js";
+import { confirmBoxTabs, isWideLayout, judgmentBreakdownLabel } from "../shared/footer-tabs.js";
 import {
   LIST_GRID_GAP,
   LIST_GRID_PADDING,
@@ -556,6 +556,7 @@ export function ConfirmBoxView({
           <Text style={s.text}>{filterSummary}</Text>
           <Text style={s.muted}>{filterOpen ? "▲" : "▼"}</Text>
         </Pressable>
+        <BreakdownLine styles={s} />
         {filterOpen ? (
           <View style={s.row}>
             {chip("全て", prio === "all", () => setPrio("all"))}
@@ -883,6 +884,50 @@ function useBadgeCounts(): Partial<Record<TabId, number>> {
     };
   }, [count]);
   return n;
+}
+
+/**
+ * 判断タブの上の内訳1行「いま聞ける N・裏方が書き直し中 N・残り N」。サイドバーのバッジは合計だけにしたので、
+ * 内訳はここに出す(2026-10-30 ユーザー指示)。数字は判断窓口の Python が数えたものをそのまま使う。
+ * 取れなければ前回の行を残す(一時的な失敗で消えると「件が無くなった」と読めるため)。
+ */
+function BreakdownLine({ styles }: { styles: { muted: object } }) {
+  const line = useBreakdownLine();
+  if (!line) return null;
+  return (
+    <Text style={styles.muted} testID="confirm-box-breakdown">
+      {line}
+    </Text>
+  );
+}
+
+function useBreakdownLine(): string | null {
+  const count = useRpc(confirmBoxCountRpc);
+  const [line, setLine] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await count({});
+        if (alive) {
+          setLine(
+            judgmentBreakdownLabel(r.presentable, r.presentableConsulting, r.presentableTotal),
+          );
+        }
+      } catch {
+        // 前回の行を残す
+      }
+    };
+    void tick();
+    const timer = setInterval(tick, REFRESH_MS);
+    const off = onBoxChanged(() => void tick());
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      off();
+    };
+  }, [count]);
+  return line;
 }
 
 function TabButton({

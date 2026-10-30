@@ -611,15 +611,17 @@ export default function contribute(server: PluginServerContext) {
     // open を全部数えていたため、裏方が検討中の件まで数えて窓口と食い違った。
     // 上の `open` では 0 を確定しない(`computePresentable` の説明。出口レビュー2巡目 指摘1)。
     // 「/ 総数」の総数も Python(badge-count の total)の答え。上の `open`(TS 側の数え方)とは別に持つ。
-    const { presentable, total: presentableTotal } = await computeBadge(
-      vaultSourceEnabled(),
-      badgeCounter,
-    );
+    const {
+      presentable,
+      total: presentableTotal,
+      consulting: presentableConsulting,
+    } = await computeBadge(vaultSourceEnabled(), badgeCounter);
     return {
       open: open.length,
       openKnown,
       presentable,
       presentableTotal,
+      presentableConsulting,
       blocking: open.filter((i) => i.priority === "blocking").length,
       permits: open.filter((i) => i.kind === "permit").length,
       failedSources: sources.filter((src) => !src.ok).length,

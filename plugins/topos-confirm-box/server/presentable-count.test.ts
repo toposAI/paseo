@@ -142,31 +142,53 @@ test("resolveBadgeCounter: presentable と total を両方そのまま返す(1/1
   assert.deepEqual(await badgeRunnerFor('{"presentable": 1, "total": 10}')(), {
     presentable: 1,
     total: 10,
+    consulting: null,
   });
   assert.deepEqual(await badgeRunnerFor('{"presentable": 0, "total": 0}')(), {
     presentable: 0,
     total: 0,
+    consulting: null,
+  });
+});
+
+test("resolveBadgeCounter: 裏方が検討中の件数 consulting もそのまま返す(壊れていれば null)", async () => {
+  assert.deepEqual(await badgeRunnerFor('{"presentable": 1, "total": 11, "consulting": 2}')(), {
+    presentable: 1,
+    total: 11,
+    consulting: 2,
+  });
+  assert.deepEqual(await badgeRunnerFor('{"presentable": 1, "total": 11, "consulting": -1}')(), {
+    presentable: 1,
+    total: 11,
+    consulting: null,
   });
 });
 
 test("resolveBadgeCounter: 片方が壊れていてももう片方は生かす・総数の無い古い Python でも presentable は出す", async () => {
-  assert.deepEqual(await badgeRunnerFor('{"presentable": 1}')(), { presentable: 1, total: null });
+  assert.deepEqual(await badgeRunnerFor('{"presentable": 1}')(), {
+    presentable: 1,
+    total: null,
+    consulting: null,
+  });
   assert.deepEqual(await badgeRunnerFor('{"presentable": 1, "total": null}')(), {
     presentable: 1,
     total: null,
+    consulting: null,
   });
   assert.deepEqual(await badgeRunnerFor('{"presentable": null, "total": 7}')(), {
     presentable: null,
     total: 7,
+    consulting: null,
   });
   assert.deepEqual(await badgeRunnerFor('{"presentable": 1, "total": -3}')(), {
     presentable: 1,
     total: null,
+    consulting: null,
   });
 });
 
 test("resolveBadgeCounter: 壊れた出力・python が落ちたときは両方 null(0件と偽らない)", async () => {
-  const none = { presentable: null, total: null };
+  const none = { presentable: null, total: null, consulting: null };
   assert.deepEqual(await badgeRunnerFor("not json")(), none);
   const down = resolveBadgeCounter({
     TOPOS_CONFIRM_BOX_JUDGMENT_CLI_DIR: fakeCheckout(),
@@ -190,9 +212,9 @@ test("Python には `badge-count` だけを渡す(2数版でも引数は増や�
 });
 
 test("computeBadge: 読まない設定・Python 無し・例外は両方 null。それ以外は答えをそのまま", async () => {
-  const none = { presentable: null, total: null };
-  const ok = async () => ({ presentable: 1, total: 10 });
-  assert.deepEqual(await computeBadge(true, ok), { presentable: 1, total: 10 });
+  const none = { presentable: null, total: null, consulting: null };
+  const ok = async () => ({ presentable: 1, total: 10, consulting: 2 });
+  assert.deepEqual(await computeBadge(true, ok), { presentable: 1, total: 10, consulting: 2 });
   assert.deepEqual(await computeBadge(false, ok), none);
   assert.deepEqual(await computeBadge(true, null), none);
   assert.deepEqual(

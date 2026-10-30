@@ -39,10 +39,12 @@ export type PresentableRunner = () => Promise<number | null>;
 export interface BadgeCounts {
   presentable: number | null;
   total: number | null;
+  /** うち裏方が検討中の件数(確認箱の内訳用)。古い Python では null */
+  consulting: number | null;
 }
 export type BadgeRunner = () => Promise<BadgeCounts>;
 
-const UNKNOWN_COUNTS: BadgeCounts = { presentable: null, total: null };
+const UNKNOWN_COUNTS: BadgeCounts = { presentable: null, total: null, consulting: null };
 
 function asCount(v: unknown): number | null {
   return typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : null;
@@ -114,9 +116,14 @@ export function resolveBadgeCounter(env: NodeJS.ProcessEnv = process.env): Badge
             const parsed = JSON.parse(stdout.trim().split("\n").pop() ?? "") as {
               presentable?: unknown;
               total?: unknown;
+              consulting?: unknown;
             };
             // 片方だけ壊れていても、もう片方は生かす(総数が無い古い Python でも presentable は出す)
-            resolve({ presentable: asCount(parsed.presentable), total: asCount(parsed.total) });
+            resolve({
+              presentable: asCount(parsed.presentable),
+              total: asCount(parsed.total),
+              consulting: asCount(parsed.consulting),
+            });
           } catch {
             resolve(UNKNOWN_COUNTS);
           }

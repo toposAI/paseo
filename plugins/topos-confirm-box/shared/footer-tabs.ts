@@ -56,22 +56,42 @@ export function bugBadgeCount(counts: { bugs?: number; [key: string]: unknown })
 }
 
 /**
- * 下部バー「ユーザー判断」のバッジ文字 = **窓口Aがいま出せる数 / 確認箱の open 総数**(例 `1/10`)。
- * 2026-10-30 ユーザー「確認箱に10件くらいはいっているのに、サイドバー下のバッジは1」→「bで」(両方出す)。
- * 数字は2つとも判断窓口の Python が数えたものをそのまま渡す(ここでは判定しない)。
- * - 総数が不明(null/undefined)のとき: 従来どおり出せる数だけ(0・不明なら出さない)。
- * - 総数が分かるとき: 出せる数が 0 でも `0/10` と出す(件はあるが窓口は今出せない)。両方 0 なら出さない。
- * 各数字は 99 で頭打ち(`99+`)。「数えられない(!)」は呼び出し側が先に処理する(0 件と区別するため)。
+ * 下部バー「ユーザー判断」のバッジ文字 = **確認箱の未回答の合計**だけ(例 `15`)。
+ * 2026-10-30 ユーザー「バッジはトータル数でよいのでは。確認箱のなかには表示してもいいかもね」:
+ * 以前の `1/15`(窓口Aがいま出せる数/総数)をやめ、内訳は確認箱の中の1行(`judgmentBreakdownLabel`)に移した。
+ * 数字は判断窓口の Python が数えた `total` をそのまま渡す(ここでは判定しない)。
+ * - 総数が不明(null/undefined)のとき: 従来どおり窓口Aが出せる数だけ(0・不明なら出さない)。
+ * - 0 件なら出さない。99 で頭打ち(`99+`)。「数えられない(!)」は呼び出し側が先に処理する。
  */
 export function judgmentBadgeLabel(
   presentable: number | undefined,
   total: number | null | undefined,
 ): string | null {
   const cap = (v: number) => (v > 99 ? "99+" : String(v));
-  const n = presentable ?? 0;
-  if (total === null || total === undefined) return n > 0 ? cap(n) : null;
-  if (n === 0 && total === 0) return null;
-  return `${cap(n)}/${cap(total)}`;
+  if (total === null || total === undefined) {
+    const n = presentable ?? 0;
+    return n > 0 ? cap(n) : null;
+  }
+  return total > 0 ? cap(total) : null;
+}
+
+/**
+ * 確認箱の中の内訳1行「いま聞ける N・裏方が書き直し中 N・残り N」。
+ * 残り = 合計 − いま聞ける − 裏方が書き直し中(負にならない)。総数が分からなければ null(出さない)。
+ * 裏方の件数が分からない(古い Python)ときは、その項目だけ省く。
+ */
+export function judgmentBreakdownLabel(
+  presentable: number | null | undefined,
+  consulting: number | null | undefined,
+  total: number | null | undefined,
+): string | null {
+  if (total === null || total === undefined || total <= 0) return null;
+  const ask = presentable ?? 0;
+  const rest = Math.max(0, total - ask - (consulting ?? 0));
+  const parts = [`いま聞ける ${ask}`];
+  if (consulting !== null && consulting !== undefined) parts.push(`裏方が書き直し中 ${consulting}`);
+  parts.push(`残り ${rest}`);
+  return parts.join("・");
 }
 
 /** PC幅の下限(ホストの compact 境界と同じ720px。`packages/app/src/styles/unistyles.ts` の md)。 */

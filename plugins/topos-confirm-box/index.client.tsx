@@ -165,7 +165,7 @@ function useJudgmentBadge(): {
 
 /**
  * 下部バーの「ユーザー判断」の1行(PC も iPhone も同じ)。
- * 件数は**窓口Aがいま出せる数 / 確認箱の open 総数**(`presentable` / `presentableTotal`。どちらも判断窓口の
+ * 件数は**確認箱の open 総数**だけ(内訳は確認箱の中。`presentable` / `presentableTotal`。どちらも判断窓口の
  * Python 1か所の答え)。両方 0 なら出さない。
  */
 function BoxTabLink({ currentScreen, openScreen }: BoxTabLinkProps) {
@@ -178,7 +178,7 @@ function BoxTabLink({ currentScreen, openScreen }: BoxTabLinkProps) {
   }, [openScreen]);
   const active = currentScreen?.screenId === BOX_TAB_SCREEN_ID;
   // jsx を prop に渡すと lint(react-perf)に当たるので、要素は一度だけ作る。
-  // 「窓口Aが出せる数/総数」(例 1/10)。総数が分からなければ出せる数だけ(judgmentBadgeLabel)
+  // 「確認箱の未回答の合計」(例 15)。内訳は確認箱の中の1行。総数が分からなければ窓口Aが出せる数だけ(judgmentBadgeLabel)
   const trailing = CountBadge({
     n: badge.n,
     unknown: badge.unknown,

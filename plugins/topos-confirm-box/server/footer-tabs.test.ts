@@ -7,6 +7,7 @@ import {
   footerTitle,
   isWideLayout,
   judgmentBadgeLabel,
+  judgmentBreakdownLabel,
 } from "../shared/footer-tabs.js";
 
 // 確認箱の画面のタブ(実装と同じ並び)。id だけを見れば足りる。
@@ -59,19 +60,33 @@ test("登録タイトルと読み上げ名は FOOTER_TABS と同じ文字列", (
   for (const t of FOOTER_TABS) assert.equal(footerTitle(t.id), t.title);
 });
 
-test("ユーザー判断のバッジは「出せる数/総数」。総数が不明なら出せる数だけ・両方0なら出さない", () => {
-  assert.equal(judgmentBadgeLabel(1, 10), "1/10", "確認箱に10件あっても窓口Aが出せるのは1件");
-  assert.equal(judgmentBadgeLabel(0, 10), "0/10", "件はあるが窓口は今出せない(0でも総数は見せる)");
-  assert.equal(judgmentBadgeLabel(0, 0), null, "両方0は出さない");
+test("ユーザー判断のバッジは未回答の合計だけ。総数が不明なら出せる数だけ・0件なら出さない", () => {
+  assert.equal(judgmentBadgeLabel(1, 10), "10", "窓口Aが出せるのは1件でもバッジは合計");
+  assert.equal(judgmentBadgeLabel(0, 10), "10", "窓口が今出せなくても合計は見せる");
+  assert.equal(judgmentBadgeLabel(0, 0), null, "0件は出さない");
   assert.equal(judgmentBadgeLabel(undefined, 0), null);
   assert.equal(judgmentBadgeLabel(1, null), "1", "総数が数えられないときは従来どおり出せる数だけ");
   assert.equal(judgmentBadgeLabel(1, undefined), "1");
   assert.equal(judgmentBadgeLabel(0, null), null);
   assert.equal(judgmentBadgeLabel(undefined, null), null);
+  assert.equal(judgmentBadgeLabel(undefined, 3), "3", "出せる数が不明でも合計があれば出す");
+  assert.equal(judgmentBadgeLabel(1, 120), "99+", "99で頭打ち");
+});
+
+test("確認箱の内訳1行は「いま聞ける・裏方が書き直し中・残り」", () => {
+  assert.equal(judgmentBreakdownLabel(1, 2, 11), "いま聞ける 1・裏方が書き直し中 2・残り 8");
+  assert.equal(judgmentBreakdownLabel(0, 0, 3), "いま聞ける 0・裏方が書き直し中 0・残り 3");
   assert.equal(
-    judgmentBadgeLabel(undefined, 3),
-    "0/3",
-    "出せる数が不明でも総数があれば0扱いで出す",
+    judgmentBreakdownLabel(1, null, 5),
+    "いま聞ける 1・残り 4",
+    "裏方の件数が不明ならその項目を省く",
   );
-  assert.equal(judgmentBadgeLabel(1, 120), "1/99+", "各数字は99で頭打ち");
+  assert.equal(judgmentBreakdownLabel(null, 1, 4), "いま聞ける 0・裏方が書き直し中 1・残り 3");
+  assert.equal(
+    judgmentBreakdownLabel(3, 5, 4),
+    "いま聞ける 3・裏方が書き直し中 5・残り 0",
+    "残りは負にならない",
+  );
+  assert.equal(judgmentBreakdownLabel(1, 0, 0), null, "0件は出さない");
+  assert.equal(judgmentBreakdownLabel(1, 0, null), null, "総数が不明なら出さない");
 });

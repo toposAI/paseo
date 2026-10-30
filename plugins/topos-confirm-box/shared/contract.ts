@@ -230,6 +230,11 @@ export const confirmBoxCountRpc = defineRpc({
      * null=数えられない(0 と区別する)。
      */
     presentableTotal: z.number().int().nullable().default(null),
+    /**
+     * 確認箱の内訳「裏方が書き直し中」= open のうち裏方が検討中の件数(`badge-count` の `consulting`)。
+     * 確認箱の中の1行(いま聞ける N・裏方が書き直し中 N・残り N)に使う。null=数えられない。
+     */
+    presentableConsulting: z.number().int().nullable().default(null),
     /** うち priority=blocking。 */
     blocking: z.number().int(),
     /** うち Paseo の承認待ち。 */
