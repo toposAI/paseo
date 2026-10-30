@@ -30,8 +30,8 @@ test("グループの振り分けは `rowGroupKeyOf` の1か所だけ(司令塔�
   // と、定義自身(1か所)。`groupingSource` は両ファイルを合わせたもの。
   assert.equal(
     countMatches(groupingSource, /rowGroupKeyOf\(/g),
-    5,
-    "呼ぶのは groupThreadRows(2)・onReorderGroup・pinFirstGrouped・定義",
+    6,
+    "呼ぶのは groupThreadRows(2)・groupThreadRowsBySide(ピン止めの切り出し)・onReorderGroup・pinFirstGrouped・定義",
   );
 });
 

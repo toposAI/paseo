@@ -259,6 +259,8 @@ export function sideOfThread(t: { aux?: boolean }): SidebarSide {
 
 /** 2群それぞれのグループ割りと、補助スレ側の「判断待ち」件数(見出しに出す)。 */
 export interface SidebarSides<T> {
+  /** ピン止めした行(両群をまたいで1か所。群の中には重ねて出さない)。 */
+  pinned: ThreadGroup<T>[];
   walltalk: ThreadGroup<T>[];
   aux: ThreadGroup<T>[];
   auxWaiting: number;
@@ -278,18 +280,25 @@ export function groupThreadRowsBySide<T extends GroupableThread>(
   pinnedLabel: string,
   otherLabel: string,
 ): SidebarSides<T> {
-  const walltalkRows = rows.filter((r) => sideOfThread(r.thread) === "walltalk");
-  const auxRows = rows.filter((r) => sideOfThread(r.thread) === "aux");
+  const isPinned = (r: SidebarRowView<T>) =>
+    rowGroupKeyOf(r.thread, coordinatorIds, coordinatorGroup, pinnedGroup) === pinnedGroup;
+  const walltalkRows = rows.filter((r) => !isPinned(r) && sideOfThread(r.thread) === "walltalk");
+  const auxRows = rows.filter((r) => !isPinned(r) && sideOfThread(r.thread) === "aux");
+  const pinnedRows = rows.filter(isPinned);
   const group = (list: readonly SidebarRowView<T>[]) =>
     groupThreadRows(list, coordinatorIds, coordinatorGroup, pinnedGroup, pinnedLabel, otherLabel);
   return {
+    pinned: group(pinnedRows),
     walltalk: group(walltalkRows),
     aux: group(auxRows),
     // 判断待ちに加え、承認待ち(needs_input)と失敗の点も数える(畳んだ中で止まっているのを見落とさない)。
-    auxWaiting: auxRows.filter((r) => {
-      const dot = (r.thread as { stateDot?: string | null }).stateDot;
-      return r.statusLabel === "判断待ち" || dot === "needs_input" || dot === "failed";
-    }).length,
+    // ピン止めは常に見えているが、補助スレ側の行なら従来どおり数える。
+    auxWaiting: rows
+      .filter((r) => sideOfThread(r.thread) === "aux")
+      .filter((r) => {
+        const dot = (r.thread as { stateDot?: string | null }).stateDot;
+        return r.statusLabel === "判断待ち" || dot === "needs_input" || dot === "failed";
+      }).length,
   };
 }
 

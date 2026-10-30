@@ -164,3 +164,23 @@ test("壊れた保存ファイルは上書き前に退避する", () => {
   assert.ok(fs.readdirSync(dir).some((f) => f.includes(".corrupt-")));
   assert.equal(readChildThreadSides(dir).get("a"), "aux");
 });
+
+test("ピン止めは両群をまたいで1か所にまとまり、各群には重ねて出ない", () => {
+  const row = (agentId: string, aux: boolean, pinned: boolean): SidebarRowView<ChildThread> =>
+    ({
+      thread: thread({ agentId, aux, pinned }),
+      statusLabel: "実装中",
+    }) as unknown as SidebarRowView<ChildThread>;
+  const rows = [
+    row("w1", false, false),
+    row("w2", false, true),
+    row("a1", true, false),
+    row("a2", true, true),
+  ];
+  const sides = groupThreadRowsBySide(rows, new Set(), "__coord", "__pinned", "ピン止め", "その他");
+  const ids = (gs: { rows: SidebarRowView<ChildThread>[] }[]) =>
+    gs.flatMap((g) => g.rows.map((r) => r.thread.agentId)).sort();
+  assert.deepEqual(ids(sides.pinned), ["a2", "w2"]);
+  assert.deepEqual(ids(sides.walltalk), ["w1"]);
+  assert.deepEqual(ids(sides.aux), ["a1"]);
+});

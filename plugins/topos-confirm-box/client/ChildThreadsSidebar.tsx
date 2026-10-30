@@ -304,13 +304,16 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
       ),
     [rows, coordinatorIds],
   );
-  const reorderable = useMemo(() => reorderableIds([...sides.walltalk, ...sides.aux]), [sides]);
+  const reorderable = useMemo(
+    () => reorderableIds([...sides.pinned, ...sides.walltalk, ...sides.aux]),
+    [sides],
+  );
   const onReorderGroup = useCallback(
-    (side: SidebarSide, groupKey: string, keys: string[]) => {
+    (side: SidebarSide | null, groupKey: string, keys: string[]) => {
       const queue = [...keys];
-      // 群ごとに同じキー(ピン止め・親なし)が出るので、群(side)も合わせて当てる。
+      // 群ごとに同じキー(親なし)が出るので、群(side)も合わせて当てる。ピン止め(side=null)は両群をまたぐ。
       const flat = threads.map((t) =>
-        sideOfThread(t) === side &&
+        (side === null || sideOfThread(t) === side) &&
         rowGroupKeyOf(t, coordinatorIds, COORDINATOR_GROUP, PINNED_GROUP) === groupKey &&
         reorderable.has(t.agentId)
           ? (queue.shift() ?? t.agentId)
@@ -931,7 +934,7 @@ function SidebarContents({
   onToggleGroup: (key: string) => void;
   onOpenGroup: (key: string) => void;
   onDragBegin: () => void;
-  onReorderGroup: (side: SidebarSide, key: string, keys: string[]) => void;
+  onReorderGroup: (side: SidebarSide | null, key: string, keys: string[]) => void;
   renderThread: (row: SidebarRowView<ChildThread>) => React.ReactElement;
   /** PC 幅で運んでいる行(無ければ null)と、2群のどちらかへ離したときの処理。 */
   dragThread: ChildThread | null;
@@ -963,6 +966,10 @@ function SidebarContents({
         OTHER_LABEL,
       ),
     [rows, coordinatorIds],
+  );
+  const reorderPinned = useCallback(
+    (key: string, keys: string[]) => onReorderGroup(null, key, keys),
+    [onReorderGroup],
   );
   const noticeStyle = useMemo(() => [styles.noticeText, { color: noticeColor }], [noticeColor]);
   const statusNoticeStyle = useMemo(
@@ -998,6 +1005,19 @@ function SidebarContents({
         </View>
       ) : null}
       <StatusCountChips rows={rows} openScreen={openScreen} />
+      {sides.pinned.map((g) => (
+        <ThreadGroupSection
+          key={g.key}
+          group={g}
+          open
+          onToggle={onToggleGroup}
+          onOpenCoordinator={onOpenGroup}
+          onDragBegin={onDragBegin}
+          onReorderGroup={reorderPinned}
+          renderThread={renderThread}
+          statusColor={statusColor}
+        />
+      ))}
       {(["walltalk", "aux"] as const).map((side) => (
         <SideSection
           key={side}
