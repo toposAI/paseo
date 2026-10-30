@@ -62,7 +62,7 @@ import type { SidebarNote } from "../shared/notes.js";
 import type { SidebarPlace, ZoneCounts } from "../shared/concept-places.js";
 import { emptySectionLabel } from "../shared/sidebar-section-mode.js";
 import type { SidebarSectionKey } from "../shared/sidebar-section-mode.js";
-import { rowStatusKind, rowStatusText } from "../shared/thread-status-label.js";
+import { rowStatusKind, rowStatusText, shortStatusText } from "../shared/thread-status-label.js";
 import type { StatusKind } from "../shared/thread-status-label.js";
 import { pickReadableText } from "../shared/contrast.js";
 import { menuCanArchive } from "../shared/thread-menu.js";
@@ -1214,7 +1214,7 @@ function ThreadGroupSection({
         <View style={styles.trailing}>
           {headingStatus ? (
             <StatusBadge
-              text={headingStatus.text}
+              text={shortStatusText(headingStatus.text)}
               kind={headingStatus.kind}
               testID={`child-group-status-${group.key || "other"}`}
             />
@@ -1360,7 +1360,7 @@ function StatusCountChips({
     <View style={styles.chips} testID="status-count-chips">
       {judgment > 0 ? (
         <StatusBadge
-          text={`判断待ち ${judgment}`}
+          text={`判断 ${judgment}`}
           kind="waiting"
           testID="status-count-judgment"
           onPress={openJudgment}
@@ -1406,7 +1406,7 @@ function threadStatusOf(
   // 登録簿とノートの状態が食い違うときは、登録簿側の語も添える(2026-10-27 指摘6・12a)。
   // どちらが正か決めない・表示を片方に寄せない(食い違いを見えるようにするだけ)。
   const conflict = row.conflict?.registry != null ? `(登録簿:${row.conflict.registry})` : "";
-  return { text: `${base.text}${conflict}${stale}`, kind: base.kind };
+  return { text: shortStatusText(`${base.text}${conflict}${stale}`), kind: base.kind };
 }
 
 function ThreadRow({

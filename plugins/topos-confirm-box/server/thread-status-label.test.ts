@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   displayStatus,
+  shortStatusText,
   statusKindOfMachine,
   statusTextOfMachine,
 } from "../shared/thread-status-label.js";
@@ -50,4 +51,11 @@ test("displayStatus: 取得失敗時は古い表示であることを添える",
     text: "完了(古い表示)",
     kind: "done",
   });
+});
+
+test("shortStatusText: 「判断待ち」は表示だけ「判断」に縮め、他の語・付記は変えない", () => {
+  assert.equal(shortStatusText("判断待ち"), "判断");
+  assert.equal(shortStatusText("判断待ち(古い表示)"), "判断(古い表示)");
+  assert.equal(shortStatusText("実装中"), "実装中");
+  assert.equal(shortStatusText("承認待ち"), "承認待ち");
 });

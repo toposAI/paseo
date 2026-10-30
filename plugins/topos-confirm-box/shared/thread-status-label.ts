@@ -89,6 +89,14 @@ export function rowStatusText(label: string, machineState: string | null | undef
   return { text: label, kind: statusKindOfLabel(label) };
 }
 
+/**
+ * 帯・チップに出す文字だけを短くする(2026-10-30 ユーザー指示「判断待ち→判断。スペースとりすぎ」)。
+ * 状態名(`判断待ち`)そのものは判定の鍵なので書き換えない。画面に出す直前にだけ通す。
+ */
+export function shortStatusText(text: string): string {
+  return text.startsWith("判断待ち") ? `判断${text.slice("判断待ち".length)}` : text;
+}
+
 /** 行末の帯の色だけ(文字は呼び出し元の語彙のまま。行末の印の選び方に使う)。 */
 export function rowStatusKind(label: string, machineState: string | null | undefined): StatusKind {
   return rowStatusText(label, machineState).kind;
