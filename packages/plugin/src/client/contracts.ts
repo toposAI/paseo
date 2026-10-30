@@ -113,6 +113,13 @@ export type PluginPanelLocation = "workspace" | "explorer" | "right";
 
 export interface PluginOpenPanelOptions {
   location?: PluginPanelLocation;
+  /**
+   * 既に何かが開いている欄へ入れるとき、今出ている物を隠してよいか。
+   * - `true`(既定)… 既に開いている物の上に重ねて前に出す(今までの動作)。
+   * - `false` … 下に回す(既に開いている物は前のまま)。自動で入れるとき、ユーザーが自分で置いた
+   *   物を隠さないため用。欄が空・既にこの面が出ているときは前と同じ。
+   */
+  focus?: boolean;
 }
 
 interface PluginWorkspacePanelBase {
@@ -120,6 +127,12 @@ interface PluginWorkspacePanelBase {
   title: string;
   icon: string;
   locations?: readonly PluginPanelLocation[];
+  /**
+   * このスレを開いたとき、右カラムにこの面を自動で出す(2026-10-30 ユーザー「PCは常時・iPhoneは
+   * ボタンで開閉」)。狭い画面(compact)では出さない。欄に既に別の物が開いていれば、それを隠さずに
+   * 後ろへ足す。そのワークスペースで一度自分で閉じた人は、自動では開き直さない。
+   */
+  autoOpen?: { whenAgentIds: readonly string[] };
 }
 
 export interface PluginWorkspacePanelProps extends PluginNavigableHostProps {

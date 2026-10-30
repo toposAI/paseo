@@ -35,7 +35,10 @@ describe("usePluginHostNavigation", () => {
 
     act(() => result.current.openAgent({ agentId: "agent-1", placement: "right" }));
 
-    expect(openAgentInRightColumnMock).toHaveBeenCalledWith({ serverId: "host-1", agentId: "agent-1" });
+    expect(openAgentInRightColumnMock).toHaveBeenCalledWith({
+      serverId: "host-1",
+      agentId: "agent-1",
+    });
     expect(navigateToAgentMock).not.toHaveBeenCalled();
   });
 

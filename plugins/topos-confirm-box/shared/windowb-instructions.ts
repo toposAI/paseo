@@ -77,7 +77,22 @@ export function freshnessText(data: WindowBInstructionsOutput): string {
     : `${at} / 台帳の更新時刻なし`;
 }
 
-/** 一覧を開く場所。PC幅は右カラム、iPhone幅は主ペイン(全画面。戻るで閉じる)。 */
+/**
+ * 一覧を開く場所。PC幅は右カラム、iPhone幅は主ペイン(全画面。戻るで閉じる)。
+ */
 export function paneLocation(width: number): "right" | "workspace" {
   return width >= WIDE_MIN_WIDTH ? "right" : "workspace";
+}
+
+/** これより古い読み出しは「古い表示」として目立たせる(2026-10-30 依頼「15分より古いとき」)。 */
+export const STALE_AFTER_MS = 15 * 60_000;
+
+/**
+ * 「古い表示(HH:MM時点)」の一行。読み出した時刻が `now` より15分以上前なら出す(それ以外は null)。
+ * 30秒ごとに引き直すので、普通はここに来ない。来るのは引き直しが止まったとき=古い「作業中」が
+ * そのまま正常に見えてしまうときで、黙って出し続けない。
+ */
+export function staleNotice(data: WindowBInstructionsOutput, now: number): string | null {
+  if (now - data.generatedAt < STALE_AFTER_MS) return null;
+  return `古い表示(${clock(data.generatedAt)}時点)`;
 }

@@ -170,7 +170,10 @@ describe("planOpenAgentInRightColumn", () => {
   });
 
   it("上下分割だけなら右カラムは無い(paneId: null)", () => {
-    const upper = { kind: "pane" as const, pane: { id: DEFAULT_PANE_ID, tabIds: [], focusedTabId: null } };
+    const upper = {
+      kind: "pane" as const,
+      pane: { id: DEFAULT_PANE_ID, tabIds: [], focusedTabId: null },
+    };
     const lower = { kind: "pane" as const, pane: { id: "lower", tabIds: [], focusedTabId: null } };
     const layout: WorkspaceLayout = {
       root: {
@@ -358,7 +361,9 @@ describe("openAgentInRightColumn", () => {
     expect(openAgentInRightColumn({ serverId: SERVER_ID, agentId: "agent-1" })).toBe(false);
     expect(layoutStore.getState().sidePaneIdByWorkspace[WORKSPACE_KEY]).toBeUndefined();
     expect(navigateToWorkspaceMock).not.toHaveBeenCalled();
-    expect(warn.mock.calls.flat().join("\n")).toContain("Right column unavailable: layout-not-loaded");
+    expect(warn.mock.calls.flat().join("\n")).toContain(
+      "Right column unavailable: layout-not-loaded",
+    );
     warn.mockRestore();
   });
 
@@ -366,7 +371,9 @@ describe("openAgentInRightColumn", () => {
     vi.spyOn(useWorkspaceLayoutStore.getState(), "ensureSidePane").mockReturnValue(null);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(openAgentInRightColumn({ serverId: SERVER_ID, agentId: "agent-1" })).toBe(false);
-    expect(warn.mock.calls.flat().join("\n")).toContain("Right column unavailable: side-pane-unavailable");
+    expect(warn.mock.calls.flat().join("\n")).toContain(
+      "Right column unavailable: side-pane-unavailable",
+    );
     warn.mockRestore();
   });
 
@@ -384,5 +391,4 @@ describe("openAgentInRightColumn", () => {
       expect.objectContaining({ placement: { mode: "pane", paneId: sidePaneId } }),
     );
   });
-
 });

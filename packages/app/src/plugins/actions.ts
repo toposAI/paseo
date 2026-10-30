@@ -14,12 +14,18 @@ import type { InstalledPlugin } from "./types";
 export interface PluginNavigation {
   openSettings(pluginId: string, screenId: string): void;
   openSurface(pluginId: string, surfaceId: string, params?: PluginScreenParams): void;
-  openWorkspacePanel(pluginId: string, panelId: string, location: PluginPanelLocation): void;
+  openWorkspacePanel(
+    pluginId: string,
+    panelId: string,
+    location: PluginPanelLocation,
+    options?: { focus?: boolean },
+  ): void;
   openAgentPanel(
     pluginId: string,
     panelId: string,
     agentId: string,
     location: PluginPanelLocation,
+    options?: { focus?: boolean },
   ): void;
 }
 
@@ -66,10 +72,12 @@ export function createPluginAgentActionContext(input: {
       if (!panel) throw new Error(`Workspace panel is unavailable: ${panelId}`);
       const location = resolvePluginPanelOpenLocation(panel, options?.location);
       if (panel.context === "workspace") {
-        navigation.openWorkspacePanel(plugin.id, panelId, location);
+        navigation.openWorkspacePanel(plugin.id, panelId, location, { focus: options?.focus });
         return;
       }
-      navigation.openAgentPanel(plugin.id, panelId, agent.id, location);
+      navigation.openAgentPanel(plugin.id, panelId, agent.id, location, {
+        focus: options?.focus,
+      });
     },
   };
 }
@@ -93,7 +101,7 @@ export function createPluginWorkspaceActionContext(input: {
       );
       if (!panel) throw new Error(`Workspace panel is unavailable: ${panelId}`);
       const location = resolvePluginPanelOpenLocation(panel, options?.location);
-      navigation.openWorkspacePanel(plugin.id, panelId, location);
+      navigation.openWorkspacePanel(plugin.id, panelId, location, { focus: options?.focus });
     },
   };
 }

@@ -7,9 +7,10 @@
  * 中身は `shared/contract.ts` の `windowbInstructionsRpc`(RPC の先の Python
  * `antigravity/utils/window_b_instruction_panel.py`)だけを読む。**ここから台帳・受信箱は書き換えない**。
  *
- * 出し方は**ワークスペース単位のパネル**(`locations: ["workspace","right"]`)。PC は右カラム、狭い画面は
- * 主ペイン=全画面(戻ると会話に戻る)。入口はヘッダのボタン「指示」(狭い画面では「…」の中)で、
- * 押すたびにページの幅で置き場所を決め直す。
+ * 出し方は**ワークスペース単位のパネル**(`locations: ["workspace","right"]`、`autoOpen`=窓口Bのスレ)。
+ * PC は窓口Bのスレを開くと右カラムに出る(欄に別の物があれば隠さず後ろへ足す)。狭い画面は主ペイン
+ * =全画面で、入口はヘッダのボタン「指示」(窓口Bのワークスペースでだけ出る)。押すたびにページの幅で
+ * 置き場所を決め直す。一覧の読み出しが15分より前に止まっていれば、上部に「古い表示(時刻)」を赤で出す。
  */
 import { useEffect, useMemo, useState } from "react";
 import { Dimensions, ScrollView, Text, View } from "react-native";
@@ -27,6 +28,7 @@ import {
   paneLocation,
   rowOrder,
   summarize,
+  staleNotice,
   truncationNote,
 } from "../shared/windowb-instructions.js";
 
@@ -63,21 +65,33 @@ export function openWindowBInstructions(
  * 一覧を30秒毎に引く。失敗したときは**前回の一覧を残して**知らせだけ出す(取れない瞬間に空にすると、
  * 指示が消えた=指示が通った、と読めてしまう)。
  */
-function useInstructions(): { data: WindowBInstructionsOutput | null; error: string | null } {
+function useInstructions(): {
+  data: WindowBInstructionsOutput | null;
+  error: string | null;
+  receivedAt: number;
+} {
   const list = useRpc(windowBInstructionsRpc);
   const [state, setState] = useState<{
     data: WindowBInstructionsOutput | null;
     error: string | null;
+    receivedAt: number;
   }>({
     data: null,
     error: null,
+    receivedAt: 0,
   });
   useEffect(() => {
     let alive = true;
     const apply = (
       next: { ok: true; data: WindowBInstructionsOutput } | { ok: false; error: string },
     ) => {
-      if (alive) setState((prev) => keepLastOnFailure(prev.data, next));
+      if (alive)
+        setState((prev) => ({
+          ...keepLastOnFailure(prev.data, next),
+          // 読み出しの時刻は Python が返す `generatedAt`(読んだ瞬間)。届いた時刻で測ると、待たされた分
+          // 「新しく見える」ので使わない。読めなかったときは前回のまま(古い物ほど古く見える)。
+          receivedAt: next.ok ? next.data.generatedAt : prev.receivedAt,
+        }));
     };
     const tick = () =>
       list({ limit: 40 })
@@ -170,6 +184,12 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
  */
 export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
   const { data, error } = useInstructions();
+  // 「古い表示」は時間で変わるので、1分ごとに時計を進めて見直す(引けている間は普通は出ない)。
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const rows = useMemo(() => (data ? rowOrder(data.items) : []), [data]);
   const c = theme.colors;
   const s = useMemo(
@@ -181,10 +201,24 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
       muted: { color: c.foregroundMuted, fontSize: 12 },
       notice: { color: c.statusWarning, fontSize: 12 },
       error: { color: c.statusDanger, fontSize: 12 },
+      stale: {
+        color: c.statusDanger,
+        backgroundColor: c.surface1,
+        borderColor: c.statusDanger,
+        borderWidth: 2,
+        borderRadius: 6,
+        paddingVertical: 6,
+        paddingHorizontal: 8,
+        fontSize: 14,
+        fontWeight: "700" as const,
+      },
       list: { padding: 10, gap: 8 },
     }),
     [c],
   );
+  // 一覧の読み出し時刻(`generatedAt`)から15分たっていたら、一覧の一番上に目立つ色で出す。時計は1分ごとに
+  // 進めて見直す(引けている間は普通は出ない)。
+  const stale = data ? staleNotice(data, now) : null;
   let notice: React.ReactElement | null = null;
   if (error) {
     notice = (
@@ -199,6 +233,11 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
   const truncate = truncated ? <Text style={s.muted}>{truncated}</Text> : null;
   return (
     <View style={s.root} testID="windowb-instructions">
+      {stale ? (
+        <Text style={s.stale} testID="windowb-stale" accessibilityLiveRegion="polite">
+          {stale}
+        </Text>
+      ) : null}
       <View style={s.head}>
         <View style={s.headRow}>
           <Text style={s.headTitle}>ぼくの指示</Text>

@@ -6,11 +6,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WindowBInstructionsOutput } from "../shared/contract.js";
 import {
+  STALE_AFTER_MS,
   WIDE_MIN_WIDTH,
   freshnessText,
   keepLastOnFailure,
   paneLocation,
   rowOrder,
+  staleNotice,
   summarize,
   truncationNote,
 } from "../shared/windowb-instructions.js";
@@ -87,4 +89,15 @@ test("PC幅は右カラム、狭い画面は主ペイン(全画面)", () => {
   assert.equal(paneLocation(WIDE_MIN_WIDTH - 1), "workspace");
   // iPhone の幅
   assert.equal(paneLocation(390), "workspace");
+});
+
+test("15分以上前の読み出しは「古い表示(時刻)」として目立たせる", () => {
+  const t = new Date(2026, 9, 30, 9, 41).getTime();
+  const data = { ...out(1), generatedAt: t };
+  // ちょうど15分は古い扱い(「より古い」ではなく「15分たったら」)
+  assert.equal(staleNotice(data, t + STALE_AFTER_MS), "古い表示(09:41時点)");
+  // 14分59秒はまだ新しい
+  assert.equal(staleNotice(data, t + STALE_AFTER_MS - 1), null);
+  // 読み出しが0(=一度も取れていない)は古い扱い
+  assert.equal(staleNotice({ ...out(1), generatedAt: 0 }, t) !== null, true);
 });

@@ -19,6 +19,7 @@ import {
 import {
   type PluginCommandCenterItemContribution,
   type PluginClientContext,
+  type PluginPanelLocation,
   type PluginClientSlashCommandContribution,
   type PluginSidebarContribution,
   type PluginScreenContribution,
@@ -74,6 +75,34 @@ function normalizePanelLocations(
     );
   }
   return normalized;
+}
+
+/**
+ * スレを開いたときに右カラムへ自動で出す指定。右カラムに置ける面で、1件以上のスレIDを持つときだけ。
+ * 出す側(スレ画面)が欄の空きを見て自動で開く。
+ */
+function normalizePanelAutoOpen(
+  panelId: string,
+  contribution: PluginWorkspacePanelContribution,
+  locations: readonly PluginPanelLocation[],
+): PluginWorkspacePanelContribution["autoOpen"] {
+  const autoOpen = contribution.autoOpen;
+  if (autoOpen === undefined) return undefined;
+  if (!locations.includes("right")) {
+    throw new Error(
+      `Workspace panel ${panelId} auto-opens but does not support the right location`,
+    );
+  }
+  const ids = Array.isArray(autoOpen.whenAgentIds) ? autoOpen.whenAgentIds : null;
+  if (!ids || ids.length === 0) {
+    throw new Error(`Workspace panel ${panelId} autoOpen needs at least one agent id`);
+  }
+  const whenAgentIds = ids.map((id) => {
+    const trimmed = typeof id === "string" ? id.trim() : "";
+    if (!trimmed) throw new Error(`Workspace panel ${panelId} autoOpen has an empty agent id`);
+    return trimmed;
+  });
+  return { whenAgentIds };
 }
 
 function isComponentType(value: unknown): boolean {
@@ -280,6 +309,7 @@ export function runPluginClientBundle(
       }
       resolvePluginIcon(icon);
       const locations = normalizePanelLocations(normalizedId, contribution.locations);
+      const autoOpen = normalizePanelAutoOpen(normalizedId, contribution, locations);
       workspacePanelIds.add(normalizedId);
       return register(
         collector.workspacePanels,
@@ -289,6 +319,7 @@ export function runPluginClientBundle(
           title,
           icon,
           locations,
+          ...(autoOpen ? { autoOpen } : {}),
         },
         () => workspacePanelIds.delete(normalizedId),
       );

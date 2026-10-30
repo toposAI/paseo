@@ -59,8 +59,6 @@ const MAIL_UI_URL = "http://100.85.224.7:8731/";
 let client: PluginClientContext | null = null;
 // ワークスペース id → 確認箱ヘッダボタンの登録(重複させない)。
 const headerButtons = new Map<string, { remove(): void }>();
-// ワークスペース id → 「ぼくの指示」ヘッダボタンの登録(`headerButtons` の登録と寿命を揃える)。
-const windowBHeaderButtons = new Map<string, { remove(): void }>();
 
 function openMailUi() {
   void Linking.openURL(MAIL_UI_URL);
@@ -267,33 +265,6 @@ function SidebarWithHeaderButton({
               },
             });
             ledgerButtons.set(workspaceId, ledger);
-            // 窓口Bの右側の「ぼくの指示」(2026-10-30)。PC はこのボタンで右カラムを開く(いまは常時表示ではない)、
-            // iPhone は同じボタンで全画面に開く(戻ると会話に戻る)。
-            windowBHeaderButtons.set(
-              workspaceId,
-              client.addHeaderButton({
-                id: "windowb-instructions",
-                workspaceId,
-                button: {
-                  title: "指示",
-                  icon: "ListChecks",
-                  behavior: {
-                    kind: "action",
-                    onPress: () => {
-                      if (!client) return;
-                      const openPanel = client.openPanel.bind(client);
-                      openWindowBInstructions(
-                        (id, options) => openPanel(id, { workspaceId, location: options.location }),
-                        workspaceId,
-                        // 開けなかったとき、押したのに何も起きない状態を残さない
-                        () =>
-                          toast.show("「ぼくの指示」を開けませんでした", { variant: "warning" }),
-                      );
-                    },
-                  },
-                },
-              }),
-            );
           }
           return null;
         })
@@ -476,6 +447,51 @@ const FOOTER_COMPONENTS: Record<FooterTabId, (props: PluginSidebarItemProps) => 
   mail: MailLink,
 };
 
+// ---------------------------------------------------------------- ぼくの指示(窓口Bの右側)
+// 2026-10-30 08:18 ユーザー(確認箱)「右側に一覧(PCは常時・iPhoneはボタンで開閉)で作る」。
+// PC は窓口Bのスレを開くと右カラムに自動で出る(ホスト側 `usePluginAutoOpenPanels` が `autoOpen` を読む。
+// 欄に別の物が開いていれば隠さず後ろへ足す)。iPhone 幅は出さず、「指示」ボタンで全画面に開く。
+// ボタンは窓口Bのワークスペースにだけ出す(`refreshWindowBWorkspace` が見つけたら `binary` を立てる)。
+const WINDOWB_HEADER_ID = "windowb-instructions";
+const windowBHeaderButtons = new Map<string, PluginButtonRegistration>();
+
+function openWindowBFor(c: PluginClientContext, workspaceId: string, onError: () => void) {
+  const openPanel = c.openPanel.bind(c);
+  openWindowBInstructions(
+    (id, options) => openPanel(id, { workspaceId, location: options.location }),
+    workspaceId,
+    onError,
+  );
+}
+
+function removeWindowBHeaderButton(workspaceId: string) {
+  windowBHeaderButtons.get(workspaceId)?.remove();
+  windowBHeaderButtons.delete(workspaceId);
+}
+
+function addWindowBHeaderButton(c: PluginClientContext, workspaceId: string) {
+  if (windowBHeaderButtons.has(workspaceId)) return;
+  windowBHeaderButtons.set(
+    workspaceId,
+    c.addHeaderButton({
+      id: WINDOWB_HEADER_ID,
+      workspaceId,
+      button: {
+        title: "指示",
+        icon: "ListChecks",
+        visible: false,
+        behavior: {
+          kind: "action",
+          onPress: () => {
+            // 開けなかったとき、押したのに何も起きない状態を残さない(画面側が1行出す)。
+            openWindowBFor(c, workspaceId, () => undefined);
+          },
+        },
+      },
+    }),
+  );
+}
+
 // ---------------------------------------------------------------- タスク台帳(窓口Bの右側)
 // 窓口Bのスレ(固定ID)のワークスペースを10秒ごとに探し直す。見つかったらそのワークスペースのヘッダに
 // 「タスク台帳」ボタンを出し、押すと右の欄(`explorer`)に台帳の面板を開く。狭い画面では幕
@@ -504,11 +520,8 @@ let windowBLookupAt = 0;
  * スレ一覧の取得は重いので、前回から `WINDOW_B_LOOKUP_MS` 経っていなければ何もしない。
  * 分からないままなら、30秒ごとに1回だけ取り直す。
  */
-async function refreshWindowBWorkspace(hosts: ReturnType<typeof useHosts>): Promise<void> {
-  const now = Date.now();
-  if (shownWindowBWorkspace && ledgerButtons.has(shownWindowBWorkspace)) return;
-  if (now - windowBLookupAt < WINDOW_B_LOOKUP_MS) return;
-  windowBLookupAt = now;
+/** 窓口Bのスレが開いているワークスペースを探す(見つからなければ null。次の巡回で取り直す)。 */
+async function findWindowBWorkspace(hosts: ReturnType<typeof useHosts>): Promise<string | null> {
   for (const host of hosts) {
     if (host.status !== "online") continue;
     const c = getPaseoClient(host.serverId);
@@ -521,18 +534,39 @@ async function refreshWindowBWorkspace(hosts: ReturnType<typeof useHosts>): Prom
           .startsWith(WINDOW_B_AGENT_ID.slice(0, 8)),
       ) as { agent?: { workspaceId?: string } } | undefined;
       const workspaceId = entry?.agent?.workspaceId;
-      if (!workspaceId) continue;
-      windowBWorkspaceId = workspaceId;
-      const reg = ledgerButtons.get(workspaceId);
-      if (reg && shownWindowBWorkspace !== workspaceId) {
-        reg.update({ visible: true });
-        shownWindowBWorkspace = workspaceId;
+      if (workspaceId) {
+        windowBWorkspaceId = workspaceId;
+        return workspaceId;
       }
-      return;
     } catch {
-      // 次の巡回で取り直す。
+      // このホストは引けなかった。次のホスト・次の巡回で取り直す。
     }
   }
+  return null;
+}
+
+/** ワークスペースを探す(見つかったらボタンを出す)。前回から `WINDOW_B_LOOKUP_MS` 内は何もしない。 */
+async function refreshWindowBWorkspace(hosts: ReturnType<typeof useHosts>): Promise<void> {
+  const now = Date.now();
+  if (shownWindowBWorkspace && ledgerButtons.has(shownWindowBWorkspace)) return;
+  if (now - windowBLookupAt < WINDOW_B_LOOKUP_MS) return;
+  windowBLookupAt = now;
+  await showWindowBButtonsIn(hosts);
+}
+
+/**
+ * 「指示」ボタンを窓口Bのワークスペースにだけ出す(iPhone 幅の入口。PC は自動で開く)。別の
+ * ワークスペースに出ていたら外す。引けなかったときは何もしない(次の巡回で取り直す)。
+ */
+async function showWindowBButtonsIn(hosts: ReturnType<typeof useHosts>): Promise<void> {
+  const found = await findWindowBWorkspace(hosts);
+  if (!found || !client) return;
+  addWindowBHeaderButton(client, found);
+  windowBHeaderButtons.get(found)?.update({ visible: true });
+  for (const id of windowBHeaderButtons.keys()) {
+    if (id !== found) removeWindowBHeaderButton(id);
+  }
+  return;
 }
 
 /** ヘッダボタンを外す。`contribute` 冒頭と片付けの両方から呼ぶ(登録簿を残したまま捨てると外せなくなる)。 */
@@ -598,6 +632,8 @@ export default function contribute(ctx: PluginClientContext) {
     icon: "ListChecks",
     context: "workspace",
     locations: ["workspace", "right"],
+    // 窓口Bのスレを開いたら右カラムに出す(2026-10-30 ユーザー「PCは常時」)。狭い画面では出さない。
+    autoOpen: { whenAgentIds: [WINDOW_B_AGENT_ID] },
     Component: WindowBInstructionsPanel,
   });
   // ヘッダボタンの登録簿は下部バーの項目の寿命に合わせて消す(再マウント時に作り直す)。

@@ -209,6 +209,7 @@ import {
 import { RenderProfile } from "@/utils/render-profiler";
 import { useWorkspaceCheckoutStatus } from "@/screens/workspace/use-workspace-checkout-status";
 import { useHasPullRequest, usePullRequestAutoAdd } from "@/panels/pull-request";
+import { usePluginAutoOpenPanels } from "@/plugins/workspace-panels/auto-open";
 
 const WORKSPACE_FLOATING_PANEL_PORTAL_HOST_PREFIX = "workspace-floating-panels";
 const EMPTY_UI_TABS: WorkspaceTab[] = [];
@@ -2119,6 +2120,18 @@ function WorkspaceScreenContent({
 
   const activeTabId = focusedPaneTabState.activeTabId;
   const activeTab = focusedPaneTabState.activeTab;
+
+  // スレを開いたら右カラムに出す面(プラグインの `autoOpen`。2026-10-30 ユーザー「PCは常時」)。
+  const autoOpenAgentId =
+    focusedPaneTabState.activeTab?.descriptor.target.kind === "agent"
+      ? focusedPaneTabState.activeTab.descriptor.target.agentId
+      : null;
+  usePluginAutoOpenPanels({
+    serverId: normalizedServerId,
+    workspaceId: normalizedWorkspaceId,
+    agentId: autoOpenAgentId,
+    enabled: isRouteFocused,
+  });
 
   const tabs = useMemo<WorkspaceTabDescriptor[]>(
     () => focusedPaneTabState.tabs.map((tab) => tab.descriptor),

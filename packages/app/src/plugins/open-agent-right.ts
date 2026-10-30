@@ -22,10 +22,7 @@ export interface OpenAgentRightPlan {
 
 export interface OpenAgentRightDeps {
   readAgentWorkspaceId: (input: { serverId: string; agentId: string }) => string | null;
-  resolveWorkspaceMapKey: (input: {
-    serverId: string;
-    workspaceId: string;
-  }) => string | null;
+  resolveWorkspaceMapKey: (input: { serverId: string; workspaceId: string }) => string | null;
   readLayout: (workspaceKey: string) => WorkspaceLayout | null;
   /** 保存済みのエクスプローラID。未記録なら既定のエクスプローラIDに倒す。 */
   readExplorerSidebarPaneId: (workspaceKey: string) => string | null | undefined;
