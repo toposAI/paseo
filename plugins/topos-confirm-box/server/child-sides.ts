@@ -88,7 +88,7 @@ export function writeChildThreadSide(
 
 /**
  * 「確実に壁打ち」と言える行か(2026-10-31 ユーザー指示「悩んだら全部補助スレ」)。
- * 常駐の「壁打ちN」(題名で判る。`child_thread_registry.RESIDENT_TITLE_RE` と同じ形)だけ。
+ * 常駐の「壁打ちN」(題名で判る。ASCII数字のみ。`RESIDENT_TITLE_RE` に近いが全角数字や改名したスレは補助に出る)だけ。
  * 人が建てたかどうかは使わない: 登録簿に載る前の建てたての子スレや、検索・調査で建てた使い捨てが
  * 「登録簿に無い」だけで壁打ちへ混ざっていた(実測: 建て直後の子スレ2件が壁打ちに出た)。
  */
@@ -102,7 +102,7 @@ const isCertainWallTalk = (t: ChildThread): boolean => /^壁打ち\d{1,2}$/.test
  * - 壁打ちへ置く行は親の印を外す(司令塔・子司令塔の見出しの下へ吸われず、壁打ち側で平らに出る)。
  *
  * 表示の振り分けだけを変える。自動アーカイブの保護(`child_thread_registry.is_wall_talk_thread`)は
- * 別規則のまま: 補助へ回った人建てスレ(登録簿に無い)も畳まない。
+ * 別規則のまま: 補助へ回った人建てスレ(登録簿に無い)は手動で aux にしても畳まない。
  */
 export function applyAuxGroup(
   threads: readonly ChildThread[],
