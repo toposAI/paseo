@@ -9,7 +9,9 @@ import path from "node:path";
 import test from "node:test";
 import {
   cachedPresentableCounter,
+  computeBadge,
   computePresentable,
+  resolveBadgeCounter,
   resolvePresentableCounter,
 } from "./presentable-count.js";
 
@@ -126,4 +128,91 @@ test("短時間はキャッシュ(3か所が30秒毎に引く)・時間が経て
   assert.equal(calls, 1, "10秒以内はキャッシュ");
   t += 11_000;
   assert.equal(await counter(), 2);
+});
+
+function badgeRunnerFor(body: string) {
+  const { dir } = fakePython(body);
+  return resolveBadgeCounter({
+    TOPOS_CONFIRM_BOX_JUDGMENT_CLI_DIR: fakeCheckout(),
+    TOPOS_CONFIRM_BOX_JUDGMENT_PYTHON: path.join(dir, "python3"),
+  }) as NonNullable<ReturnType<typeof resolveBadgeCounter>>;
+}
+
+test("resolveBadgeCounter: presentable と total を両方そのまま返す(1/10)", async () => {
+  assert.deepEqual(await badgeRunnerFor('{"presentable": 1, "total": 10}')(), {
+    presentable: 1,
+    total: 10,
+  });
+  assert.deepEqual(await badgeRunnerFor('{"presentable": 0, "total": 0}')(), {
+    presentable: 0,
+    total: 0,
+  });
+});
+
+test("resolveBadgeCounter: 片方が壊れていてももう片方は生かす・総数の無い古い Python でも presentable は出す", async () => {
+  assert.deepEqual(await badgeRunnerFor('{"presentable": 1}')(), { presentable: 1, total: null });
+  assert.deepEqual(await badgeRunnerFor('{"presentable": 1, "total": null}')(), {
+    presentable: 1,
+    total: null,
+  });
+  assert.deepEqual(await badgeRunnerFor('{"presentable": null, "total": 7}')(), {
+    presentable: null,
+    total: 7,
+  });
+  assert.deepEqual(await badgeRunnerFor('{"presentable": 1, "total": -3}')(), {
+    presentable: 1,
+    total: null,
+  });
+});
+
+test("resolveBadgeCounter: 壊れた出力・python が落ちたときは両方 null(0件と偽らない)", async () => {
+  const none = { presentable: null, total: null };
+  assert.deepEqual(await badgeRunnerFor("not json")(), none);
+  const down = resolveBadgeCounter({
+    TOPOS_CONFIRM_BOX_JUDGMENT_CLI_DIR: fakeCheckout(),
+    TOPOS_CONFIRM_BOX_JUDGMENT_PYTHON: "/nonexistent/python3",
+  }) as NonNullable<ReturnType<typeof resolveBadgeCounter>>;
+  assert.deepEqual(await down(), none);
+  assert.equal(resolveBadgeCounter({ TOPOS_CONFIRM_BOX_JUDGMENT_CLI_DIR: "/nonexistent" }), null);
+});
+
+test("Python には `badge-count` だけを渡す(2数版でも引数は増やさない)", async () => {
+  const co = fakeCheckout();
+  const { dir, log } = fakePython('{"presentable": 1, "total": 10}');
+  const run = resolveBadgeCounter({
+    TOPOS_CONFIRM_BOX_JUDGMENT_CLI_DIR: co,
+    TOPOS_CONFIRM_BOX_JUDGMENT_PYTHON: path.join(dir, "python3"),
+  }) as NonNullable<ReturnType<typeof resolveBadgeCounter>>;
+  await run();
+  const args = fs.readFileSync(log, "utf8").trim().split("\n");
+  assert.equal(args.length, 2);
+  assert.equal(args[1], "badge-count");
+});
+
+test("computeBadge: 読まない設定・Python 無し・例外は両方 null。それ以外は答えをそのまま", async () => {
+  const none = { presentable: null, total: null };
+  const ok = async () => ({ presentable: 1, total: 10 });
+  assert.deepEqual(await computeBadge(true, ok), { presentable: 1, total: 10 });
+  assert.deepEqual(await computeBadge(false, ok), none);
+  assert.deepEqual(await computeBadge(true, null), none);
+  assert.deepEqual(
+    await computeBadge(true, async () => {
+      throw new Error("boom");
+    }),
+    none,
+  );
+});
+
+test("cachedPresentableCounter は2数版でも同じ回り方(同時に引いても python は1回)", async () => {
+  let calls = 0;
+  const counter = cachedPresentableCounter(async () => {
+    calls += 1;
+    return { presentable: 1, total: 10 };
+  }) as NonNullable<
+    ReturnType<typeof cachedPresentableCounter<{ presentable: number; total: number }>>
+  >;
+  const [a, b] = await Promise.all([counter(), counter()]);
+  assert.deepEqual(a, { presentable: 1, total: 10 });
+  assert.deepEqual(b, a);
+  assert.equal(calls, 1);
 });

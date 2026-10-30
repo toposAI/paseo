@@ -55,6 +55,25 @@ export function bugBadgeCount(counts: { bugs?: number; [key: string]: unknown })
   return counts.bugs ?? 0;
 }
 
+/**
+ * 下部バー「ユーザー判断」のバッジ文字 = **窓口Aがいま出せる数 / 確認箱の open 総数**(例 `1/10`)。
+ * 2026-10-30 ユーザー「確認箱に10件くらいはいっているのに、サイドバー下のバッジは1」→「bで」(両方出す)。
+ * 数字は2つとも判断窓口の Python が数えたものをそのまま渡す(ここでは判定しない)。
+ * - 総数が不明(null/undefined)のとき: 従来どおり出せる数だけ(0・不明なら出さない)。
+ * - 総数が分かるとき: 出せる数が 0 でも `0/10` と出す(件はあるが窓口は今出せない)。両方 0 なら出さない。
+ * 各数字は 99 で頭打ち(`99+`)。「数えられない(!)」は呼び出し側が先に処理する(0 件と区別するため)。
+ */
+export function judgmentBadgeLabel(
+  presentable: number | undefined,
+  total: number | null | undefined,
+): string | null {
+  const cap = (v: number) => (v > 99 ? "99+" : String(v));
+  const n = presentable ?? 0;
+  if (total === null || total === undefined) return n > 0 ? cap(n) : null;
+  if (n === 0 && total === 0) return null;
+  return `${cap(n)}/${cap(total)}`;
+}
+
 /** PC幅の下限(ホストの compact 境界と同じ720px。`packages/app/src/styles/unistyles.ts` の md)。 */
 export const WIDE_MIN_WIDTH = 720;
 /**

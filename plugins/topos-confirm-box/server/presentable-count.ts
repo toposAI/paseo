@@ -31,6 +31,24 @@ const CACHE_MS = 10_000;
 export type PresentableRunner = () => Promise<number | null>;
 
 /**
+ * バッジの2つの数字。`presentable`=窓口Aがいま出せる件数(1/0)、`total`=確認箱の open(未回答)総数。
+ * どちらも null=数えられない(0件と区別する)。2026-10-30 ユーザー「確認箱に10件くらいはいっているのに、
+ * サイドバー下のバッジは1」→「出せる数/総数」の両方を出す。総数も Python(`badge-count` の `total`)が数え、
+ * ここでは条件を書き写さない。
+ */
+export interface BadgeCounts {
+  presentable: number | null;
+  total: number | null;
+}
+export type BadgeRunner = () => Promise<BadgeCounts>;
+
+const UNKNOWN_COUNTS: BadgeCounts = { presentable: null, total: null };
+
+function asCount(v: unknown): number | null {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : null;
+}
+
+/**
  * バッジの数字(presentable)を決める。**TS 側の集合(`open`)では 0 を確定しない**:
  * `open` は確認箱の行の集合で、窓口の候補(抱えたままの件など)と条件が違いうるため、`open` が空でも
  * 窓口は1件出せることがある(出口レビュー2巡目 指摘1)。Python を呼ばないのは「判断ノートを読まない設定」
@@ -50,16 +68,36 @@ export async function computePresentable(
   }
 }
 
-/** 数字を返す関数。設定が解決できなければ null(=バッジは数字を出さない)。 */
+/** `computePresentable` の2数版。判断ノートを読まない設定・Python が無い・例外はどちらも null。 */
+export async function computeBadge(
+  vaultEnabled: boolean,
+  counter: BadgeRunner | null,
+): Promise<BadgeCounts> {
+  if (!vaultEnabled || !counter) return UNKNOWN_COUNTS;
+  try {
+    return await counter();
+  } catch {
+    return UNKNOWN_COUNTS;
+  }
+}
+
+/** 窓口Aがいま出せる件数だけを返す関数(`resolveBadgeCounter` の presentable 側)。 */
 export function resolvePresentableCounter(
   env: NodeJS.ProcessEnv = process.env,
 ): PresentableRunner | null {
+  const run = resolveBadgeCounter(env);
+  if (!run) return null;
+  return async () => (await run()).presentable;
+}
+
+/** 2つの数字を返す関数。設定が解決できなければ null(=バッジは数字を出さない)。 */
+export function resolveBadgeCounter(env: NodeJS.ProcessEnv = process.env): BadgeRunner | null {
   const dir = env.TOPOS_CONFIRM_BOX_JUDGMENT_CLI_DIR?.trim() || DEFAULT_CLI_DIR;
   const script = path.join(path.resolve(dir), "antigravity", "utils", "judgment_window.py");
   if (!fs.existsSync(script)) return null;
   const python = env.TOPOS_CONFIRM_BOX_JUDGMENT_PYTHON?.trim() || DEFAULT_PYTHON;
   return () =>
-    new Promise((resolve) => {
+    new Promise<BadgeCounts>((resolve) => {
       execFile(
         python,
         [script, "badge-count"],
@@ -75,13 +113,12 @@ export function resolvePresentableCounter(
             // 1行だけの JSON。末尾の行を読む(警告が stderr に出ても壊れない)
             const parsed = JSON.parse(stdout.trim().split("\n").pop() ?? "") as {
               presentable?: unknown;
+              total?: unknown;
             };
-            const v = parsed.presentable;
-            if (v === null) return resolve(null);
-            if (typeof v === "number" && Number.isInteger(v) && v >= 0) return resolve(v);
-            resolve(null);
+            // 片方だけ壊れていても、もう片方は生かす(総数が無い古い Python でも presentable は出す)
+            resolve({ presentable: asCount(parsed.presentable), total: asCount(parsed.total) });
           } catch {
-            resolve(null);
+            resolve(UNKNOWN_COUNTS);
           }
         },
       );
@@ -92,15 +129,15 @@ export function resolvePresentableCounter(
  * 同じ数字を短時間キャッシュする(3か所が30秒毎に引くため、python の起動を1回にまとめる)。
  * 取り直し専用の経路は持たない(バッジは読むだけで、窓口の台帳を書かない)。
  */
-export function cachedPresentableCounter(
-  runner: PresentableRunner | null,
+export function cachedPresentableCounter<T = number | null>(
+  runner: (() => Promise<T>) | null,
   cacheMs: number = CACHE_MS,
   now: () => number = Date.now,
-): PresentableRunner | null {
+): (() => Promise<T>) | null {
   if (!runner) return null;
   let at = 0;
-  let value: number | null = null;
-  let inflight: Promise<number | null> | null = null;
+  let value = undefined as T;
+  let inflight: Promise<T> | null = null;
   return () => {
     if (at && now() - at < cacheMs) return Promise.resolve(value);
     if (inflight) return inflight;

@@ -6,6 +6,7 @@ import {
   confirmBoxTabs,
   footerTitle,
   isWideLayout,
+  judgmentBadgeLabel,
 } from "../shared/footer-tabs.js";
 
 // 確認箱の画面のタブ(実装と同じ並び)。id だけを見れば足りる。
@@ -56,4 +57,21 @@ test("下部バーの並び: ユーザー判断 → バグ報告 → スレ一�
 
 test("登録タイトルと読み上げ名は FOOTER_TABS と同じ文字列", () => {
   for (const t of FOOTER_TABS) assert.equal(footerTitle(t.id), t.title);
+});
+
+test("ユーザー判断のバッジは「出せる数/総数」。総数が不明なら出せる数だけ・両方0なら出さない", () => {
+  assert.equal(judgmentBadgeLabel(1, 10), "1/10", "確認箱に10件あっても窓口Aが出せるのは1件");
+  assert.equal(judgmentBadgeLabel(0, 10), "0/10", "件はあるが窓口は今出せない(0でも総数は見せる)");
+  assert.equal(judgmentBadgeLabel(0, 0), null, "両方0は出さない");
+  assert.equal(judgmentBadgeLabel(undefined, 0), null);
+  assert.equal(judgmentBadgeLabel(1, null), "1", "総数が数えられないときは従来どおり出せる数だけ");
+  assert.equal(judgmentBadgeLabel(1, undefined), "1");
+  assert.equal(judgmentBadgeLabel(0, null), null);
+  assert.equal(judgmentBadgeLabel(undefined, null), null);
+  assert.equal(
+    judgmentBadgeLabel(undefined, 3),
+    "0/3",
+    "出せる数が不明でも総数があれば0扱いで出す",
+  );
+  assert.equal(judgmentBadgeLabel(1, 120), "1/99+", "各数字は99で頭打ち");
 });

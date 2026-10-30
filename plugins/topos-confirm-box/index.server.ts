@@ -87,8 +87,8 @@ import {
 import { isJudgmentCounted } from "./shared/judgment-open.js";
 import {
   cachedPresentableCounter,
-  computePresentable,
-  resolvePresentableCounter,
+  computeBadge,
+  resolveBadgeCounter,
 } from "./server/presentable-count.js";
 import { cachedWindowBRunner, resolveWindowBRunner } from "./server/windowb-instructions.js";
 import {
@@ -564,7 +564,7 @@ export default function contribute(server: PluginServerContext) {
   });
 
   // バッジの数字(窓口Aがいま出せる件数)は判断窓口の Python に聞く。10秒キャッシュ(3か所が30秒毎に引く)
-  const presentableCounter = cachedPresentableCounter(resolvePresentableCounter());
+  const badgeCounter = cachedPresentableCounter(resolveBadgeCounter());
 
   // 窓口Bの右側の「指示の一覧」。組み立ても Python 1か所に任せ、ここは呼んで返すだけ(読み取り専用)。
   // スクリプトの有無は呼ぶたびに見る(デーモンを止めずにチェックアウトを移しても読み直せる)。
@@ -594,11 +594,16 @@ export default function contribute(server: PluginServerContext) {
     // 2026-10-28 ユーザー「そしたらバッジださないでよ。そして開くとカードあったけど？」: 判断ノートの
     // open を全部数えていたため、裏方が検討中の件まで数えて窓口と食い違った。
     // 上の `open` では 0 を確定しない(`computePresentable` の説明。出口レビュー2巡目 指摘1)。
-    const presentable = await computePresentable(vaultSourceEnabled(), presentableCounter);
+    // 「/ 総数」の総数も Python(badge-count の total)の答え。上の `open`(TS 側の数え方)とは別に持つ。
+    const { presentable, total: presentableTotal } = await computeBadge(
+      vaultSourceEnabled(),
+      badgeCounter,
+    );
     return {
       open: open.length,
       openKnown,
       presentable,
+      presentableTotal,
       blocking: open.filter((i) => i.priority === "blocking").length,
       permits: open.filter((i) => i.kind === "permit").length,
       failedSources: sources.filter((src) => !src.ok).length,

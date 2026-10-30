@@ -218,6 +218,11 @@ test("確認箱の中のバッジ(サーバー)と下部バー(クライアン�
     /setUnknown\(r\.presentable === null\)/,
     "数えられないときは不明の印を出す(0件と区別)",
   );
+  assert.match(
+    body,
+    /setTotal\(r\.presentableTotal \?\? undefined\)/,
+    "総数は件数 RPC の presentableTotal(Python の total)をそのまま出す",
+  );
   assert.doesNotMatch(body, /r\.permits/, "permit を足さない(窓口の答えを書き換えない)");
   assert.doesNotMatch(body, /commit/, "押下でも件を先取りしない(窓口Aの台帳を書かない)");
   assert.doesNotMatch(body, /r\.open/, "open 総数をバッジに出さない");
@@ -225,7 +230,7 @@ test("確認箱の中のバッジ(サーバー)と下部バー(クライアン�
 
   // サーバー: バッジの数字は判断窓口の Python の答えをそのまま返す(分岐の表は presentable-count.test.ts)。
   // `open` の空で 0 を確定しない(窓口の候補と TS 側の集合は条件が違いうる。出口レビュー2巡目 指摘1)
-  assert.match(serverSource, /computePresentable\(vaultSourceEnabled\(\), presentableCounter\)/);
+  assert.match(serverSource, /computeBadge\(\s*vaultSourceEnabled\(\),\s*badgeCounter,?\s*\)/);
   assert.doesNotMatch(serverSource, /!open\.length/, "TS 側の集合で 0 を確定しない");
   // 押下で台帳を書かない(件を先取りしない。2026-10-29)。`--commit` の引数の形だけを見る
   assert.doesNotMatch(serverSource, /["']--commit["']/);

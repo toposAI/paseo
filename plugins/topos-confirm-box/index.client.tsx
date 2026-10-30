@@ -46,6 +46,7 @@ import {
   BOX_TAB_SCREEN_ID,
   bugBadgeCount,
   footerTitle,
+  judgmentBadgeLabel,
   type FooterTabId,
 } from "./shared/footer-tabs";
 
@@ -101,8 +102,18 @@ const badgeText = { color: "#ffffff", fontSize: 10, fontWeight: "700" as const }
 
 /** 件数そのままのバッジ。0/取得前は出さない(既存の確認箱バッジと同じ)。
  * `unknown`(数え切れていない)は件数の代わりに「!」を出す(0 件と読ませない)。 */
-function CountBadge({ n, unknown = false }: { n: number | undefined; unknown?: boolean }) {
+function CountBadge({
+  n,
+  unknown = false,
+  text,
+}: {
+  n: number | undefined;
+  unknown?: boolean;
+  /** 「1/10」のように件数の代わりに出す文字。null は出さない(undefined なら n を出す) */
+  text?: string | null;
+}) {
   if (unknown) return <Text style={badgeText}>!</Text>;
+  if (text !== undefined) return text === null ? null : <Text style={badgeText}>{text}</Text>;
   if (!n) return null;
   return <Text style={badgeText}>{n > 99 ? "99+" : n}</Text>;
 }
@@ -111,10 +122,16 @@ function CountBadge({ n, unknown = false }: { n: number | undefined; unknown?: b
  * 下部バーの「ユーザー判断」1行の件数。確認箱のバッジと同じ回り方(30秒毎 + 変更通知)で取り直す。
  * 「子スレ完了」のバッジは 2026-10-26 に撤去した(完了報告は完了箱Cへ一本化)。
  */
-function useJudgmentBadge(): { n: number | undefined; unknown: boolean } {
+function useJudgmentBadge(): {
+  n: number | undefined;
+  total: number | undefined;
+  unknown: boolean;
+} {
   const count = useRpc(confirmBoxCountRpc);
   const signalTimes = useRpc(boxSignalRpc);
   const [n, setN] = useState<number | undefined>(undefined);
+  // 「/ 総数」の総数(確認箱の open 総数。Python の badge-count の total)。不明は undefined
+  const [total, setTotal] = useState<number | undefined>(undefined);
   const [unknown, setUnknown] = useState(false);
   useEffect(() => {
     let alive = true;
@@ -129,6 +146,7 @@ function useJudgmentBadge(): { n: number | undefined; unknown: boolean } {
           if (!alive) return null;
           setUnknown(r.presentable === null);
           setN(r.presentable ?? undefined);
+          setTotal(r.presentableTotal ?? undefined);
           return null;
         })
         .catch(() => {});
@@ -147,12 +165,13 @@ function useJudgmentBadge(): { n: number | undefined; unknown: boolean } {
       stop();
     };
   }, [count, signalTimes]);
-  return { n, unknown };
+  return { n, total, unknown };
 }
 
 /**
  * 下部バーの「ユーザー判断」の1行(PC も iPhone も同じ)。
- * 件数は**窓口Aがいま出せる件数**(`presentable`。判定は判断窓口の Python 1か所)。0 件なら出さない。
+ * 件数は**窓口Aがいま出せる数 / 確認箱の open 総数**(`presentable` / `presentableTotal`。どちらも判断窓口の
+ * Python 1か所の答え)。両方 0 なら出さない。
  */
 function BoxTabLink({ currentScreen, openScreen }: BoxTabLinkProps) {
   const badge = useJudgmentBadge();
@@ -164,7 +183,12 @@ function BoxTabLink({ currentScreen, openScreen }: BoxTabLinkProps) {
   }, [openScreen]);
   const active = currentScreen?.screenId === BOX_TAB_SCREEN_ID;
   // jsx を prop に渡すと lint(react-perf)に当たるので、要素は一度だけ作る。
-  const trailing = CountBadge({ n: badge.n, unknown: badge.unknown });
+  // 「窓口Aが出せる数/総数」(例 1/10)。総数が分からなければ出せる数だけ(judgmentBadgeLabel)
+  const trailing = CountBadge({
+    n: badge.n,
+    unknown: badge.unknown,
+    text: judgmentBadgeLabel(badge.n, badge.total),
+  });
   return (
     <SidebarRow
       icon="CircleHelp"

@@ -224,6 +224,12 @@ export const confirmBoxCountRpc = defineRpc({
      * 画面側で書き換えると、また数える側と選ぶ側がずれる)。
      */
     presentable: z.number().int().nullable().default(null),
+    /**
+     * サイドバーのバッジの「/ 総数」= 確認箱の open(未回答)総数(`badge-count` の `total`)。
+     * 「出せる数/総数」の両方を出すため(2026-10-30 ユーザー指示)。窓口Aの「出せる」判定には関与しない。
+     * null=数えられない(0 と区別する)。
+     */
+    presentableTotal: z.number().int().nullable().default(null),
     /** うち priority=blocking。 */
     blocking: z.number().int(),
     /** うち Paseo の承認待ち。 */
