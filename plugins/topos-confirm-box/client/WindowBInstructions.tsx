@@ -33,7 +33,7 @@ import {
 } from "../shared/windowb-instructions.js";
 
 export const WINDOWB_PANEL_ID = "window-b-instructions";
-export const WINDOWB_PANEL_TITLE = "ぼくの指示";
+export const WINDOWB_PANEL_TITLE = "指示一覧";
 export const WINDOWB_BUTTON_ID = "windowb-instructions";
 const REFRESH_MS = 30_000;
 
@@ -231,7 +231,7 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
       ) : null}
       <View style={s.head}>
         <View style={s.headRow}>
-          <Text style={s.headTitle}>ぼくの指示</Text>
+          <Text style={s.headTitle}>指示一覧</Text>
           <Text style={s.muted}>{summarize(data)}</Text>
         </View>
         {data ? <Text style={s.muted}>{freshnessText(data)}</Text> : null}

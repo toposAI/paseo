@@ -20,7 +20,7 @@ const viewSource = readFileSync(join(root, "client", "TaskLedgerView.tsx"), "utf
 
 test("窓口Bのスレを開いたら自動で出す指定と、右カラムに置ける指定が揃っている", () => {
   const start = clientSource.indexOf("id: WINDOWB_PANEL_ID,");
-  assert.ok(start >= 0, "addWorkspacePanel に「ぼくの指示」の面板がある");
+  assert.ok(start >= 0, "addWorkspacePanel に「指示一覧」の面板がある");
   const body = clientSource.slice(start, clientSource.indexOf("});", start));
   assert.match(body, /locations: \["workspace", "right"\]/, "右カラムに置ける");
   assert.match(

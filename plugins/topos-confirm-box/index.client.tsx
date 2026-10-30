@@ -503,7 +503,7 @@ function addWindowBHeaderButton(c: PluginClientContext, workspaceId: string) {
       id: WINDOWB_HEADER_ID,
       workspaceId,
       button: {
-        title: "指示",
+        title: "指示一覧",
         icon: "ListChecks",
         visible: false,
         behavior: {
