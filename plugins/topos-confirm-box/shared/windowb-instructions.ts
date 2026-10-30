@@ -160,7 +160,7 @@ export function routeText(r: InstructionRoute): string {
     .join(" ・ ");
 }
 
-/** 閉じているときに出す行と、出さなかった件数。 */
+/** 項目行の出し分け。画面は開いたときだけ呼ぶ(閉じたカードは日付とタイトルだけ)。閉じ側の分岐は互換のため残す。 */
 export function visibleRoutes(
   routes: readonly InstructionRoute[] | undefined,
   open: boolean,

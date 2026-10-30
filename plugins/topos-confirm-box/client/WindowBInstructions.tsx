@@ -117,6 +117,9 @@ const ALERT_TEXT: Record<string, string> = {
   unassigned: "担当が1時間たっても決まっていない",
 };
 
+/** 閉じたカードの状態語に添える、赤の短い理由(長い文は開いたときだけ)。 */
+const ALERT_SHORT: Record<string, string> = { no_reply: "返事なし", unassigned: "担当未定" };
+
 /** 状態の文字の色。赤=返事なし/担当未定(alert)、橙=台帳にない・未投函・届いたか不明・知らない語、他は状態ごと。 */
 function kindColor(c: PluginTheme["colors"], kind: string, urgent: boolean, warn: boolean): string {
   if (urgent) return c.statusDanger;
@@ -182,7 +185,10 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
     >
       <View style={s.head}>
         <Text style={s.time}>{item.atText}</Text>
-        <Text style={s.kind}>{item.kind}</Text>
+        <Text style={s.kind}>
+          {item.kind}
+          {item.alert ? ` ・ ${ALERT_SHORT[item.alert] ?? "要確認"}` : ""}
+        </Text>
       </View>
       <Text style={s.title} numberOfLines={open ? undefined : 1}>
         {rowTitle(item)}
