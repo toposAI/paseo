@@ -402,6 +402,7 @@ describe("evaluatePluginClientBundle", () => {
       ["[]", "must support at least one location"],
       ['["sidebar"]', "has invalid location: sidebar"],
       ['["explorer", "explorer"]', "has duplicate locations"],
+      ['["right"]', "must also support the workspace location with right"],
     ] as const) {
       expect(() =>
         evaluatePluginClientBundle(

@@ -1175,6 +1175,48 @@ describe("file explorer binary responses", () => {
       payload: new Uint8Array(),
     });
   });
+
+  test("chat image requests answer the requesting source", async () => {
+    const messages: unknown[] = [];
+    const targetedMessages: Array<{ source: object; message: SessionOutboundMessage }> = [];
+    const source = { kind: "test-source" };
+    const session = createSessionForTest({ messages, targetedMessages });
+
+    const previous = process.env.PASEO_CHAT_IMAGES;
+    process.env.PASEO_CHAT_IMAGES = "off";
+    try {
+      await session.handleMessage(
+        {
+          type: "chat_image_request",
+          url: "https://example.com/a.png",
+          requestId: "req-chat-image",
+        },
+        source,
+      );
+    } finally {
+      if (previous === undefined) {
+        delete process.env.PASEO_CHAT_IMAGES;
+      } else {
+        process.env.PASEO_CHAT_IMAGES = previous;
+      }
+    }
+
+    expect(messages).toEqual([]);
+    expect(targetedMessages).toEqual([
+      {
+        source,
+        message: {
+          type: "chat_image_response",
+          payload: {
+            requestId: "req-chat-image",
+            url: "https://example.com/a.png",
+            status: "direct",
+            reason: "disabled",
+          },
+        },
+      },
+    ]);
+  });
 });
 
 describe("workspace file access (behavior preservation)", () => {

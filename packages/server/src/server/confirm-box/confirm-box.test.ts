@@ -579,6 +579,37 @@ describe("confirm-box routes", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test("項目の画像は一覧に中身を載せず、画像のURLから読める(外部へ出ない)", async () => {
+    // 1x1 の PNG(先頭バイトで形式を判断できる最小の画像)
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const tooBig = Buffer.alloc(2 * 1024 * 1024 + 1).toString("base64");
+    appendFileSync(
+      eventsFile(dir),
+      pyItemFull("i", {
+        images: [
+          { data: png.toString("base64"), mimeType: "image/png" },
+          { data: png.toString("base64"), mimeType: "text/html" },
+          { data: tooBig, mimeType: "image/png" },
+        ],
+      }),
+    );
+    const list = (await (await fetch(`${base}/items?view=all`)).json()) as {
+      items: Array<{ id: string; images?: unknown; imageCount?: number }>;
+    };
+    const item = list.items.find((entry) => entry.id === "i");
+    expect(item).toMatchObject({ imageCount: 1 });
+    expect(item).not.toHaveProperty("images");
+    const image = await fetch(`${base}/items/i/image/0`);
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toContain("image/png");
+    expect(Buffer.from(await image.arrayBuffer()).equals(png)).toBe(true);
+    expect((await fetch(`${base}/items/i/image/1`)).status).toBe(404);
+    expect((await fetch(`${base}/items/missing/image/0`)).status).toBe(404);
+  });
+
   test("ページ・summary・items・ack・ack-all・外部受信・health", async () => {
     const page = await fetch(`${base}/`);
     expect(page.headers.get("content-type")).toContain("text/html");

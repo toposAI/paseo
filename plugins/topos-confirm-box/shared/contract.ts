@@ -140,6 +140,15 @@ export const ConfirmBoxItemSchema = z.object({
   workspaceId: z.string().nullable(),
   /** permit かつ質問の時だけ入る(選択肢ボタンの代わりに質問フォームを描く)。 */
   questions: z.array(ConfirmBoxQuestionSchema).optional(),
+  /** 投函側が添えた画像(base64)。カードに小さく並べる。無い項目は undefined。 */
+  images: z
+    .array(
+      z.object({
+        data: z.string(),
+        mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+      }),
+    )
+    .optional(),
   /** 通知の束ね: 同一source+同一内容の未読をまとめた件数(2件以上のときだけ入る)。 */
   dupCount: z.number().int().optional(),
   /** 束ねた全項目の id(代表を含む)。既読にするときは全部に ack する。 */
@@ -651,3 +660,70 @@ export function notificationTabRows(
       return au !== bu ? au - bu : b.ts - a.ts;
     });
 }
+
+// ---------------------------------------------------------------- RPC: 窓口Bの指示の一覧
+
+/**
+ * 窓口Bのスレの右側に出す「ぼくの指示がいまどうなっているか」。
+ *
+ * 組み立ては Python 1か所(`antigravity/utils/window_b_instruction_panel.py`)に任せる。あちらが
+ * 受信箱・依頼台帳・子スレ登録簿・確認箱の判断ノート・返事の追跡を突き合わせ、こちらは形の写しだけを持つ
+ * (状態の決め方を TS 側へ書き写すと、数える側と選ぶ側がずれる。確認箱のバッジで起きた失敗と同じ)。
+ * **読み取り専用**: この画面から台帳・受信箱は書き換えない。
+ *
+ * 状態の語は**閉じた列挙にしない**(`z.string()`)。RPC の出力は zod で検査されるので、Python 側に語を
+ * 1つ足しただけで列挙が合わなくなると、一覧全体が「読めません」になる。知らない語は画面が橙で出す。
+ */
+export const WINDOW_B_KIND = {
+  /** 確認箱に判断が投函されている。 */
+  judgment: "判断待ち(確認箱)",
+  /** 振った子スレだけが待っていて、確認箱には無い(投函漏れ)。 */
+  childJudging: "判断待ち(確認箱に未投函)",
+  working: "作業中",
+  accepted: "受付済み",
+  noReply: "返事なし",
+  done: "完了",
+  unledgered: "未登録",
+  unknown: "届いたか不明",
+} as const;
+
+export const windowBInstructionsRpc = defineRpc({
+  name: "topos.windowb.instructions",
+  input: z.object({
+    /** 1回に返す件数の上限(0 は全部。既定40)。 */
+    limit: z.number().int().min(0).max(500).default(40),
+  }),
+  output: z.object({
+    generatedAt: z.number(),
+    ledgerUpdatedAt: z.number(),
+    total: z.number().int(),
+    items: z.array(
+      z.object({
+        key: z.string(),
+        at: z.number(),
+        atText: z.string(),
+        text: z.string(),
+        title: z.string(),
+        assignees: z.array(
+          z.object({ id: z.string(), title: z.string(), status: z.string().nullable().optional() }),
+        ),
+        assigneeText: z.string(),
+        kind: z.string(),
+        detail: z.string(),
+        /** 赤にしてよい理由(no_reply=10分返事なし / unassigned=1時間担当未定)。 */
+        alert: z.enum(["no_reply", "unassigned"]).nullable(),
+        alertReason: z.string(),
+        /** 橙(赤ではない)。unledgered=台帳に載っていない / unposted=確認箱に未投函。 */
+        warn: z.enum(["unledgered", "unposted"]).nullable(),
+        items: z.number().int(),
+      }),
+    ),
+    counts: z.record(z.string(), z.number()),
+    alerts: z.number().int(),
+    warns: z.number().int(),
+    /** 読み出せなかった台帳などの知らせ(空を「大丈夫」と読ませない)。 */
+    notices: z.array(z.string()),
+  }),
+});
+export type WindowBInstructionsOutput = z.infer<typeof windowBInstructionsRpc.output>;
+export type WindowBInstruction = WindowBInstructionsOutput["items"][number];

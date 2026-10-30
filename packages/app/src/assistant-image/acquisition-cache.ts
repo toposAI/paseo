@@ -45,6 +45,29 @@ export function createAssistantImageFileAcquisitionKey(input: {
   return `file:${input.serverId ?? "unknown-server"}:${input.occurrenceKey}:${input.cwd}:${input.path}`;
 }
 
+export function createAssistantImageRemotePreviewAttachmentId(input: {
+  serverId?: string;
+  occurrenceKey: string;
+  mimeType: string;
+  url: string;
+  contentLength: number;
+}): string {
+  return createPreviewAttachmentId({
+    mimeType: input.mimeType,
+    path: input.url,
+    contentLength: input.contentLength,
+    contentKey: `${input.serverId ?? "unknown-server"}:${input.occurrenceKey}`,
+  });
+}
+
+export function createAssistantImageRemoteAcquisitionKey(input: {
+  serverId?: string;
+  occurrenceKey: string;
+  url: string;
+}): string {
+  return `remote:${input.serverId ?? "unknown-server"}:${input.occurrenceKey}:${input.url}`;
+}
+
 export function createAssistantImageAcquisitionCache<T>(input: {
   capacity: number;
   onRetain?: (value: T) => () => void;

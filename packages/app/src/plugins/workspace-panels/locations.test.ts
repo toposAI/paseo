@@ -20,7 +20,7 @@ vi.mock("../client-runtime", () => ({
   }),
 }));
 
-function install(locations: readonly ("workspace" | "explorer")[]) {
+function install(locations: readonly ("workspace" | "explorer" | "right")[]) {
   const bundle = `(function() {
     return { default: function(plugin) {
       plugin.addWorkspacePanel({
@@ -57,6 +57,21 @@ describe("plugin workspace panel locations", () => {
     };
     expect(panelTargetSupportsHost("host-1", target, "main")).toBe(true);
     expect(panelTargetSupportsHost("host-1", target, "explorer")).toBe(true);
+    pluginRegistry.removeHost("host-1");
+  });
+
+  it("lets a workspace+right panel sit in the main and side hosts, but not Explorer", () => {
+    // 右カラムはホスト上は main 扱い。`right` だけを受けるパネルを左のサイドバーへ置かない。
+    install(["workspace", "right"]);
+    const target = {
+      kind: "plugin" as const,
+      pluginId: "review",
+      panelId: "details",
+      context: "agent" as const,
+      agentId: "agent-1",
+    };
+    expect(panelTargetSupportsHost("host-1", target, "main")).toBe(true);
+    expect(panelTargetSupportsHost("host-1", target, "explorer")).toBe(false);
     pluginRegistry.removeHost("host-1");
   });
 

@@ -84,6 +84,9 @@ function getAssistantImageMetadataKey(
   if (resolution.kind === "direct") {
     return `direct:${createImageSourceCacheKey(resolution.uri)}`;
   }
+  if (resolution.kind === "remote") {
+    return `remote:${resolution.url}`;
+  }
   // A file path identifies an image only within its daemon and workspace.
   // Callers without that context must use the default aspect ratio.
   if (!input.serverId) {

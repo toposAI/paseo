@@ -271,6 +271,7 @@ describe("loadAppSettingsFromStorage", () => {
       displayAs: "used",
       pins: null,
       serverId: null,
+      lastGoodByHost: {},
     });
 
     const deps = makeDeps({
@@ -295,6 +296,7 @@ describe("loadAppSettingsFromStorage", () => {
         { sourceId: "claude", windowId: "five-hour" },
       ],
       serverId: "server",
+      lastGoodByHost: {},
     });
   });
 
@@ -310,6 +312,7 @@ describe("loadAppSettingsFromStorage", () => {
       displayAs: "remaining",
       pins: [],
       serverId: "server",
+      lastGoodByHost: {},
     });
   });
 
@@ -330,6 +333,7 @@ describe("loadAppSettingsFromStorage", () => {
       displayAs: "used",
       pins: [{ sourceId: "claude", windowId: "weekly" }],
       serverId: null,
+      lastGoodByHost: {},
     });
   });
 

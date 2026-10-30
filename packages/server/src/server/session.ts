@@ -90,6 +90,11 @@ import {
 } from "./lifecycle-reasons.js";
 import { DirectorySyncService } from "./directory-sync/index.js";
 import {
+  createChatImageRequestHandler,
+  createDefaultChatImageCache,
+  type ChatImageResolvedPayload,
+} from "./chat-images/remote-image.js";
+import {
   assertWorkspaceAutomationAllowedForWorkspace,
   clearWorkspaceAutomationBlock,
   formatWorkspaceAutomationBlockedMessage,
@@ -793,6 +798,7 @@ export class Session {
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly usageSession: UsageSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
+  private readonly handleChatImageRequest: (url: string) => Promise<ChatImageResolvedPayload>;
   private readonly agentConfigSession: AgentConfigSession;
   private readonly projectConfigSession: ProjectConfigSession;
   private readonly daemonSession: DaemonSession;
@@ -894,6 +900,9 @@ export class Session {
       downloadTokenStore,
       paseoHome,
       logger: this.sessionLogger,
+    });
+    this.handleChatImageRequest = createChatImageRequestHandler({
+      cache: createDefaultChatImageCache({ ...process.env, PASEO_HOME: paseoHome }),
     });
     this.agentManager = agentManager;
     this.agentStorage = agentStorage;
@@ -2995,6 +3004,8 @@ export class Session {
     switch (msg.type) {
       case "file_explorer_request":
         return this.workspaceFilesSession.handleFileExplorerRequest(msg, source);
+      case "chat_image_request":
+        return this.handleChatImageRequestMessage(msg, source);
       case "fs.file.subscribe.request":
         return this.workspaceFilesSession.handleFileSubscribeRequest(msg, this.delivery);
       case "fs.file.unsubscribe.request":
@@ -3021,6 +3032,25 @@ export class Session {
       default:
         return undefined;
     }
+  }
+
+  /**
+   * Proxies a chat image request to the daemon and answers the same source that
+   * asked. Every failure mode is reported in-band (status `direct` or `error`)
+   * so old clients can fall back to loading the URL themselves.
+   */
+  private async handleChatImageRequestMessage(
+    msg: Extract<SessionInboundMessage, { type: "chat_image_request" }>,
+    source?: object,
+  ): Promise<void> {
+    const payload = await this.handleChatImageRequest(msg.url);
+    this.emitForSource(
+      {
+        type: "chat_image_response",
+        payload: { requestId: msg.requestId, url: msg.url, ...payload },
+      },
+      source,
+    );
   }
 
   private dispatchWorkspaceStateMessage(msg: SessionInboundMessage): Promise<void> | undefined {

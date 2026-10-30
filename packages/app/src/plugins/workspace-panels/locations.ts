@@ -54,8 +54,13 @@ export function panelTargetSupportsHost(
   const panel = findPluginPanel(serverId, target);
   // Preserve a persisted unavailable panel where the user left it until its plugin loads again.
   if (!panel) return true;
+  // 右カラム(`right`)は主ペインと同じ `main` 系。両方を受け付けるパネルだけを置いてよい。
   const location: PluginPanelLocation = host === "explorer" ? "explorer" : "workspace";
-  return pluginPanelSupportsLocation(panel, location);
+  const needsRight = (panel.locations ?? []).includes("right");
+  return (
+    pluginPanelSupportsLocation(panel, location) &&
+    (!needsRight || pluginPanelSupportsLocation(panel, "right"))
+  );
 }
 
 export function panelTargetSupportsHostForWorkspaceKey(

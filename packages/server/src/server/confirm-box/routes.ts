@@ -46,7 +46,28 @@ export function registerConfirmBoxRoutes(options: {
     const view = req.query.view === "all" ? "all" : "active";
     const parsed = Number.parseInt(String(req.query.limit ?? "100"), 10);
     const limit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 500) : 100;
-    res.json({ items: store.list(view, limit), summary: store.summary() });
+    // 画像の中身は一覧に載せず、`imageCount` だけ返す(15秒ごとの再取得で数MBを運ばない)。
+    const items = store.list(view, limit).map((item) => {
+      const { images, ...rest } = item;
+      if (!images || images.length === 0) {
+        return rest;
+      }
+      return Object.assign(rest, { imageCount: images.length });
+    });
+    res.json({ items, summary: store.summary() });
+  });
+
+  /** 項目に添えられた画像1枚。ページは同じ origin から読むので端末は外部へ出ない。 */
+  app.get(`${base}/items/:id/image/:index`, (req, res) => {
+    store.refresh();
+    const item = store.getItem(req.params.id ?? "");
+    const index = Number.parseInt(String(req.params.index ?? ""), 10);
+    const image = item?.images?.[index];
+    if (!image) {
+      res.status(404).json({ ok: false, reason: "not_found" });
+      return;
+    }
+    res.type(image.mimeType).send(Buffer.from(image.data, "base64"));
   });
 
   app.post(`${base}/items/:id/ack`, (req, res) => {

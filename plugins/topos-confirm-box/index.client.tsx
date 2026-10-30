@@ -11,6 +11,7 @@ import {
   type PluginSidebarItemProps,
 } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
+import { useToast } from "@getpaseo/plugin/client/react-native";
 import { ChildThreadsSidebar, CHILD_THREADS_SCREEN_ID } from "./client/ChildThreadsSidebar";
 import { ChildThreadsView } from "./client/ChildThreadsView";
 import { ConceptNoteView } from "./client/ConceptNoteView";
@@ -28,6 +29,12 @@ import {
   TaskLedgerScreen,
   WINDOW_B_AGENT_ID,
 } from "./client/TaskLedgerView";
+import {
+  WINDOWB_PANEL_ID,
+  WINDOWB_PANEL_TITLE,
+  WindowBInstructionsPanel,
+  openWindowBInstructions,
+} from "./client/WindowBInstructions";
 import { onBoxChanged } from "./client/events";
 import { watchBoxSignal } from "./client/change-signal";
 import { setSidebarMode, useSidebarMode } from "./client/sidebar-mode";
@@ -52,6 +59,8 @@ const MAIL_UI_URL = "http://100.85.224.7:8731/";
 let client: PluginClientContext | null = null;
 // ワークスペース id → 確認箱ヘッダボタンの登録(重複させない)。
 const headerButtons = new Map<string, { remove(): void }>();
+// ワークスペース id → 「ぼくの指示」ヘッダボタンの登録(`headerButtons` の登録と寿命を揃える)。
+const windowBHeaderButtons = new Map<string, { remove(): void }>();
 
 function openMailUi() {
   void Linking.openURL(MAIL_UI_URL);
@@ -215,6 +224,7 @@ function SidebarWithHeaderButton({
   n,
 }: Pick<PluginSidebarItemProps, "currentScreen" | "openScreen"> & { n: number | undefined }) {
   const hosts = useHosts();
+  const toast = useToast();
   const open = useCallback(() => openScreen({ screenId: SCREEN_ID }), [openScreen]);
   const { registered, tick } = useRegisteredHeaderButtons();
 
@@ -257,6 +267,33 @@ function SidebarWithHeaderButton({
               },
             });
             ledgerButtons.set(workspaceId, ledger);
+            // 窓口Bの右側の「ぼくの指示」(2026-10-30)。PC はこのボタンで右カラムを開く(いまは常時表示ではない)、
+            // iPhone は同じボタンで全画面に開く(戻ると会話に戻る)。
+            windowBHeaderButtons.set(
+              workspaceId,
+              client.addHeaderButton({
+                id: "windowb-instructions",
+                workspaceId,
+                button: {
+                  title: "指示",
+                  icon: "ListChecks",
+                  behavior: {
+                    kind: "action",
+                    onPress: () => {
+                      if (!client) return;
+                      const openPanel = client.openPanel.bind(client);
+                      openWindowBInstructions(
+                        (id, options) => openPanel(id, { workspaceId, location: options.location }),
+                        workspaceId,
+                        // 開けなかったとき、押したのに何も起きない状態を残さない
+                        () =>
+                          toast.show("「ぼくの指示」を開けませんでした", { variant: "warning" }),
+                      );
+                    },
+                  },
+                },
+              }),
+            );
           }
           return null;
         })
@@ -266,7 +303,7 @@ function SidebarWithHeaderButton({
     return () => {
       alive = false;
     };
-  }, [hosts, registered, tick]);
+  }, [hosts, registered, tick, toast]);
 
   // 窓口Bのスレがどのワークスペースにあるか(/ が無ければ null)が分かったら、そのワークスペースの
   // ヘッダにだけ台帳のボタンを出す。他のワークスペースでも、台帳の面板を右の欄に出していれば出す。
@@ -506,6 +543,8 @@ function removeHeaderButtons() {
   ledgerButtons.clear();
   windowBWorkspaceId = null;
   shownWindowBWorkspace = null;
+  for (const r of windowBHeaderButtons.values()) r.remove();
+  windowBHeaderButtons.clear();
 }
 
 export default function contribute(ctx: PluginClientContext) {
@@ -549,6 +588,18 @@ export default function contribute(ctx: PluginClientContext) {
       Component: FOOTER_COMPONENTS[tab.id],
     });
   }
+  // 窓口Bの右側の「ぼくの指示」の一覧(2026-10-30)。中身は Python 1か所が組み立てる読み取り専用の面。
+  // 右カラム(`right`)と主ペイン(`workspace`)の両方に置けるようにする: PC は右、iPhone は全画面。
+  // ワークスペース単位のパネルとして登録する(中身は窓口Bが開いているかに関係なく同じ一覧なので、
+  // コマンドセンター・ヘッダボタンというワークスペース単位の入口から素直に開ける)。
+  ctx.addWorkspacePanel({
+    id: WINDOWB_PANEL_ID,
+    title: WINDOWB_PANEL_TITLE,
+    icon: "ListChecks",
+    context: "workspace",
+    locations: ["workspace", "right"],
+    Component: WindowBInstructionsPanel,
+  });
   // ヘッダボタンの登録簿は下部バーの項目の寿命に合わせて消す(再マウント時に作り直す)。
   removeHeaderButtons();
   return () => {

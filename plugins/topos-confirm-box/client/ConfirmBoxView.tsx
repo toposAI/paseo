@@ -7,7 +7,15 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
-import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
+import {
+  Image,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+} from "react-native";
 import type { LayoutChangeEvent } from "react-native";
 import { useHosts, useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
@@ -233,6 +241,16 @@ export function ConfirmBoxView({
         gap: touch ? 8 : 6,
       },
       plainBlock: { gap: 6 },
+      // 添付画像は1行に並べ、入りきらない分は横スクロール(1枚96px)。カードの gap を崩さないよう1つの View にまとめる。
+      imageRow: {
+        flexDirection: "row" as const,
+        gap: 6,
+      },
+      imageThumb: {
+        width: 96,
+        height: 96,
+        borderRadius: 8,
+      },
       plainSymbol: { color: c.accent, fontWeight: "700" as const },
       reporter: {
         color: c.foreground,
@@ -1258,6 +1276,14 @@ function ItemCard({
     [item, onAnswer],
   );
   const created = useMemo(() => formatCreated(item.ts), [item.ts]);
+  // 添付画像の data URI はデータが変わったときだけ作り直す(lint: jsx-no-new-object-as-prop)。
+  const imageSources = useMemo(
+    () =>
+      (item.images ?? []).map((image) => ({
+        uri: `data:${image.mimeType};base64,${image.data}`,
+      })),
+    [item.images],
+  );
   const questions = item.questions ?? NO_QUESTIONS;
   return (
     // ペイン切替は件名の押下だけ。外枠を Pressable にすると、右ペインが開いている間 react-native-web が
@@ -1280,6 +1306,19 @@ function ItemCard({
             </Text>
           )}
         </Pressable>
+        {imageSources.length > 0 ? (
+          <View style={styles.imageRow}>
+            {imageSources.map((source) => (
+              <Image
+                key={source.uri}
+                accessibilityLabel="添付画像"
+                source={source}
+                style={styles.imageThumb}
+                resizeMode="cover"
+              />
+            ))}
+          </View>
+        ) : null}
         {questions.length > 0 ? (
           <QuestionAnswer
             questions={questions}
