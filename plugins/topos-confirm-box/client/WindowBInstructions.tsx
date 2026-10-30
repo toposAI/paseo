@@ -190,7 +190,11 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
         {item.detail ? ` ・ ${item.detail}` : ""}
       </Text>
       {routes.shown.map((r) => (
-        <Text key={r.no} style={s.meta} testID={`windowb-route-${item.key}-${r.no}`}>
+        <Text
+          key={`${r.no}-${r.summary}`}
+          style={s.meta}
+          testID={`windowb-route-${item.key}-${r.no}`}
+        >
           {routeText(r)}
         </Text>
       ))}
