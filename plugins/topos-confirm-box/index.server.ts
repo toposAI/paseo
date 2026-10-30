@@ -428,12 +428,8 @@ export default function contribute(server: PluginServerContext) {
       parentsUnknown = true;
       threadsIncomplete = true;
     }
-    // 壁打ち/補助スレの振り分けは最後に付ける(登録簿の id は取り込み前の `rows` + 既知 id)。
-    threads = applyAuxGroup(
-      threads,
-      new Set([...rows.map((t) => t.agentId), ...readKnownChildThreadIds(dir)]),
-      readChildThreadSides(dir),
-    );
+    // 壁打ち/補助スレの振り分けは最後に付ける(確実な壁打ちだけ壁打ち、それ以外は補助)。
+    threads = applyAuxGroup(threads, readChildThreadSides(dir));
     return {
       threads,
       dir: readDir,

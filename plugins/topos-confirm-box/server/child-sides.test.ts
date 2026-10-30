@@ -36,19 +36,27 @@ function thread(overrides: Partial<ChildThread>): ChildThread {
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "sides-"));
 
-test("自動判定: 登録簿の行=補助、登録簿に無い人が建てたスレ=壁打ち、司令塔と見出しの親は常に補助", () => {
+test("自動判定: 常駐の壁打ちNだけ壁打ち、人が建てた疑いのスレも登録簿の行も補助、司令塔と見出しの親は常に補助", () => {
   const rows = applyAuxGroup(
     [
       thread({ agentId: "reg", parentAgentId: "p", parentTitle: "P" }),
       thread({ agentId: "mine" }),
       thread({ agentId: "co", coordinator: true }),
       thread({ agentId: "head", groupingParent: true }),
+      thread({ agentId: "w1", title: "壁打ち1" }),
+      thread({ agentId: "wx", title: "壁打ちの設計" }),
     ],
-    new Set(["reg", "head"]),
     new Map(),
   );
   const side = Object.fromEntries(rows.map((t) => [t.agentId, sideOfThread(t)]));
-  assert.deepEqual(side, { reg: "aux", mine: "walltalk", co: "aux", head: "aux" });
+  assert.deepEqual(side, {
+    reg: "aux",
+    mine: "aux",
+    co: "aux",
+    head: "aux",
+    w1: "walltalk",
+    wx: "aux",
+  });
   assert.equal(rows[0]?.parentAgentId, "p");
 });
 
@@ -59,7 +67,6 @@ test("手動指定は自動判定より優先し、壁打ちへ移した行は�
       thread({ agentId: "mine" }),
       thread({ agentId: "co", coordinator: true }),
     ],
-    new Set(["reg"]),
     new Map([
       ["reg", "walltalk"],
       ["mine", "aux"],

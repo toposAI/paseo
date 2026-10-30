@@ -1,10 +1,9 @@
 /**
  * サイドバーの「壁打ち」と「補助スレ」の振り分け(2026-10-30 ユーザー指示)。
  *
- * - 補助スレ: 裏方(司令塔)が建てて結果を回収する子スレ。登録簿(`child_threads.json`)に載る行、
- *   司令塔そのもの、子を持つ親(見出し)。サイドバーでは既定で折りたたむ。
- * - 壁打ち: ユーザーが直接話すスレ。登録簿に載らない(=人が自分で建てた)スレ、
- *   および自動で判定できないものはこちら(隠して見落とすより、出す側に倒す)。
+ * - 壁打ち: 確実に壁打ちと言えるものだけ(手動で移した行、常駐の「壁打ちN」)。
+ * - 補助スレ: それ以外すべて(迷ったら補助。2026-10-31 ユーザー指示)。登録簿の子スレ、司令塔、
+ *   見出しの親、人が建てたが壁打ちと確かでないスレを含む。サイドバーでは既定で折りたたむ。
  * - ユーザーが手で移した結果は `child_threads_sides.json` に保存し、自動判定より優先する(全端末共通)。
  *   司令塔の行は移せない(司令塔グループは補助スレの入れ子として常に補助側)。
  */
@@ -88,21 +87,31 @@ export function writeChildThreadSide(
 }
 
 /**
+ * 「確実に壁打ち」と言える行か(2026-10-31 ユーザー指示「悩んだら全部補助スレ」)。
+ * 常駐の「壁打ちN」(題名で判る。`child_thread_registry.RESIDENT_TITLE_RE` と同じ形)だけ。
+ * 人が建てたかどうかは使わない: 登録簿に載る前の建てたての子スレや、検索・調査で建てた使い捨てが
+ * 「登録簿に無い」だけで壁打ちへ混ざっていた(実測: 建て直後の子スレ2件が壁打ちに出た)。
+ */
+const isCertainWallTalk = (t: ChildThread): boolean => /^壁打ち\d{1,2}$/.test(t.title.trim());
+
+/**
  * 各行へ `aux`(補助スレ側か)を付ける。
  *
  * - 司令塔・子を持つ親(`groupingParent`)は常に補助側(移せない。見出しの入れ子を壊さない)。
- * - 手動指定があればそれ。無ければ「登録簿に載る行」=補助、載らない行=壁打ち。
+ * - 手動指定があればそれ。無ければ「確実に壁打ち」(常駐の壁打ちN)だけ壁打ち、それ以外は全部補助。
  * - 壁打ちへ置く行は親の印を外す(司令塔・子司令塔の見出しの下へ吸われず、壁打ち側で平らに出る)。
+ *
+ * 表示の振り分けだけを変える。自動アーカイブの保護(`child_thread_registry.is_wall_talk_thread`)は
+ * 別規則のまま: 補助へ回った人建てスレ(登録簿に無い)も畳まない。
  */
 export function applyAuxGroup(
   threads: readonly ChildThread[],
-  registeredIds: ReadonlySet<string>,
   overrides: SideOverrides,
 ): ChildThread[] {
   return threads.map((t) => {
     const fixedAux = t.coordinator === true || t.groupingParent === true;
     const manual = overrides.get(t.agentId);
-    const aux = fixedAux || (manual ? manual === "aux" : registeredIds.has(t.agentId));
+    const aux = fixedAux || (manual ? manual === "aux" : !isCertainWallTalk(t));
     if (aux) return t.aux ? t : { ...t, aux: true };
     const detached =
       t.parentAgentId === null && t.parentTitle === null
