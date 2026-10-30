@@ -95,7 +95,7 @@ export const taskLedgerListRpc = defineRpc({
 export type TaskLedgerListOutput = z.infer<typeof taskLedgerListRpc.output>;
 
 /** 完了の表示モード。既定は「完了は隠す」。 */
-export type LedgerMode = "hide-done" | "show-done";
+export type LedgerMode = "hide-done" | "only-done";
 
 /**
  * 完了か。台帳が完了と書いていれば完了。子スレを振った行は、振った子スレが全部完了したら完了。
@@ -137,7 +137,9 @@ export function keySortValue(key: string): string {
 
 export function filterLedgerRows(rows: readonly LedgerRow[], mode: LedgerMode): LedgerRow[] {
   const sorted = sortLedgerRows(rows);
-  return mode === "show-done" ? sorted : sorted.filter((r) => !isLedgerDone(r));
+  return mode === "only-done"
+    ? sorted.filter((r) => isLedgerDone(r))
+    : sorted.filter((r) => !isLedgerDone(r));
 }
 
 /** 進捗の表示名と色の種類(画面とテストで同じ語彙を使う)。 */

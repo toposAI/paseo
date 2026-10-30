@@ -48,13 +48,13 @@ test("広い画面で欄を閉じたときの逃げ道として全画面も登�
   );
 });
 
-test("完了の表示モードは「完了も表示」と「完了は隠す」の2つで、既定は完了を隠す", () => {
+test("完了の表示モードは「完了だけ表示」と「完了は隠す」の2つで、既定は完了を隠す", () => {
   const start = viewSource.indexOf("export function useTaskLedger");
   assert.ok(start >= 0, "useTaskLedger がある");
   const body = viewSource.slice(start, viewSource.indexOf("\nexport function", start + 10));
   assert.match(body, /useState<LedgerMode>\("hide-done"\)/, "既定は「完了は隠す」");
   assert.match(viewSource, /完了は隠す/);
-  assert.match(viewSource, /完了も表示/);
+  assert.match(viewSource, /完了だけ表示/);
   assert.match(viewSource, /filterLedgerRows\(/, "並びと完了の判定は共通の1本を通す");
 });
 

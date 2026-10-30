@@ -3,7 +3,7 @@
  *
  * - 一番上が最新。1行 = 依頼の1項目。要約と「タップで原文を開く」。
  * - 1行に、いつ受付したか・子スレに振ったか(子スレ名/代理決定/投函/説明のみ)・子スレの進捗・開発プロジェクト。
- * - 一番上の切り替えで「完了は隠す」(既定)と「完了も表示」。
+ * - 一番上の切り替えで「完了は隠す」(既定)と「完了だけ表示」。
  * - PC は右の欄の面板(`addWorkspacePanel` の `explorer`)として出す。窓口Bの画面のヘッダの
  *   「タスク台帳」ボタンで開く(iPhone では同じボタンが幕をそのまま開く)。
  *   狭い(iPhone)画面では右端から左へスワイプして出る幕に載る(Paseo 本体の
@@ -144,7 +144,7 @@ export function TaskLedgerView({
     [data],
   );
   const hideDone = useCallback(() => setMode("hide-done"), [setMode]);
-  const showDone = useCallback(() => setMode("show-done"), [setMode]);
+  const onlyDone = useCallback(() => setMode("only-done"), [setMode]);
 
   // スマホ幅では状態バー・安全領域のぶんだけ中身を下げる(右の欄に並べる時は触らない)。
   const rootStyle = useMemo(
@@ -176,7 +176,7 @@ export function TaskLedgerView({
         </View>
         <View style={s.chips}>
           {chip("完了は隠す", mode === "hide-done", hideDone)}
-          {chip("完了も表示", mode === "show-done", showDone)}
+          {chip("完了だけ表示", mode === "only-done", onlyDone)}
         </View>
         {error ? <Text style={s.warn}>読み込めません: {error}</Text> : null}
         {data?.notes.map((n) => (
@@ -218,15 +218,15 @@ function countText(
   if (!data) return "読み込み中";
   if (mode === "hide-done")
     return done > 0 ? `${visible}件(完了${done}件は非表示)` : `${visible}件`;
-  return done > 0 ? `${visible}件(完了${done}件を含む)` : `${visible}件`;
+  return `${visible}件(完了のみ)`;
 }
 
 function emptyText(data: TaskLedgerListOutput, mode: LedgerMode): string {
   if (data.rows.length === 0)
     return "窓口Bの依頼はまだありません。受付されると、ここに上から順に並びます。";
   if (mode === "hide-done")
-    return "いま残っている依頼はありません(「完了も表示」で完了した依頼が見られます)。";
-  return "依頼はまだありません。";
+    return "いま残っている依頼はありません(「完了だけ表示」で完了した依頼が見られます)。";
+  return "完了した依頼はまだありません。";
 }
 
 /** 1行(1項目)。要約・受付時刻・振り先・進捗・開発プロジェクトを出し、タップで原文を開く。 */

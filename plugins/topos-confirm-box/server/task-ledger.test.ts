@@ -318,7 +318,7 @@ test("一番上が最新。同じ鍵は項目番号の順で、完了は隠せ�
     filterLedgerRows(rows, "hide-done").map((r) => r.id),
     ["b", "c"],
   );
-  assert.equal(filterLedgerRows(rows, "show-done").length, 3);
+  assert.equal(filterLedgerRows(rows, "only-done").length, 1);
   assert.equal(keySortValue("10/28 21:11#2"), "10282111.0002");
   // 連番は数値で比べる(#10 が #2 より後ろ=新しい)。
   const many: LedgerRow[] = [
