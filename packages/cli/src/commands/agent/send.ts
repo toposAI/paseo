@@ -29,6 +29,7 @@ export const agentSendSchema: OutputSchema<AgentSendResult> = {
 
 export interface AgentSendOptions extends CommandOptions {
   wait?: boolean;
+  steer?: boolean;
   image?: string[];
   prompt?: string;
   promptFile?: string;
@@ -42,7 +43,11 @@ export function addSendOptions(cmd: Command): Command {
     .option("--prompt <text>", "Provide the message inline as a flag")
     .option("--prompt-file <path>", "Read the message from a UTF-8 text file")
     .option("--image <path>", "Attach image(s) to the message", collectMultiple, [])
-    .option("--no-wait", "Return immediately without waiting for completion");
+    .option("--no-wait", "Return immediately without waiting for completion")
+    .option(
+      "--steer",
+      "If the agent is mid-turn, deliver the message into the running turn instead of interrupting it",
+    );
 }
 
 /**
@@ -195,6 +200,7 @@ export async function runSendCommand(
     await client.sendAgentMessage(agentIdArg, promptInput, {
       images,
       sourceAgentId: process.env.PASEO_AGENT_ID?.trim() || undefined,
+      ...(options.steer ? { activeTurnBehavior: "steer" as const } : {}),
     });
 
     // If --no-wait, return immediately
