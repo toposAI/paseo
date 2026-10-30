@@ -6,7 +6,14 @@
  *
  * Node/React のどちらのAPIも使わない(両ランタイムが import する)。
  */
-import { WINDOW_B_KIND, type WindowBInstructionsOutput } from "./contract.js";
+import {
+  WINDOW_B_KIND,
+  type WindowBInstruction,
+  type WindowBInstructionsOutput,
+} from "./contract.js";
+
+/** 窓口BのスレID。ここを見て「窓口Bの画面か」を決め、窓口Bの画面でだけ指示一覧を自動で出す。 */
+export const WINDOW_B_AGENT_ID = "29f7ab97-3c33-407e-8a2b-c5284dd38f99";
 
 /** PC幅の下限(ホストの compact 境界と同じ720px)。 */
 export const WIDE_MIN_WIDTH = 720;
@@ -129,4 +136,36 @@ export function doneButtonText(mode: ListMode, doneCount: number): string {
 /** 絞った結果が空のときの文。 */
 export function emptyText(mode: ListMode): string {
   return mode === "done" ? "直近3日の完了はありません" : "進行中の指示はありません";
+}
+
+export type InstructionRoute = NonNullable<WindowBInstruction["routes"]>[number];
+
+/** カードを閉じているときに出す項目の数。残りは「ほかN項目」にまとめる(押すと全部開く)。 */
+export const ROUTES_COLLAPSED = 3;
+
+/**
+ * 項目1行の「振り先と進み具合」。例: `1. 画像を出す ・ 子スレ「実装スレ」 ・ 実装中`。
+ * 進み具合は、完了なら「完了」、子スレなら子スレの自己申告の状態(登録簿に居なければ「状態不明」)、
+ * それ以外は依頼台帳の状態。種別が空なら「まだ振っていない」(振り先が付くまで空のまま)。
+ */
+export function routeText(r: InstructionRoute): string {
+  const dest = r.dest === "" ? "まだ振っていない" : r.dest;
+  const wrapped = r.dest === "子スレ" ? `「${r.assignee}」` : `(${r.assignee})`;
+  const who = r.assignee ? wrapped : "";
+  let progress = r.status;
+  if (r.done) progress = "完了";
+  else if (r.dest === "子スレ") progress = r.childStatus ?? "状態不明";
+  return [`${r.no}. ${r.summary}`.trimEnd(), `${dest}${who}`, progress]
+    .filter(Boolean)
+    .join(" ・ ");
+}
+
+/** 閉じているときに出す行と、出さなかった件数。 */
+export function visibleRoutes(
+  routes: readonly InstructionRoute[] | undefined,
+  open: boolean,
+): { shown: InstructionRoute[]; hidden: number } {
+  const all = routes ?? [];
+  if (open || all.length <= ROUTES_COLLAPSED) return { shown: [...all], hidden: 0 };
+  return { shown: all.slice(0, ROUTES_COLLAPSED), hidden: all.length - ROUTES_COLLAPSED };
 }

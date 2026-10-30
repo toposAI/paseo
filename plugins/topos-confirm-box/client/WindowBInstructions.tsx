@@ -4,6 +4,9 @@
  * 2026-10-30 08:08 ユーザー「とりあえず僕の指示をこのスレの右側で確認できるやつ、これ作ってよ / 指示が通ってるかわからん」
  * ／確認箱の回答「右側に一覧(PCは常時・iPhoneはボタンで開閉)で作る」。
  *
+ * 2026-10-30 19:13 ユーザー「まとめて(タスク台帳を指示一覧へ1本にまとめる。タスク台帳の振り先・進み具合を
+ * 指示一覧に移し、タスク台帳のボタンは消す)」: 各カードに項目ごとの振り先と進み具合(`routes`)を出す。
+ *
  * 中身は `shared/contract.ts` の `windowbInstructionsRpc`(RPC の先の Python
  * `antigravity/utils/window_b_instruction_panel.py`)だけを読む。**ここから台帳・受信箱は書き換えない**。
  *
@@ -31,6 +34,8 @@ import {
   keepLastOnFailure,
   paneLocation,
   rowOrder,
+  routeText,
+  visibleRoutes,
   summarize,
   staleNotice,
   truncationNote,
@@ -133,6 +138,7 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
   const [open, setOpen] = useState(false);
   const toggleOpen = useCallback(() => setOpen((v) => !v), []);
   const a11yState = useMemo(() => ({ expanded: open }), [open]);
+  const routes = useMemo(() => visibleRoutes(item.routes, open), [item.routes, open]);
   const urgent = item.alert !== null;
   const warn = item.warn !== null || !isKnownKind(item.kind);
   const accent = kindColor(c, item.kind, urgent, warn);
@@ -183,6 +189,12 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
         {item.assigneeText}
         {item.detail ? ` ・ ${item.detail}` : ""}
       </Text>
+      {routes.shown.map((r) => (
+        <Text key={r.no} style={s.meta} testID={`windowb-route-${item.key}-${r.no}`}>
+          {routeText(r)}
+        </Text>
+      ))}
+      {routes.hidden > 0 ? <Text style={s.meta}>ほか{routes.hidden}項目(押すと全部)</Text> : null}
       {item.alert ? (
         <Text style={s.alert}>{ALERT_TEXT[item.alert] ?? item.alertReason}</Text>
       ) : null}

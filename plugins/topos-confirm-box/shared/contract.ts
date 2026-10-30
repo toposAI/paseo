@@ -728,6 +728,27 @@ export const windowBInstructionsRpc = defineRpc({
         /** 橙(赤ではない)。unledgered=台帳に載っていない / unposted=確認箱に未投函。 */
         warn: z.enum(["unledgered", "unposted"]).nullable(),
         items: z.number().int(),
+        /**
+         * 項目ごとの振り先と進み具合(旧タスク台帳の1行ぶん。2026-10-30 指示一覧へ一本化)。
+         * 古いサーバは欄ごと無い(画面は出さないだけ)。
+         */
+        routes: z
+          .array(
+            z.object({
+              no: z.number().int(),
+              summary: z.string(),
+              /** 振り先の種別。子スレ / 代理決定 / 投函 / 説明のみ / 空=まだ振っていない。 */
+              dest: z.string(),
+              /** 子スレなら題名、それ以外は理由。 */
+              assignee: z.string(),
+              /** 子スレ登録簿の自己申告の状態。登録簿に居なければ null。 */
+              childStatus: z.string().nullable(),
+              /** 依頼台帳の状態(未割当 / 割当済 / 完了)。 */
+              status: z.string(),
+              done: z.boolean(),
+            }),
+          )
+          .optional(),
       }),
     ),
     counts: z.record(z.string(), z.number()),

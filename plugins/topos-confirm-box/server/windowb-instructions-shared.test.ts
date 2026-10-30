@@ -15,6 +15,9 @@ import {
   keepLastOnFailure,
   paneLocation,
   rowOrder,
+  routeText,
+  visibleRoutes,
+  type InstructionRoute,
   staleNotice,
   summarize,
   truncationNote,
@@ -139,4 +142,55 @@ test("filterByMode: 既定は完了を隠し、done は完了だけ", () => {
   assert.equal(doneButtonText("active", 3), "完了だけ(3)");
   assert.equal(doneButtonText("done", 3), "一覧にもどる");
   assert.notEqual(emptyText("active"), emptyText("done"));
+});
+
+const route = (over: Partial<InstructionRoute>): InstructionRoute => ({
+  no: 1,
+  summary: "画像を出す",
+  dest: "子スレ",
+  assignee: "実装スレ",
+  childStatus: "実装中",
+  status: "割当済",
+  done: false,
+  ...over,
+});
+
+test("routeText: 子スレは題名と自己申告の状態、完了は「完了」、登録簿に居なければ状態不明", () => {
+  assert.equal(routeText(route({})), "1. 画像を出す ・ 子スレ「実装スレ」 ・ 実装中");
+  assert.equal(
+    routeText(route({ done: true, status: "完了" })),
+    "1. 画像を出す ・ 子スレ「実装スレ」 ・ 完了",
+  );
+  assert.equal(
+    routeText(route({ childStatus: null })),
+    "1. 画像を出す ・ 子スレ「実装スレ」 ・ 状態不明",
+  );
+});
+
+test("routeText: 子スレ以外は理由を括弧で、種別が空なら「まだ振っていない」(台帳の状態を出す)", () => {
+  assert.equal(
+    routeText(
+      route({
+        dest: "説明のみ",
+        assignee: "口頭で足りる",
+        childStatus: null,
+        status: "完了",
+        done: true,
+      }),
+    ),
+    "1. 画像を出す ・ 説明のみ(口頭で足りる) ・ 完了",
+  );
+  assert.equal(
+    routeText(route({ dest: "", assignee: "", childStatus: null, status: "未割当" })),
+    "1. 画像を出す ・ まだ振っていない ・ 未割当",
+  );
+});
+
+test("visibleRoutes: 閉じている間は3項目まで、開くと全部。古いサーバ(routes なし)は空", () => {
+  const rs = [1, 2, 3, 4, 5].map((no) => route({ no }));
+  assert.deepEqual(visibleRoutes(rs, false).hidden, 2);
+  assert.equal(visibleRoutes(rs, false).shown.length, 3);
+  assert.equal(visibleRoutes(rs, true).shown.length, 5);
+  assert.equal(visibleRoutes(rs.slice(0, 3), false).hidden, 0);
+  assert.deepEqual(visibleRoutes(undefined, false), { shown: [], hidden: 0 });
 });

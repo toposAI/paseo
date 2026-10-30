@@ -3,7 +3,7 @@
  * (2026-10-30 08:18 ユーザー(確認箱)「右側に一覧(PCは常時・iPhoneはボタンで開閉)で作る」)。
  *
  * 描画の実体は React Native なので `node --test` では動かせない。**ソースの形**を機械的に検査する
- * (`task-ledger-wiring.test.ts` と同じ方式)。実際に出るかは実機確認(browser-op)で担保する。
+ * (`open-agent-right-column.test.ts` と同じ方式)。実際に出るかは実機確認(browser-op)で担保する。
  * ホスト側(自動で出す仕組み・右カラムの置き方)は `packages/app` の vitest で検査する。
  */
 import assert from "node:assert/strict";
@@ -16,7 +16,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const clientSource = readFileSync(join(root, "index.client.tsx"), "utf8");
 const panelSource = readFileSync(join(root, "client", "WindowBInstructions.tsx"), "utf8");
-const viewSource = readFileSync(join(root, "client", "TaskLedgerView.tsx"), "utf8");
+const sharedSource = readFileSync(join(root, "shared", "windowb-instructions.ts"), "utf8");
 
 test("窓口Bのスレを開いたら自動で出す指定と、右カラムに置ける指定が揃っている", () => {
   const start = clientSource.indexOf("id: WINDOWB_PANEL_ID,");
@@ -32,7 +32,7 @@ test("窓口Bのスレを開いたら自動で出す指定と、右カラムに�
   assert.match(body, /edgeSwipe: true/, "狭い画面の右端スワイプで開く");
   assert.match(body, /band: \{ whenAgentIds: \[WINDOW_B_AGENT_ID\], Component: WindowBBand \}/);
   // スレID は台帳と同じ定数(窓口B の固定ID)。別名で書き直さない。
-  assert.match(viewSource, /WINDOW_B_AGENT_ID = "29f7ab97-3c33-407e-8a2b-c5284dd38f99"/);
+  assert.match(sharedSource, /WINDOW_B_AGENT_ID = "29f7ab97-3c33-407e-8a2b-c5284dd38f99"/);
 });
 
 test("iPhone の入口(「指示」ボタン)は残っていて、窓口Bのワークスペースにだけ出る", () => {
@@ -51,4 +51,17 @@ test("一覧の面は、読んだ時刻が15分より前なら上部に目立つ
   assert.match(panelSource, /staleNotice\(data, now\)/);
   assert.match(panelSource, /testID="windowb-stale"/);
   assert.match(panelSource, /statusDanger/, "警告色(赤系)で出す");
+});
+
+test("タスク台帳の入口は無い(指示一覧へ一本化。ヘッダのボタン・面板・画面・RPC を登録しない)", () => {
+  const serverSource = readFileSync(join(root, "index.server.ts"), "utf8");
+  for (const src of [clientSource, serverSource]) {
+    assert.doesNotMatch(src, /TASK_LEDGER|TaskLedger|taskLedger|task-ledger|タスク台帳/);
+  }
+  assert.doesNotMatch(clientSource, /ClipboardList/);
+});
+
+test("指示一覧のカードは項目ごとの振り先と進み具合(routes)を出す", () => {
+  assert.match(panelSource, /routeText\(r\)/);
+  assert.match(panelSource, /visibleRoutes\(item\.routes, open\)/);
 });
