@@ -157,6 +157,22 @@ export class PluginButtonStore {
   }
 }
 
+/**
+ * ヘッダの直接表示枠とオーバーフロー(…)の振り分け(2026-10-30 ユーザー指示「指示一覧を直接表示、
+ * ほかは全部3点リーダの中に」)。pinned を先頭へ(安定ソート)。pinned が1つでもあれば直接表示は
+ * pinned の個数まで、無ければ従来どおり先頭 `limit` 個。
+ */
+export function splitHeaderButtons<T extends { button: { pinned?: boolean } }>(
+  entries: readonly T[],
+  limit: number,
+): { visible: T[]; overflow: T[] } {
+  const pinned = entries.filter((entry) => entry.button.pinned === true);
+  if (pinned.length === 0)
+    return { visible: entries.slice(0, limit), overflow: entries.slice(limit) };
+  const rest = entries.filter((entry) => entry.button.pinned !== true);
+  return { visible: pinned, overflow: rest };
+}
+
 export function buttonMatches(
   entry: RegisteredPluginButton,
   serverId: string,

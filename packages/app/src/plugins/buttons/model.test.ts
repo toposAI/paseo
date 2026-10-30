@@ -2,7 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import type { PluginButton } from "@getpaseo/plugin/client";
 import type { InstalledPlugin } from "../types";
-import { PluginButtonStore, buttonMatches } from "./model";
+import { PluginButtonStore, buttonMatches, splitHeaderButtons } from "./model";
 
 function installation(): InstalledPlugin {
   return {
@@ -169,5 +169,37 @@ describe("plugin buttons", () => {
     });
     await buttons.run(key, ["nested", "run"]);
     expect(calls).toBe(2);
+  });
+});
+
+describe("splitHeaderButtons(2026-10-30 窓口Bの指示一覧を直接表示)", () => {
+  const e = (name: string, pinned?: boolean) => ({ name, button: { pinned } });
+
+  it("pinned が無ければ従来どおり先頭 limit 個だけ直接表示する", () => {
+    const { visible, overflow } = splitHeaderButtons([e("a"), e("b"), e("c")], 1);
+    expect(visible.map((x) => x.name)).toEqual(["a"]);
+    expect(overflow.map((x) => x.name)).toEqual(["b", "c"]);
+  });
+
+  it("pinned があれば pinned だけを直接表示し、ほかは全部オーバーフローへ(元の順を保つ)", () => {
+    const { visible, overflow } = splitHeaderButtons([e("a"), e("b", true), e("c")], 3);
+    expect(visible.map((x) => x.name)).toEqual(["b"]);
+    expect(overflow.map((x) => x.name)).toEqual(["a", "c"]);
+  });
+
+  it("pinned が複数なら pinned の個数だけ(安定ソート)", () => {
+    const { visible, overflow } = splitHeaderButtons([e("a", true), e("b"), e("c", true)], 1);
+    expect(visible.map((x) => x.name)).toEqual(["a", "c"]);
+    expect(overflow.map((x) => x.name)).toEqual(["b"]);
+  });
+
+  it("pinned は検証で既定 false になり、真偽値以外は拒否される", () => {
+    const s = store();
+    const inst = installation();
+    const reg = s.addHeaderButton(inst, { id: "x", workspaceId: "w", button: button() });
+    expect(s.getSnapshot()[0].button.pinned).toBe(false);
+    reg.update({ pinned: true });
+    expect(s.getSnapshot()[0].button.pinned).toBe(true);
+    expect(() => reg.update({ pinned: "yes" as unknown as boolean })).toThrow();
   });
 });

@@ -76,6 +76,7 @@ function validateBehavior(
 export type ResolvedPluginButton = PluginButton & {
   visible: boolean;
   disabled: boolean;
+  pinned: boolean;
   label: string | undefined;
 };
 
@@ -90,6 +91,7 @@ export function validateButton(
     label: button.label === undefined ? undefined : requireText(button.label, "label"),
     visible: optionalBoolean(button.visible, true),
     disabled: optionalBoolean(button.disabled, false),
+    pinned: optionalBoolean(button.pinned, false),
     behavior: validateBehavior(button.behavior, validation),
   };
 }

@@ -132,7 +132,29 @@ interface PluginWorkspacePanelBase {
    * ボタンで開閉」)。狭い画面(compact)では出さない。欄に既に別の物が開いていれば、それを隠さずに
    * 後ろへ足す。そのワークスペースで一度自分で閉じた人は、自動では開き直さない。
    */
-  autoOpen?: { whenAgentIds: readonly string[] };
+  autoOpen?: {
+    whenAgentIds: readonly string[];
+    /**
+     * 狭い画面で、このスレの画面の右端から左へスワイプするとこの面を開く(2026-10-30 ユーザー指示
+     * 「窓口Bの場面で右端からスワイプすると指示一覧が開く」)。既定 false。
+     */
+    edgeSwipe?: boolean;
+  };
+  /**
+   * このスレの会話の上に細い帯を出す(2026-10-30 ユーザー指示「指示 N件・赤1」)。帯を押すと `open()` で
+   * この面を開く(狭い画面=全画面タブ、PC幅=右カラム)。`whenAgentIds` のスレにだけ出る。
+   */
+  band?: {
+    whenAgentIds: readonly string[];
+    Component: ComponentType<PluginWorkspaceBandProps>;
+  };
+}
+
+export interface PluginWorkspaceBandProps extends PluginHostProps {
+  workspaceId: string;
+  agentId: string;
+  /** 帯を付けた面を開く。 */
+  open(): void;
 }
 
 export interface PluginWorkspacePanelProps extends PluginNavigableHostProps {

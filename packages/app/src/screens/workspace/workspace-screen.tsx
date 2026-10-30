@@ -210,6 +210,7 @@ import { RenderProfile } from "@/utils/render-profiler";
 import { useWorkspaceCheckoutStatus } from "@/screens/workspace/use-workspace-checkout-status";
 import { useHasPullRequest, usePullRequestAutoAdd } from "@/panels/pull-request";
 import { usePluginAutoOpenPanels } from "@/plugins/workspace-panels/auto-open";
+import { PluginEdgeSwipeStrip, PluginWorkspaceBands } from "@/plugins/workspace-panels/entry-views";
 
 const WORKSPACE_FLOATING_PANEL_PORTAL_HOST_PREFIX = "workspace-floating-panels";
 const EMPTY_UI_TABS: WorkspaceTab[] = [];
@@ -4181,7 +4182,23 @@ function WorkspaceScreenContent({
         </NewTabLauncherProvider>
       ) : null}
 
-      <View style={styles.centerContent}>{workspacePanelContent}</View>
+      {/* 窓口Bの入口(2026-10-30 ユーザー指示): 会話の上の帯と、狭い画面の右端スワイプ。
+          どちらもプラグインの面の `band` / `autoOpen.edgeSwipe` が指すスレにだけ出る。 */}
+      <PluginWorkspaceBands
+        serverId={normalizedServerId}
+        workspaceId={normalizedWorkspaceId}
+        agentId={autoOpenAgentId}
+      />
+      <View style={styles.centerContent}>
+        {workspacePanelContent}
+        {isMobile ? (
+          <PluginEdgeSwipeStrip
+            serverId={normalizedServerId}
+            workspaceId={normalizedWorkspaceId}
+            agentId={autoOpenAgentId}
+          />
+        ) : null}
+      </View>
     </View>
   );
 

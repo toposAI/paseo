@@ -102,7 +102,32 @@ function normalizePanelAutoOpen(
     if (!trimmed) throw new Error(`Workspace panel ${panelId} autoOpen has an empty agent id`);
     return trimmed;
   });
-  return { whenAgentIds };
+  if (autoOpen.edgeSwipe !== undefined && typeof autoOpen.edgeSwipe !== "boolean") {
+    throw new Error(`Workspace panel ${panelId} autoOpen.edgeSwipe must be a boolean`);
+  }
+  return autoOpen.edgeSwipe ? { whenAgentIds, edgeSwipe: true } : { whenAgentIds };
+}
+
+/** 会話の上の帯の指定。1件以上のスレIDと、描画できるコンポーネントが要る。 */
+function normalizePanelBand(
+  panelId: string,
+  contribution: PluginWorkspacePanelContribution,
+): PluginWorkspacePanelContribution["band"] {
+  const band = contribution.band;
+  if (band === undefined) return undefined;
+  const ids = Array.isArray(band.whenAgentIds) ? band.whenAgentIds : null;
+  if (!ids || ids.length === 0) {
+    throw new Error(`Workspace panel ${panelId} band needs at least one agent id`);
+  }
+  if (typeof band.Component !== "function") {
+    throw new Error(`Workspace panel ${panelId} band is not a component`);
+  }
+  const whenAgentIds = ids.map((id) => {
+    const trimmed = typeof id === "string" ? id.trim() : "";
+    if (!trimmed) throw new Error(`Workspace panel ${panelId} band has an empty agent id`);
+    return trimmed;
+  });
+  return { whenAgentIds, Component: band.Component };
 }
 
 function isComponentType(value: unknown): boolean {
@@ -310,6 +335,7 @@ export function runPluginClientBundle(
       resolvePluginIcon(icon);
       const locations = normalizePanelLocations(normalizedId, contribution.locations);
       const autoOpen = normalizePanelAutoOpen(normalizedId, contribution, locations);
+      const band = normalizePanelBand(normalizedId, contribution);
       workspacePanelIds.add(normalizedId);
       return register(
         collector.workspacePanels,
@@ -320,6 +346,7 @@ export function runPluginClientBundle(
           icon,
           locations,
           ...(autoOpen ? { autoOpen } : {}),
+          ...(band ? { band } : {}),
         },
         () => workspacePanelIds.delete(normalizedId),
       );

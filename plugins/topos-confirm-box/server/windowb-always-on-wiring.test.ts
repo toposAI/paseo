@@ -25,9 +25,12 @@ test("窓口Bのスレを開いたら自動で出す指定と、右カラムに�
   assert.match(body, /locations: \["workspace", "right"\]/, "右カラムに置ける");
   assert.match(
     body,
-    /autoOpen: \{ whenAgentIds: \[WINDOW_B_AGENT_ID\] \}/,
+    /autoOpen: \{ whenAgentIds: \[WINDOW_B_AGENT_ID\](, edgeSwipe: true)? \}/,
     "窓口Bのスレのときだけ自動で出す",
   );
+  // 2026-10-30: 右端スワイプと会話の上の帯も、窓口Bのスレだけを指す。
+  assert.match(body, /edgeSwipe: true/, "狭い画面の右端スワイプで開く");
+  assert.match(body, /band: \{ whenAgentIds: \[WINDOW_B_AGENT_ID\], Component: WindowBBand \}/);
   // スレID は台帳と同じ定数(窓口B の固定ID)。別名で書き直さない。
   assert.match(viewSource, /WINDOW_B_AGENT_ID = "29f7ab97-3c33-407e-8a2b-c5284dd38f99"/);
 });
@@ -40,6 +43,7 @@ test("iPhone の入口(「指示」ボタン)は残っていて、窓口Bのワ�
   const start = clientSource.indexOf("function addWindowBHeaderButton");
   const body = clientSource.slice(start, clientSource.indexOf("\n}\n", start));
   assert.match(body, /visible: false/);
+  assert.match(body, /pinned: true/, "「…」に畳まず直接表示する(2026-10-30)");
   assert.match(body, /openWindowBFor\(c, workspaceId/);
 });
 

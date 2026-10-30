@@ -41,7 +41,7 @@ import {
 } from "../popover";
 import { SurfaceErrorBoundary } from "../surface-error-boundary";
 import { toPluginTheme } from "../theme";
-import { buttonMatches, type RegisteredPluginButton } from "./model";
+import { buttonMatches, splitHeaderButtons, type RegisteredPluginButton } from "./model";
 import { pluginButtonStore } from "./store";
 import { resolvePluginPlatform } from "../platform";
 
@@ -572,8 +572,7 @@ export function PluginHeaderButtons({
   const { t } = useTranslation();
   const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
   const limit = compact || width < 1100 ? 1 : 3;
-  const visible = entries.slice(0, limit);
-  const overflow = entries.slice(limit);
+  const { visible, overflow } = splitHeaderButtons(entries, limit);
   const overflowStyle = useCallback(
     (state: IconButtonChromeState) => headerButtonStyle(compact, state),
     [compact],

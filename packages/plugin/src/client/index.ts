@@ -12,6 +12,7 @@ export type {
   PluginPanelLocation,
   PluginOpenPanelOptions,
   PluginWorkspacePanelProps,
+  PluginWorkspaceBandProps,
   PluginAgentPanelProps,
   PluginClientOpenPanelOptions,
   PluginClientContext,

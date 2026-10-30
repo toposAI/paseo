@@ -35,6 +35,7 @@ import {
   WindowBInstructionsPanel,
   openWindowBInstructions,
 } from "./client/WindowBInstructions";
+import { WindowBBand } from "./client/WindowBBand";
 import { onBoxChanged } from "./client/events";
 import { watchBoxSignal } from "./client/change-signal";
 import { setSidebarMode, useSidebarMode } from "./client/sidebar-mode";
@@ -505,6 +506,8 @@ function addWindowBHeaderButton(c: PluginClientContext, workspaceId: string) {
       button: {
         title: "指示一覧",
         icon: "ListChecks",
+        // 「…」に畳まず直接表示(2026-10-30 ユーザー「窓口Bの指示一覧を直接表示、他は全部3点リーダの中」)。
+        pinned: true,
         visible: false,
         behavior: {
           kind: "action",
@@ -659,7 +662,10 @@ export default function contribute(ctx: PluginClientContext) {
     context: "workspace",
     locations: ["workspace", "right"],
     // 窓口Bのスレを開いたら右カラムに出す(2026-10-30 ユーザー「PCは常時」)。狭い画面では出さない。
-    autoOpen: { whenAgentIds: [WINDOW_B_AGENT_ID] },
+    // 狭い画面では右端から左へスワイプすると開く(2026-10-30 ユーザー「窓口Bの場面で右端からスワイプ」)。
+    autoOpen: { whenAgentIds: [WINDOW_B_AGENT_ID], edgeSwipe: true },
+    // 会話の上の細い帯「指示 N件・赤1」(2026-10-30 ユーザー「Cもいいね。やって」)。押すと一覧を開く。
+    band: { whenAgentIds: [WINDOW_B_AGENT_ID], Component: WindowBBand },
     Component: WindowBInstructionsPanel,
   });
   // ヘッダボタンの登録簿は下部バーの項目の寿命に合わせて消す(再マウント時に作り直す)。

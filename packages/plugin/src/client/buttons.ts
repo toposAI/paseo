@@ -36,6 +36,11 @@ export interface PluginButton {
   label?: string;
   visible?: boolean;
   disabled?: boolean;
+  /**
+   * ヘッダで「…」メニューへ畳まず直接表示する(既定 false)。2026-10-30 ユーザー指示(窓口Bの「指示一覧」)。
+   * pinned が1つでもあるワークスペースでは、直接表示は pinned の個数までで、ほかのボタンは全部「…」に入る。
+   */
+  pinned?: boolean;
   behavior: PluginButtonBehavior;
 }
 
