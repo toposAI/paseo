@@ -270,7 +270,9 @@ function SidebarWithHeaderButton({
         })
         .catch(() => {});
     }
-    void refreshWindowBWorkspace(hosts);
+    // オンラインのホストが一覧に揃ってから窓口Bのワークスペースを探す(揃う前に探すと、後から来た
+    // ホストを次の10秒の巡回まで見ない)。`hosts`・`registered` は取得のたびに変わる(=取り直し)。
+    if (hosts.some((host) => host.status === "online")) void refreshWindowBWorkspace(hosts);
     return () => {
       alive = false;
     };
@@ -527,12 +529,12 @@ async function findWindowBWorkspace(hosts: ReturnType<typeof useHosts>): Promise
     const c = getPaseoClient(host.serverId);
     try {
       const res = await c.agents.list({ scope: "active", includeBackground: true });
-      // 1件は `{ agent, project }` の入れ子(スレの本体は `agent`)。
-      const entry = res.entries.find((e) =>
-        String((e as { agent?: { id?: string } }).agent?.id ?? "")
-          .toLowerCase()
-          .startsWith(WINDOW_B_AGENT_ID.slice(0, 8)),
-      ) as { agent?: { workspaceId?: string } } | undefined;
+      // 1件は `{ agent, project }` の入れ子(スレの本体は `agent`)。ID は接頭辞(8文字)でなく全体で比べる
+      // (同じ接頭辞の別スレがあれば、そちらのワークスペースを掴んでしまう)。
+      const isWindowB = (e: unknown): e is { agent?: { workspaceId?: string } } =>
+        String((e as { agent?: { id?: string } })?.agent?.id ?? "").toLowerCase() ===
+        WINDOW_B_AGENT_ID.toLowerCase();
+      const entry = res.entries.find(isWindowB);
       const workspaceId = entry?.agent?.workspaceId;
       if (workspaceId) {
         windowBWorkspaceId = workspaceId;
