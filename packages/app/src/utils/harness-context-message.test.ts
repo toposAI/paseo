@@ -115,4 +115,64 @@ SessionStart hook additional context: このセッションはメインworking t
       isHarnessContextOnlyMessage("前の会話の続きです。\n\nThis session is being continued"),
     ).toBe(false);
   });
+
+  // 2026-10-30: after a restart the agent listing came back as a plain user turn and filled
+  // the chat (窓口B, thread f5627d3). It is the harness describing its own subagents.
+  it("folds a turn that carries the agent listing as a system reminder", () => {
+    expect(
+      isHarnessContextOnlyMessage(
+        "<system-reminder>\nAvailable agent types for the Agent tool:\n- Explore: Fast read-only search agent\n- Chore: Mechanical, judgment-free chores\n\nWhen you launch multiple agents for independent work, send them in a single message.\n</system-reminder>",
+      ),
+    ).toBe(true);
+  });
+
+  it("folds an agent listing written without reminder tags", () => {
+    expect(
+      isHarnessContextOnlyMessage(
+        "Available agent types for the Agent tool:\n- Explore: Fast read-only search agent\n- Chore: Mechanical chores\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a turn that adds words of its own to an agent listing", () => {
+    expect(
+      isHarnessContextOnlyMessage(
+        "Available agent types for the Agent tool:\n- Explore: Fast read-only search agent\n\nこれが定期的に出てくる",
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps a user turn that just asks about the listing", () => {
+    expect(isHarnessContextOnlyMessage("Available agent types for the Agent tool: って何?")).toBe(
+      false,
+    );
+  });
+
+  it("folds the note about a file the summary left out", () => {
+    expect(
+      isHarnessContextOnlyMessage(
+        "Note: /Users/user/repos/example/.claude/skills/judgment-window/SKILL.md was read before the last conversation was summarized, but the contents are too large to include. Use Read tool if you need to access it.",
+      ),
+    ).toBe(true);
+    expect(
+      isHarnessContextOnlyMessage(
+        "Note: /Users/user/repos/example/SKILL.md was read before the last conversation was summarized. これを出さないで",
+      ),
+    ).toBe(false);
+  });
+
+  it("folds the compaction turn holding the summary, its note, hook output, and the resume excerpt", () => {
+    expect(
+      isHarnessContextOnlyMessage(
+        [
+          "This session is being continued from a previous conversation that ran out of context.",
+          "Summary:\n1. Primary Request",
+          "Note: /Users/user/repos/example/.claude/skills/x/SKILL.md was read before the last conversation was summarized, but the contents are too large to include. Use Read tool if you need to access it.",
+          "SessionStart:compact hook success: [cloud_setup.sh] skipped",
+          "[HookHealthcheck] OK: all registered hook scripts present.",
+          "[compact_context] ★未処理の依頼★ 次のユーザー発言は圧縮の直前に届き、応答が付く前に圧縮されました:\n\n■ 最初の依頼:\nあなたは窓口Bです。\n\n■ 直近のユーザー発言(最大20件):\n- 完了箱c\nthinkが表示されてる直して",
+        ].join("\n\n"),
+      ),
+    ).toBe(true);
+  });
 });
