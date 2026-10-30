@@ -100,9 +100,19 @@ export function staleNotice(data: WindowBInstructionsOutput, now: number): strin
 /** 一覧の見せ方。active=完了を隠す(既定) / done=完了だけ(直近3日。Python が返す範囲)。 */
 export type ListMode = "active" | "done";
 
-/** 見せ方に合わせて行を絞る。完了の判定は Python の状態の語(WINDOW_B_KIND.done)と一致させる。 */
-export function filterByMode<T extends { kind: string }>(rows: readonly T[], mode: ListMode): T[] {
-  return rows.filter((r) => (r.kind === WINDOW_B_KIND.done) === (mode === "done"));
+/**
+ * 見せ方に合わせて行を絞る。完了の判定は Python の状態の語(WINDOW_B_KIND.done)と一致させる。
+ * 「完了だけ」の間も、判断待ち・赤・橙の行は隠さない(置きっぱなしで新しい判断待ちが見えなくなるのを防ぐ。
+ * 2026-10-30 出口レビュー指摘7a)。
+ */
+export function filterByMode<
+  T extends { kind: string; alert?: string | null; warn?: string | null },
+>(rows: readonly T[], mode: ListMode): T[] {
+  return rows.filter((r) => {
+    const isDone = r.kind === WINDOW_B_KIND.done;
+    if (mode === "active") return !isDone;
+    return isDone || Boolean(r.alert) || Boolean(r.warn) || r.kind === WINDOW_B_KIND.judgment;
+  });
 }
 
 /** 「完了だけ」ボタンの文字(件数つき)。 */

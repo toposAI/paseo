@@ -115,6 +115,15 @@ test("filterByMode: 既定は完了を隠し、done は完了だけ", () => {
     filterByMode(rows, "done").map((r) => r.kind),
     ["完了", "完了"],
   );
+  // 完了だけ の間も、判断待ち・赤・橙は隠さない
+  const att = [
+    { kind: "完了" },
+    { kind: "判断待ち(確認箱)" },
+    { kind: "作業中", alert: "no_reply" },
+    { kind: "作業中", warn: "unposted" },
+    { kind: "作業中" },
+  ];
+  assert.equal(filterByMode(att, "done").length, 4);
   assert.equal(doneButtonText("active", 3), "完了だけ(3)");
   assert.equal(doneButtonText("done", 3), "一覧にもどる");
   assert.notEqual(emptyText("active"), emptyText("done"));
