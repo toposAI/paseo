@@ -708,8 +708,12 @@ export const windowBInstructionsRpc = defineRpc({
         key: z.string(),
         at: z.number(),
         atText: z.string(),
+        /** ユーザーの発言の逐語(カードを押すと開く)。 */
         text: z.string(),
+        /** カードに出す1行。要約(brief)があればそれ、無ければ逐語の先頭。 */
         title: z.string(),
+        /** 台帳の全項目に付いた1行要約。1つでも欠けていれば null(古いサーバは欄ごと無い)。 */
+        brief: z.string().nullable().optional(),
         assignees: z.array(
           z.object({ id: z.string(), title: z.string(), status: z.string().nullable().optional() }),
         ),

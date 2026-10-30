@@ -96,3 +96,21 @@ export function staleNotice(data: WindowBInstructionsOutput, now: number): strin
   if (now - data.generatedAt < STALE_AFTER_MS) return null;
   return `古い表示(${clock(data.generatedAt)}時点)`;
 }
+
+/** 一覧の見せ方。active=完了を隠す(既定) / done=完了だけ(直近3日。Python が返す範囲)。 */
+export type ListMode = "active" | "done";
+
+/** 見せ方に合わせて行を絞る。完了の判定は Python の状態の語(WINDOW_B_KIND.done)と一致させる。 */
+export function filterByMode<T extends { kind: string }>(rows: readonly T[], mode: ListMode): T[] {
+  return rows.filter((r) => (r.kind === WINDOW_B_KIND.done) === (mode === "done"));
+}
+
+/** 「完了だけ」ボタンの文字(件数つき)。 */
+export function doneButtonText(mode: ListMode, doneCount: number): string {
+  return mode === "done" ? "一覧にもどる" : `完了だけ(${doneCount})`;
+}
+
+/** 絞った結果が空のときの文。 */
+export function emptyText(mode: ListMode): string {
+  return mode === "done" ? "直近3日の完了はありません" : "進行中の指示はありません";
+}

@@ -12,8 +12,8 @@
  * =全画面で、入口はヘッダのボタン「指示」(窓口Bのワークスペースでだけ出る)。押すたびにページの幅で
  * 置き場所を決め直す。一覧の読み出しが15分より前に止まっていれば、上部に「古い表示(時刻)」を赤で出す。
  */
-import { useEffect, useMemo, useState } from "react";
-import { Dimensions, ScrollView, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Dimensions, Pressable, ScrollView, Text, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import {
@@ -23,6 +23,10 @@ import {
   type WindowBInstructionsOutput,
 } from "../shared/contract.js";
 import {
+  doneButtonText,
+  emptyText,
+  filterByMode,
+  type ListMode,
   freshnessText,
   keepLastOnFailure,
   paneLocation,
@@ -85,7 +89,7 @@ function useInstructions(): {
       if (alive) setState((prev) => keepLastOnFailure(prev.data, next));
     };
     const tick = () =>
-      list({ limit: 40 })
+      list({ limit: 100 })
         .then((data) => apply({ ok: true, data }))
         .catch((e: unknown) =>
           apply({ ok: false, error: e instanceof Error ? e.message : String(e) }),
@@ -124,6 +128,10 @@ function isKnownKind(kind: string): boolean {
 
 /** 1行。赤=返事なし/担当未定、橙=台帳に載っていない。それ以外は状態の文字で見せる。 */
 function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginTheme["colors"] }) {
+  // 押すと発言の逐語が開く(カードは1行要約。要約が意味を取り違えていても逐語で確かめられる)
+  const [open, setOpen] = useState(false);
+  const toggleOpen = useCallback(() => setOpen((v) => !v), []);
+  const a11yState = useMemo(() => ({ expanded: open }), [open]);
   const urgent = item.alert !== null;
   const warn = item.warn !== null || !isKnownKind(item.kind);
   const accent = kindColor(c, item.kind, urgent, warn);
@@ -145,16 +153,29 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
       title: { color: c.foreground, fontSize: 14 },
       meta: { color: c.foregroundMuted, fontSize: 12 },
       alert: { color: c.statusDanger, fontSize: 12, fontWeight: "600" as const },
+      verbatim: {
+        color: c.foregroundMuted,
+        fontSize: 12,
+        borderTopColor: c.border,
+        borderTopWidth: 1,
+        paddingTop: 4,
+      },
     }),
     [c, accent, urgent, warn],
   );
   return (
-    <View style={s.card} testID={`windowb-row-${item.key}`}>
+    <Pressable
+      style={s.card}
+      testID={`windowb-row-${item.key}`}
+      accessibilityRole="button"
+      accessibilityState={a11yState}
+      onPress={toggleOpen}
+    >
       <View style={s.head}>
         <Text style={s.time}>{item.atText}</Text>
         <Text style={s.kind}>{item.kind}</Text>
       </View>
-      <Text style={s.title} numberOfLines={2}>
+      <Text style={s.title} numberOfLines={open ? undefined : 2}>
         {item.title}
       </Text>
       <Text style={s.meta}>
@@ -164,7 +185,12 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
       {item.alert ? (
         <Text style={s.alert}>{ALERT_TEXT[item.alert] ?? item.alertReason}</Text>
       ) : null}
-    </View>
+      {open ? (
+        <Text style={s.verbatim} selectable testID={`windowb-verbatim-${item.key}`}>
+          {item.text}
+        </Text>
+      ) : null}
+    </Pressable>
   );
 }
 
@@ -181,7 +207,11 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(timer);
   }, []);
-  const rows = useMemo(() => (data ? rowOrder(data.items) : []), [data]);
+  // 既定は完了を隠す。「完了だけ」ボタンで直近3日の完了だけを見せる(2026-10-30 ユーザー指示)
+  const [mode, setMode] = useState<ListMode>("active");
+  const rows = useMemo(() => (data ? filterByMode(rowOrder(data.items), mode) : []), [data, mode]);
+  const toggleMode = useCallback(() => setMode((m) => (m === "done" ? "active" : "done")), []);
+  const doneCount = data ? data.items.filter((i) => i.kind === WINDOW_B_KIND.done).length : 0;
   const c = theme.colors;
   const s = useMemo(
     () => ({
@@ -204,6 +234,16 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
         fontWeight: "700" as const,
       },
       list: { padding: 10, gap: 8 },
+      toggle: {
+        alignSelf: "flex-start" as const,
+        borderColor: c.border,
+        borderWidth: 1,
+        borderRadius: 6,
+        paddingVertical: 4,
+        paddingHorizontal: 10,
+        backgroundColor: c.surface1,
+      },
+      toggleText: { color: c.foreground, fontSize: 13 },
     }),
     [c],
   );
@@ -240,12 +280,20 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
             橙=受信箱には届いているが、依頼台帳に載っていないか、判断が確認箱に投函されていない(状態を引けない)
           </Text>
         ) : null}
+        <Pressable
+          style={s.toggle}
+          testID="windowb-done-toggle"
+          accessibilityRole="button"
+          onPress={toggleMode}
+        >
+          <Text style={s.toggleText}>{doneButtonText(mode, doneCount)}</Text>
+        </Pressable>
         {truncate}
         {notice}
       </View>
       <ScrollView contentContainerStyle={s.list}>
         {!data && !error ? <Text style={s.muted}>読み込み中…</Text> : null}
-        {data && rows.length === 0 ? <Text style={s.muted}>直近の指示はありません</Text> : null}
+        {data && rows.length === 0 ? <Text style={s.muted}>{emptyText(mode)}</Text> : null}
         {rows.map((item) => (
           <Row key={item.key} item={item} colors={c} />
         ))}

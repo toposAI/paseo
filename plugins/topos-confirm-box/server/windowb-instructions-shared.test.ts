@@ -8,6 +8,9 @@ import type { WindowBInstructionsOutput } from "../shared/contract.js";
 import {
   STALE_AFTER_MS,
   WIDE_MIN_WIDTH,
+  doneButtonText,
+  emptyText,
+  filterByMode,
   freshnessText,
   keepLastOnFailure,
   paneLocation,
@@ -100,4 +103,19 @@ test("15分以上前の読み出しは「古い表示(時刻)」として目立�
   assert.equal(staleNotice(data, t + STALE_AFTER_MS - 1), null);
   // 読み出しが0(=一度も取れていない)は古い扱い
   assert.equal(staleNotice({ ...out(1), generatedAt: 0 }, t) !== null, true);
+});
+
+test("filterByMode: 既定は完了を隠し、done は完了だけ", () => {
+  const rows = [{ kind: "作業中" }, { kind: "完了" }, { kind: "返事なし" }, { kind: "完了" }];
+  assert.deepEqual(
+    filterByMode(rows, "active").map((r) => r.kind),
+    ["作業中", "返事なし"],
+  );
+  assert.deepEqual(
+    filterByMode(rows, "done").map((r) => r.kind),
+    ["完了", "完了"],
+  );
+  assert.equal(doneButtonText("active", 3), "完了だけ(3)");
+  assert.equal(doneButtonText("done", 3), "一覧にもどる");
+  assert.notEqual(emptyText("active"), emptyText("done"));
 });
