@@ -105,6 +105,18 @@ test("15分以上前の読み出しは「古い表示(時刻)」として目立�
   assert.equal(staleNotice({ ...out(1), generatedAt: 0 }, t) !== null, true);
 });
 
+test("filterByMode: 完了報告待ちは完了ではないので、どちらの見せ方でも隠さない", () => {
+  const rows = [{ kind: "完了報告待ち" }, { kind: "完了" }, { kind: "作業中" }];
+  assert.deepEqual(
+    filterByMode(rows, "active").map((r) => r.kind),
+    ["完了報告待ち", "作業中"],
+  );
+  assert.deepEqual(
+    filterByMode(rows, "done").map((r) => r.kind),
+    ["完了報告待ち", "完了"],
+  );
+});
+
 test("filterByMode: 既定は完了を隠し、done は完了だけ", () => {
   const rows = [{ kind: "作業中" }, { kind: "完了" }, { kind: "返事なし" }, { kind: "完了" }];
   assert.deepEqual(

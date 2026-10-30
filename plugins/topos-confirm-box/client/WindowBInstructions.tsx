@@ -116,6 +116,7 @@ function kindColor(c: PluginTheme["colors"], kind: string, urgent: boolean, warn
   if (urgent) return c.statusDanger;
   if (warn) return c.statusWarning;
   if (kind === WINDOW_B_KIND.unknown || kind === WINDOW_B_KIND.noReply) return c.statusWarning;
+  if (kind === WINDOW_B_KIND.reportPending) return c.statusWarning;
   if (kind === WINDOW_B_KIND.done) return c.statusSuccess;
   if (kind === WINDOW_B_KIND.judgment) return c.accent;
   return c.foreground;

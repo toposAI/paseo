@@ -688,6 +688,8 @@ export const WINDOW_B_KIND = {
   working: "作業中",
   accepted: "受付済み",
   noReply: "返事なし",
+  /** 完了済みだが窓口Bへの完了報告がまだ(完了ではないので隠さず、件数にも数える)。 */
+  reportPending: "完了報告待ち",
   done: "完了",
   unledgered: "未登録",
   unknown: "届いたか不明",

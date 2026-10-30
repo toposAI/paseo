@@ -103,7 +103,7 @@ export type ListMode = "active" | "done";
 /**
  * 見せ方に合わせて行を絞る。完了の判定は Python の状態の語(WINDOW_B_KIND.done)と一致させる。
  * 「完了だけ」の間も、判断待ち・赤・橙の行は隠さない(置きっぱなしで新しい判断待ちが見えなくなるのを防ぐ。
- * 2026-10-30 出口レビュー指摘7a)。
+ * 2026-10-30 出口レビュー指摘7a)。「完了報告待ち」は完了ではないので、どちらの見せ方でも隠さない。
  */
 export function filterByMode<
   T extends { kind: string; alert?: string | null; warn?: string | null },
@@ -111,7 +111,13 @@ export function filterByMode<
   return rows.filter((r) => {
     const isDone = r.kind === WINDOW_B_KIND.done;
     if (mode === "active") return !isDone;
-    return isDone || Boolean(r.alert) || Boolean(r.warn) || r.kind === WINDOW_B_KIND.judgment;
+    return (
+      isDone ||
+      Boolean(r.alert) ||
+      Boolean(r.warn) ||
+      r.kind === WINDOW_B_KIND.judgment ||
+      r.kind === WINDOW_B_KIND.reportPending
+    );
   });
 }
 
