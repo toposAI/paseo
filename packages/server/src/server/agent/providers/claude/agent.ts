@@ -1477,6 +1477,57 @@ function isSyntheticHistoryUserEntry(entry: Record<string, unknown>): boolean {
   return isSyntheticUserEntry(entry) && !isToolResultUserEntry(entry);
 }
 
+// `api-request-blob` / `api-request-shape` replay the raw request body, harness-injected
+// context blocks included; none of their content was said in the conversation.
+const REQUEST_BODY_RECORD_TYPE = "api-request-blob";
+
+/**
+ * The blocks a replayed request carried, harness-injected context included.
+ *
+ * The `api-request-blob` records in a transcript are the raw request bodies Claude Code sent
+ * (the agent listing, the tool definitions, the system prompt). They hold text blocks like any
+ * other entry, so callers must never turn them into conversation rows; the provider model is
+ * read from here because it survives a resume, unlike the launch options.
+ */
+function readReplayedRequestBlocks(entry: Record<string, unknown>): unknown[] {
+  if (entry.type !== REQUEST_BODY_RECORD_TYPE) {
+    return [];
+  }
+  const message = toObjectRecord(entry.message);
+  if (!message) {
+    return [];
+  }
+  if (typeof message.content === "string") {
+    return [{ type: "text", text: message.content }];
+  }
+  return Array.isArray(message.content) ? message.content : [];
+}
+
+/**
+ * A transcript entry only records what was sent and received, so the provider model arrives as
+ * the first sentence of the request's system prompt, followed by the exact model ID. The ID is
+ * preferred because it compares against the model list; the display name is the fallback.
+ */
+function readSystemPromptModel(blocks: readonly unknown[]): string | null {
+  let displayName: string | null = null;
+  for (const item of blocks) {
+    const block = toObjectRecord(item);
+    if (block?.type !== "text" || typeof block.text !== "string") {
+      continue;
+    }
+    const sentence = /You are powered by the model named (.+?)\./.exec(block.text);
+    if (!sentence?.[1]) {
+      continue;
+    }
+    const exactId = /The exact model ID is (\S+?)\./.exec(block.text);
+    if (exactId?.[1]) {
+      return exactId[1];
+    }
+    displayName ??= sentence[1];
+  }
+  return displayName;
+}
+
 function firstTrimmedString(sources: readonly unknown[]): string | null {
   for (const source of sources) {
     const value = readTrimmedString(source);
@@ -2336,10 +2387,13 @@ class ClaudeAgentSession implements AgentSession {
     if (this.cachedRuntimeInfo) {
       return { ...this.cachedRuntimeInfo };
     }
+    // A resumed session has no options of its own until its first turn; the replayed request
+    // shows which model it was actually running.
+    const model = this.lastOptionsModel ?? this.lastRuntimeModel ?? null;
     const info: AgentRuntimeInfo = {
       provider: "claude",
       sessionId: this.claudeSessionId,
-      model: this.lastOptionsModel,
+      model,
       modeId: this.currentMode ?? null,
       ...(this.lastRuntimeModel
         ? {
@@ -5314,6 +5368,13 @@ class ClaudeAgentSession implements AgentSession {
     return replay;
   }
 
+  private readReplayedModel(entry: Record<string, unknown>): void {
+    if (this.lastRuntimeModel) {
+      return;
+    }
+    this.lastRuntimeModel = readSystemPromptModel(readReplayedRequestBlocks(entry));
+  }
+
   private ingestPersistedHistoryLine(
     line: string,
     timeline: PersistedTimelineEntry[],
@@ -5339,6 +5400,7 @@ class ClaudeAgentSession implements AgentSession {
     if (entry.isSidechain) {
       return;
     }
+    this.readReplayedModel(entry);
     const notificationToolUseId = readTaskNotificationToolUseIdFromHistoryRecord(entry);
     if (notificationToolUseId && replay.restoredIds.has(notificationToolUseId)) {
       return;
@@ -6391,6 +6453,12 @@ function convertClaudeHistoryEntryPreamble(
   }
 
   if (entry.isCompactSummary) {
+    return { shortCircuit: [] };
+  }
+  // The transcript also records the request bodies Claude Code sent (`api-request-blob` and
+  // `api-request-shape`). They carry the raw prompt — the agent listing, the environment — and
+  // must never come back as rows, or a compaction prints the whole dump into the conversation.
+  if (entry.type === "api-request-blob" || entry.type === "api-request-shape") {
     return { shortCircuit: [] };
   }
   if (entry.type === "user" && isSyntheticHistoryUserEntry(entry)) {

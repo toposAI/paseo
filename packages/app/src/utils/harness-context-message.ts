@@ -5,6 +5,17 @@ const TOTAL_TOKENS_TAG_PATTERN = /<\/?total_tokens\b[^>]*>/gi;
 const QUOTE_PREFIX_PATTERN = /^[\s>]*/;
 const BULLET_LINE_PATTERN = /^-\s/;
 const ENVIRONMENT_UPDATE_PATTERN = /#\s*Environment update\b/;
+// Claude Code renders some attachments as a system message, but the app that talks to it
+// through its SDK reports them as a user event on resume. The agent listing is the long one:
+// one `<name>: <description>` line per subagent, shown as a raw message after a restart
+// (2026-10-30). Its bullet lines continue the paragraph until the blank line after the listing.
+const AGENT_LISTING_HEADER = "Available agent types for the Agent tool:";
+// The fixed sentence the harness puts after the listing, in the same block but its own paragraph.
+const AGENT_LISTING_TRAILER = "When you launch multiple agents for independent work";
+// Claude Code writes this note, whole, as its own paragraph after a summary. The pattern spans
+// the entire line: a reader who adds words of their own in the same paragraph keeps their turn.
+const COMPACT_NOTE_PATTERN =
+  /^Note: .+ was read before the last conversation was summarized(?:, but the contents are too large to include)?\. Use Read tool if you need to access it\.?$/;
 const TOOL_RECORD_PREFIX = "Called the ";
 // Claude Code hands hook output back as the turn's text, one `<Event>[:<matcher>] hook ...:`
 // header per hook (`SessionStart:compact hook success: ...`, `SessionStart hook additional
@@ -49,6 +60,85 @@ function isBlankLine(line: string): boolean {
   return readLineText(line).trim().length === 0;
 }
 
+interface HarnessTurnScan {
+  sawReminder: boolean;
+  sawEnvironmentUpdate: boolean;
+  sawTotalTokens: boolean;
+  sawAgentListing: boolean;
+  sawCompactNote: boolean;
+}
+
+function sawHarnessArtifact(scan: HarnessTurnScan): boolean {
+  return (
+    scan.sawReminder ||
+    scan.sawEnvironmentUpdate ||
+    scan.sawTotalTokens ||
+    scan.sawAgentListing ||
+    scan.sawCompactNote
+  );
+}
+
+/**
+ * Reads the harness artifact that starts at `index`, returning where the next one begins.
+ * A line the harness did not write ends the scan (`null`): those are the user's own words.
+ */
+function consumeHarnessParagraph(
+  lines: readonly string[],
+  index: number,
+  scan: HarnessTurnScan,
+): number | null {
+  const lineText = readLineText(lines[index]!);
+  // The note about a file the summary left out is its own paragraph, without reminder tags.
+  if (COMPACT_NOTE_PATTERN.test(lineText.trim())) {
+    scan.sawCompactNote = true;
+    return index + 1;
+  }
+  if (ENVIRONMENT_UPDATE_PATTERN.test(lineText)) {
+    scan.sawEnvironmentUpdate = true;
+    // The update's working directories follow as bullets and belong to the reminder.
+    let next = index;
+    while (next + 1 < lines.length && BULLET_LINE_PATTERN.test(readLineText(lines[next + 1]!))) {
+      next += 1;
+    }
+    return next + 1;
+  }
+  if (TOTAL_TOKENS_BLOCK_PATTERN.test(lineText)) {
+    scan.sawTotalTokens = true;
+    return lineText.replace(TOTAL_TOKENS_BLOCK_PATTERN, "").trim().length > 0 ? null : index + 1;
+  }
+  if (TOTAL_TOKENS_TAG_PATTERN.test(lineText)) {
+    // A bare tag line (`<total_tokens>N tokens left</total_tokens>` may wrap) is the banner.
+    scan.sawTotalTokens = true;
+    const rest = lineText.replace(TOTAL_TOKENS_TAG_PATTERN, "").trim();
+    TOTAL_TOKENS_TAG_PATTERN.lastIndex = 0;
+    return rest.length > 0 ? null : index + 1;
+  }
+  TOTAL_TOKENS_TAG_PATTERN.lastIndex = 0;
+  if (lineText.startsWith(TOOL_RECORD_PREFIX) || lineText === AGENT_LISTING_HEADER) {
+    const isListing = lineText === AGENT_LISTING_HEADER;
+    scan.sawAgentListing ||= isListing;
+    // A tool record or a listing runs to the end of its paragraph, which spans the blank
+    // lines left by the dropped reminder blocks.
+    let next = index;
+    while (next + 1 < lines.length && readLineText(lines[next + 1]!).trim().length > 0) {
+      next += 1;
+    }
+    while (next + 1 < lines.length && isBlankLine(lines[next + 1]!)) next += 1;
+    // The listing's closing sentence is its own paragraph inside the same block.
+    if (
+      isListing &&
+      next + 1 < lines.length &&
+      readLineText(lines[next + 1]!)
+        .trim()
+        .startsWith(AGENT_LISTING_TRAILER)
+    ) {
+      next += 1;
+    }
+    return next + 1;
+  }
+  return lineText.trim().length > 0 ? null : index + 1;
+}
+
 /**
  * True when a user message carries nothing but text the harness injected into the user's
  * turn — system reminders, the environment update, and records of tool calls the model made.
@@ -62,50 +152,22 @@ export function isHarnessContextOnlyMessage(text: string): boolean {
   if (isHookOutputTurn(text)) return true;
   if (readLineText(text.trimStart()).startsWith(COMPACT_SUMMARY_OPENING)) return true;
   const withoutReminders = text.replace(SYSTEM_REMINDER_BLOCK_PATTERN, "");
-  const sawReminder = withoutReminders !== text;
   const lines = withoutReminders.split("\n");
-  let sawEnvironmentUpdate = false;
-  let sawTotalTokens = false;
+  const scan: HarnessTurnScan = {
+    sawReminder: withoutReminders !== text,
+    sawEnvironmentUpdate: false,
+    sawTotalTokens: false,
+    sawAgentListing: false,
+    sawCompactNote: false,
+  };
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const lineText = readLineText(lines[index]!);
-    if (ENVIRONMENT_UPDATE_PATTERN.test(lineText)) {
-      sawEnvironmentUpdate = true;
-      // The update's working directories follow as bullets and belong to the reminder.
-      while (
-        index + 1 < lines.length &&
-        BULLET_LINE_PATTERN.test(readLineText(lines[index + 1]!))
-      ) {
-        index += 1;
-      }
-      continue;
-    }
-    if (TOTAL_TOKENS_BLOCK_PATTERN.test(lineText)) {
-      sawTotalTokens = true;
-      if (lineText.replace(TOTAL_TOKENS_BLOCK_PATTERN, "").trim().length > 0) return false;
-      continue;
-    }
-    if (TOTAL_TOKENS_TAG_PATTERN.test(lineText)) {
-      // A bare tag line (`<total_tokens>N tokens left</total_tokens>` may wrap) is the banner.
-      sawTotalTokens = true;
-      TOTAL_TOKENS_TAG_PATTERN.lastIndex = 0;
-      if (lineText.replace(TOTAL_TOKENS_TAG_PATTERN, "").trim().length > 0) return false;
-      continue;
-    }
-    TOTAL_TOKENS_TAG_PATTERN.lastIndex = 0;
-    if (lineText.startsWith(TOOL_RECORD_PREFIX)) {
-      // A tool record runs to the end of its paragraph, which spans the blank lines left
-      // by the dropped reminder blocks.
-      while (index + 1 < lines.length && readLineText(lines[index + 1]!).trim().length > 0) {
-        index += 1;
-      }
-      while (index + 1 < lines.length && isBlankLine(lines[index + 1]!)) index += 1;
-      continue;
-    }
-    if (lineText.trim().length > 0) return false;
+  let index = 0;
+  while (index < lines.length) {
+    const next = consumeHarnessParagraph(lines, index, scan);
+    // A tool record on its own is ordinary tool output the user may have pasted to ask about;
+    // only another harness artifact in the same turn makes it one too.
+    if (next === null) return false;
+    index = next;
   }
-
-  // A tool record on its own is ordinary tool output the user may have pasted to ask about;
-  // only a reminder, environment update, token banner, or hook-output turn makes it a harness artifact.
-  return sawReminder || sawEnvironmentUpdate || sawTotalTokens;
+  return sawHarnessArtifact(scan);
 }
