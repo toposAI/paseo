@@ -29,7 +29,7 @@ test("窓口Bのスレを開いたら自動で出す指定と、右カラムに�
     "窓口Bのスレのときだけ自動で出す",
   );
   // スレID は台帳と同じ定数(窓口B の固定ID)。別名で書き直さない。
-  assert.match(viewSource, /WINDOW_B_AGENT_ID = "f5627d30-26e6-4fbf-9fea-441cabb502a7"/);
+  assert.match(viewSource, /WINDOW_B_AGENT_ID = "29f7ab97-3c33-407e-8a2b-c5284dd38f99"/);
 });
 
 test("iPhone の入口(「指示」ボタン)は残っていて、窓口Bのワークスペースにだけ出る", () => {

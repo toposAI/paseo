@@ -33,7 +33,7 @@ import type {
 } from "../shared/task-ledger.js";
 
 /** 窓口BのスレID。ここを見て「窓口Bの画面か」を決め、窓口Bの画面だけでヘッダボタンを出す。 */
-export const WINDOW_B_AGENT_ID = "f5627d30-26e6-4fbf-9fea-441cabb502a7";
+export const WINDOW_B_AGENT_ID = "29f7ab97-3c33-407e-8a2b-c5284dd38f99";
 /** 面板の id(`ctx.openPanel` と `Contribute` の両方で使う)。 */
 export const TASK_LEDGER_PANEL_ID = "window-b-ledger";
 /** 全画面で開くときの画面の id(右の欄を作れないときに落ち先として使う)。 */
