@@ -1,0 +1,210 @@
+/**
+ * 窓口Bのスレの右側の「ぼくの指示がいまどうなっているか」の面。
+ *
+ * 2026-10-30 08:08 ユーザー「とりあえず僕の指示をこのスレの右側で確認できるやつ、これ作ってよ / 指示が通ってるかわからん」
+ * ／確認箱の回答「右側に一覧(PCは常時・iPhoneはボタンで開閉)で作る」。
+ *
+ * 中身は `shared/contract.ts` の `windowbInstructionsRpc`(RPC の先の Python
+ * `antigravity/utils/window_b_instruction_panel.py`)だけを読む。**ここから台帳・受信箱は書き換えない**。
+ *
+ * 出し方は**ワークスペース単位のパネル**(`locations: ["workspace","right"]`)。PC は右カラム、狭い画面は
+ * 主ペイン=全画面(戻ると会話に戻る)。入口はヘッダのボタン「指示」(狭い画面では「…」の中)で、
+ * 押すたびにページの幅で置き場所を決め直す。
+ */
+import { useEffect, useMemo, useState } from "react";
+import { Dimensions, ScrollView, Text, View } from "react-native";
+import { useRpc } from "@getpaseo/plugin/client";
+import type { PluginTheme } from "@getpaseo/plugin";
+import {
+  windowBInstructionsRpc,
+  type WindowBInstruction,
+  type WindowBInstructionsOutput,
+} from "../shared/contract.js";
+import {
+  keepLastOnFailure,
+  paneLocation,
+  rowOrder,
+  summarize,
+} from "../shared/windowb-instructions.js";
+
+export const WINDOWB_PANEL_ID = "window-b-instructions";
+export const WINDOWB_PANEL_TITLE = "ぼくの指示";
+export const WINDOWB_BUTTON_ID = "windowb-instructions";
+const REFRESH_MS = 30_000;
+
+/**
+ * 一覧を開く。PC 幅は右カラム、狭い画面は主ペイン(全画面。戻ると元の会話に戻る)。
+ * 開けなかった(レイアウト未読み込み・窓口Bのワークスペースでない)ときは false を返すだけで、
+ * 押したのに何も起きない状態を作らないよう、呼び出し側が知らせを出す。
+ */
+export function openWindowBInstructions(
+  openPanel: (id: string, options: { location: "right" | "workspace" }) => void,
+  workspaceId: string,
+): boolean {
+  try {
+    openPanel(WINDOWB_PANEL_ID, {
+      location: paneLocation(Dimensions.get("window").width),
+    });
+  } catch (e) {
+    console.warn("[topos] window B instructions were not opened", workspaceId, e);
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------- 一覧のデータ
+
+/**
+ * 一覧を30秒毎に引く。失敗したときは**前回の一覧を残して**知らせだけ出す(取れない瞬間に空にすると、
+ * 指示が消えた=指示が通った、と読めてしまう)。
+ */
+function useInstructions(): { data: WindowBInstructionsOutput | null; error: string | null } {
+  const list = useRpc(windowBInstructionsRpc);
+  const [state, setState] = useState<{
+    data: WindowBInstructionsOutput | null;
+    error: string | null;
+  }>({
+    data: null,
+    error: null,
+  });
+  useEffect(() => {
+    let alive = true;
+    const apply = (
+      next: { ok: true; data: WindowBInstructionsOutput } | { ok: false; error: string },
+    ) => {
+      if (alive) setState((prev) => keepLastOnFailure(prev.data, next));
+    };
+    const tick = () =>
+      list({ limit: 40 })
+        .then((data) => apply({ ok: true, data }))
+        .catch((e: unknown) =>
+          apply({ ok: false, error: e instanceof Error ? e.message : String(e) }),
+        );
+    void tick();
+    const timer = setInterval(tick, REFRESH_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [list]);
+  return state;
+}
+
+// ---------------------------------------------------------------- 行
+
+const ALERT_TEXT: Record<string, string> = {
+  no_reply: "送ってから10分、返事が無い",
+  unassigned: "担当が1時間たっても決まっていない",
+};
+
+/** 状態の文字の色。赤=返事なし/担当未定(alert)、橙=台帳に載っていない(warn)、他は状態ごと。 */
+function kindColor(c: PluginTheme["colors"], kind: string, urgent: boolean, warn: boolean): string {
+  if (urgent) return c.statusDanger;
+  if (warn) return c.statusWarning;
+  if (kind === "完了") return c.statusSuccess;
+  if (kind === "判断待ち(確認箱)") return c.accent;
+  return c.foreground;
+}
+
+/** 1行。赤=返事なし/担当未定、橙=台帳に載っていない。それ以外は状態の文字で見せる。 */
+function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginTheme["colors"] }) {
+  const urgent = item.alert !== null;
+  const warn = item.warn !== null;
+  const accent = kindColor(c, item.kind, urgent, warn);
+  const s = useMemo(
+    () => ({
+      card: {
+        backgroundColor: c.surface1,
+        borderColor: urgent ? c.statusDanger : c.border,
+        borderLeftColor: accent,
+        borderWidth: urgent || warn ? 2 : 1,
+        borderLeftWidth: 4,
+        borderRadius: 8,
+        padding: 8,
+        gap: 3,
+      },
+      head: { flexDirection: "row" as const, justifyContent: "space-between" as const, gap: 8 },
+      time: { color: c.foregroundMuted, fontSize: 12 },
+      kind: { color: accent, fontSize: 12, fontWeight: "700" as const },
+      title: { color: c.foreground, fontSize: 14 },
+      meta: { color: c.foregroundMuted, fontSize: 12 },
+      alert: { color: c.statusDanger, fontSize: 12, fontWeight: "600" as const },
+    }),
+    [c, accent, urgent, warn],
+  );
+  return (
+    <View style={s.card} testID={`windowb-row-${item.key}`}>
+      <View style={s.head}>
+        <Text style={s.time}>{item.atText}</Text>
+        <Text style={s.kind}>{item.kind}</Text>
+      </View>
+      <Text style={s.title} numberOfLines={2}>
+        {item.title}
+      </Text>
+      <Text style={s.meta}>
+        {item.assigneeText}
+        {item.detail ? ` ・ ${item.detail}` : ""}
+      </Text>
+      {item.alert ? (
+        <Text style={s.alert}>{ALERT_TEXT[item.alert] ?? item.alertReason}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------- 一覧の面
+
+/**
+ * 一覧の面。置き場所はホストが決めるので、右カラムでも主ペインでも同じ一覧を出す(読み取り専用)。
+ */
+export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
+  const { data, error } = useInstructions();
+  const rows = useMemo(() => (data ? rowOrder(data.items) : []), [data]);
+  const c = theme.colors;
+  const s = useMemo(
+    () => ({
+      root: { flex: 1, backgroundColor: c.surface0 },
+      head: { padding: 10, gap: 4, borderBottomColor: c.border, borderBottomWidth: 1 },
+      headRow: { flexDirection: "row" as const, justifyContent: "space-between" as const, gap: 8 },
+      headTitle: { color: c.foreground, fontSize: 14, fontWeight: "700" as const },
+      muted: { color: c.foregroundMuted, fontSize: 12 },
+      notice: { color: c.statusWarning, fontSize: 12 },
+      error: { color: c.statusDanger, fontSize: 12 },
+      list: { padding: 10, gap: 8 },
+    }),
+    [c],
+  );
+  let notice: React.ReactElement | null = null;
+  if (error) {
+    notice = (
+      <Text style={s.error}>
+        いま読めません({error}){data ? "。下は前回読めた内容です" : ""}
+      </Text>
+    );
+  } else if (data && data.notices.length > 0) {
+    notice = <Text style={s.notice}>{data.notices.join(" / ")}</Text>;
+  }
+  return (
+    <View style={s.root} testID="windowb-instructions">
+      <View style={s.head}>
+        <View style={s.headRow}>
+          <Text style={s.headTitle}>ぼくの指示</Text>
+          <Text style={s.muted}>{summarize(data)}</Text>
+        </View>
+        {data && data.warns > 0 ? (
+          <Text style={s.muted}>
+            橙=受信箱には届いているが、依頼台帳に載っていない(状態を引けない)
+          </Text>
+        ) : null}
+        {notice}
+      </View>
+      <ScrollView contentContainerStyle={s.list}>
+        {!data && !error ? <Text style={s.muted}>読み込み中…</Text> : null}
+        {data && rows.length === 0 ? <Text style={s.muted}>直近3日の指示はありません</Text> : null}
+        {rows.map((item) => (
+          <Row key={item.key} item={item} colors={c} />
+        ))}
+      </ScrollView>
+    </View>
+  );
+}

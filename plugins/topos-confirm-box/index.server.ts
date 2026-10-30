@@ -38,6 +38,7 @@ import {
   priorityMoveRpc,
   prioritySayRpc,
   priorityStandingRpc,
+  windowBInstructionsRpc,
   REJECT_CHOICE,
 } from "./shared/contract.js";
 import { appendAck } from "./server/ack.js";
@@ -89,6 +90,7 @@ import {
   computePresentable,
   resolvePresentableCounter,
 } from "./server/presentable-count.js";
+import { cachedWindowBRunner, resolveWindowBRunner } from "./server/windowb-instructions.js";
 import {
   childThreadsArchiveRpc,
   childThreadsListRpc,
@@ -561,6 +563,18 @@ export default function contribute(server: PluginServerContext) {
 
   // バッジの数字(窓口Aがいま出せる件数)は判断窓口の Python に聞く。10秒キャッシュ(3か所が30秒毎に引く)
   const presentableCounter = cachedPresentableCounter(resolvePresentableCounter());
+
+  // 窓口Bの右側の「指示の一覧」。組み立ても Python 1か所に任せ、ここは呼んで返すだけ(読み取り専用)。
+  const windowBRunner = cachedWindowBRunner(resolveWindowBRunner());
+
+  server.handle(windowBInstructionsRpc, async (input) => {
+    if (!windowBRunner) {
+      throw new Error(
+        "ToposAI-Mini-Project のチェックアウトが見つからないため、指示の一覧を読めません",
+      );
+    }
+    return windowBRunner(input.limit);
+  });
 
   server.handle(confirmBoxCountRpc, async (input, ctx) => {
     const { items, sources, generatedAt } = await collect(ctx);

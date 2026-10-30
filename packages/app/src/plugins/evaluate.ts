@@ -38,7 +38,7 @@ import { pluginReactNativeRuntime } from "./react-native/runtime";
 import { parsePluginThemeContribution } from "./themes";
 
 const CONTRIBUTION_ID = /^[a-z][a-z0-9-]*$/;
-const PANEL_LOCATIONS = ["workspace", "explorer"] as const;
+const PANEL_LOCATIONS = ["workspace", "explorer", "right"] as const;
 const TIMELINE_ITEM_TYPES = new Set([
   "user_message",
   "assistant_message",

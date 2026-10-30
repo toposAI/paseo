@@ -20,6 +20,12 @@ import {
   useSharedUnread,
 } from "./client/SharedProjects";
 import { ConfirmBoxView } from "./client/ConfirmBoxView";
+import {
+  WINDOWB_PANEL_ID,
+  WINDOWB_PANEL_TITLE,
+  WindowBInstructionsPanel,
+  openWindowBInstructions,
+} from "./client/WindowBInstructions";
 import { onBoxChanged } from "./client/events";
 import { watchBoxSignal } from "./client/change-signal";
 import { setSidebarMode, useSidebarMode } from "./client/sidebar-mode";
@@ -43,6 +49,8 @@ const MAIL_UI_URL = "http://100.85.224.7:8731/";
 let client: PluginClientContext | null = null;
 // ワークスペース id → 確認箱ヘッダボタンの登録(重複させない)。
 const headerButtons = new Map<string, { remove(): void }>();
+// ワークスペース id → 「ぼくの指示」ヘッダボタンの登録(`headerButtons` の登録と寿命を揃える)。
+const windowBHeaderButtons = new Map<string, { remove(): void }>();
 
 function openMailUi() {
   void Linking.openURL(MAIL_UI_URL);
@@ -234,6 +242,30 @@ function SidebarWithHeaderButton({
                 },
               }),
             );
+            // 窓口Bの右側の「ぼくの指示」(2026-10-30)。PC は右カラムに常時、iPhone はこのボタンで開閉する
+            // (狭い画面では一覧が全画面で開き、戻ると会話に戻る)。
+            windowBHeaderButtons.set(
+              workspaceId,
+              client.addHeaderButton({
+                id: "windowb-instructions",
+                workspaceId,
+                button: {
+                  title: "指示",
+                  icon: "ListChecks",
+                  behavior: {
+                    kind: "action",
+                    onPress: () => {
+                      if (!client) return;
+                      const openPanel = client.openPanel.bind(client);
+                      openWindowBInstructions(
+                        (id, options) => openPanel(id, { workspaceId, location: options.location }),
+                        workspaceId,
+                      );
+                    },
+                  },
+                },
+              }),
+            );
           }
           return null;
         })
@@ -407,6 +439,8 @@ const FOOTER_COMPONENTS: Record<FooterTabId, (props: PluginSidebarItemProps) => 
 function removeHeaderButtons() {
   for (const r of headerButtons.values()) r.remove();
   headerButtons.clear();
+  for (const r of windowBHeaderButtons.values()) r.remove();
+  windowBHeaderButtons.clear();
 }
 
 export default function contribute(ctx: PluginClientContext) {
@@ -436,6 +470,18 @@ export default function contribute(ctx: PluginClientContext) {
       Component: FOOTER_COMPONENTS[tab.id],
     });
   }
+  // 窓口Bの右側の「ぼくの指示」の一覧(2026-10-30)。中身は Python 1か所が組み立てる読み取り専用の面。
+  // 右カラム(`right`)と主ペイン(`workspace`)の両方に置けるようにする: PC は右、iPhone は全画面。
+  // ワークスペース単位のパネルとして登録する(中身は窓口Bが開いているかに関係なく同じ一覧なので、
+  // コマンドセンター・ヘッダボタンというワークスペース単位の入口から素直に開ける)。
+  ctx.addWorkspacePanel({
+    id: WINDOWB_PANEL_ID,
+    title: WINDOWB_PANEL_TITLE,
+    icon: "ListChecks",
+    context: "workspace",
+    locations: ["workspace", "right"],
+    Component: WindowBInstructionsPanel,
+  });
   // ヘッダボタンの登録簿は下部バーの項目の寿命に合わせて消す(再マウント時に作り直す)。
   removeHeaderButtons();
   return () => {
