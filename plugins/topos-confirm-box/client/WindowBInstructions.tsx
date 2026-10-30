@@ -35,6 +35,7 @@ import {
   paneLocation,
   rowOrder,
   routeText,
+  rowTitle,
   visibleRoutes,
   summarize,
   staleNotice,
@@ -134,7 +135,8 @@ function isKnownKind(kind: string): boolean {
 
 /** 1行。赤=返事なし/担当未定、橙=台帳に載っていない。それ以外は状態の文字で見せる。 */
 function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginTheme["colors"] }) {
-  // 押すと発言の逐語が開く(カードは1行要約。要約が意味を取り違えていても逐語で確かめられる)
+  // 既定は日付とタイトル(1行)だけ。押すと全文・振り先と進み具合・赤の理由が開き、もう一度押すと閉じる。
+  // 開閉はカードごとの状態で、30秒ごとの引き直しでは閉じない(key=item.key で同じカードを引き継ぐ)。
   const [open, setOpen] = useState(false);
   const toggleOpen = useCallback(() => setOpen((v) => !v), []);
   const a11yState = useMemo(() => ({ expanded: open }), [open]);
@@ -182,24 +184,27 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
         <Text style={s.time}>{item.atText}</Text>
         <Text style={s.kind}>{item.kind}</Text>
       </View>
-      <Text style={s.title} numberOfLines={open ? undefined : 2}>
-        {item.title}
+      <Text style={s.title} numberOfLines={open ? undefined : 1}>
+        {rowTitle(item)}
       </Text>
-      <Text style={s.meta}>
-        {item.assigneeText}
-        {item.detail ? ` ・ ${item.detail}` : ""}
-      </Text>
-      {routes.shown.map((r) => (
-        <Text
-          key={`${r.no}-${r.summary}`}
-          style={s.meta}
-          testID={`windowb-route-${item.key}-${r.no}`}
-        >
-          {routeText(r)}
+      {open ? (
+        <Text style={s.meta}>
+          {item.assigneeText}
+          {item.detail ? ` ・ ${item.detail}` : ""}
         </Text>
-      ))}
-      {routes.hidden > 0 ? <Text style={s.meta}>ほか{routes.hidden}項目(押すと全部)</Text> : null}
-      {item.alert ? (
+      ) : null}
+      {open
+        ? routes.shown.map((r) => (
+            <Text
+              key={`${r.no}-${r.summary}`}
+              style={s.meta}
+              testID={`windowb-route-${item.key}-${r.no}`}
+            >
+              {routeText(r)}
+            </Text>
+          ))
+        : null}
+      {open && item.alert ? (
         <Text style={s.alert}>{ALERT_TEXT[item.alert] ?? item.alertReason}</Text>
       ) : null}
       {open ? (

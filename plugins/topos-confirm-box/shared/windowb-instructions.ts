@@ -169,3 +169,14 @@ export function visibleRoutes(
   if (open || all.length <= ROUTES_COLLAPSED) return { shown: [...all], hidden: 0 };
   return { shown: all.slice(0, ROUTES_COLLAPSED), hidden: all.length - ROUTES_COLLAPSED };
 }
+
+/** 閉じたカードのタイトル。要約(title)が空なら全文の1行目(画面側で1行に切る)。逐語でない要約は作らない。 */
+export function rowTitle(item: { title: string; text: string }): string {
+  if (item.title.trim() !== "") return item.title;
+  return (
+    item.text
+      .split("\n")
+      .find((l) => l.trim() !== "")
+      ?.trim() ?? ""
+  );
+}

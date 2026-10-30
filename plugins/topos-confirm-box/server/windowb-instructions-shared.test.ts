@@ -17,6 +17,7 @@ import {
   rowOrder,
   routeText,
   visibleRoutes,
+  rowTitle,
   type InstructionRoute,
   staleNotice,
   summarize,
@@ -193,4 +194,9 @@ test("visibleRoutes: 閉じている間は3項目まで、開くと全部。古�
   assert.equal(visibleRoutes(rs, true).shown.length, 5);
   assert.equal(visibleRoutes(rs.slice(0, 3), false).hidden, 0);
   assert.deepEqual(visibleRoutes(undefined, false), { shown: [], hidden: 0 });
+});
+
+test("rowTitle: 要約があればそれ、無ければ全文の1行目", () => {
+  assert.equal(rowTitle({ title: "要約", text: "全文\n2行目" }), "要約");
+  assert.equal(rowTitle({ title: " ", text: "\n全文1行目\n2行目" }), "全文1行目");
 });
