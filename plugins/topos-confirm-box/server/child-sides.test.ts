@@ -45,6 +45,7 @@ test("自動判定: 常駐の壁打ちNだけ壁打ち、人が建てた疑い�
       thread({ agentId: "head", groupingParent: true }),
       thread({ agentId: "w1", title: "壁打ち1" }),
       thread({ agentId: "wx", title: "壁打ちの設計" }),
+      thread({ agentId: "wt", title: "壁打ち3: サイドバーの分類" }),
     ],
     new Map(),
   );
@@ -56,6 +57,7 @@ test("自動判定: 常駐の壁打ちNだけ壁打ち、人が建てた疑い�
     head: "aux",
     w1: "walltalk",
     wx: "aux",
+    wt: "walltalk",
   });
   assert.equal(rows[0]?.parentAgentId, "p");
 });

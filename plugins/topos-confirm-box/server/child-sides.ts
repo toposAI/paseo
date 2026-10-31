@@ -93,7 +93,7 @@ export function writeChildThreadSide(
  * 人が画面から直接建てたと確かなスレ(`humanMade`: 親スレの印も `source` も無い。2026-10-31 ユーザー指示)は壁打ち。
  */
 const isCertainWallTalk = (t: ChildThread): boolean =>
-  /^壁打ち\d{1,2}$/.test(t.title.trim()) || t.humanMade === true;
+  /^壁打ち\d{1,2}(?:\s*[:：].*)?$/.test(t.title.trim()) || t.humanMade === true;
 
 /**
  * 各行へ `aux`(補助スレ側か)を付ける。
