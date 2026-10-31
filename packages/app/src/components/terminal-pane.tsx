@@ -302,7 +302,21 @@ export function TerminalPane({
   const [focusRequestToken, setFocusRequestToken] = useState(0);
   const [resizeRequestToken, setResizeRequestToken] = useState(0);
   useBlockMobilePanelOpenGestures(isMobile && isWorkspaceFocused && isPaneFocused && hasSelection);
-  const emulatorRef = useRef<TerminalEmulatorHandle>(null);
+  const emulatorRef = useRef<TerminalEmulatorHandle | null>(null);
+  // The emulator chunk loads lazily; stream data that arrives before it mounts is queued and replayed.
+  const pendingEmulatorOpsRef = useRef<((handle: TerminalEmulatorHandle) => void)[]>([]);
+  const setEmulatorHandle = useCallback((handle: TerminalEmulatorHandle | null) => {
+    emulatorRef.current = handle;
+    if (!handle) return;
+    const pending = pendingEmulatorOpsRef.current;
+    pendingEmulatorOpsRef.current = [];
+    for (const op of pending) op(handle);
+  }, []);
+  const withEmulator = useCallback((op: (handle: TerminalEmulatorHandle) => void) => {
+    const handle = emulatorRef.current;
+    if (handle) op(handle);
+    else pendingEmulatorOpsRef.current.push(op);
+  }, []);
   const findRef = useRef<TerminalPaneFindHandle>(null);
   const handleFindRequest = useCallback(() => findRef.current?.open(), []);
   const handleFindResult = useCallback(
@@ -531,7 +545,7 @@ export function TerminalPane({
       if (terminalIdRef.current !== outputTerminalId) {
         return;
       }
-      emulatorRef.current?.writeOutput(data);
+      withEmulator((handle) => handle.writeOutput(data));
     },
   );
 
@@ -543,7 +557,8 @@ export function TerminalPane({
       if (terminalIdRef.current !== restoreTerminalId) {
         return;
       }
-      emulatorRef.current?.restoreOutput(data);
+      pendingEmulatorOpsRef.current = [];
+      withEmulator((handle) => handle.restoreOutput(data));
     },
   );
 
@@ -556,7 +571,8 @@ export function TerminalPane({
       if (terminalIdRef.current !== snapshotTerminalId) {
         return;
       }
-      emulatorRef.current?.renderSnapshot(state);
+      pendingEmulatorOpsRef.current = [];
+      withEmulator((handle) => handle.renderSnapshot(state));
     },
   );
 
@@ -1088,7 +1104,7 @@ export function TerminalPane({
         <View style={styles.terminalGestureContainer}>
           <Suspense fallback={null}>
             <TerminalEmulator
-              ref={emulatorRef}
+              ref={setEmulatorHandle}
               dom={TERMINAL_EMULATOR_DOM_PROPS}
               streamKey={terminalStreamKey}
               supportsTerminalInputModeReplay={supportsTerminalInputModeReplay}
