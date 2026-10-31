@@ -6,6 +6,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useUnistyles } from "react-native-unistyles";
 import { createAssistantSelectionClipboardContent } from "@/assistant-selection-copy/content.web";
@@ -106,7 +107,7 @@ function toQuoteBlock(quote: string): string {
     .join("\n");
 }
 
-function readSelection(): Pick | null {
+function readSelection(owner: Element | null): Pick | null {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
   const range = selection.getRangeAt(0);
@@ -114,7 +115,10 @@ function readSelection(): Pick | null {
     range.commonAncestorContainer instanceof Element
       ? range.commonAncestorContainer
       : range.commonAncestorContainer.parentElement;
-  if (!container?.closest(CHAT_SCROLL_SELECTOR)) return null;
+  const scroll = container?.closest(CHAT_SCROLL_SELECTOR);
+  if (!scroll) return null;
+  // Panes that are not on screen stay mounted; only the pane that owns the selection reacts.
+  if (owner && !owner.contains(scroll)) return null;
   const quote =
     createAssistantSelectionClipboardContent(selection)?.plainText ?? selection.toString();
   if (!quote.trim()) return null;
@@ -137,7 +141,28 @@ function readSelection(): Pick | null {
   return { quote, range: range.cloneRange(), top, left };
 }
 
-export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActionsProps) {
+/**
+ * The bar and comment card are position:fixed with z-index 1000, but the chat pane is a stack of
+ * z-index:0 stacking contexts, so rendered in place the card ranks below the message composer and
+ * its lower half (cancel/send) is hidden behind it. Portal to <body> so z-index 1000 competes at
+ * the top level.
+ */
+export function ToposSelectionActions(props: ToposSelectionActionsProps) {
+  const anchorRef = useRef<HTMLSpanElement | null>(null);
+  const content = <ToposSelectionActionsInner {...props} anchorRef={anchorRef} />;
+  return (
+    <>
+      <span ref={anchorRef} hidden data-testid="topos-selection-anchor" />
+      {typeof document === "undefined" ? content : createPortal(content, document.body)}
+    </>
+  );
+}
+
+function ToposSelectionActionsInner({
+  serverId,
+  agentId,
+  anchorRef,
+}: ToposSelectionActionsProps & { anchorRef: { current: HTMLSpanElement | null } }) {
   const { t } = useTranslation();
   const { theme } = useUnistyles();
   const enabled = useSettings((settings) => settings.toposChatStyle);
@@ -174,7 +199,7 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
     const showSettled = () => {
       if (commentingRef.current) return;
       clearTimer();
-      const next = readSelection();
+      const next = readSelection(anchorRef.current?.parentElement ?? null);
       if (next) {
         setStatus("idle");
         setPick(next);
@@ -211,7 +236,7 @@ export function ToposSelectionActions({ serverId, agentId }: ToposSelectionActio
       document.removeEventListener("pointercancel", handlePointerUp, true);
       clearTimer();
     };
-  }, [enabled]);
+  }, [enabled, anchorRef]);
 
   // While the comment card is open the textarea steals focus and the native selection
   // disappears, so paint the saved range ourselves and keep it aligned on scroll/resize.
