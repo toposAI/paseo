@@ -32,7 +32,7 @@ afterEach(() => {
   window.getSelection()?.removeAllRanges();
 });
 
-function select(id: string) {
+function selectText(id: string) {
   const range = document.createRange();
   range.selectNodeContents(document.getElementById(id)!);
   range.getBoundingClientRect = () =>
@@ -55,7 +55,7 @@ describe("ToposSelectionActions", () => {
         <ToposSelectionActions serverId="s" agentId="a" />
       </div>,
     );
-    await select("text");
+    await selectText("text");
 
     const bar = document.querySelector('[data-testid="topos-selection-bar"]');
     expect(bar).not.toBeNull();
@@ -72,7 +72,7 @@ describe("ToposSelectionActions", () => {
         <ToposSelectionActions serverId="s" agentId="a" />
       </div>,
     );
-    await select("text");
+    await selectText("text");
     Object.defineProperty(window, "innerWidth", { value: 1440, configurable: true });
     await act(async () => {
       fireEvent.click(getByTestId("topos-selection-comment-button"));
@@ -100,7 +100,7 @@ describe("ToposSelectionActions", () => {
         </div>
       </>,
     );
-    await select("a");
+    await selectText("a");
     expect(document.querySelectorAll('[data-testid="topos-selection-bar"]')).toHaveLength(1);
   });
 });
