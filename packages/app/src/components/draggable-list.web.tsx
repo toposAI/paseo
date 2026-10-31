@@ -18,7 +18,11 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { DraggableListProps, DraggableRenderItemInfo } from "./draggable-list.types";
-import { getDragActivationConstraints, useDragReorderState } from "./drag-reorder";
+import {
+  getDragActivationConstraints,
+  useDragReorderState,
+  useDragStuckGuard,
+} from "./drag-reorder";
 
 export type { DraggableListProps, DraggableRenderItemInfo };
 
@@ -210,6 +214,7 @@ export function DraggableList<T>({
     onDragEnd,
     onDragBegin,
   });
+  useDragStuckGuard(activeId !== null);
   const activationConstraints = getDragActivationConstraints(useDragHandle, DRAG_ACTIVATION_CONFIG);
 
   const sensors = useSensors(

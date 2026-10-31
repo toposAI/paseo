@@ -16,7 +16,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { DraggableRenderItemInfo } from "./draggable-list.types";
-import { useDragReorderState } from "./drag-reorder";
+import { useDragReorderState, useDragStuckGuard } from "./drag-reorder";
 
 const restrictToHorizontalAxis: Modifier = ({ transform }) => ({
   ...transform,
@@ -149,6 +149,7 @@ export function SortableInlineList<T>({
   });
   const items = externalDndContext ? data : managedItems;
   const activeId = externalDndContext ? externalActiveId : internalActiveId;
+  useDragStuckGuard(activeId !== null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
