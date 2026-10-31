@@ -11,7 +11,7 @@ import type pino from "pino";
 const EVENTS_MAX = 50;
 const STRING_MAX = 120;
 const DAILY_BYTES_MAX = 5 * 1024 * 1024;
-const KINDS = new Set(["pointerdown", "click", "no-click", "drag-guard-cancel"]);
+const KINDS = new Set(["pointerdown", "click", "no-click", "click-swallowed", "drag-guard-cancel"]);
 
 interface SanitizedTarget {
   tag: string;

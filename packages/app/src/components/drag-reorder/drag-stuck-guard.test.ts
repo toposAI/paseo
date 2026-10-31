@@ -53,4 +53,13 @@ describe("armDragStuckGuard", () => {
     window.dispatchEvent(new Event("blur"));
     expect(escapes).toBe(0);
   });
+
+  it("sends Escape only once per drag", () => {
+    const disarm = armDragStuckGuard(window, document);
+    window.dispatchEvent(new Event("blur"));
+    window.dispatchEvent(new MouseEvent("mousemove", { buttons: 0 }));
+    window.dispatchEvent(new MouseEvent("mousemove", { buttons: 0 }));
+    expect(escapes).toBe(1);
+    disarm();
+  });
 });

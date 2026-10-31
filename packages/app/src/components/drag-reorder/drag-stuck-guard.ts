@@ -8,10 +8,32 @@ import { recordDragGuardCancel } from "@/diagnostics/click-recorder";
  */
 const RELEASE_GRACE_MS = 250;
 
+// 直近の入力がキーボードなら、キーボードドラッグの可能性が高い(mouseup を取り逃しようがない)ので保険を張らない。
+let lastInput: "pointer" | "keyboard" | null = null;
+let trackerInstalled = false;
+
+function ensureInputTracker(win: Window): void {
+  if (trackerInstalled) return;
+  trackerInstalled = true;
+  win.addEventListener("pointerdown", () => (lastInput = "pointer"), true);
+  win.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.isTrusted) lastInput = "keyboard";
+    },
+    true,
+  );
+}
+
 export function armDragStuckGuard(win: Window, doc: Document): () => void {
   let releaseTimer: ReturnType<typeof setTimeout> | null = null;
+  if (lastInput === "keyboard") return () => {};
+  let fired = false;
 
   const cancelDrag = () => {
+    // 1回のドラッグにつき1回だけ送る(効かなかった場合に Escape を連射しない)。
+    if (fired) return;
+    fired = true;
     recordDragGuardCancel();
     doc.dispatchEvent(
       new KeyboardEvent("keydown", {
@@ -52,6 +74,9 @@ export function armDragStuckGuard(win: Window, doc: Document): () => void {
 }
 
 export function useDragStuckGuard(active: boolean): void {
+  useEffect(() => {
+    if (typeof window !== "undefined") ensureInputTracker(window);
+  }, []);
   useEffect(() => {
     if (!active || typeof window === "undefined") return undefined;
     return armDragStuckGuard(window, document);

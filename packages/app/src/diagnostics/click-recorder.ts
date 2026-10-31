@@ -4,7 +4,12 @@
  * ドラッグ保険が発動したときに、既存サーバーの /api/client-click-log へ静かに送る。
  * 本文・入力内容は読まない(タグ名・testID・role・class・親3段だけ)。送信失敗は握りつぶす。
  */
-export type ClickDiagKind = "pointerdown" | "click" | "no-click" | "drag-guard-cancel";
+export type ClickDiagKind =
+  | "pointerdown"
+  | "click"
+  | "no-click"
+  | "click-swallowed"
+  | "drag-guard-cancel";
 
 interface ElementDescriptor {
   tag: string;
@@ -72,6 +77,7 @@ export function createClickRecorder(deps: ClickRecorderDeps): ClickRecorder {
   let waitTimer: ReturnType<typeof setTimeout> | null = null;
   let lastFlushAt = 0;
   let flushCount = 0;
+  let swallowPending = false;
 
   const build = (kind: ClickDiagKind, event: MouseEvent | null, x: number, y: number) => {
     const target = event?.target ?? null;
@@ -112,7 +118,7 @@ export function createClickRecorder(deps: ClickRecorderDeps): ClickRecorder {
     build("pointerdown", event, event.clientX, event.clientY);
   };
   const onPointerUp = (event: PointerEvent) => {
-    if (!down || event.button !== 0) return;
+    if (!down || event.button !== 0 || event.pointerType === "touch") return;
     const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y);
     down = null;
     if (moved > TAP_SLOP_PX) return;
@@ -127,11 +133,23 @@ export function createClickRecorder(deps: ClickRecorderDeps): ClickRecorder {
   const onClick = (event: MouseEvent) => {
     clearWait();
     build("click", event, event.clientX, event.clientY);
+    // window の capture では見えたのに bubble に届かない = 途中(dnd-kit の document capture 等)で止められた。
+    swallowPending = true;
+    setTimeout(() => {
+      if (!swallowPending) return;
+      swallowPending = false;
+      build("click-swallowed", event, event.clientX, event.clientY);
+      flush("click-swallowed", false);
+    }, 0);
+  };
+  const onClickBubble = () => {
+    swallowPending = false;
   };
 
   win.addEventListener("pointerdown", onPointerDown, true);
   win.addEventListener("pointerup", onPointerUp, true);
   win.addEventListener("click", onClick, true);
+  win.addEventListener("click", onClickBubble, false);
 
   return {
     recordGuardCancel: () => {
@@ -143,6 +161,7 @@ export function createClickRecorder(deps: ClickRecorderDeps): ClickRecorder {
       win.removeEventListener("pointerdown", onPointerDown, true);
       win.removeEventListener("pointerup", onPointerUp, true);
       win.removeEventListener("click", onClick, true);
+      win.removeEventListener("click", onClickBubble, false);
     },
   };
 }

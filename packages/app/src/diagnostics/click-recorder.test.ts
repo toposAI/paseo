@@ -82,4 +82,13 @@ describe("click recorder", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]?.reason).toBe("drag-guard-cancel");
   });
+
+  it("reports a click that was stopped before reaching the bubble phase", () => {
+    const stop = (e: Event) => e.stopPropagation();
+    document.addEventListener("click", stop, true);
+    tap(document.getElementById("b") as Element, { click: true });
+    vi.advanceTimersByTime(10);
+    document.removeEventListener("click", stop, true);
+    expect(sent.map((p) => p.reason)).toEqual(["click-swallowed"]);
+  });
 });
