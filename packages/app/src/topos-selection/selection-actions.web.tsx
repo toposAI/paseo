@@ -340,6 +340,9 @@ function ToposSelectionActionsInner({
     zIndex: 1000,
     background: colors.popover,
     color: colors.foreground,
+    // Portaled to <body>, so the app's UI font (theme token, same as the chat text) is set here
+    // instead of being inherited; buttons/textarea then inherit it from the panel.
+    fontFamily: theme.fontFamily.ui,
     border: `1px solid ${colors.border}`,
     borderRadius: 14,
     boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
@@ -357,6 +360,7 @@ function ToposSelectionActionsInner({
     fontWeight: 600,
     cursor: "pointer",
     whiteSpace: "nowrap",
+    fontFamily: "inherit",
   };
   const keepSelection = (event: { preventDefault: () => void }) => event.preventDefault();
 

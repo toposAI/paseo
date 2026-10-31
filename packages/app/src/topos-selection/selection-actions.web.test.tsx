@@ -8,7 +8,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 Object.assign(globalThis, { React });
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
-vi.mock("react-native-unistyles", () => ({ useUnistyles: () => ({ theme: { colors: {} } }) }));
+vi.mock("react-native-unistyles", () => ({
+  useUnistyles: () => ({ theme: { colors: {}, fontFamily: { ui: "TestUiFont, sans-serif" } } }),
+}));
 vi.mock("@/hooks/use-settings", () => ({
   useSettings: (select: (s: { toposChatStyle: boolean }) => unknown) =>
     select({ toposChatStyle: true }),
@@ -61,6 +63,12 @@ describe("ToposSelectionActions", () => {
     expect(bar).not.toBeNull();
     expect(container.contains(bar)).toBe(false);
     expect(bar!.parentElement).toBe(document.body);
+    // Off the chat tree it no longer inherits the app font, so the panel sets the UI font itself.
+    expect((bar as HTMLElement).style.fontFamily).toBe("TestUiFont, sans-serif");
+    expect(
+      (document.querySelector('[data-testid="topos-selection-go"]') as HTMLElement).style
+        .fontFamily,
+    ).toBe("inherit");
   });
 
   it("opens the comment card under document.body too", async () => {
