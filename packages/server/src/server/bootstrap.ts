@@ -244,6 +244,7 @@ import { PluginService } from "./plugins/index.js";
 import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
 import { ManagedPluginSources } from "./plugins/managed-source.js";
 import { setupConfirmBox } from "./confirm-box/index.js";
+import { registerClientClickLogRoute } from "./client-click-log/index.js";
 import { buildPresenceSnapshot, parseWithinSeconds } from "./presence/snapshot.js";
 import type { ConfirmBoxTimelineItem } from "./confirm-box/chat.js";
 import { sendPromptToAgent } from "./agent/agent-prompt.js";
@@ -811,6 +812,13 @@ export async function createPaseoDaemon(
   // Health check endpoint
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // topos-customizations: サイドバーのクリック不具合の原因記録(画面側のクリック記録の受け口)。
+  registerClientClickLogRoute({
+    app,
+    logger,
+    baseDir: path.join(config.paseoHome, "client-click-log"),
   });
 
   // topos-customizations: 確認箱(watchdog等の通知の受け皿)。詳細は TOPOS_CUSTOMIZATIONS.md。
