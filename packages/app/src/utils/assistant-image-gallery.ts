@@ -3,6 +3,8 @@ import {
   type AssistantImageEntry,
 } from "@/utils/assistant-image-metadata";
 
+const PARTIAL_IMAGE_TAIL = /!(?:\[[^\]]*)?(?:\]\([^)]*)?$/;
+
 export type AssistantBlockItem =
   | { kind: "markdown"; key: string; block: string; isLast: boolean }
   | { kind: "images"; key: string; images: AssistantImageEntry[]; isLast: boolean };
@@ -14,7 +16,10 @@ export type AssistantBlockItem =
 export function groupAssistantImageBlocks(blocks: string[]): AssistantBlockItem[] {
   const items: AssistantBlockItem[] = [];
   blocks.forEach((block, index) => {
-    const entries = parseAssistantImageOnlyBlock(block);
+    // While streaming, the last block may end in a half-written image token. Dropping it
+    // keeps a gallery a gallery instead of flipping to markdown and back (a remount each time).
+    const settled = index === blocks.length - 1 ? block.replace(PARTIAL_IMAGE_TAIL, "") : block;
+    const entries = parseAssistantImageOnlyBlock(settled);
     const previous = items[items.length - 1];
     if (entries && previous?.kind === "images") {
       previous.images.push(...entries);
@@ -79,7 +84,7 @@ export function layoutAssistantImageGallery(input: GalleryLayoutInput): GalleryL
     // One row, swiped sideways. Each image is tall enough to read yet never wider
     // than ~85% of the screen, so the next one peeks in and shows there is more.
     const widest = Math.max(...ratios);
-    const height = Math.min(maxHeight, (availableWidth * 0.85) / widest);
+    const height = Math.min(maxHeight, Math.max(minRowHeight, (availableWidth * 0.85) / widest));
     return {
       rows: [
         buildRow(
@@ -99,7 +104,9 @@ export function layoutAssistantImageGallery(input: GalleryLayoutInput): GalleryL
     if (current.length === 0) return;
     const rowRatios = current.map((index) => ratios[index]!);
     const fitted = justifiedHeight(rowRatios, availableWidth, gap);
-    rows.push(buildRow(current, ratios, Math.min(fitted, maxHeight)));
+    // A short last row keeps the previous row's height so the set reads as one even grid.
+    const previousHeight = rows[rows.length - 1]?.height ?? maxHeight;
+    rows.push(buildRow(current, ratios, Math.min(fitted, maxHeight, previousHeight)));
     current = [];
   };
   for (let index = 0; index < count; index += 1) {

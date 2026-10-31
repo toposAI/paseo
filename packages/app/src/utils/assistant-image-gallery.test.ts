@@ -101,3 +101,33 @@ describe("layoutAssistantImageGallery", () => {
     for (const row of rows) expect(row.height).toBeGreaterThanOrEqual(140 - 0.001);
   });
 });
+
+describe("review follow-ups", () => {
+  it("keeps a gallery while the last image token is half written", () => {
+    const items = groupAssistantImageBlocks(["![a](/a.png) ![b](/b"]);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.kind).toBe("images");
+    expect(groupAssistantImageBlocks(["![a](/a.png) ![b"])[0]?.kind).toBe("images");
+  });
+
+  it("does not stretch a lone last row taller than the row before it", () => {
+    const { rows } = layoutAssistantImageGallery({
+      ...base,
+      aspectRatios: [1.5, 1.5, 1.5, 1.5, 1.5],
+      availableWidth: 600,
+      compact: false,
+    });
+    const last = rows[rows.length - 1]!;
+    expect(last.height).toBeLessThanOrEqual(rows[0]!.height + 0.001);
+  });
+
+  it("never lets a panorama squash the phone swipe row below the minimum height", () => {
+    const { rows } = layoutAssistantImageGallery({
+      ...base,
+      aspectRatios: [5, 0.5, 0.5],
+      availableWidth: 358,
+      compact: true,
+    });
+    expect(rows[0]!.height).toBeGreaterThanOrEqual(140);
+  });
+});

@@ -183,6 +183,8 @@ export interface AssistantMessageHeightEstimateInput {
   imageContext?: AssistantImageContext;
 }
 
+const ASSISTANT_IMAGE_ESTIMATE_MAX_HEIGHT = 480;
+
 export function estimateAssistantMessageHeightFromCache({
   markdown,
   contentMaxWidth,
@@ -197,9 +199,13 @@ export function estimateAssistantMessageHeightFromCache({
     const aspectRatio =
       getAssistantImageMetadata({ source, ...imageContext })?.aspectRatio ??
       ASSISTANT_IMAGE_DEFAULT_ASPECT_RATIO;
+    // Rendering caps a tall image's height, so the estimate must too.
     return Math.max(
       ASSISTANT_IMAGE_MIN_HEIGHT,
-      Math.round((contentMaxWidth - ASSISTANT_IMAGE_INSET) / aspectRatio),
+      Math.min(
+        ASSISTANT_IMAGE_ESTIMATE_MAX_HEIGHT,
+        Math.round((contentMaxWidth - ASSISTANT_IMAGE_INSET) / aspectRatio),
+      ),
     );
   });
 

@@ -958,13 +958,16 @@ function AssistantMarkdownImage({
   }, [aspectRatio, imageUri, viewerOpen]);
 
   const stateFrameStyle = useMemo<StyleProp<ViewStyle>>(
-    () => [
-      assistantMessageStylesheet.imageFrame,
-      containerStyle,
-      imageSizeStyle,
-      assistantMessageStylesheet.imageState,
-    ],
-    [containerStyle, imageSizeStyle],
+    () =>
+      layoutSize
+        ? [imageSizeStyle, assistantMessageStylesheet.imageState]
+        : [
+            assistantMessageStylesheet.imageFrame,
+            containerStyle,
+            imageSizeStyle,
+            assistantMessageStylesheet.imageState,
+          ],
+    [containerStyle, imageSizeStyle, layoutSize],
   );
   const copyDataSet = useMemo(() => markdownCopyImageDataSet(source, alt), [source, alt]);
 
@@ -1566,6 +1569,7 @@ function NativeShimmerPeakSvg({ gradientId }: { gradientId: string }) {
 }
 
 interface AssistantMessageBlockContainerProps {
+  /** Empty for galleries: they have no single markdown block to key a measured height on. */
   block: string;
   marginBottom: number;
   children: ReactNode;
@@ -1585,7 +1589,7 @@ function AssistantMessageBlockContainer({
     [block],
   );
   return (
-    <View style={style} onLayout={isWeb ? handleLayout : undefined}>
+    <View style={style} onLayout={isWeb && block ? handleLayout : undefined}>
       {children}
     </View>
   );
