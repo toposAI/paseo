@@ -89,6 +89,12 @@ export const ChildThreadSchema = z.object({
    */
   aux: z.boolean().optional(),
   /**
+   * 人がPaseoの画面(新しいワークスペース)から直接建てたスレか(`mergeUnregisteredThreads` が付ける。2026-10-31)。
+   * 親スレの印(`paseo.parent-agent-id`)も `source` も無く、題名の出所(`paseo.title-source`)だけ持つスレ。
+   * 真なら自動判定で壁打ち側に置く(手動の振り分けは優先)。古い応答(未指定)は偽。
+   */
+  humanMade: z.boolean().optional(),
+  /**
    * 司令塔スレそのもの(登録簿ではなく起こしデーモンの `coordinator_id` から出した行)。
    * 一覧の先頭に「司令塔」グループとして並べる。
    */

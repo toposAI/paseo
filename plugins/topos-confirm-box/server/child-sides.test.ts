@@ -60,6 +60,21 @@ test("自動判定: 常駐の壁打ちNだけ壁打ち、人が建てた疑い�
   assert.equal(rows[0]?.parentAgentId, "p");
 });
 
+test("人が建てたと確かなスレ(humanMade)は壁打ち、手動の aux 指定が優先、司令塔は動かない", () => {
+  const rows = applyAuxGroup(
+    [
+      thread({ agentId: "h", humanMade: true }),
+      thread({ agentId: "hm", humanMade: true }),
+      thread({ agentId: "hc", humanMade: true, coordinator: true }),
+    ],
+    new Map([["hm", "aux"]] as const),
+  );
+  assert.deepEqual(
+    rows.map((t) => sideOfThread(t)),
+    ["walltalk", "aux", "aux"],
+  );
+});
+
 test("手動指定は自動判定より優先し、壁打ちへ移した行は親の印を外す。司令塔は動かせない", () => {
   const rows = applyAuxGroup(
     [

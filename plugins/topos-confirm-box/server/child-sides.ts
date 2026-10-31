@@ -89,10 +89,11 @@ export function writeChildThreadSide(
 /**
  * 「確実に壁打ち」と言える行か(2026-10-31 ユーザー指示「悩んだら全部補助スレ」)。
  * 常駐の「壁打ちN」(題名で判る。ASCII数字のみ。`RESIDENT_TITLE_RE` に近いが全角数字や改名したスレは補助に出る)だけ。
- * 人が建てたかどうかは使わない: 登録簿に載る前の建てたての子スレや、検索・調査で建てた使い捨てが
- * 「登録簿に無い」だけで壁打ちへ混ざっていた(実測: 建て直後の子スレ2件が壁打ちに出た)。
+ * 「登録簿に無い」だけでは壁打ちにしない(建て直後の子スレ2件が壁打ちに混ざった実測)。ただし Paseo のラベルで
+ * 人が画面から直接建てたと確かなスレ(`humanMade`: 親スレの印も `source` も無い。2026-10-31 ユーザー指示)は壁打ち。
  */
-const isCertainWallTalk = (t: ChildThread): boolean => /^壁打ち\d{1,2}$/.test(t.title.trim());
+const isCertainWallTalk = (t: ChildThread): boolean =>
+  /^壁打ち\d{1,2}$/.test(t.title.trim()) || t.humanMade === true;
 
 /**
  * 各行へ `aux`(補助スレ側か)を付ける。

@@ -346,3 +346,19 @@ test("R2-6: 登録簿にあるスレは error・状態なしでも未登録と�
   );
   assert.equal(result.skipped.inRegistry, 2);
 });
+
+test("人が画面から建てたスレ(親の印・source が無く title-source だけ)に humanMade を付ける。それ以外は付けない", () => {
+  const mk = (id: string, labels: unknown) => ({ id, title: `t ${id}`, status: "idle", labels });
+  const { rows } = mergeUnregisteredThreads(
+    [],
+    [
+      mk("human", { "paseo.title-source": "auto" }),
+      mk("child", { "paseo.parent-agent-id": "p", "paseo.title-source": "auto" }),
+      mk("auto", { source: "fb-auto", "paseo.title-source": "auto" }),
+      mk("nolabel", {}),
+      mk("unknown", undefined),
+    ],
+  );
+  const by = Object.fromEntries(rows.map((r) => [r.agentId, r.humanMade === true]));
+  assert.deepEqual(by, { human: true, child: false, auto: false, nolabel: false, unknown: false });
+});

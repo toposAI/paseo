@@ -44,6 +44,22 @@ export interface ListedAgentLike {
   attentionReason?: unknown;
   /** 承認待ち(permission)の配列。長さが件数。 */
   pendingPermissions?: unknown;
+  /** Paseo が付けたラベル(`paseo.parent-agent-id` など)。人が直接建てたスレかの判定に使う。 */
+  labels?: unknown;
+}
+
+/**
+ * 人が画面から直接建てたスレか(2026-10-31 ユーザー指示「新しいワークスペースから建てたら壁打ちへ」)。
+ * 実測(`~/.paseo/agents`): 司令塔・裏方・子スレが建てたものは `paseo.parent-agent-id` を持ち、自動投函などは
+ * `source` を持つ。人が建てたものは `paseo.title-source` だけ(または無し)。ラベルが全く無い古いスレは
+ * 人が建てたか判らないので偽(迷ったら補助)。
+ */
+export function isHumanMadeAgent(a: ListedAgentLike): boolean {
+  const labels = a.labels;
+  if (!labels || typeof labels !== "object" || Array.isArray(labels)) return false;
+  const keys = Object.keys(labels);
+  if (!keys.includes("paseo.title-source")) return false;
+  return !keys.some((k) => k === "source" || k.startsWith("paseo.parent-agent-id"));
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -259,6 +275,7 @@ export function mergeUnregisteredThreads(
       parentOpenable: false,
       // 開けるかは `thread-liveness.ts` が後で付ける(ここでは未判定)。
       access: null,
+      ...(isHumanMadeAgent(a) ? { humanMade: true } : {}),
     });
   }
   added.sort((a, b) => compareChildThreads(a, b) || a.agentId.localeCompare(b.agentId));
