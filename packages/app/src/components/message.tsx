@@ -1,5 +1,13 @@
 import type { AgentMessage } from "@getpaseo/protocol/agent-message";
-import { ASSISTANT_IMAGE_DEFAULT_ASPECT_RATIO } from "@/utils/assistant-image-metadata";
+import {
+  ASSISTANT_IMAGE_DEFAULT_ASPECT_RATIO,
+  getAssistantImageMetadata,
+  type AssistantImageEntry,
+} from "@/utils/assistant-image-metadata";
+import {
+  groupAssistantImageBlocks,
+  layoutAssistantImageGallery,
+} from "@/utils/assistant-image-gallery";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { TaskListRow } from "@/components/task-list-row";
 import {
@@ -7,6 +15,8 @@ import {
   Text,
   Image,
   Pressable,
+  ScrollView,
+  useWindowDimensions,
   type GestureResponderEvent,
   type LayoutChangeEvent,
   StyleProp,
@@ -801,6 +811,11 @@ interface AssistantMessageProps {
   phase: MarkdownPhase;
 }
 
+const IMAGE_GALLERY_GAP = 8;
+// Share of the window height one image may take, so a tall image is seen whole without scrolling.
+const IMAGE_MAX_HEIGHT_RATIO = 0.6;
+const IMAGE_GALLERY_MIN_ROW_HEIGHT = 140;
+
 export const assistantMessageStylesheet = StyleSheet.create((theme) => ({
   container: {
     paddingVertical: theme.spacing[3],
@@ -828,6 +843,13 @@ export const assistantMessageStylesheet = StyleSheet.create((theme) => ({
     width: "100%",
     overflow: "hidden",
     position: "relative",
+  },
+  galleryRows: {
+    gap: IMAGE_GALLERY_GAP,
+  },
+  galleryRow: {
+    flexDirection: "row",
+    gap: IMAGE_GALLERY_GAP,
   },
   image: {
     width: "100%",
@@ -864,6 +886,8 @@ function AssistantMarkdownImage({
   client,
   workspaceRoot,
   serverId,
+  layoutSize,
+  onAspectRatio,
 }: {
   source: string;
   occurrenceKey: string;
@@ -872,8 +896,12 @@ function AssistantMarkdownImage({
   client?: DaemonClient | null;
   workspaceRoot?: string;
   serverId?: string;
+  /** Gallery cell: exact pixel size, replaces the full-width/aspect-ratio frame. */
+  layoutSize?: { width: number; height: number };
+  onAspectRatio?: (aspectRatio: number) => void;
 }) {
   const { t } = useTranslation();
+  const { height: windowHeight } = useWindowDimensions();
   const [viewerOpen, setViewerOpen] = useState(false);
   const openViewer = useCallback(() => setViewerOpen(true), []);
   const closeViewer = useCallback(() => setViewerOpen(false), []);
@@ -896,16 +924,29 @@ function AssistantMarkdownImage({
   const imageUri = binding?.uri ?? "";
   const imageSource = useMemo(() => ({ uri: imageUri }), [imageUri]);
   const frameStyle = useMemo<StyleProp<ViewStyle>>(
-    () => [assistantMessageStylesheet.imageFrame, containerStyle],
-    [containerStyle],
+    () =>
+      layoutSize
+        ? { width: layoutSize.width, height: layoutSize.height }
+        : [assistantMessageStylesheet.imageFrame, containerStyle],
+    [containerStyle, layoutSize],
   );
+  useEffect(() => {
+    if (aspectRatio) onAspectRatio?.(aspectRatio);
+  }, [aspectRatio, onAspectRatio]);
   const imageSizeStyle = useMemo<ViewStyle>(() => {
+    if (layoutSize) return { width: layoutSize.width, height: layoutSize.height };
     if (image.status === "failed") return { height: 160 };
-    return { aspectRatio: aspectRatio ?? ASSISTANT_IMAGE_DEFAULT_ASPECT_RATIO };
-  }, [aspectRatio, image.status]);
+    return {
+      aspectRatio: aspectRatio ?? ASSISTANT_IMAGE_DEFAULT_ASPECT_RATIO,
+      maxHeight: windowHeight * IMAGE_MAX_HEIGHT_RATIO,
+    };
+  }, [aspectRatio, image.status, layoutSize, windowHeight]);
   const surfaceStyle = useMemo<StyleProp<ViewStyle>>(
-    () => [assistantMessageStylesheet.imageSurface, imageSizeStyle],
-    [imageSizeStyle],
+    () => [
+      assistantMessageStylesheet.imageSurface,
+      layoutSize ? { width: layoutSize.width, height: layoutSize.height } : imageSizeStyle,
+    ],
+    [imageSizeStyle, layoutSize],
   );
   const lightboxSource = useMemo<ImageLightboxSource | null>(() => {
     if (!viewerOpen || !imageUri) return null;
@@ -974,6 +1015,128 @@ function AssistantMarkdownImage({
       </Pressable>
       <AttachmentLightbox source={lightboxSource} onClose={closeViewer} />
     </View>
+  );
+}
+
+function AssistantImageGallery({
+  images,
+  occurrenceKey,
+  client,
+  workspaceRoot,
+  serverId,
+}: {
+  images: AssistantImageEntry[];
+  occurrenceKey: string;
+  client?: DaemonClient | null;
+  workspaceRoot?: string;
+  serverId?: string;
+}) {
+  const isCompact = useIsCompactFormFactor();
+  const { height: windowHeight } = useWindowDimensions();
+  const [availableWidth, setAvailableWidth] = useState(0);
+  const [measuredRatios, setMeasuredRatios] = useState<Record<number, number>>({});
+  const handleLayout = useCallback((event: LayoutChangeEvent) => {
+    setAvailableWidth(Math.floor(event.nativeEvent.layout.width));
+  }, []);
+  const handleMeasuredRatio = useCallback((index: number, ratio: number) => {
+    setMeasuredRatios((current) =>
+      current[index] === ratio ? current : { ...current, [index]: ratio },
+    );
+  }, []);
+  const aspectRatios = useMemo(
+    () =>
+      images.map(
+        (image, index) =>
+          measuredRatios[index] ??
+          getAssistantImageMetadata({ source: image.source, serverId, workspaceRoot })
+            ?.aspectRatio ??
+          ASSISTANT_IMAGE_DEFAULT_ASPECT_RATIO,
+      ),
+    [images, measuredRatios, serverId, workspaceRoot],
+  );
+  const layout = useMemo(
+    () =>
+      layoutAssistantImageGallery({
+        aspectRatios,
+        availableWidth,
+        maxHeight: windowHeight * IMAGE_MAX_HEIGHT_RATIO,
+        gap: IMAGE_GALLERY_GAP,
+        compact: isCompact,
+        minRowHeight: IMAGE_GALLERY_MIN_ROW_HEIGHT,
+      }),
+    [aspectRatios, availableWidth, isCompact, windowHeight],
+  );
+
+  const renderRow = (row: (typeof layout.rows)[number], rowIndex: number) => (
+    <View key={`row:${rowIndex}`} style={assistantMessageStylesheet.galleryRow}>
+      {row.indexes.map((imageIndex, position) => (
+        <AssistantGalleryCell
+          key={`${occurrenceKey}:image:${imageIndex}`}
+          image={images[imageIndex]!}
+          index={imageIndex}
+          occurrenceKey={`${occurrenceKey}:image:${imageIndex}`}
+          width={row.widths[position]!}
+          height={row.height}
+          onAspectRatio={handleMeasuredRatio}
+          client={client}
+          workspaceRoot={workspaceRoot}
+          serverId={serverId}
+        />
+      ))}
+    </View>
+  );
+
+  return (
+    <View onLayout={handleLayout} style={assistantMessageStylesheet.galleryRows}>
+      {layout.scrollable ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {layout.rows.map(renderRow)}
+        </ScrollView>
+      ) : (
+        layout.rows.map(renderRow)
+      )}
+    </View>
+  );
+}
+
+function AssistantGalleryCell({
+  image,
+  index,
+  occurrenceKey,
+  width,
+  height,
+  onAspectRatio,
+  client,
+  workspaceRoot,
+  serverId,
+}: {
+  image: AssistantImageEntry;
+  index: number;
+  occurrenceKey: string;
+  width: number;
+  height: number;
+  onAspectRatio: (index: number, ratio: number) => void;
+  client?: DaemonClient | null;
+  workspaceRoot?: string;
+  serverId?: string;
+}) {
+  const handleAspectRatio = useCallback(
+    (ratio: number) => onAspectRatio(index, ratio),
+    [index, onAspectRatio],
+  );
+  const layoutSize = useMemo(() => ({ width, height }), [width, height]);
+  return (
+    <AssistantMarkdownImage
+      source={image.source}
+      occurrenceKey={occurrenceKey}
+      alt={image.alt}
+      hasLeadingContent={false}
+      client={client}
+      workspaceRoot={workspaceRoot}
+      serverId={serverId}
+      layoutSize={layoutSize}
+      onAspectRatio={handleAspectRatio}
+    />
   );
 }
 
@@ -1998,10 +2161,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   }, [client, fileLinkActions, markdownParser, occurrenceKey, phase, serverId, workspaceRoot]);
 
   const blocks = useMemo(() => splitMarkdownBlocks(revealedMessage), [revealedMessage]);
-  const keyedBlocks = useMemo(
-    () => blocks.map((block, index) => ({ key: `block:${index}`, block })),
-    [blocks],
-  );
+  const blockItems = useMemo(() => groupAssistantImageBlocks(blocks), [blocks]);
 
   const assistantContainerStyle = useMemo(
     () => [
@@ -2027,22 +2187,30 @@ export const AssistantMessage = memo(function AssistantMessage({
 
   return (
     <View testID="assistant-message" dataSet={revealDataSet} style={assistantContainerStyle}>
-      {keyedBlocks.map(({ key, block }, index) => (
+      {blockItems.map((item) => (
         <AssistantMessageBlockContainer
-          key={key}
-          block={block}
-          marginBottom={index < keyedBlocks.length - 1 ? 12 : 0}
+          key={item.key}
+          block={item.kind === "markdown" ? item.block : ""}
+          marginBottom={item.isLast ? 0 : 12}
         >
-          <MemoizedMarkdownBlock
-            text={block}
-            rules={markdownRules}
-            parser={
-              phase === "streaming" && index === keyedBlocks.length - 1
-                ? streamingMarkdownParser
-                : markdownParser
-            }
-            onLinkPress={handleMarkdownLinkPress}
-          />
+          {item.kind === "images" ? (
+            <AssistantImageGallery
+              images={item.images}
+              occurrenceKey={`${occurrenceKey}:${item.key}`}
+              client={client}
+              workspaceRoot={workspaceRoot}
+              serverId={serverId}
+            />
+          ) : (
+            <MemoizedMarkdownBlock
+              text={item.block}
+              rules={markdownRules}
+              parser={
+                phase === "streaming" && item.isLast ? streamingMarkdownParser : markdownParser
+              }
+              onLinkPress={handleMarkdownLinkPress}
+            />
+          )}
         </AssistantMessageBlockContainer>
       ))}
       {fullMessageByteLength !== null ? (

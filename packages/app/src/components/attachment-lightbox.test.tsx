@@ -55,6 +55,11 @@ vi.mock("react-native-unistyles", () => ({
   useUnistyles: () => ({ theme }),
 }));
 
+vi.mock("@/constants/layout", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/constants/layout")>()),
+  useIsCompactFormFactor: () => false,
+}));
+
 vi.mock("@/constants/platform", () => ({
   isWeb: true,
   isNative: false,

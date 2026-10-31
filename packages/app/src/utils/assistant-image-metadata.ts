@@ -155,6 +155,28 @@ export function extractAssistantImageSources(markdown: string): string[] {
   return parsed.sources;
 }
 
+export interface AssistantImageEntry {
+  source: string;
+  alt?: string;
+}
+
+const MARKDOWN_IMAGE_WITH_ALT_PATTERN = /!\[([^\]]*)]\((<[^>]+>|[^)\n]+)\)/g;
+
+/** Entries of a block made only of images (blank space between them), else null. */
+export function parseAssistantImageOnlyBlock(block: string): AssistantImageEntry[] | null {
+  if (block.replace(MARKDOWN_IMAGE_PATTERN, "").trim().length > 0) {
+    return null;
+  }
+  const entries: AssistantImageEntry[] = [];
+  for (const match of block.matchAll(MARKDOWN_IMAGE_WITH_ALT_PATTERN)) {
+    const source = normalizeAssistantImageSourceToken(match[2] ?? "");
+    if (source) {
+      entries.push({ source, alt: match[1] || undefined });
+    }
+  }
+  return entries.length > 0 ? entries : null;
+}
+
 export interface AssistantMessageHeightEstimateInput {
   markdown: string;
   contentMaxWidth: number;
