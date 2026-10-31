@@ -1,6 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import React, {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useMemo,
@@ -32,8 +34,14 @@ import { FileHtmlPreview } from "./html-preview";
 import { FileMarkdownPreview } from "./markdown-preview";
 import { FileEditorModel, getFileConflictCallout, type FileConflictCallout } from "./editor/model";
 import { createFileObservationSource } from "./editor/observation-source";
-import { FileEditorView } from "./editor/view";
-import { FileSourceView } from "./source/view";
+
+// CodeMirror is heavy; load the editor/source views only when a file is opened as source.
+const FileEditorView = lazy(() =>
+  import("./editor/view").then((mod) => ({ default: mod.FileEditorView })),
+);
+const FileSourceView = lazy(() =>
+  import("./source/view").then((mod) => ({ default: mod.FileSourceView })),
+);
 import type { FileConflictAlertState } from "./conflict-alert";
 import type { LiveFileModel } from "./live-file/model";
 import { confirmDialog } from "@/utils/confirm-dialog";
@@ -105,15 +113,17 @@ function ReadonlySource({
     [theme],
   );
   return (
-    <FileSourceView
-      content={preview.content ?? ""}
-      filename={filename}
-      location={location}
-      navigationRevision={navigationRevision}
-      size={preview.size}
-      theme={visualTheme}
-      tooLargeMessage={t("panels.file.tooLargeToDisplay")}
-    />
+    <Suspense fallback={null}>
+      <FileSourceView
+        content={preview.content ?? ""}
+        filename={filename}
+        location={location}
+        navigationRevision={navigationRevision}
+        size={preview.size}
+        theme={visualTheme}
+        tooLargeMessage={t("panels.file.tooLargeToDisplay")}
+      />
+    </Suspense>
   );
 }
 
@@ -521,7 +531,10 @@ function EditableFilePane({
   }, [liveFile, model]);
   const snapshot = useSyncExternalStore(model.subscribe, model.getSnapshot, model.getSnapshot);
   const suspendPendingSave = useCallback(() => model.suspendAutosave(), [model]);
-  usePublishPanelInstanceAttributes({ modified: snapshot.modified, suspendPendingSave });
+  usePublishPanelInstanceAttributes({
+    modified: snapshot.modified,
+    suspendPendingSave,
+  });
   const theme = UnistylesRuntime.getTheme();
   const visualTheme = useMemo(
     () => ({
@@ -603,16 +616,18 @@ function EditableFilePane({
         onModeChange={onModeChange}
       />
       {showSource ? (
-        <FileEditorView
-          model={model}
-          filename={filename}
-          location={location}
-          navigationRevision={navigationRevision}
-          vimEnabled={settings.vimKeybindings}
-          theme={visualTheme}
-          onCursorChange={setCursor}
-          onVimModeChange={handleVimModeChange}
-        />
+        <Suspense fallback={null}>
+          <FileEditorView
+            model={model}
+            filename={filename}
+            location={location}
+            navigationRevision={navigationRevision}
+            vimEnabled={settings.vimKeybindings}
+            theme={visualTheme}
+            onCursorChange={setCursor}
+            onVimModeChange={handleVimModeChange}
+          />
+        </Suspense>
       ) : (
         <FilePreviewBody
           preview={renderedPreview}
@@ -638,7 +653,11 @@ function fileConflictAlertState(input: {
   if (!input.callout) return undefined;
   if (input.callout.kind === "deleted") return { kind: "deleted" };
   if (input.callout.kind === "checkFailed") {
-    return { kind: "checkFailed", retrying: input.retrying, onRetry: input.onRetry };
+    return {
+      kind: "checkFailed",
+      retrying: input.retrying,
+      onRetry: input.onRetry,
+    };
   }
   return {
     kind: "changed",

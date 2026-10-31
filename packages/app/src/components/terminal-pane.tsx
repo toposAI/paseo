@@ -2,7 +2,7 @@ import { TerminalFind, type TerminalPaneFindHandle } from "@/terminal/find";
 import type { TerminalFindResult } from "@/terminal/runtime/terminal-emulator-runtime";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useRetainedPanelActive } from "@/components/retained-panel";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 import {
   Pressable,
@@ -61,7 +61,10 @@ import { usePanelStore } from "@/stores/panel-store";
 import { useBlockMobilePanelOpenGestures } from "@/mobile-panels/provider";
 import { useSessionStore } from "@/stores/session-store";
 import { toXtermTheme } from "@/utils/to-xterm-theme";
-import TerminalEmulator, { type TerminalEmulatorHandle } from "./terminal-emulator";
+import type { TerminalEmulatorHandle } from "./terminal-emulator";
+
+// xterm and its addons are large; load them when a terminal is first shown, not at startup.
+const TerminalEmulator = lazy(() => import("./terminal-emulator"));
 import { TerminalFloatingCopyAction, TerminalPasteAction } from "./terminal-copy-paste-actions";
 import {
   createTerminalResizeDebouncer,
@@ -244,7 +247,10 @@ export function TerminalPane({
     return trimmed.length > 0 ? trimmed : undefined;
   }, [settings.monoFontFamily]);
   const isMobile = useIsCompactFormFactor();
-  const showVirtualKeyBar = shouldShowTerminalVirtualKeyBar({ isNative, isCompact: isMobile });
+  const showVirtualKeyBar = shouldShowTerminalVirtualKeyBar({
+    isNative,
+    isCompact: isMobile,
+  });
   const [keyBarWidth, setKeyBarWidth] = useState(0);
   const virtualKeyboardRows = resolveTerminalVirtualKeyboardRows({
     isCompact: isMobile,
@@ -311,7 +317,9 @@ export function TerminalPane({
   const keyboardRefitTimeoutsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const lastAutoFocusKeyRef = useRef<string | null>(null);
   const paneFocusResizeClaimRef = useRef(EMPTY_FOCUS_CLAIM_STATE);
-  const initialSnapshot = workspaceTerminalSession.snapshots.get({ terminalId });
+  const initialSnapshot = workspaceTerminalSession.snapshots.get({
+    terminalId,
+  });
 
   useEffect(() => {
     terminalIdRef.current = terminalId;
@@ -529,7 +537,9 @@ export function TerminalPane({
 
   const handleStreamRestore = useStableEvent(
     ({ terminalId: restoreTerminalId, data }: { terminalId: string; data: Uint8Array }) => {
-      workspaceTerminalSession.snapshots.clear({ terminalId: restoreTerminalId });
+      workspaceTerminalSession.snapshots.clear({
+        terminalId: restoreTerminalId,
+      });
       if (terminalIdRef.current !== restoreTerminalId) {
         return;
       }
@@ -539,7 +549,10 @@ export function TerminalPane({
 
   const handleStreamSnapshot = useStableEvent(
     ({ terminalId: snapshotTerminalId, state }: { terminalId: string; state: TerminalState }) => {
-      workspaceTerminalSession.snapshots.set({ terminalId: snapshotTerminalId, state });
+      workspaceTerminalSession.snapshots.set({
+        terminalId: snapshotTerminalId,
+        state,
+      });
       if (terminalIdRef.current !== snapshotTerminalId) {
         return;
       }
@@ -859,7 +872,10 @@ export function TerminalPane({
       rows: Math.floor(input.rows),
       cols: Math.floor(input.cols),
     };
-    measuredTerminalSizeRef.current = { rows: nextResize.rows, cols: nextResize.cols };
+    measuredTerminalSizeRef.current = {
+      rows: nextResize.rows,
+      cols: nextResize.cols,
+    };
     terminalResizeDebouncer.schedule(nextResize);
   });
 
@@ -947,7 +963,10 @@ export function TerminalPane({
 
   const toggleModifier = useCallback(
     (modifier: keyof ModifierState) => {
-      setModifiers((current) => ({ ...current, [modifier]: !current[modifier] }));
+      setModifiers((current) => ({
+        ...current,
+        [modifier]: !current[modifier],
+      }));
       requestTerminalFocus();
       requestTerminalReflow();
     },
@@ -1067,38 +1086,40 @@ export function TerminalPane({
     <Animated.View style={containerStyle}>
       <View style={styles.outputContainer}>
         <View style={styles.terminalGestureContainer}>
-          <TerminalEmulator
-            ref={emulatorRef}
-            dom={TERMINAL_EMULATOR_DOM_PROPS}
-            streamKey={terminalStreamKey}
-            supportsTerminalInputModeReplay={supportsTerminalInputModeReplay}
-            testId="terminal-surface"
-            xtermTheme={xtermTheme}
-            scrollbackLines={settings.terminalScrollbackLines}
-            fontFamily={terminalFontFamily}
-            fontSize={settings.codeFontSize}
-            keyboardInset={keyboardInset}
-            isKeyboardVisible={isKeyboardVisible}
-            swipeGesturesEnabled={swipeGesturesEnabled}
-            initialSnapshot={initialSnapshot}
-            onRendererReadyChange={handleRendererReadyChange}
-            onSwipeRight={handleSwipeRight}
-            onSwipeLeft={handleSwipeLeft}
-            onFindRequest={handleFindRequest}
-            onFindResult={handleFindResult}
-            onInput={handleTerminalData}
-            onFocus={handleTerminalFocus}
-            onResize={handleTerminalResize}
-            onTerminalKey={handleTerminalKey}
-            onInputModeChange={handleInputModeChange}
-            onSelectionChange={handleSelectionChange}
-            onResolveLocalFileLink={handleResolveLocalFileLink}
-            onOpenLocalFileLink={handleOpenLocalFileLink}
-            onPendingModifiersConsumed={handlePendingModifiersConsumed}
-            pendingModifiers={modifiers}
-            focusRequestToken={focusRequestToken}
-            resizeRequestToken={resizeRequestToken}
-          />
+          <Suspense fallback={null}>
+            <TerminalEmulator
+              ref={emulatorRef}
+              dom={TERMINAL_EMULATOR_DOM_PROPS}
+              streamKey={terminalStreamKey}
+              supportsTerminalInputModeReplay={supportsTerminalInputModeReplay}
+              testId="terminal-surface"
+              xtermTheme={xtermTheme}
+              scrollbackLines={settings.terminalScrollbackLines}
+              fontFamily={terminalFontFamily}
+              fontSize={settings.codeFontSize}
+              keyboardInset={keyboardInset}
+              isKeyboardVisible={isKeyboardVisible}
+              swipeGesturesEnabled={swipeGesturesEnabled}
+              initialSnapshot={initialSnapshot}
+              onRendererReadyChange={handleRendererReadyChange}
+              onSwipeRight={handleSwipeRight}
+              onSwipeLeft={handleSwipeLeft}
+              onFindRequest={handleFindRequest}
+              onFindResult={handleFindResult}
+              onInput={handleTerminalData}
+              onFocus={handleTerminalFocus}
+              onResize={handleTerminalResize}
+              onTerminalKey={handleTerminalKey}
+              onInputModeChange={handleInputModeChange}
+              onSelectionChange={handleSelectionChange}
+              onResolveLocalFileLink={handleResolveLocalFileLink}
+              onOpenLocalFileLink={handleOpenLocalFileLink}
+              onPendingModifiersConsumed={handlePendingModifiersConsumed}
+              pendingModifiers={modifiers}
+              focusRequestToken={focusRequestToken}
+              resizeRequestToken={resizeRequestToken}
+            />
+          </Suspense>
         </View>
 
         <TerminalFind

@@ -821,6 +821,15 @@ export class VoiceAssistantWebSocketServer {
     const wss = new WebSocketServer({
       server,
       path: "/ws",
+      // Large JSON frames (agent/workspace lists) compress ~7x. Context takeover is off
+      // and small frames are skipped to bound per-connection zlib memory and CPU.
+      perMessageDeflate: {
+        threshold: 1024,
+        serverNoContextTakeover: true,
+        clientNoContextTakeover: true,
+        zlibDeflateOptions: { level: 3 },
+        concurrencyLimit: 4,
+      },
       handleProtocols: (protocols) => selectWebSocketProtocol(protocols, password),
       verifyClient: ({ req }, callback) => {
         this.verifyWsUpgrade(
