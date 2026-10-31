@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { recordDragGuardCancel } from "@/diagnostics/click-recorder";
 
 /**
  * dnd-kit はドラッグ開始時に document へ capture の click 抑止を付け、終了/キャンセルでしか外さない。
@@ -11,6 +12,7 @@ export function armDragStuckGuard(win: Window, doc: Document): () => void {
   let releaseTimer: ReturnType<typeof setTimeout> | null = null;
 
   const cancelDrag = () => {
+    recordDragGuardCancel();
     doc.dispatchEvent(
       new KeyboardEvent("keydown", {
         code: "Escape",
