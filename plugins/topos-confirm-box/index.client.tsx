@@ -427,14 +427,20 @@ function Popover({ theme, workspaceId, close }: PluginButtonContentProps) {
     [],
   );
   // 優先順位は浮いた枠に出さず、ワークスペースのパネル(PC=右カラム・狭い画面=全画面)で開く。
+  const toast = useToast();
   const openPriority = useCallback(() => {
-    if (!client) return;
     const c = client;
-    openPriorityPanel((id, options) =>
-      c.openPanel(id, { workspaceId, location: options.location }),
+    const failed = () => toast.error("優先順位を開けませんでした");
+    if (!c) {
+      failed();
+      return;
+    }
+    const opened = openPriorityPanel(
+      (id, options) => c.openPanel(id, { workspaceId, location: options.location }),
+      failed,
     );
-    close();
-  }, [workspaceId, close]);
+    if (opened) close();
+  }, [workspaceId, close, toast]);
   return (
     <View style={popoverStyle} onLayout={onLayout}>
       <ConfirmBoxView
