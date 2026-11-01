@@ -108,6 +108,20 @@ async function drainAgentRunIterator(
   }
 }
 
+/** Agent-origin sends wait when the agent is busy, or when earlier messages are still queued (order). */
+function shouldQueueAgentMessage(
+  agentManager: AgentRunController,
+  agentId: string,
+  logger: Logger,
+  options: StartAgentRunOptions | undefined,
+): boolean {
+  if (!options?.queueIfBusy) return false;
+  return (
+    agentManager.hasBlockingRun(agentId) ||
+    getAgentMessageQueue(agentManager, logger).depth(agentId) > 0
+  );
+}
+
 function enqueueAgentMessage(
   agentManager: AgentRunController,
   agentId: string,
@@ -157,16 +171,16 @@ export async function startAgentRun(
     options?.onDispatch?.("out_of_band");
     return { disposition: "out_of_band" };
   }
-  if (
-    options?.queueIfBusy &&
-    (agentManager.hasBlockingRun(agentId) ||
-      getAgentMessageQueue(agentManager, logger).depth(agentId) > 0)
-  ) {
-    return enqueueAgentMessage(agentManager, agentId, prompt, logger, options);
+  if (shouldQueueAgentMessage(agentManager, agentId, logger, options)) {
+    return enqueueAgentMessage(agentManager, agentId, prompt, logger, options!);
   }
   try {
     return await startAgentRunInner(agentManager, agentId, prompt, logger, options);
   } catch (error) {
+    // Lost a race with a turn that started after the busy check: wait instead of failing the sender.
+    if (options?.queueIfBusy && agentManager.hasBlockingRun(agentId)) {
+      return enqueueAgentMessage(agentManager, agentId, prompt, logger, options);
+    }
     if (!isStaleProviderSessionError(error)) throw error;
     logger.info({ agentId, err: error }, "Provider session went stale; reopening from persistence");
     // The live session belongs to a retired plugin runtime. Reload swaps in a

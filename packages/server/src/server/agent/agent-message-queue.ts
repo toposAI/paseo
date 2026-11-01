@@ -49,7 +49,8 @@ export class AgentMessageQueue {
   }
 
   depth(agentId: string): number {
-    return this.queues.get(agentId)?.length ?? 0;
+    // A head being delivered is already shifted out; count it so a newcomer cannot overtake it.
+    return (this.queues.get(agentId)?.length ?? 0) + (this.draining.has(agentId) ? 1 : 0);
   }
 
   private ensureSubscribed(): void {
