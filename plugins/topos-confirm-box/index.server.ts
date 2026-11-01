@@ -193,6 +193,7 @@ import {
   archiveProject,
   buildPriorityDetail,
   countRunning,
+  readMembershipRow,
   findProject,
   markStanding,
   moveProject,
@@ -899,7 +900,10 @@ export default function contribute(server: PluginServerContext) {
       threads = []; // 数えられない=0件であってもアーカイブは止めない(確認を出さないだけ)
     }
     const withRunning = (rows: PriorityProject[]): PriorityProject[] =>
-      rows.map((p) => ({ ...p, running: countRunning(p, threads) }));
+      rows.map((p) => ({
+        ...p,
+        running: countRunning(p, threads, readMembershipRow(dir, p.id)),
+      }));
     return {
       projects: withRunning(visible),
       archived: withRunning(archived),
@@ -942,7 +946,12 @@ export default function contribute(server: PluginServerContext) {
     } catch {
       threads = [];
     }
-    return buildPriorityDetail(project, threads, readOpenQuestions(dir, project.name));
+    return buildPriorityDetail(
+      project,
+      threads,
+      readOpenQuestions(dir, project.name),
+      readMembershipRow(dir, project.id),
+    );
   });
 
   server.handle(priorityMoveRpc, async (input) => {

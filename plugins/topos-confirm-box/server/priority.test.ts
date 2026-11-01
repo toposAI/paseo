@@ -12,6 +12,7 @@ import {
   moveProject,
   normalizeProjects,
   readLedger,
+  readMembershipRow,
   readOpenQuestions,
   sameName,
   splitArchived,
@@ -290,4 +291,33 @@ test("中身: 未決の判断は project 名で突き合わせ、判断済み(ap
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("束ね: 横の台帳の threads と題名キーワードも担当に数え、中身にも並べる(thread だけの行は従来どおり)", () => {
+  const p = { id: "fam", name: "Topos家族版(UI・配布)", note: "", thread: null };
+  const mem = { keywords: ["家族版"], threads: ["g1"] };
+  const threads = [
+    th("g1", "孫スレの題名は無関係"),
+    th("k1", "家族版の画面修正"),
+    th("k2", "家族版の出荷", "完了"),
+    th("o1", "ほかの案件"),
+  ];
+  assert.equal(countRunning(p, threads, mem), 2);
+  assert.equal(countRunning(p, threads), 0); // 束ねなし=従来どおり
+  const d = buildPriorityDetail(p, threads, [], mem);
+  assert.deepEqual(d.related.map((t) => t.agentId).sort(), ["g1", "k1", "k2"]);
+  // thread だけの行
+  const q = { id: "q", name: "単発", note: "", thread: "g1" };
+  assert.equal(countRunning(q, threads, null), 1);
+});
+
+test("横の台帳の読み込み: 行が無い・ファイルが無いときは null", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mem-"));
+  assert.equal(readMembershipRow(dir, "a"), null);
+  fs.writeFileSync(
+    path.join(dir, "priority_membership.json"),
+    JSON.stringify({ version: 1, rows: { a: { keywords: ["x"], threads: ["t", 3] } } }),
+  );
+  assert.deepEqual(readMembershipRow(dir, "a"), { keywords: ["x"], threads: ["t"] });
+  assert.equal(readMembershipRow(dir, "b"), null);
 });

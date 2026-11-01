@@ -288,7 +288,7 @@ export interface DetailThread {
   machineState: string | null;
 }
 
-const DETAIL_RELATED_MAX = 10;
+const DETAIL_RELATED_MAX = 30;
 const DETAIL_QUESTIONS_MAX = 10;
 /** 動いている行を先に出す(「まだ動いているのか」が開いてすぐ分かる)。 */
 function liveFirst(a: DetailThread, b: DetailThread): number {
@@ -301,14 +301,54 @@ function liveFirst(a: DetailThread, b: DetailThread): number {
  * 行をアーカイブすると**一覧から外れるだけ**で、子スレは止めない。止める操作と混同させないため、
  * 画面はこの件数が1以上のときだけ「動いているものがN件あります」と一度確認する。
  */
-export function countRunning(project: PriorityProject, threads: readonly DetailThread[]): number {
+export function countRunning(
+  project: PriorityProject,
+  threads: readonly DetailThread[],
+  membership?: MembershipRow | null,
+): number {
   return threads.filter(
     (t) =>
-      (t.agentId === project.thread || sameName(t.title, project.name)) &&
+      isMember(project, t, membership) &&
       t.status !== "完了" &&
       t.status !== "待機" &&
       t.machineState !== "closed",
   ).length;
+}
+
+/** 横の台帳 `priority_membership.json` の1行(担当スレ id と題名キーワード)。 */
+export interface MembershipRow {
+  keywords: string[];
+  threads: string[];
+}
+
+const MEMBERSHIP_FILE = "priority_membership.json";
+
+/** 横の台帳の行 `id` を読む。無い/壊れていれば null(`thread` と題名一致だけで数える従来の動き)。 */
+export function readMembershipRow(dir: string, id: string): MembershipRow | null {
+  const rec = readJson(path.join(dir, MEMBERSHIP_FILE)) as {
+    rows?: Record<string, { keywords?: unknown; threads?: unknown }>;
+  } | null;
+  const row = rec?.rows?.[id];
+  if (!row || typeof row !== "object") return null;
+  const strs = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x !== "") : [];
+  return { keywords: strs(row.keywords), threads: strs(row.threads) };
+}
+
+/**
+ * スレがこの行の担当か。台帳の `thread`・横の台帳の `threads`(孫スレを含む明示の担当)・題名キーワード・
+ * 題名が行名と同じ、のどれか(データ側 `row_members` と同じ規則)。
+ */
+function isMember(
+  project: PriorityProject,
+  t: DetailThread,
+  membership?: MembershipRow | null,
+): boolean {
+  if (t.agentId === project.thread || sameName(t.title, project.name)) return true;
+  if (!membership) return false;
+  if (membership.threads.includes(t.agentId)) return true;
+  const title = t.title.toLowerCase();
+  return membership.keywords.some((k) => title.includes(k.toLowerCase()));
 }
 
 /**
@@ -338,6 +378,7 @@ export function buildPriorityDetail(
   project: PriorityProject,
   threads: readonly DetailThread[],
   pending: readonly { id: string; subject: string; ts: number }[],
+  membership?: MembershipRow | null,
 ): {
   note: string;
   thread: DetailThread | null;
@@ -346,7 +387,7 @@ export function buildPriorityDetail(
 } {
   const byId = project.thread ? (threads.find((t) => t.agentId === project.thread) ?? null) : null;
   const others = threads
-    .filter((t) => t.agentId !== project.thread && sameName(t.title, project.name))
+    .filter((t) => t.agentId !== project.thread && isMember(project, t, membership))
     .sort(liveFirst)
     .slice(0, DETAIL_RELATED_MAX);
   return {
