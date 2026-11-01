@@ -3439,6 +3439,8 @@ export class Session {
       this.agentStorage,
       this.agentManager,
       matched.id,
+      undefined,
+      "resume_by_handle",
     );
     return {
       record: matched,
@@ -4539,7 +4541,13 @@ export class Session {
         }
         throw error;
       }
-      await unarchiveAgentState(this.agentStorage, this.agentManager, snapshot.id);
+      await unarchiveAgentState(
+        this.agentStorage,
+        this.agentManager,
+        snapshot.id,
+        undefined,
+        "resume_finalize",
+      );
       await this.agentManager.hydrateTimelineFromProvider(snapshot.id);
       await this.agentUpdates.forwardLiveAgent(snapshot);
       const timelineSize = this.agentManager.getTimeline(snapshot.id).length;
@@ -4659,7 +4667,13 @@ export class Session {
 
     try {
       await this.restoreOwningWorkspaceForLegacyAgentRefresh(agentId);
-      await unarchiveAgentState(this.agentStorage, this.agentManager, agentId);
+      await unarchiveAgentState(
+        this.agentStorage,
+        this.agentManager,
+        agentId,
+        undefined,
+        "refresh_agent_request",
+      );
       let snapshot: ManagedAgent;
       const existing = this.agentManager.getAgent(agentId);
       if (existing) {

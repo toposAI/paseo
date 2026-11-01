@@ -13,8 +13,7 @@ import { reportThreadTarget, resolveThreadTarget } from "./thread-target.js";
 
 /** スレを引く間の上限。引けなくても開くこと自体は止めない(全画面へ落とすだけ)。 */
 const LIST_TIMEOUT_MS = 3_000;
-export const READ_FAILED_NOTICE =
-  "スレの状態を引けなかったので、全画面で開きました";
+export const READ_FAILED_NOTICE = "スレの状態を引けなかったので、全画面で開きました";
 
 /** 引いて確かめるスレ1件の状態。`archivedAt` が空なら開ける。 */
 export type AgentRead = DirectoryAgent | null;
@@ -25,22 +24,19 @@ export type AgentRead = DirectoryAgent | null;
  * **一覧(`agents.list`)は引かない**(2026-10-27 出口レビュー round2 指摘1): アーカイブ済み込みの全件を
  * 返すので、この環境(実測 2,426 件)では3秒を待っても返らない。宛先の生死を見るには1件で足りる。
  */
-export async function readAgent(
-  serverId: string,
-  agentId: string
-): Promise<AgentRead> {
+export async function readAgent(serverId: string, agentId: string): Promise<AgentRead> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error("timeout")), LIST_TIMEOUT_MS);
   });
   try {
+    // SDK の handle.refresh() は fetch_agent_request(読むだけ・アーカイブを解かない)。
+    // サーバーの refresh_agent_request(=無条件に unarchive + 再読込)を呼ぶ daemonClient.refreshAgent と取り違えないこと。
     const snap = await Promise.race([
       getPaseoClient(serverId).agents.ref(agentId).refresh(),
       deadline,
     ]);
-    const agent = snap?.agent as
-      | { archivedAt?: unknown; status?: unknown }
-      | undefined;
+    const agent = snap?.agent as { archivedAt?: unknown; status?: unknown } | undefined;
     if (!agent) return null;
     return {
       id: agentId,
@@ -83,11 +79,8 @@ export interface OpenThreadContext {
  * 分からない(null)ときは畳まない — 「分からない」を「同じ」と取り違えると、右に並ぶはずの相手が消える。
  */
 export function showsSameThread(
-  current:
-    | { kind: "card" | "thread"; id: string; answerId?: string | null }
-    | null
-    | undefined,
-  agentId: string
+  current: { kind: "card" | "thread"; id: string; answerId?: string | null } | null | undefined,
+  agentId: string,
 ): boolean {
   if (!current) return false;
   if (current.kind === "thread") return current.id === agentId;
@@ -128,7 +121,7 @@ export async function openThreadInPane(input: {
    * 振り替えの順番(領域司令塔→親→総司令塔)と推測しない規則は `resolveThreadTarget` の1箇所に任せる。
    */
   const verify = async (agentId: string): Promise<DirectoryAgent[]> => {
-    const title = context.direct === true ? null : context.title ?? null;
+    const title = context.direct === true ? null : (context.title ?? null);
     const domain = title ? inferDomain(title) : null;
     const ids = [
       agentId,
@@ -162,7 +155,7 @@ export async function openThreadInPane(input: {
         notice: READ_FAILED_NOTICE,
       });
     }
-    const title = context.direct === true ? null : context.title ?? null;
+    const title = context.direct === true ? null : (context.title ?? null);
     const result = resolveThreadTarget({
       target: agentId,
       destination: input.destination ?? null,

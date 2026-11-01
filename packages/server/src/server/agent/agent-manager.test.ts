@@ -8821,6 +8821,39 @@ test("unarchiveSnapshot unarchives native provider storage before clearing archi
   });
 });
 
+test("unarchiveSnapshot logs which path lifted the archive", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-unarchive-via-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const infoCalls: Array<[Record<string, unknown>, string]> = [];
+  const base = createTestLogger();
+  const recordingLogger = {
+    child: () => recordingLogger,
+    info: (obj: Record<string, unknown>, msg: string) => infoCalls.push([obj, msg]),
+    warn: () => undefined,
+    error: () => undefined,
+    debug: () => undefined,
+    trace: () => undefined,
+    fatal: () => undefined,
+  } as unknown as typeof base;
+  const manager = new AgentManager({
+    clients: { codex: new NativeArchiveRecordingClient() },
+    registry: storage,
+    logger: recordingLogger,
+  });
+  const agent = await manager.createAgent(
+    { provider: "codex", cwd: workdir, title: "via" },
+    undefined,
+    { workspaceId: undefined },
+  );
+  await manager.archiveAgent(agent.id);
+
+  await manager.unarchiveSnapshot(agent.id, undefined, "refresh_agent_request");
+
+  const entry = infoCalls.find(([, msg]) => msg === "Agent unarchived");
+  expect(entry?.[0]).toMatchObject({ agentId: agent.id, via: "refresh_agent_request" });
+  expect(entry?.[0].previousArchivedAt).toEqual(expect.any(String));
+});
+
 test("unarchiveSnapshotByHandle unarchives native provider storage for the matched snapshot", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-native-unarchive-handle-"));
   const storagePath = join(workdir, "agents");
