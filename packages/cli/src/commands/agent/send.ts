@@ -39,9 +39,9 @@ export interface AgentSendOptions extends CommandOptions {
 // A person typing in a terminal has a TTY and is not running inside an agent. Agents' tools,
 // launchd jobs and scripts have neither, so their messages wait for the turn boundary.
 export function isHumanAtTerminal(): boolean {
-  return Boolean(
-    process.stdin.isTTY && process.stdout.isTTY && !process.env.PASEO_AGENT_ID?.trim(),
-  );
+  if (process.env.PASEO_AGENT_ID?.trim()) return false;
+  // Any attached terminal stream counts, so `paseo send ... | jq` or `> log` typed by a person still interrupts.
+  return Boolean(process.stdout.isTTY || process.stderr.isTTY);
 }
 
 export function addSendOptions(cmd: Command): Command {

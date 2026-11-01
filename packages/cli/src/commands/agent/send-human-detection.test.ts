@@ -1,20 +1,20 @@
 import { afterEach, expect, test } from "vitest";
 import { isHumanAtTerminal } from "./send.js";
 
-const originalIn = process.stdin.isTTY;
+const originalErr = process.stderr.isTTY;
 const originalOut = process.stdout.isTTY;
 const originalAgentId = process.env.PASEO_AGENT_ID;
 
 afterEach(() => {
-  process.stdin.isTTY = originalIn;
+  process.stderr.isTTY = originalErr;
   process.stdout.isTTY = originalOut;
   if (originalAgentId === undefined) delete process.env.PASEO_AGENT_ID;
   else process.env.PASEO_AGENT_ID = originalAgentId;
 });
 
-function setup(stdin: boolean, stdout: boolean, agentId?: string) {
-  process.stdin.isTTY = stdin;
+function setup(stdout: boolean, stderr: boolean, agentId?: string) {
   process.stdout.isTTY = stdout;
+  process.stderr.isTTY = stderr;
   if (agentId === undefined) delete process.env.PASEO_AGENT_ID;
   else process.env.PASEO_AGENT_ID = agentId;
 }
@@ -29,9 +29,9 @@ test("a launchd job or script (no TTY) is automation", () => {
   expect(isHumanAtTerminal()).toBe(false);
 });
 
-test("captured output (agent tool / subprocess) is automation", () => {
-  setup(true, false);
-  expect(isHumanAtTerminal()).toBe(false);
+test("a person piping stdout (| jq) with stderr on the terminal is still human", () => {
+  setup(false, true);
+  expect(isHumanAtTerminal()).toBe(true);
 });
 
 test("inside an agent, even with a TTY, is automation", () => {
