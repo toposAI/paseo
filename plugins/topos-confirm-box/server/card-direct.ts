@@ -618,30 +618,60 @@ export async function autoAskOnce(deps: ShowDeps, agentId = ""): Promise<AutoAsk
   return showFromNext(deps, target, openRow, out);
 }
 
+/** その行が画面(タイムライン)に載っているか・載っていれば時系列の最後か。 */
+interface RowPlacement {
+  onScreen: boolean;
+  /** 同じ cardId の行より後ろに、別の項目(発言など)が無い。 */
+  isLatest: boolean;
+}
+
 /**
- * その行が**いま画面(タイムライン)に載っているか**。
+ * その行が**いま画面(タイムライン)に載っているか**、載っているなら**一番下か**。
  *
  * 行はデーモンのメモリ上にしか無いので、デーモンを再起動すると消える。状態ファイルだけを見て
  * 「もう出している」と判断すると、再起動後に質問が画面から消えたままになる。読めないとき
- * (スレがまだ読み込まれていない)は「出ている」側に倒す=二重に出さない。
+ * (スレがまだ読み込まれていない)は「出ている・一番下」側に倒す=二重に出さない。
  */
-async function rowOnScreen(deps: ShowDeps, agentId: string, cardId: string): Promise<boolean> {
+async function rowPlacement(
+  deps: ShowDeps,
+  agentId: string,
+  cardId: string,
+): Promise<RowPlacement> {
   try {
     const page = await deps.paseo.agents.ref(agentId).timeline.refetch({
       limit: 200,
       projection: "canonical",
     });
     const entries = (page?.entries ?? []) as { item?: Record<string, unknown> }[];
-    return entries.some((e) => {
+    let last = -1;
+    entries.forEach((e, i) => {
       const it = (e.item ?? e) as {
         type?: string;
         kind?: string;
         data?: { cardId?: string };
       };
-      return it.type === "plugin" && it.kind === CARD_DIRECT_KIND && it.data?.cardId === cardId;
+      if (it.type === "plugin" && it.kind === CARD_DIRECT_KIND && it.data?.cardId === cardId)
+        last = i;
     });
+    return { onScreen: last >= 0, isLatest: last === entries.length - 1 };
   } catch {
-    return true;
+    return { onScreen: true, isLatest: true };
+  }
+}
+
+/**
+ * 表示中の1問が、後の発言の下に埋もれていて、窓口Aが動いていないか(出し直してよいか)。
+ *
+ * 窓口Aが running の間は、いま返事を組み立てている最中で行が最後になる可能性があるので
+ * 触らない(2026-11-02 ユーザー「また窓口Aバグってる。次が出てない」)。状態が読めないときも出し直さない。
+ */
+async function agentIdle(deps: ShowDeps, agentId: string): Promise<boolean> {
+  try {
+    const ref = deps.paseo.agents.ref(agentId);
+    await ref.refresh();
+    return ref.status === "idle";
+  } catch {
+    return false;
   }
 }
 
@@ -745,8 +775,15 @@ async function showFromNext(
   const sha = cardSha(deps.stateDir, cardId);
   // 同じ本文の行が「いま画面にあれば」何もしない(`next` が印の期限を延ばしている)。
   // 画面から消えている(デーモン再起動で行が消えた)ときは、同じ1問を出し直す。
+  // 画面にはあるが後の発言の下に埋もれ、窓口Aが動いていない(idle)ときも一番下へ出し直す。
+  // 古い行は下の retireRow で押せなくなる(有効な行は常に1つ)。
   if (openRow && openRow.cardId === cardId && openRow.cardSha === sha) {
-    if (await rowOnScreen(deps, target, cardId)) return noShow("");
+    const placement = await rowPlacement(deps, target, cardId);
+    if (placement.onScreen && placement.isLatest) return noShow("");
+    if (placement.onScreen && !(await agentIdle(deps, target))) return noShow("buried_not_idle");
+    // 待っている間に押下で行が答え済みになっていたら、答えた1問を出し直さない。
+    const now = openRowOf(readRowState(deps.stateDir).agents[target]);
+    if (placement.onScreen && now?.shownAt !== openRow.shownAt) return noShow("");
   }
   const retired = openRow?.cardId ?? "";
   if (openRow) retireRow(deps.stateDir, target, openRow.shownAt);
