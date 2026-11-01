@@ -1860,7 +1860,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       inputSchema: sendAgentPromptInputSchema,
       outputSchema: {
         success: z.boolean(),
-        disposition: z.enum(["turn_started", "out_of_band"]).optional(),
+        disposition: z.enum(["turn_started", "out_of_band", "queued"]).optional(),
         status: AgentStatusEnum,
         guidance: z.string().optional(),
       },
@@ -1868,7 +1868,8 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     async ({ agentId, prompt, sessionMode, notifyOnFinish = Boolean(callerAgentId) }) => {
       let stopNotification: (() => void) | undefined;
       function armFinishNotification(disposition: PromptDispatchDisposition): void {
-        if (!callerAgentId || !notifyOnFinish) {
+        // A queued message has no turn of its own yet; the finish of the current turn is not its.
+        if (!callerAgentId || !notifyOnFinish || disposition === "queued") {
           return;
         }
         stopNotification = setupFinishNotification({
@@ -1888,6 +1889,8 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         agentId,
         prompt,
         source: callerAgentId ? { kind: "agent-message", agentId: callerAgentId } : undefined,
+        // Agent-to-agent: never interrupt a running turn; deliver at the turn boundary.
+        queueIfBusy: Boolean(callerAgentId),
         sessionMode,
         onDispatch: armFinishNotification,
         logger: childLogger,

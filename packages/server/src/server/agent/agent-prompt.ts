@@ -9,6 +9,7 @@ import type {
 import type { AgentManager, ManagedAgent } from "./agent-manager.js";
 import type { AgentStorage } from "./agent-storage.js";
 import { ensureAgentLoaded } from "./agent-loading.js";
+import { getAgentMessageQueue } from "./agent-message-queue.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
 import { getParentAgentIdFromLabels } from "@getpaseo/protocol/agent-labels";
 import type { ActiveTurnBehavior } from "@getpaseo/protocol/messages";
@@ -24,6 +25,7 @@ export type AgentRunController = Pick<
   | "replaceAgentRun"
   | "steerOrReplaceActiveTurn"
   | "streamAgent"
+  | "subscribe"
 > & {
   reloadAgentSession(agentId: string): Promise<unknown>;
 };
@@ -36,9 +38,14 @@ export interface StartAgentRunOptions {
   runOptions?: AgentRunOptions;
   /** Ask the provider to deny permissions blocking this steer. */
   clearPendingPermissions?: boolean;
+  /**
+   * Agent-to-agent send: if the target is mid-turn, wait for the turn boundary instead of
+   * interrupting or steering. Out-of-band commands still run immediately.
+   */
+  queueIfBusy?: { sourceAgentId?: string };
 }
 
-export type PromptDispatchDisposition = "out_of_band" | "steered" | "turn_started";
+export type PromptDispatchDisposition = "out_of_band" | "steered" | "turn_started" | "queued";
 
 async function steerOrReplaceActiveRun(
   agentManager: AgentRunController,
@@ -101,6 +108,28 @@ async function drainAgentRunIterator(
   }
 }
 
+function enqueueAgentMessage(
+  agentManager: AgentRunController,
+  agentId: string,
+  prompt: AgentPromptInput,
+  logger: Logger,
+  options: StartAgentRunOptions,
+): { disposition: PromptDispatchDisposition } {
+  getAgentMessageQueue(agentManager, logger).enqueue(agentId, {
+    sourceAgentId: options.queueIfBusy?.sourceAgentId,
+    // Re-checked at delivery: only a no-longer-busy agent receives it, so it never interrupts.
+    deliver: async () => {
+      await startAgentRun(agentManager, agentId, prompt, logger, {
+        ...options,
+        queueIfBusy: undefined,
+        onDispatch: undefined,
+      });
+    },
+  });
+  options.onDispatch?.("queued");
+  return { disposition: "queued" };
+}
+
 export async function startAgentRun(
   agentManager: AgentRunController,
   agentId: string,
@@ -127,6 +156,9 @@ export async function startAgentRun(
   if (agentManager.tryRunOutOfBand(agentId, prompt, options?.runOptions)) {
     options?.onDispatch?.("out_of_band");
     return { disposition: "out_of_band" };
+  }
+  if (options?.queueIfBusy && agentManager.hasBlockingRun(agentId)) {
+    return enqueueAgentMessage(agentManager, agentId, prompt, logger, options);
   }
   try {
     return await startAgentRunInner(agentManager, agentId, prompt, logger, options);
@@ -242,6 +274,11 @@ export interface SendPromptToAgentParams {
   unarchive?: boolean;
   /** See {@link StartAgentRunOptions.clearPendingPermissions}. */
   clearPendingPermissions?: boolean;
+  /**
+   * When the target is mid-turn, wait for the turn boundary instead of interrupting or steering.
+   * Set for agent-to-agent messages that did not ask for interrupt/steer explicitly.
+   */
+  queueIfBusy?: boolean;
   logger: Logger;
 }
 
@@ -365,6 +402,12 @@ export async function sendPromptToAgent(
     onDispatch: params.onDispatch,
     activeTurnBehavior: params.activeTurnBehavior,
     clearPendingPermissions: params.clearPendingPermissions,
+    queueIfBusy: params.queueIfBusy
+      ? {
+          sourceAgentId:
+            params.source?.kind === "agent-message" ? params.source.agentId : undefined,
+        }
+      : undefined,
     runOptions,
   });
 }

@@ -4228,6 +4228,9 @@ describe("send_agent_prompt MCP tool", () => {
             expect(parentClient.sessions[0]!.prompts[0]).toContain("finished.");
           });
         } else {
+          // The target must be at a turn boundary: a busy target queues the message instead.
+          childClient.sessions[0]!.finishTurn("Ongoing task done");
+          await vi.waitFor(() => expect(agentManager.getAgent(child.id)?.lifecycle).toBe("idle"));
           childClient.sessions[0]!.rejectNextTurnStart(new Error("Requested turn could not start"));
           await expect(
             invokeToolWithParsedInput(tool, { agentId: child.id, prompt: "Replacement task" }),
@@ -4341,17 +4344,21 @@ describe("send_agent_prompt MCP tool", () => {
 
       const sent = await invokeToolWithParsedInput(registeredTool(server, "send_agent_prompt"), {
         agentId: childId,
-        prompt: "Stop and reply instead",
+        prompt: "Reply when you are free",
       });
+      // Agent-to-agent: the running turn is not interrupted; the prompt waits for the turn boundary.
       expect(sent.structuredContent).toMatchObject({
         success: true,
+        disposition: "queued",
         status: "running",
       });
       const childSession = childClient.sessions[0]!;
-      await vi.waitFor(() => expect(childSession.prompts).toHaveLength(2));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(childSession.prompts).toHaveLength(1);
 
       expect(parentClient.sessions[0]!.prompts).toHaveLength(0);
       childSession.finishTurn();
+      await vi.waitFor(() => expect(childSession.prompts).toHaveLength(2));
 
       function finishNotifications() {
         return (parentClient.sessions[0]?.prompts ?? []).filter((prompt) =>

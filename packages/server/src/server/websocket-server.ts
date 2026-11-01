@@ -461,6 +461,7 @@ interface SocketSessionOptions {
   clientId: string;
   appVersion: string | null;
   clientCapabilities: Record<string, unknown> | null;
+  clientType?: WSHelloMessage["clientType"];
   permissions: readonly DaemonPermission[];
   connectionLogger: pino.Logger;
   onMessage: (message: SessionOutboundMessage) => void;
@@ -1385,18 +1386,28 @@ export class VoiceAssistantWebSocketServer {
     clientId: string;
     appVersion: string | null;
     clientCapabilities: Record<string, unknown> | null;
+    clientType?: WSHelloMessage["clientType"];
     connectionLogger: pino.Logger;
     lifecycle: { kind: "reconnectable" } | { kind: "ephemeral-plugin"; pluginId: string };
     admission: SessionAdmission;
   }): SessionConnection {
-    const { ws, clientId, appVersion, clientCapabilities, connectionLogger, lifecycle, admission } =
-      params;
+    const {
+      ws,
+      clientId,
+      appVersion,
+      clientCapabilities,
+      clientType,
+      connectionLogger,
+      lifecycle,
+      admission,
+    } = params;
     let connection: SessionConnection | null = null;
 
     const session = this.createSocketSession({
       clientId,
       appVersion,
       clientCapabilities,
+      clientType,
       permissions: admission.permissions,
       connectionLogger,
       onMessage: (msg) => {
@@ -1471,6 +1482,7 @@ export class VoiceAssistantWebSocketServer {
       clientId: options.clientId,
       appVersion: options.appVersion,
       clientCapabilities: options.clientCapabilities,
+      clientType: options.clientType,
       permissions: options.permissions,
       onMessage: options.onMessage,
       onMessageToSource: options.onMessageToSource,
@@ -1640,6 +1652,7 @@ export class VoiceAssistantWebSocketServer {
       clientId,
       appVersion: message.appVersion ?? null,
       clientCapabilities: message.capabilities ?? null,
+      clientType: message.clientType,
       connectionLogger,
       lifecycle: pluginId ? { kind: "ephemeral-plugin", pluginId } : { kind: "reconnectable" },
       admission: admitted,

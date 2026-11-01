@@ -16,7 +16,11 @@ import { join } from "node:path";
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { AgentManager } from "./agent-manager.js";
 import { AgentStorage } from "./agent-storage.js";
-import { setupFinishNotification, waitForAgentRunStartWithTimeout } from "./agent-prompt.js";
+import {
+  sendPromptToAgent,
+  setupFinishNotification,
+  waitForAgentRunStartWithTimeout,
+} from "./agent-prompt.js";
 import type { AgentManagerEvent, ManagedAgent } from "./agent-manager.js";
 import type {
   AgentClient,
@@ -850,4 +854,88 @@ test("a human pasting an agent envelope stays a human message through provider r
     messageId: "provider-echo",
     clientMessageId: "human-submission",
   });
+});
+
+test("sendPromptToAgent with queueIfBusy never interrupts a running turn and delivers at the turn boundary", async () => {
+  let busy = true;
+  let subscriber: ((event: AgentManagerEvent) => void) | null = null;
+  const agent: ManagedAgent = Object.create(null);
+  Reflect.set(agent, "id", "busy-agent");
+  Reflect.set(agent, "config", { title: "Busy Agent" });
+  Reflect.set(agent, "lifecycle", "running");
+  Reflect.set(agent, "session", {});
+  Reflect.set(agent, "pendingPermissions", new Map());
+
+  const streamAgentSpy = vi.fn(() => (async function* noop() {})());
+  const replaceAgentRunSpy = vi.fn(() => (async function* noop() {})());
+  const steerSpy = vi.fn();
+  const agentManager = new AgentManager({ clients: {}, logger: createTestLogger() });
+  Reflect.set(
+    agentManager,
+    "getAgent",
+    vi.fn(() => agent),
+  );
+  Reflect.set(
+    agentManager,
+    "subscribe",
+    vi.fn((callback: (event: AgentManagerEvent) => void) => {
+      subscriber = callback;
+      return () => {};
+    }),
+  );
+  Reflect.set(
+    agentManager,
+    "hasBlockingRun",
+    vi.fn(() => busy),
+  );
+  Reflect.set(
+    agentManager,
+    "hasInFlightRun",
+    vi.fn(() => busy),
+  );
+  Reflect.set(
+    agentManager,
+    "tryRunOutOfBand",
+    vi.fn(() => false),
+  );
+  Reflect.set(agentManager, "steerOrReplaceActiveTurn", steerSpy);
+  Reflect.set(agentManager, "streamAgent", streamAgentSpy);
+  Reflect.set(agentManager, "replaceAgentRun", replaceAgentRunSpy);
+  Reflect.set(
+    agentManager,
+    "requireSessionAgent",
+    vi.fn(() => agent),
+  );
+  Reflect.set(agentManager, "ensureAgentLoaded", vi.fn());
+
+  const agentStorage: AgentStorage = Object.create(AgentStorage.prototype);
+  Reflect.set(
+    agentStorage,
+    "get",
+    vi.fn(async () => null),
+  );
+
+  const dispositions: string[] = [];
+  const result = await sendPromptToAgent({
+    agentManager,
+    agentStorage,
+    agentId: "busy-agent",
+    prompt: "from another agent",
+    source: { kind: "agent-message", agentId: "sender-agent" },
+    queueIfBusy: true,
+    onDispatch: (d) => dispositions.push(d),
+    logger: createTestLogger(),
+  });
+
+  expect(result.disposition).toBe("queued");
+  expect(dispositions).toEqual(["queued"]);
+  expect(replaceAgentRunSpy).not.toHaveBeenCalled();
+  expect(steerSpy).not.toHaveBeenCalled();
+  expect(streamAgentSpy).not.toHaveBeenCalled();
+
+  busy = false;
+  Reflect.set(agent, "lifecycle", "idle");
+  subscriber?.({ type: "agent_state", agent });
+  await vi.waitFor(() => expect(streamAgentSpy).toHaveBeenCalledTimes(1));
+  expect(replaceAgentRunSpy).not.toHaveBeenCalled();
 });

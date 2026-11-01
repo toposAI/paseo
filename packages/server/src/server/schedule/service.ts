@@ -206,6 +206,7 @@ type ScheduleAgentManager = Pick<
   | "replaceAgentRun"
   | "steerOrReplaceActiveTurn"
   | "streamAgent"
+  | "subscribe"
 > &
   Pick<
     AgentManager,

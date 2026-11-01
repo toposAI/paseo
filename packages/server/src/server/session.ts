@@ -451,6 +451,8 @@ export interface SessionOptions {
   permissions: readonly DaemonPermission[];
   appVersion?: string | null;
   clientCapabilities?: Record<string, unknown> | null;
+  /** Self-declared at hello. Only used to route non-app senders to the turn-boundary queue. */
+  clientType?: "mobile" | "browser" | "cli" | "mcp" | "hub";
   onMessage: (msg: SessionOutboundMessage) => void;
   onMessageToSource?: (source: object, msg: SessionOutboundMessage) => void;
   onBinaryMessage?: (frame: Uint8Array) => void;
@@ -707,6 +709,7 @@ export class Session {
   private readonly authorization: SessionAuthorization;
   private appVersion: string | null;
   private clientCapabilities: ReadonlySet<ClientCapability>;
+  private readonly clientType: SessionOptions["clientType"];
   private readonly sessionId: string;
   private readonly onMessage: (msg: SessionOutboundMessage) => void;
   private readonly onMessageToSource:
@@ -814,6 +817,7 @@ export class Session {
       permissions,
       appVersion,
       clientCapabilities,
+      clientType,
       onMessage,
       onMessageToSource,
       onBinaryMessage,
@@ -870,6 +874,7 @@ export class Session {
     this.authorization = new SessionAuthorization(permissions);
     this.appVersion = appVersion ?? null;
     this.clientCapabilities = parseClientCapabilities(clientCapabilities);
+    this.clientType = clientType;
     this.sessionId = uuidv4();
     this.onMessage = onMessage;
     this.onMessageToSource = onMessageToSource ?? null;
@@ -8228,6 +8233,8 @@ export class Session {
       const agentId = resolved.agentId;
 
       const prompt = buildAgentPrompt(msg.text, msg.images, msg.attachments);
+      const isAgentOriginMessage =
+        Boolean(msg.sourceAgentId) || this.clientType === "cli" || this.clientType === "mcp";
       this.sessionLogger.trace(
         {
           agentId,
@@ -8248,6 +8255,9 @@ export class Session {
             : undefined,
           messageId: msg.messageId,
           activeTurnBehavior: msg.activeTurnBehavior ?? "interrupt",
+          // Agent-to-agent (CLI/MCP clients, or any message naming a source agent) that did not
+          // ask for interrupt/steer waits for the turn boundary. App input keeps interrupting.
+          queueIfBusy: !msg.activeTurnBehavior && isAgentOriginMessage,
           clearPendingPermissions: true,
           logger: this.sessionLogger,
         });

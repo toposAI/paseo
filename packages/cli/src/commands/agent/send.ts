@@ -30,6 +30,7 @@ export const agentSendSchema: OutputSchema<AgentSendResult> = {
 export interface AgentSendOptions extends CommandOptions {
   wait?: boolean;
   steer?: boolean;
+  interrupt?: boolean;
   image?: string[];
   prompt?: string;
   promptFile?: string;
@@ -47,6 +48,10 @@ export function addSendOptions(cmd: Command): Command {
     .option(
       "--steer",
       "If the agent is mid-turn, deliver the message into the running turn instead of interrupting it",
+    )
+    .option(
+      "--interrupt",
+      "If the agent is mid-turn, interrupt it now. Default: wait and deliver at the turn boundary",
     );
 }
 
@@ -196,11 +201,15 @@ export async function runSendCommand(
     const images =
       options.image && options.image.length > 0 ? await readImageFiles(options.image) : undefined;
 
+    let activeTurnBehavior: "steer" | "interrupt" | undefined;
+    if (options.steer) activeTurnBehavior = "steer";
+    else if (options.interrupt) activeTurnBehavior = "interrupt";
+
     // Send the message
     await client.sendAgentMessage(agentIdArg, promptInput, {
       images,
       sourceAgentId: process.env.PASEO_AGENT_ID?.trim() || undefined,
-      ...(options.steer ? { activeTurnBehavior: "steer" as const } : {}),
+      ...(activeTurnBehavior ? { activeTurnBehavior } : {}),
     });
 
     // If --no-wait, return immediately

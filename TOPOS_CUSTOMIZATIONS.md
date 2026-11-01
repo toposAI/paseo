@@ -148,3 +148,8 @@ variant \`tool_definition\`, expected \`tool_reference\``で失敗していた�
     (ToposAI-Mini-Project の `spawn_backstage.sh`・`spawn_window_thread.sh`・`spawn_judgment_windows.sh`・
     `spawn_progress_window.sh`)。窓口系は識別子を兼ねるため、表示用の題名を
     `paseo.title-display-title` にも入れておく(表示名と識別子を分ける準備)。
+- エージェント間の連絡は走行中のターンを中断せず、ターンの切れ目で渡す(2026-11-01, 枝 feat/agent-message-queue-20261101):
+  `agent/agent-message-queue.ts`(順番待ち)、`agent-prompt.ts`の`queueIfBusy`、`session.ts`の`send_agent_message`。
+  対象は CLI/MCP クライアント(helloのclientType)、または`sourceAgentId`付きの送信で、`activeTurnBehavior`未指定のとき。
+  アプリ(mobile/browser)からの入力・`--interrupt`・`--steer`・Stop(cancel)は従来どおり。MCP`send_agent_prompt`は呼び出し元が
+  エージェントなら常に順番待ち(完了通知は順番待ち分には付かない)。
