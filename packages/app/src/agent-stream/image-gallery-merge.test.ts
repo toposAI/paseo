@@ -148,4 +148,11 @@ describe("live presentation", () => {
     // Settling the head into the tail leaves the same visible order.
     expect(run([r1, i1, r2, i2], [])).toEqual(["r1", "r2", "i1:block:0"]);
   });
+
+  it("does not move an image away from the caption text above it in the same message", () => {
+    const caption = text("m:block:0", "Here:");
+    const captioned = image("m:block:1", "/a.png", { blockIndex: 1, blockGroupId: "m" });
+    const items = [caption, captioned, read("r1"), image("i2", "/b.png")];
+    expect(mergeSeparatedImageGalleries(items)).toBe(items);
+  });
 });

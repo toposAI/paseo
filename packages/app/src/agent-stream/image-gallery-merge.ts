@@ -23,7 +23,13 @@ interface CachedMergedGallery {
 const mergedGalleryCache = new WeakMap<AssistantMessageItem, CachedMergedGallery>();
 
 export function isImageOnlyRow(item: StreamItem): item is AssistantMessageItem {
-  return item.kind === "assistant_message" && parseAssistantImageOnlyBlock(item.text) !== null;
+  // A later Markdown block of a message has its own text above it (a caption); moving
+  // that image away would separate it from the text.
+  return (
+    item.kind === "assistant_message" &&
+    (item.blockIndex ?? 0) === 0 &&
+    parseAssistantImageOnlyBlock(item.text) !== null
+  );
 }
 
 function mergeGalleryRun(rows: readonly AssistantMessageItem[]): AssistantMessageItem {
