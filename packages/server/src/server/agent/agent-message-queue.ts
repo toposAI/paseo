@@ -96,6 +96,11 @@ export class AgentMessageQueue {
             "agent.message_queue.delivered",
           );
         } catch (error) {
+          if (this.manager.hasBlockingRun(agentId)) {
+            // Lost a race with another turn start: keep the message and wait for the next boundary.
+            queue.unshift(head);
+            break;
+          }
           this.logger.error(
             { err: error, agentId, sourceAgentId: head.sourceAgentId },
             "agent.message_queue.deliver_failed",

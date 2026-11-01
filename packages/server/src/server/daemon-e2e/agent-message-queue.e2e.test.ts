@@ -263,12 +263,11 @@ test("CLI message naming a source agent does not interrupt; delivered at the tur
   expect(session.interruptCalls).toBe(0);
 });
 
-test("CLI message without source agent id (no PASEO_AGENT_ID) is also queued", async () => {
+test("CLI message without source agent id (a human at a terminal) still interrupts", async () => {
   const { cli, agent, session } = await setup();
   await cli.sendMessage(agent.id, "from terminal");
   await settle();
-  expect(session.interruptCalls).toBe(0);
-  expect(session.prompts).toHaveLength(1);
+  expect(session.interruptCalls).toBe(1);
 });
 
 test("several queued messages arrive in order, one per turn", async () => {

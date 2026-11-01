@@ -157,7 +157,11 @@ export async function startAgentRun(
     options?.onDispatch?.("out_of_band");
     return { disposition: "out_of_band" };
   }
-  if (options?.queueIfBusy && agentManager.hasBlockingRun(agentId)) {
+  if (
+    options?.queueIfBusy &&
+    (agentManager.hasBlockingRun(agentId) ||
+      getAgentMessageQueue(agentManager, logger).depth(agentId) > 0)
+  ) {
     return enqueueAgentMessage(agentManager, agentId, prompt, logger, options);
   }
   try {
@@ -398,7 +402,8 @@ export async function sendPromptToAgent(
     : params.runOptions;
 
   return await startAgentRun(params.agentManager, params.agentId, delivery.prompt, params.logger, {
-    replaceRunning: true,
+    // Agent-origin messages never replace a running turn; they wait in the queue instead.
+    replaceRunning: !params.queueIfBusy,
     onDispatch: params.onDispatch,
     activeTurnBehavior: params.activeTurnBehavior,
     clearPendingPermissions: params.clearPendingPermissions,
