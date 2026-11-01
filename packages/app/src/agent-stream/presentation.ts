@@ -9,6 +9,7 @@ import {
   type ToolCallDetailLevel,
 } from "@/tool-calls/detail-level/projection";
 import { mergeAdjacentThoughts } from "./thinking-merge";
+import { mergeSeparatedImageGalleries, pullGalleryAcrossBoundary } from "./image-gallery-merge";
 
 interface PresentationInput {
   tail: StreamItem[];
@@ -79,6 +80,10 @@ export function createStreamPresentation() {
   let preparedTail: StreamItem[] | undefined;
   let preparedLevel: ToolCallDetailLevel | undefined;
   let preparedHistory: PreparedToolCallHistory | null = null;
+  // The tail minus a gallery that the live head continues; kept stable while it holds.
+  let boundaryTail: StreamItem[] = [];
+  let boundaryLevel: ToolCallDetailLevel | undefined;
+  let boundaryPrepared: PreparedToolCallHistory | null = null;
 
   /**
    * One display row per Markdown block. Each block renders on its own, so a construct
@@ -142,8 +147,10 @@ export function createStreamPresentation() {
       // One rendering path: history splits the same way the live head does, and
       // `blocksBySource` keeps both the live block identities and the split cost
       // from being paid again when only the tail's array identity changed.
-      historyRows = mergeAdjacentThoughts(
-        projectPluginTimelineItems(input.tail, input.transform).flatMap<StreamItem>(nativeBlocks),
+      historyRows = mergeSeparatedImageGalleries(
+        mergeAdjacentThoughts(
+          projectPluginTimelineItems(input.tail, input.transform).flatMap<StreamItem>(nativeBlocks),
+        ),
       );
       historySource = input.tail;
       historyTransform = input.transform;
@@ -174,10 +181,27 @@ export function createStreamPresentation() {
       preparedTail = displayTail;
       preparedLevel = input.level;
     }
+    const displayHead = mergeSeparatedImageGalleries(mergeAdjacentThoughts(head));
+    const boundary = pullGalleryAcrossBoundary(displayTail, displayHead);
+    if (boundary) {
+      const nextBoundaryTail = retainItems(boundaryTail, boundary.tail);
+      if (boundaryTail !== nextBoundaryTail || boundaryLevel !== input.level) {
+        boundaryPrepared = prepareToolCallHistory(input.level, nextBoundaryTail);
+        boundaryTail = nextBoundaryTail;
+        boundaryLevel = input.level;
+      }
+      return projectToolCallDetailLevel({
+        level: input.level,
+        tail: boundaryTail,
+        head: boundary.head,
+        preparedHistory: boundaryPrepared,
+        isTurnActive: input.isTurnActive,
+      });
+    }
     return projectToolCallDetailLevel({
       level: input.level,
       tail: displayTail,
-      head: mergeAdjacentThoughts(head),
+      head: displayHead,
       preparedHistory,
       isTurnActive: input.isTurnActive,
     });

@@ -31,6 +31,7 @@ import type {
   ToolCallTimelineItem,
 } from "../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../provider-session-import.js";
+import { renderProviderImageOutputAsAssistantMarkdown } from "./provider-image-output.js";
 import { getAgentProviderDefinition } from "@getpaseo/protocol/provider-manifest";
 
 export const MOCK_LOAD_TEST_PROVIDER_ID = "mock";
@@ -269,6 +270,29 @@ function parseSettledAssistantImageMarkdown(prompt: AgentPromptInput): string | 
     promptToText(prompt),
   );
   return match?.[1] ?? null;
+}
+
+interface ReadImageSequenceRequest {
+  mode: "alternating" | "batch";
+  paths: string[];
+}
+
+/**
+ * `emit read image sequence alternating|batch: /a.png, /b.png` replays Claude's Read-an-image
+ * shape (no paths = an empty turn): a Read, then its image as its own assistant message.
+ */
+function parseReadImageSequencePrompt(prompt: AgentPromptInput): ReadImageSequenceRequest | null {
+  const match = /^emit read image sequence (alternating|batch):\s*(.*)$/i.exec(
+    promptToText(prompt).trim(),
+  );
+  if (!match) {
+    return null;
+  }
+  const paths = match[2]!
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return { mode: match[1]!.toLowerCase() as "alternating" | "batch", paths };
 }
 
 function parseMockQuestionPrompt(prompt: AgentPromptInput): MockQuestionPromptRequest | null {
@@ -854,6 +878,7 @@ export class MockLoadTestAgentSession implements AgentSession {
     const questionPrompt = parseMockQuestionPrompt(prompt);
     const structuredBranchName = parseStructuredBranchNamePrompt(prompt);
     const settledAssistantImageMarkdown = parseSettledAssistantImageMarkdown(prompt);
+    const readImageSequence = parseReadImageSequencePrompt(prompt);
     const steeringReplayShape = parseSteeringReplayShape(prompt);
     const scheduleTurn = () => {
       if (shouldEmitTurnFailure(prompt)) {
@@ -869,6 +894,8 @@ export class MockLoadTestAgentSession implements AgentSession {
         );
       } else if (structuredBranchName) {
         this.scheduleSettledAssistantTurn(turn, JSON.stringify(structuredBranchName));
+      } else if (readImageSequence) {
+        this.scheduleReadImageSequenceTurn(turn, readImageSequence);
       } else if (settledAssistantImageMarkdown) {
         this.scheduleSettledAssistantTurn(turn, settledAssistantImageMarkdown);
       } else if (shouldEmitPlanApprovalPrompt(prompt)) {
@@ -1233,6 +1260,42 @@ export class MockLoadTestAgentSession implements AgentSession {
   ): void {
     turn.timer = setTimeout(() => {
       this.emitQuestionPromptTurn(turn, questionPrompt);
+    }, 0);
+    turn.timer.unref?.();
+  }
+
+  private scheduleReadImageSequenceTurn(turn: ActiveTurn, request: ReadImageSequenceRequest): void {
+    const gapMs = 2500;
+    const wait = () => new Promise<void>((resolvePromise) => setTimeout(resolvePromise, gapMs));
+    const readCall = (index: number, status: ToolCallTimelineItem["status"]) =>
+      createToolCall({
+        callId: `${turn.turnId}-read-${index}`,
+        name: "Read",
+        status,
+        detail: { type: "read", filePath: request.paths[index]! },
+      });
+    const emitResult = (index: number) => {
+      this.emitTimeline(turn.turnId, readCall(index, "completed"));
+      const image = renderProviderImageOutputAsAssistantMarkdown({ path: request.paths[index]! });
+      if (image) this.emitTimeline(turn.turnId, image);
+    };
+    turn.timer = setTimeout(async () => {
+      if (this.activeTurn !== turn) return;
+      this.emitTurnStarted(turn);
+      if (request.mode === "batch") {
+        for (let index = 0; index < request.paths.length; index += 1) {
+          this.emitTimeline(turn.turnId, readCall(index, "running"));
+        }
+      }
+      for (let index = 0; index < request.paths.length; index += 1) {
+        if (request.mode === "alternating") {
+          this.emitTimeline(turn.turnId, readCall(index, "running"));
+        }
+        await wait();
+        if (this.activeTurn !== turn) return;
+        emitResult(index);
+      }
+      this.finishTurnWithText(turn, "Read images");
     }, 0);
     turn.timer.unref?.();
   }
