@@ -235,6 +235,13 @@ export type ChildThreadSide = (typeof CHILD_THREAD_SIDES)[number];
 /** 壁打ち⇔補助スレの振り分けの保存先(確認箱ディレクトリ直下。全端末で共通)。 */
 export const CHILD_THREAD_SIDES_FILE = "child_threads_sides.json";
 
+/**
+ * 1件スレ(確認箱の1件を窓口Aから受けて話すスレ)の id の一覧(2026-11-01、壁打ち側に出すため)。
+ * 手動の振り分けとは別ファイル: こちらは表示の振り分けだけを意味し、自動アーカイブの保護には効かない。
+ * 書き手は ToposAI 側の `antigravity/utils/one_thread_lane.py`。
+ */
+export const CHILD_THREAD_ONE_THREAD_FILE = "child_threads_one_thread.json";
+
 export const childThreadsSideRpc = defineRpc({
   name: "topos.childthreads.side",
   input: z.object({

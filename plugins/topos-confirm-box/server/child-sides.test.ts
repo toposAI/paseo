@@ -4,8 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { applyAuxGroup, readChildThreadSides, writeChildThreadSide } from "./child-sides.js";
-import { CHILD_THREAD_SIDES_FILE } from "../shared/child-threads.js";
+import {
+  applyAuxGroup,
+  readChildThreadSides,
+  readOneThreadIds,
+  writeChildThreadSide,
+} from "./child-sides.js";
+import { CHILD_THREAD_ONE_THREAD_FILE, CHILD_THREAD_SIDES_FILE } from "../shared/child-threads.js";
 import type { ChildThread } from "../shared/child-threads.js";
 import { groupThreadRowsBySide, sideOfThread } from "../shared/sidebar-rows.js";
 import type { SidebarRowView } from "../shared/sidebar-rows.js";
@@ -95,6 +100,52 @@ test("手動指定は自動判定より優先し、壁打ちへ移した行は�
   assert.equal(rows[0]?.parentTitle, null);
   assert.equal(sideOfThread(rows[1]!), "aux");
   assert.equal(sideOfThread(rows[2]!), "aux");
+});
+
+test("1件スレの印がある行は壁打ち: 子を持つ親でも壁打ちへ出る(2026-11-01 ユーザー指示)", () => {
+  const rows = applyAuxGroup(
+    [
+      thread({
+        agentId: "one",
+        parentAgentId: "A",
+        parentTitle: "判断窓口A",
+        groupingParent: true,
+      }),
+      thread({ agentId: "kid", parentAgentId: "one", parentTitle: "1件: 件名" }),
+      thread({ agentId: "reg", parentAgentId: "p", parentTitle: "P" }),
+    ],
+    new Map(),
+    new Set(["one"]),
+  );
+  const side = Object.fromEntries(rows.map((t) => [t.agentId, sideOfThread(t)]));
+  // 1件スレは壁打ちへ。調べの子スレ(子の行)は補助のまま(見出しの無いグループとして補助側に並ぶ)
+  assert.deepEqual(side, { one: "walltalk", kid: "aux", reg: "aux" });
+  // 壁打ちへ出る行は親の印を外す(判断窓口Aの見出しの下へ吸われない)
+  assert.equal(rows[0]?.parentAgentId, null);
+});
+
+test("1件スレの印でも司令塔は動かず、手動の aux 指定が優先する", () => {
+  const rows = applyAuxGroup(
+    [thread({ agentId: "co", coordinator: true }), thread({ agentId: "one" })],
+    new Map([["one", "aux"]] as const),
+    new Set(["co", "one"]),
+  );
+  assert.deepEqual(
+    rows.map((t) => sideOfThread(t)),
+    ["aux", "aux"],
+  );
+});
+
+test("1件スレの一覧: 無い/読める/大文字小文字を吸収/壊れたファイルは空", () => {
+  const dir = tmp();
+  assert.equal(readOneThreadIds(dir).size, 0);
+  fs.writeFileSync(
+    path.join(dir, CHILD_THREAD_ONE_THREAD_FILE),
+    JSON.stringify({ version: 1, ids: ["ABC-123-4567", 3, ""] }),
+  );
+  assert.deepEqual([...readOneThreadIds(dir)], ["abc-123-4567"]);
+  fs.writeFileSync(path.join(dir, CHILD_THREAD_ONE_THREAD_FILE), "{broken");
+  assert.equal(readOneThreadIds(dir).size, 0);
 });
 
 test("振り分けの保存: 書く→読める、null で自動へ戻る、壊れたファイルは空", () => {
