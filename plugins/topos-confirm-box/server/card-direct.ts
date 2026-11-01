@@ -103,6 +103,27 @@ export function runJudgmentCli(
   });
 }
 
+/** JSON を返さない副命令(`release` は "ok" と出すだけ)用。終了コードだけ見る。 */
+function runJudgmentExit(
+  cli: JudgmentCli,
+  args: readonly string[],
+): Promise<{ code: number; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      cli.python,
+      [cli.script, ...args],
+      { cwd: path.dirname(cli.script), timeout: CLI_TIMEOUT_MS, killSignal: "SIGKILL" },
+      (error, _stdout, stderr) => {
+        if (error && typeof error.code !== "number") {
+          reject(new Error(`${(error as Error).message} ${`${stderr}`.slice(-300)}`));
+          return;
+        }
+        resolve({ code: typeof error?.code === "number" ? error.code : 0, stderr: `${stderr}` });
+      },
+    );
+  });
+}
+
 // ---------------------------------------------------------------- 行の状態(二重記録よけ)
 
 interface AgentRowState {
@@ -114,7 +135,13 @@ interface AgentRowState {
   /** 行に載せた選択肢(押された id の見出しを逐語の回答にするため)。 */
   options: CardDirectOption[];
   answered: Record<string, { recorded: string; choiceId: string; at: number }>;
+  /** 「保留」で手放した件(回答ではないので answered とは別に持つ)。 */
+  held?: string[];
+  /** 差し替えで止めた行(押しても記録しない)。直近だけ残す。 */
+  retired?: string[];
 }
+
+const RETIRED_KEEP = 20;
 
 interface RowStateFile {
   agents: Record<string, AgentRowState>;
@@ -229,9 +256,23 @@ export async function appendCardRow(
     options,
     // 同じスレの過去の回答履歴は残す(押し直しの判定に使う)
     answered: prev?.answered ?? {},
+    held: prev?.held ?? [],
+    retired: prev?.retired ?? [],
   };
   writeRowState(deps.stateDir, state);
   return cardId;
+}
+
+/** 行を「もう押せない」印にする(差し替え・カード消失)。件そのものは触らない。 */
+function retireRow(stateDir: string, agentId: string, cardId: string): void {
+  if (!cardId) return;
+  const state = readRowState(stateDir);
+  const row = state.agents[agentId];
+  if (!row || !row.cardId) return;
+  const retired = (row.retired ?? []).filter((id) => id !== cardId);
+  retired.push(cardId);
+  row.retired = retired.slice(-RETIRED_KEEP);
+  writeRowState(stateDir, state);
 }
 
 /**
@@ -373,4 +414,197 @@ export async function answerCard(deps: ShowDeps, input: AnswerInput): Promise<An
     return { ok: true, recorded, reason: "", nextCardId, shownNext: true };
   }
   return { ok: true, recorded, reason: "", nextCardId: "", shownNext: false };
+}
+
+// ---------------------------------------------------------------- 保留(release)
+
+export interface HoldResult {
+  ok: boolean;
+  reason: string;
+  nextCardId: string;
+  shownNext: boolean;
+}
+
+/**
+ * 「保留」= この1問を記録せずに手放し、次の1問へ進む。
+ *
+ * `release --dismissed`(=質問を閉じられた扱いで次へ進む)を使う。単なる `release` だと件が
+ * すぐ空きに戻り、直後の `next` が同じ質問を返して「保留」が見かけ上なにもしない。
+ * `--dismissed` は件を open のまま残し、他に出せる件があるあいだ後ろへ回す。
+ */
+export async function holdCard(
+  deps: ShowDeps,
+  input: { agentId: string; cardId: string },
+): Promise<HoldResult> {
+  const env = deps.env ?? process.env;
+  const fail = (reason: string): HoldResult => ({
+    ok: false,
+    reason,
+    nextCardId: "",
+    shownNext: false,
+  });
+  if (isPaused(env)) return fail("paused");
+  if (!deps.cli) return fail("judgment_cli_missing");
+  const state = readRowState(deps.stateDir);
+  const row = state.agents[input.agentId];
+  if (!row || row.cardId !== input.cardId) return fail("stale");
+  if (row.answered[input.cardId]) return fail("duplicate");
+  if (row.held?.includes(input.cardId)) return fail("duplicate");
+
+  try {
+    const res = await runJudgmentExit(deps.cli, [
+      "release",
+      "--window",
+      row.window,
+      "--id",
+      input.cardId,
+      "--dismissed",
+    ]);
+    // 4 = この窓口の有効な印ではない(期限切れ・別の窓口が持っている)
+    if (res.code !== 0) return fail(res.code === 4 ? "stale" : `release_failed: exit ${res.code}`);
+  } catch (error) {
+    return fail(`release_failed: ${(error as Error).message}`.slice(0, 300));
+  }
+  const after = readRowState(deps.stateDir);
+  const held = after.agents[input.agentId];
+  if (held && held.cardId === input.cardId) {
+    held.held = [...(held.held ?? []).filter((id) => id !== input.cardId), input.cardId];
+    writeRowState(deps.stateDir, after);
+  }
+  // 保留した1問の代わりに、次の1問があれば出す
+  const next = await showNext(deps, input.agentId, row.window);
+  return { ok: true, reason: "", nextCardId: next.cardId, shownNext: next.shown };
+}
+
+// ---------------------------------------------------------------- 自動出題(モデルを呼ばない)
+
+/**
+ * 窓口Aのスレ id。`windows/A.id`(判断窓口が使っている正本)を読み、検証では環境変数で差し替える。
+ * どちらも無ければ空(=自動出題しない)。
+ */
+export function resolveWindowAgent(
+  env: NodeJS.ProcessEnv = process.env,
+  stateDir: string = judgmentStateDir(env),
+): string {
+  const override = env.TOPOS_CARD_DIRECT_AGENT_A?.trim();
+  if (override) return override;
+  try {
+    const lines = fs
+      .readFileSync(path.join(stateDir, "windows", "A.id"), "utf8")
+      .split("\n")
+      .map((l) => l.replace(/#.*/, "").trim());
+    return lines.find((l) => /^[0-9a-f][0-9a-f-]{7,}$/i.test(l)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export interface AutoAskResult {
+  shown: boolean;
+  cardId: string;
+  reason: string;
+  retired: string;
+}
+
+function noShow(reason: string, retired = ""): AutoAskResult {
+  return { shown: false, cardId: "", reason, retired };
+}
+
+/** まだ答えていない(保留にもしていない)表示中の行。 */
+function openRowOf(row: AgentRowState | undefined): AgentRowState | undefined {
+  if (!row || !row.cardId) return undefined;
+  if (row.answered[row.cardId]) return undefined;
+  if ((row.held ?? []).includes(row.cardId)) return undefined;
+  return row;
+}
+
+/**
+ * 1回ぶんの自動出題(2026-11-01 ユーザー「自動で次の質問スタンバイしてほしい」)。
+ *
+ * モデルは呼ばない。`judgment_window.py next` を叩き、返ったカードをそのまま行にするだけ。
+ * **未回答の行が生きているあいだは新しい行を出さない**(常に1問)。出した行の件は `next` が
+ * 自分の印として返し続けるので、呼ぶたびに期限が延びる(=話しかけなくても質問が消えない)。
+ */
+export async function autoAskOnce(deps: ShowDeps, agentId = ""): Promise<AutoAskResult> {
+  const env = deps.env ?? process.env;
+  const target = agentId || resolveWindowAgent(env, deps.stateDir);
+  if (!target) return noShow("no_agent");
+  if (!deps.cli) return noShow("judgment_cli_missing");
+  // 門1: 出題停止の印(本物の PAUSED.json は外さない)
+  if (isPaused(env)) return noShow("paused");
+
+  const openRow = openRowOf(readRowState(deps.stateDir).agents[target]);
+  let out: Record<string, unknown>;
+  try {
+    out = await runJudgmentCli(deps.cli, ["next", "--window", "A"]);
+  } catch (error) {
+    return noShow(`next_failed: ${(error as Error).message}`.slice(0, 300));
+  }
+  return showFromNext(deps, target, openRow, out);
+}
+
+/** `next` の返り値をそのまま行にする(出さないときは理由だけ)。 */
+async function showFromNext(
+  deps: ShowDeps,
+  target: string,
+  openRow: AgentRowState | undefined,
+  out: Record<string, unknown>,
+): Promise<AutoAskResult> {
+  if (out.paused) return noShow("paused");
+  const item = pickItem(out) ?? {};
+  const card = item.card as Record<string, unknown> | null | undefined;
+  if (!item.has_card || !card || typeof card !== "object") {
+    // カードが無い(点検の印が切れた・作り直し中・出せる件が無い)。表示中の行は押せなくする
+    if (!openRow) return noShow(String(item.card_note ?? out.say ?? "no_card").slice(0, 300));
+    retireRow(deps.stateDir, target, openRow.cardId);
+    return noShow("card_missing", openRow.cardId);
+  }
+  const cardId = String(card.id ?? "");
+  const sha = cardSha(deps.stateDir, cardId);
+  // すでに同じ本文の行が出ている=何もしない(`next` が印の期限を延ばしている)
+  if (openRow && openRow.cardId === cardId && openRow.cardSha === sha) return noShow("");
+  const retired = openRow?.cardId ?? "";
+  if (retired) retireRow(deps.stateDir, target, retired);
+  const shownId = await appendCardRow(deps, target, String(item.window ?? "A"), card);
+  return { shown: true, cardId: shownId, reason: "", retired };
+}
+
+export interface AutoAskHandle {
+  /** いま走っているか(試験用)。 */
+  running(): boolean;
+  stop(): void;
+}
+
+/**
+ * 自動出題を一定間隔で回す。プラグインのサーバーが読み込まれた時点で始め、
+ * 片付け(プラグインの reload・デーモンの終了)で止める。
+ *
+ * 出す時点は「回答の直後・出せるカードができた時・PAUSED が外れた時・再起動の後」のどれも
+ * 「次の見回り」で拾う(専用のイベントは無い。`next` は何度呼んでも同じ1問を返す)。
+ */
+export function startAutoAsk(deps: ShowDeps, intervalMs = 20_000): AutoAskHandle {
+  let busy = false;
+  let stopped = false;
+  const tick = (): void => {
+    if (busy || stopped) return;
+    busy = true;
+    autoAskOnce(deps)
+      .catch(() => {
+        // 見回りの失敗で止めない(次の見回りで拾う)
+      })
+      .finally(() => {
+        busy = false;
+      });
+  };
+  // 起動直後はスレの読み込みが終わっていないので、少し置いてから1回目を打つ
+  const first = setTimeout(tick, 3_000);
+  const timer = setInterval(tick, intervalMs);
+  return {
+    running: () => busy,
+    stop: () => {
+      stopped = true;
+      clearTimeout(first);
+      clearInterval(timer);
+    },
+  };
 }

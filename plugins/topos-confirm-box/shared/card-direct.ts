@@ -89,17 +89,41 @@ export const cardDirectAnswerRpc = defineRpc({
   }),
 });
 
-/** 試作の動作確認用(いま何を出しているか。読み取りのみ)。 */
+/**
+ * 「保留」= この1問はいま答えず、次の1問へ進む(2026-11-01 壁打ち4)。
+ *
+ * 記録はせず、`judgment_window.py release`(=手放す)に繋ぐ。件は open のまま残り、
+ * 他の出せる件があるあいだは後ろへ回る(次の `next` で同じ質問がすぐ戻らない)。
+ */
+export const cardDirectHoldRpc = defineRpc({
+  name: "topos.carddirect.hold",
+  input: z.object({
+    agentId: z.string(),
+    cardId: z.string(),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    reason: z.string().default(""),
+    nextCardId: z.string().default(""),
+    shownNext: z.boolean().default(false),
+  }),
+});
+
+/** いま何を出しているか(読み取りのみ)。古い行のボタンを止めるため、画面が定期的に見る。 */
 export const cardDirectStateRpc = defineRpc({
   name: "topos.carddirect.state",
   input: z.object({ agentId: z.string().default("") }),
   output: z.object({
+    /** 出題の一時停止の印(PAUSED)があるか。 */
+    paused: z.boolean().default(false),
     agents: z.record(
       z.string(),
       z.object({
         cardId: z.string().default(""),
         shownAt: z.number().default(0),
         answered: z.array(z.string()).default([]),
+        /** 差し替えで止めた行(押しても記録しない)。 */
+        retired: z.array(z.string()).default([]),
       }),
     ),
   }),
