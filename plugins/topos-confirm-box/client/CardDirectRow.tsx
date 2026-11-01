@@ -23,6 +23,7 @@ import {
   cardDirectStateRpc,
   type CardDirectData,
 } from "../shared/card-direct.js";
+import { alignToTop } from "./align-to-top.js";
 
 const REASON_LABEL: Record<string, string> = {
   paused: "いまは出題を止めています(この回答は記録していません)",
@@ -41,16 +42,7 @@ const STALE_LABEL: Record<string, string> = {
 /** 保留にした行の印(選択肢の id と衝突しない値)。 */
 const HELD = "__hold__";
 
-/** 画面に出したときに、カードの先頭が上へ隠れていたら先頭へ合わせる(iPhone の長いカード)。 */
-function alignToTop(node: unknown): void {
-  const el = node as {
-    getBoundingClientRect?: () => { top: number };
-    scrollIntoView?: (options: { block: string }) => void;
-  } | null;
-  if (!el || typeof el.getBoundingClientRect !== "function") return;
-  if (typeof el.scrollIntoView !== "function") return;
-  if (el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: "start" });
-}
+// 先頭合わせの判定と戻し方は client/align-to-top.ts(ヘッダーの高さは固定値で持たず実測する)
 
 /** この行がまだ押せるかを、いま出している行と突き合わせる。 */
 function staleOf(
@@ -81,10 +73,11 @@ export function CardDirectRow({ agentId, item, theme }: PluginTimelineItemProps<
 
   const styles = useMemo(() => buildStyles(c), [c]);
 
-  // 出したときに先頭へ合わせる(行が画面の下に積まれたあとで1回だけ)
+  // 出したときに先頭へ合わせる(行が画面の下に積まれたあと)。会話の自動スクロールが
+  // 遅れて走ることがあるので、出てすぐの数回だけ見張る(その後の利用者のスクロールは動かさない)
   useEffect(() => {
-    const timer = setTimeout(() => alignToTop(cardRef.current), 250);
-    return () => clearTimeout(timer);
+    const timers = [250, 800, 1600].map((ms) => setTimeout(() => alignToTop(cardRef.current), ms));
+    return () => timers.forEach(clearTimeout);
   }, []);
 
   const decided = !!state?.chosen;
