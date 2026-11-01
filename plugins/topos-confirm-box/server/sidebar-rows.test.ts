@@ -51,6 +51,46 @@ const note = (over: Partial<SidebarNote>): SidebarNote => ({
   ...over,
 });
 
+test("上段: 完了+ピン止めの行は残り、完了+ピン止めなしは隠れる(ノートの有無どちらも)", () => {
+  const impl = new Map([["n-pin", note({ path: "/v/np.md", status: "完了", title: "終わった" })]]);
+  const rows = buildUpperRows(
+    [
+      { ...thread("pin", "完了"), pinned: true },
+      { ...thread("plain", "完了"), pinned: false },
+      { ...thread("unset", "完了") },
+      { ...thread("n-pin", "完了"), pinned: true },
+      { ...thread("n-plain", "完了"), pinned: false },
+    ],
+    new Map([...impl, ["n-plain", note({ path: "/v/n.md", status: "完了" })]]),
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.thread.agentId, r.statusLabel]),
+    [
+      ["pin", "完了"],
+      ["n-pin", "完了"],
+    ],
+  );
+});
+
+test("上段: 完了+ピン止めでも司令塔は残さず、closed+ピン止めの完了行は残り、ピン止め欄に入る", () => {
+  const rows = buildUpperRows(
+    [
+      { ...thread("coord", "完了"), pinned: true, coordinator: true },
+      { ...thread("closed-pin", "完了"), pinned: true, machineState: "closed" },
+      { ...thread("closed-plain", "完了"), machineState: "closed" },
+    ],
+    new Map(),
+  );
+  assert.deepEqual(
+    rows.map((r) => [r.thread.agentId, r.statusLabel]),
+    [["closed-pin", "完了"]],
+  );
+  assert.equal(
+    rowGroupKeyOf(rows[0]!.thread, new Set(), COORDINATOR_GROUP, PINNED_GROUP),
+    PINNED_GROUP,
+  );
+});
+
 test("上段: ノートのstatusが実装中/判断待ち/確認待ちの行だけ、題名はノート優先", () => {
   const impl = new Map([
     ["a", note({ path: "/v/a.md", status: "実装中", title: "ノート題名A" })],

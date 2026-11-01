@@ -5,7 +5,7 @@
  *   ノートが無いスレにだけ使う。
  * - 上段に出すのは status が 実装中/判断待ち/確認待ち(旧語彙・移行中) の行(ノートがあるスレ)、または
  *   ノートが無く子スレ一覧でも `完了` 以外の行(実装中/ユーザー判断待ち/承認待ち/待機中)。
- *   ノートがあるのに `完了` のスレは上段から外す。2026-10-26 に完了の「確認待ち」表示は廃止した
+ *   ノートがあるのに `完了` のスレは上段から外す(ただしピン止めした行は完了でも残す)。2026-10-26 に完了の「確認待ち」表示は廃止した
  *   (完了はユーザー確認を待たずに畳まれる)。
  * - 行の題名と状態文字はノート側を優先する(スレ側は古いことがあるため)。
  */
@@ -45,6 +45,8 @@ export interface RowThread {
    * 上段に出すのは子の行より後ろ(見出しとして)で、子の行は「自分の見出しの先頭」に来る。
    */
   groupingParent?: boolean;
+  /** ピン止め済みか(`ChildThread.pinned`)。ピン止めした完了の行は上段(ピン止め欄)に残す。 */
+  pinned?: boolean;
   /** Paseo の機械状態(行末の「終了」の判定に使う。閉じたスレの「実装中」を出さない)。 */
   machineState?: string | null;
 }
@@ -358,7 +360,7 @@ export function reorderableIds<T extends GroupableThread>(
 }
 
 /**
- * 上段の行を作る。ノートの無いスレは `完了` 以外を残す(`keepsWithoutNote`)。
+ * 上段の行を作る。ノートの無いスレは `完了` 以外を残す(`keepsWithoutNote`)。ピン止めした行は完了でも残す。
  * 並びは入力の順を保つ(ドラッグ並びを壊さない)。
  */
 export function buildUpperRows<T extends RowThread>(
@@ -377,8 +379,11 @@ export function buildUpperRows<T extends RowThread>(
         : null;
     // 2026-10-26: 「完了待ち」(ユーザーの確認待ち)は廃止した。完了は確認を待たずに畳まれるので、
     // 行はノートの status(実装中・判断待ち)か、ノートの無い行の機械状態だけで決める。
+    // ピン止めした行は完了でも残す(ユーザーが自分で残すと決めた行。ピン止め欄に出る)。
+    // 司令塔はピン止めの対象外(`rowGroupKeyOf` と同じ定義)。
+    const pinned = t.pinned === true && t.coordinator !== true;
     if (note) {
-      if (!isUpperStatus(note.status)) continue;
+      if (!isUpperStatus(note.status) && !pinned) continue;
       rows.push({
         thread: t,
         title: note.title || t.title,
@@ -395,7 +400,7 @@ export function buildUpperRows<T extends RowThread>(
     }
     // グループ見出しになる親(子司令塔)は、完了でも**残す**(子の行はこの見出しの下に並ぶため。
     // 親の状態は見出しの帯に出す。2026-10-27 通し検証B 指摘1)。
-    if (!keepsWithoutNote(t.status) && t.groupingParent !== true) continue;
+    if (!keepsWithoutNote(t.status) && t.groupingParent !== true && !pinned) continue;
     rows.push({
       thread: t,
       title: t.title,
