@@ -56,7 +56,10 @@ function closeAutoOpened(
   const tabId = buildDeterministicWorkspaceTabId(tabTarget);
   const layout = store.layoutByWorkspace[workspaceKey];
   const pane = layout ? findPaneContainingTab(layout.root, tabId) : null;
-  if (pane && pane.hidden !== true) store.closeTab(workspaceKey, tabId);
+  if (!pane || pane.hidden === true) return;
+  store.closeTab(workspaceKey, tabId);
+  // 実際に閉じたときだけ「入れた」記録を消す(戻ってきたらまた入れる)。ユーザーが先に自分で閉じていた面は、
+  // 優先順位など別のタブへ焦点が移って戻っただけで勝手に出し直さない(2026-11-02 優先順位パネルの実画面確認)。
   handledKeys.delete(`${workspaceKey}|${target.pluginId}:${target.panelId}`);
 }
 
