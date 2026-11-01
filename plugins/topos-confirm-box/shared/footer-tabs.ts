@@ -122,3 +122,12 @@ export function isWideLayout(width: number, height: number | undefined, compact 
   if (compact) return false;
   return width >= WIDE_MIN_WIDTH && (height === undefined || height >= WIDE_MIN_HEIGHT);
 }
+
+/**
+ * 確認箱のタブを選んだときの動き。優先順位はパネルの開き口(`hasPriorityOpener`)があれば、箱の中で
+ * 切り替えずワークスペースのパネルとして開く(PC=右カラム・狭い画面=全画面。2026-11-02 ユーザー指示)。
+ * それ以外のタブ・開き口が無い画面(全画面の確認箱)は、これまでどおり箱の中で切り替える。
+ */
+export function tabSelectAction(id: string, hasPriorityOpener: boolean): "open-panel" | "switch" {
+  return id === "priority" && hasPriorityOpener ? "open-panel" : "switch";
+}

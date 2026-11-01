@@ -32,7 +32,12 @@ import {
   judgmentTabRows,
   rejectComment,
 } from "../shared/contract.js";
-import { confirmBoxTabs, isWideLayout, judgmentBreakdownLabel } from "../shared/footer-tabs.js";
+import {
+  confirmBoxTabs,
+  isWideLayout,
+  judgmentBreakdownLabel,
+  tabSelectAction,
+} from "../shared/footer-tabs.js";
 import {
   LIST_GRID_GAP,
   LIST_GRID_PADDING,
@@ -78,7 +83,13 @@ export function ConfirmBoxView({
   layout,
   openScreen,
   initialTab,
+  onOpenPriority,
 }: Pick<PluginHostProps, "theme"> & {
+  /**
+   * 渡されたら、「優先順位」のタブを選んだときに箱の中で切り替えず、これを呼ぶ(ポップオーバー用:
+   * 優先順位はワークスペースのパネルとして出す。`PriorityPanel.tsx`)。
+   */
+  onOpenPriority?: () => void;
   /** 渡されたら最上部に5画面のアイコン列+更新ボタンを出す(全画面のとき。ポップオーバーは渡さない)。 */
   openScreen?: (input: { screenId: string; params?: Record<string, string> }) => void;
   /** 確認箱そのもの(`box`)を開いたときの最初のタブ。 */
@@ -175,7 +186,7 @@ export function ConfirmBoxView({
     () => (cellWidth === undefined ? undefined : { width: cellWidth }),
     [cellWidth],
   );
-  const { shownTab, tabs, selectTab } = useBoxTabs(mode, initialTab);
+  const { shownTab, tabs, selectTab } = useBoxTabs(mode, initialTab, onOpenPriority);
   // カードチャットは画面を問わずこのペインに一本化した(旧・自由記述欄は廃止=2026-10-22ユーザー決定)。
   // ヘッダのポップオーバーも幅<720なので、ペインは全画面スライドとして重なる。
   // ペインの相手は2種: カードの投函元スレ(💬)と、優先順位の行の担当スレ(行タップ)。
@@ -786,6 +797,7 @@ type TabId = "items" | "bugs" | "notify" | "priority";
 function useBoxTabs(
   mode: BoxTabMode,
   initialTab: "items" | "bugs" | "notify" | "priority" = "bugs",
+  onOpenPriority?: () => void,
 ): {
   shownTab: TabId;
   tabs: readonly (typeof TABS)[number][];
@@ -798,7 +810,16 @@ function useBoxTabs(
   // (並びに無いタブの中身が出続けるのを防ぐ)。
   const valid = picked !== null && tabs.some((tb) => tb.id === picked);
   const shownTab: TabId = (valid && picked) || forcedTab || initialTab;
-  const selectTab = useCallback((id: TabId) => setPicked(id), []);
+  const selectTab = useCallback(
+    (id: TabId) => {
+      if (tabSelectAction(id, onOpenPriority !== undefined) === "open-panel") {
+        onOpenPriority?.();
+        return;
+      }
+      setPicked(id);
+    },
+    [onOpenPriority],
+  );
   return { shownTab, tabs, selectTab };
 }
 

@@ -31,6 +31,12 @@ import {
   openWindowBInstructions,
 } from "./client/WindowBInstructions";
 import { WindowBBand } from "./client/WindowBBand";
+import {
+  openPriorityPanel,
+  PriorityPanel,
+  PRIORITY_PANEL_ID,
+  PRIORITY_PANEL_TITLE,
+} from "./client/PriorityPanel";
 import { WINDOW_B_AGENT_ID } from "./shared/windowb-instructions";
 import { onBoxChanged } from "./client/events";
 import { watchBoxSignal } from "./client/change-signal";
@@ -414,15 +420,28 @@ const popoverStyle = { height: 420 };
  * (窓が広いPCでもポップオーバーは狭いため、窓幅で判定すると一覧とチャットが同じ箱に
  * 押し込まれて潰れる)。
  */
-function Popover({ theme }: PluginButtonContentProps) {
+function Popover({ theme, workspaceId, close }: PluginButtonContentProps) {
   const [width, setWidth] = useState(0);
   const onLayout = useCallback(
     (e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width)),
     [],
   );
+  // 優先順位は浮いた枠に出さず、ワークスペースのパネル(PC=右カラム・狭い画面=全画面)で開く。
+  const openPriority = useCallback(() => {
+    if (!client) return;
+    const c = client;
+    openPriorityPanel((id, options) =>
+      c.openPanel(id, { workspaceId, location: options.location }),
+    );
+    close();
+  }, [workspaceId, close]);
   return (
     <View style={popoverStyle} onLayout={onLayout}>
-      <ConfirmBoxView theme={theme} containerWidth={width || undefined} />
+      <ConfirmBoxView
+        theme={theme}
+        containerWidth={width || undefined}
+        onOpenPriority={openPriority}
+      />
     </View>
   );
 }
@@ -611,6 +630,16 @@ export default function contribute(ctx: PluginClientContext) {
     // 会話の上の細い帯「指示 N件・赤1」(2026-10-30 ユーザー「Cもいいね。やって」)。押すと一覧を開く。
     band: { whenAgentIds: [WINDOW_B_AGENT_ID], Component: WindowBBand },
     Component: WindowBInstructionsPanel,
+  });
+  // 優先順位(2026-11-02 ユーザー「PCはチャット欄の右カラム、iPhoneは全画面」)。指示一覧と同じ右カラムに
+  // タブとして入り、前へ出る(閉じると下の指示一覧がまた出る)。入口は確認箱ポップオーバーの「優先順位」タブ。
+  ctx.addWorkspacePanel({
+    id: PRIORITY_PANEL_ID,
+    title: PRIORITY_PANEL_TITLE,
+    icon: "ListOrdered",
+    context: "workspace",
+    locations: ["workspace", "right"],
+    Component: PriorityPanel,
   });
   // ヘッダボタンの登録簿は下部バーの項目の寿命に合わせて消す(再マウント時に作り直す)。
   removeHeaderButtons();

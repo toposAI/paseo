@@ -9,6 +9,7 @@ import {
   isWideLayout,
   judgmentBadgeLabel,
   judgmentBreakdownLabel,
+  tabSelectAction,
 } from "../shared/footer-tabs.js";
 
 // 確認箱の画面のタブ(実装と同じ並び)。id だけを見れば足りる。
@@ -101,4 +102,12 @@ test("チップの判断待ちは確認箱の合計に揃え、合計が取れ�
 
 test("内訳: 窓口Aの件数が数えられないときは 0 と偽らず ? と出す", () => {
   assert.equal(judgmentBreakdownLabel(null, 2, 10), "いま聞ける ?・裏方が書き直し中 2・残り 8");
+});
+
+test("優先順位はパネルの開き口があるときだけ、箱の中で切り替えずパネルで開く", () => {
+  assert.equal(tabSelectAction("priority", true), "open-panel");
+  assert.equal(tabSelectAction("priority", false), "switch");
+  for (const id of ["items", "bugs", "notify"]) {
+    assert.equal(tabSelectAction(id, true), "switch");
+  }
 });
