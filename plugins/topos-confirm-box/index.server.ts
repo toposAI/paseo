@@ -128,9 +128,11 @@ import { listAllAgents } from "./server/agent-pages.js";
 import { applyStateDots, stateDotsById } from "./server/agent-state-dots.js";
 import {
   dropFinishedClosedRows,
+  hoistRowsToTop,
   promoteCoreRows,
   readCoreWindowIds,
   readSidebarHiddenIds,
+  readSidebarTopAgentIds,
   standbyForCoreClosed,
 } from "./server/closed-rows.js";
 import { applyWindowUnread, readWindowId } from "./server/window-unread.js";
@@ -369,7 +371,8 @@ export default function contribute(server: PluginServerContext) {
       // 登録簿の行のピン止めはグループ内の先頭へ寄せるが、そのグループの `parentAgentId` は
       // クライアントで欠ける(`buildUpperRows`)。ここで寄せると上の段の先頭へ跳ぶので、規則を揃えない
       // (出口レビュー round1 指摘3。先頭へ寄せたい場合は未登録行にも親 id を渡す設計変更が要る)。
-      threads = applyChildThreadOrder(threads, readChildThreadOrder(dir));
+      const savedOrder = readChildThreadOrder(dir);
+      threads = applyChildThreadOrder(threads, savedOrder);
       // 押して開けるか。いまの判定は**スレのアーカイブと `closed`**だけを止める
       // (`thread-liveness.ts` のコメント参照)。ワークスペースがアーカイブ済みの場合は
       // ここへ生きている id しか渡していないため `workspace-archived` が付かない
@@ -423,6 +426,11 @@ export default function contribute(server: PluginServerContext) {
         readCoreWindowIds(),
         readSidebarHiddenIds(),
       );
+      // 判断窓口Aを一覧の先頭(ピン止めグループの一番上)に置く(2026-11-01 ユーザー指示「一番上にしたい」)。
+      // 役(`judgment_window/windows/A.id`)で引くので、乗り換えで id が変わっても保存順に無い
+      // 新しい id が末尾へ落ちることがない。保存順に居るとき(=ユーザーがドラッグして決めた位置)は
+      // 動かさない: 寄せ続けると、下へ動かした直後に毎回先頭へ戻ってしまう。並びの保存は書き換えない。
+      threads = hoistRowsToTop(threads, readSidebarTopAgentIds(), savedOrder);
     } catch {
       threads = adoptOrphans(markCoordinators(rows, ids));
       parentsUnknown = true;

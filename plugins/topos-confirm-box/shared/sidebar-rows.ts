@@ -411,8 +411,15 @@ export function buildUpperRows<T extends RowThread>(
   // 親の行は子の行より後ろへ。子の行は自分の見出しの**先頭**に来るので、`groupRows` が親の行に
   // 見出しを付けると「見出し→子の行」の順で並ぶ(親が子の間や先頭に混ざる二重表示をしない)。
   // 並びはそれ以外(pin 先頭・グループ単位の出現順)を保つ。
+  //
+  // ただし**ピン止めした親は後ろへ回さない**。`groupThreadRows` はピン止めした親を見出しにせず
+  // 「ピン止め」グループの普通の行として出すので、後ろへ回す理由が無い。回していたため、保存した
+  // 並び順で先頭に置いても表示だけが末尾へ戻り、ドラッグしても同じ位置へ戻っていた
+  // (2026-11-01 ユーザー報告「判断窓口Aがピン止めの一番下に固定。ドラッグで動くけど一番下に戻る」。
+  // 判断窓口Aは判断カードの子スレを持つので `groupingParent` になる)。
   const isHeading = (r: SidebarRowView<T>) =>
-    (r.thread as { groupingParent?: boolean }).groupingParent === true;
+    (r.thread as { groupingParent?: boolean }).groupingParent === true &&
+    (r.thread as { pinned?: boolean }).pinned !== true;
   return [...rows.filter((r) => !isHeading(r)), ...rows.filter(isHeading)];
 }
 

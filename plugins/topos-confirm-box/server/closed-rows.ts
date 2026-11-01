@@ -55,6 +55,45 @@ export function readSidebarHiddenIds(dir: string = stateDir()): string[] {
   return readIdLines(path.join(dir, "sidebar_hidden_agent_ids.txt"));
 }
 
+/**
+ * サイドバーの**一番上に固定する行**の id(2026-11-01 ユーザー指示「判断窓口Aをピン止めの一番上に」)。
+ *
+ * 判断窓口A は乗り換えのたびに agent id が変わる(`scripts/spawn_judgment_windows.sh` が
+ * `judgment_window/windows/A.id` を書き換える)。**id ではなく役で引く**ので、乗り換え直後から
+ * 新しいスレが同じ場所(先頭)に来る。`sidebar_top_agent_ids.txt`(1行1id・`#` コメント可)で足せる。
+ */
+export function readSidebarTopAgentIds(dir: string = stateDir()): string[] {
+  return [
+    ...readIdLines(path.join(dir, "judgment_window", "windows", "A.id")).slice(0, 1),
+    ...readIdLines(path.join(dir, "sidebar_top_agent_ids.txt")),
+  ];
+}
+
+/**
+ * 指定 id の行を一覧の先頭へ移す(残りの相対順はそのまま)。
+ *
+ * 保存した並び順(`child_threads_order.json`)に無い新しい id は末尾に置かれる規則なので、
+ * 乗り換え直後の窓口Aは必ず一番下に出る。役で先頭へ寄せて、乗り換え直後でも先頭に来るようにする。
+ *
+ * `placedIds`(保存順に入っている id)に居る行は寄せない。**ユーザーがドラッグして決めた位置を
+ * 上書きしない**ため(寄せ続けると、下へ動かしても毎回先頭へ跳ね返る=元の不具合の繰り返し)。
+ * 役の id が保存順に無いとき(=乗り換え直後・初回)だけ先頭に置く。
+ */
+export function hoistRowsToTop<T extends { agentId: string }>(
+  rows: readonly T[],
+  topIds: readonly string[],
+  placedIds: readonly string[] = [],
+): T[] {
+  if (topIds.length === 0 || rows.length < 2) return [...rows];
+  const head: T[] = [];
+  const rest: T[] = [];
+  for (const row of rows) {
+    const hoist = matchesAny(row.agentId, topIds) && !matchesAny(row.agentId, placedIds);
+    (hoist ? head : rest).push(row);
+  }
+  return [...head, ...rest];
+}
+
 /** id が一覧のどれかに一致するか(短縮形は先頭一致)。 */
 function matchesAny(agentId: string, ids: readonly string[]): boolean {
   return ids.some((id) => agentId === id || agentId.startsWith(id) || id.startsWith(agentId));
