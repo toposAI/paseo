@@ -11,6 +11,7 @@ import { getPaseoClient, useHosts, useRpc } from "@getpaseo/plugin/client";
 import { coordinatorTargetRpc } from "../shared/contract.js";
 import { DOCK_FALLBACK_CONTEXT, pickDockTarget } from "../shared/card-pane.js";
 import { BubbleIcon } from "./Icons.js";
+import { readAgentStateOn } from "./agent-read.js";
 import { notifyBoxChanged } from "./events.js";
 
 /** カード💬の会話スレッド(確認箱チャット用)の agent ID。優先順位ページの常駐会話と共通。 */
@@ -307,12 +308,10 @@ function useDockTarget(fixedId: string | null) {
     setFixedAlive(null);
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     const bumpRetry = () => setRetry((n) => n + 1);
-    getPaseoClient(serverId)
-      .agents.ref(fixedId)
-      .refresh()
-      .then((snap) => {
-        const agent = snap?.agent as { archivedAt?: string | null } | undefined;
-        if (alive) setFixedAlive(Boolean(agent) && agent?.archivedAt == null);
+    // 生死を見るだけ。アーカイブを解く呼び方にしない(`client/agent-read.ts`)。
+    readAgentStateOn(serverId, fixedId)
+      .then((state) => {
+        if (alive) setFixedAlive(state != null && state.archivedAt == null);
         return null;
       })
       .catch(() => {
