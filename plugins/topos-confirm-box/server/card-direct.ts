@@ -779,8 +779,11 @@ async function showFromNext(
   // 古い行は下の retireRow で押せなくなる(有効な行は常に1つ)。
   if (openRow && openRow.cardId === cardId && openRow.cardSha === sha) {
     const placement = await rowPlacement(deps, target, cardId);
-    if (placement.onScreen && (placement.isLatest || !(await agentIdle(deps, target))))
-      return noShow("");
+    if (placement.onScreen && placement.isLatest) return noShow("");
+    if (placement.onScreen && !(await agentIdle(deps, target))) return noShow("buried_not_idle");
+    // 待っている間に押下で行が答え済みになっていたら、答えた1問を出し直さない。
+    const now = openRowOf(readRowState(deps.stateDir).agents[target]);
+    if (placement.onScreen && now?.shownAt !== openRow.shownAt) return noShow("");
   }
   const retired = openRow?.cardId ?? "";
   if (openRow) retireRow(deps.stateDir, target, openRow.shownAt);
