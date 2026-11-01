@@ -784,6 +784,9 @@ export function startAutoAsk(deps: ShowDeps, intervalMs = 20_000): AutoAskHandle
   // 起動直後はスレの読み込みが終わっていないので、少し置いてから1回目を打つ
   const first = setTimeout(tick, 3_000);
   const timer = setInterval(tick, intervalMs);
+  // 見回りの時計だけでプロセスを生かさない(デーモンは別の接続で生きている。試験が終われるように)
+  first.unref();
+  timer.unref();
   return {
     running: () => busy,
     stop: () => {

@@ -232,11 +232,18 @@ import {
 export default function contribute(server: PluginServerContext) {
   // 自動出題(モデルを呼ばない)。**最初にハンドラが呼ばれた時点**で始める: プラグインのサーバーは
   // `contribute` の時点では PaseoApi を持たず、行の貼り先(スレ)も画面が開いて読み込まれるまで
-  // 触れないため。画面は状態を10秒ごとに読むので、デーモン再起動後もそこで始まる。
+  // 触れないため。デーモン再起動後は判断カードの行が1本も無く、行の画面(CardDirectRow)も
+  // マウントされないので、行に紐づく RPC は来ない。画面が開いている間ずっと定期的に呼ばれる
+  // `confirmBoxCountRpc` のハンドラでも始めて、行が無い状態からでも出題が始まるようにする。
   let autoAsk: ReturnType<typeof startAutoAsk> | null = null;
+  let disposed = false;
   const ensureAutoAsk = (paseo: PaseoApi): void => {
-    if (autoAsk) return;
-    autoAsk = startAutoAsk({ paseo, cli: resolveJudgmentCli(), stateDir: judgmentStateDir() });
+    // 片付け後に遅れて届いた呼び出しで、誰も止めない見回りを立てない
+    if (disposed || autoAsk) return;
+    // CLI が見つからないうちは始めない(見つかるまで次の呼び出しで再試行する)
+    const cli = resolveJudgmentCli();
+    if (!cli) return;
+    autoAsk = startAutoAsk({ paseo, cli, stateDir: judgmentStateDir() });
   };
 
   // 判断カードを機械がそのまま画面へ出す試作(2026-11-01)。判断の中身は Python 1か所に任せ、
@@ -673,6 +680,8 @@ export default function contribute(server: PluginServerContext) {
   server.handle(windowBInstructionsRpc, async (input) => windowBRunner(input.limit));
 
   server.handle(confirmBoxCountRpc, async (input, ctx) => {
+    // 再起動直後(判断カードの行がまだ無い)でも自動出題を始める。2回目以降は何もしない。
+    ensureAutoAsk(ctx.paseo);
     const { items, sources, generatedAt } = await collect(ctx);
     // 数え方の SSOT は `countJudgmentCounted`。判断窓口の counts.open(N)と同じ対象に揃えるため、
     // Vault 判断ノート由来の項目と permit のうち state が new だけを数え、材料待ち・承認済み・既読と
@@ -1632,7 +1641,9 @@ export default function contribute(server: PluginServerContext) {
   });
 
   return () => {
+    disposed = true;
     autoAsk?.stop();
+    autoAsk = null;
   };
 }
 
