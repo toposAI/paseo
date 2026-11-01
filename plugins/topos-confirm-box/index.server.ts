@@ -136,7 +136,12 @@ import {
   standbyForCoreClosed,
 } from "./server/closed-rows.js";
 import { applyWindowUnread, readWindowId } from "./server/window-unread.js";
-import { applyAuxGroup, readChildThreadSides, writeChildThreadSide } from "./server/child-sides.js";
+import {
+  applyAuxGroup,
+  readChildThreadSides,
+  readOneThreadIds,
+  writeChildThreadSide,
+} from "./server/child-sides.js";
 import { mergeUnregisteredThreads } from "./server/unregistered-threads.js";
 import type { ListedAgentLike } from "./server/unregistered-threads.js";
 import { WORKSPACE_SCAN_LIMIT, decideWorkspaceArchive } from "./server/workspace-membership.js";
@@ -436,8 +441,8 @@ export default function contribute(server: PluginServerContext) {
       parentsUnknown = true;
       threadsIncomplete = true;
     }
-    // 壁打ち/補助スレの振り分けは最後に付ける(確実な壁打ちだけ壁打ち、それ以外は補助)。
-    threads = applyAuxGroup(threads, readChildThreadSides(dir));
+    // 壁打ち/補助スレの振り分けは最後に付ける(確実な壁打ちと1件スレだけ壁打ち、それ以外は補助)。
+    threads = applyAuxGroup(threads, readChildThreadSides(dir), readOneThreadIds(dir));
     return {
       threads,
       dir: readDir,

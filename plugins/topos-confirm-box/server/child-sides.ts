@@ -9,7 +9,11 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { CHILD_THREAD_SIDES, CHILD_THREAD_SIDES_FILE } from "../shared/child-threads.js";
+import {
+  CHILD_THREAD_ONE_THREAD_FILE,
+  CHILD_THREAD_SIDES,
+  CHILD_THREAD_SIDES_FILE,
+} from "../shared/child-threads.js";
 import type { ChildThread, ChildThreadSide } from "../shared/child-threads.js";
 import { normalizeChildThreadOrder } from "./child-threads.js";
 
@@ -96,10 +100,40 @@ const isCertainWallTalk = (t: ChildThread): boolean =>
   /^壁打ち\d{1,2}(?:\s*[:：].*)?$/.test(t.title.trim()) || t.humanMade === true;
 
 /**
+ * 1件スレ(確認箱の1件を窓口Aから受けて話すスレ)の id を読む(2026-11-01 ユーザー指示
+ * 「窓口Aでオーバスのスレが立ったときに補助スレの方に入ってしまいます。壁打ちの方に入れて」)。
+ *
+ * 書き手は ToposAI 側の `antigravity/utils/one_thread_lane.py`(移すたびに1行足す)。手動の振り分け
+ * (`child_threads_sides.json`)とは**別のファイル**にする: 手動指定は自動アーカイブの保護
+ * (`child_thread_registry.is_wall_talk_thread`)にも効くが、1件スレは1件ごとに畳んでよいので、
+ * 「壁打ち側に出す」だけを意味する印を別に持つ。壊れた/無いファイルは空(補助側のまま=迷ったら補助)。
+ */
+export function readOneThreadIds(dir: string): ReadonlySet<string> {
+  const out = new Set<string>();
+  try {
+    const raw: unknown = JSON.parse(
+      fs.readFileSync(path.join(dir, CHILD_THREAD_ONE_THREAD_FILE), "utf8"),
+    );
+    const ids = (raw as { ids?: unknown } | null)?.ids;
+    if (!Array.isArray(ids)) return out;
+    for (const value of ids) {
+      const key = normalizeChildThreadOrder([value])[0];
+      if (key) out.add(key.toLowerCase());
+    }
+  } catch {
+    // 読めない: 印なし(自動判定のまま)
+  }
+  return out;
+}
+
+/**
  * 各行へ `aux`(補助スレ側か)を付ける。
  *
- * - 司令塔・子を持つ親(`groupingParent`)は常に補助側(移せない。見出しの入れ子を壊さない)。
- * - 手動指定があればそれ。無ければ「確実に壁打ち」(常駐の壁打ちN)だけ壁打ち、それ以外は全部補助。
+ * - 司令塔・子を持つ親(`groupingParent`)は原則として補助側(移せない。見出しの入れ子を壊さない)。
+ *   ただし **1件スレ(`oneThreadIds`)だけは例外**: 1件スレは調べの子スレを切りやすいので子を持つ親に
+ *   なりやすく、そのままでは壁打ち側に出せない(2026-11-01 実測: 3本のうち子を持つ2本が補助のまま
+ *   残った)。子の行は補助側に残るので、見出しの無いグループとして補助側に並ぶ。
+ * - 手動指定(`aux`)が最優先。無ければ1件スレ→壁打ち、それ以外は「確実に壁打ち」(常駐の壁打ちN)だけ壁打ち。
  * - 壁打ちへ置く行は親の印を外す(司令塔・子司令塔の見出しの下へ吸われず、壁打ち側で平らに出る)。
  *
  * 表示の振り分けだけを変える。自動アーカイブの保護(`child_thread_registry.is_wall_talk_thread`)は
@@ -108,11 +142,13 @@ const isCertainWallTalk = (t: ChildThread): boolean =>
 export function applyAuxGroup(
   threads: readonly ChildThread[],
   overrides: SideOverrides,
+  oneThreadIds: ReadonlySet<string> = new Set(),
 ): ChildThread[] {
   return threads.map((t) => {
-    const fixedAux = t.coordinator === true || t.groupingParent === true;
+    const oneThread = oneThreadIds.has(t.agentId.toLowerCase());
+    const fixedAux = t.coordinator === true || (t.groupingParent === true && !oneThread);
     const manual = overrides.get(t.agentId);
-    const aux = fixedAux || (manual ? manual === "aux" : !isCertainWallTalk(t));
+    const aux = fixedAux || (manual ? manual === "aux" : !oneThread && !isCertainWallTalk(t));
     if (aux) return t.aux ? t : { ...t, aux: true };
     const detached =
       t.parentAgentId === null && t.parentTitle === null
