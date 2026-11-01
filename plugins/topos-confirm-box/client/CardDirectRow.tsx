@@ -107,7 +107,13 @@ export function CardDirectRow({ agentId, item, theme }: PluginTimelineItemProps<
     (optionId: string, label: string) => {
       if (busy || decided) return;
       setBusy(true);
-      send({ agentId, cardId: data.cardId, choiceId: optionId, answer: label })
+      send({
+        agentId,
+        cardId: data.cardId,
+        choiceId: optionId,
+        answer: label,
+        shownAt: data.shownAt,
+      })
         .then((out) => {
           setBusy(false);
           if (out.ok) {
@@ -134,13 +140,13 @@ export function CardDirectRow({ agentId, item, theme }: PluginTimelineItemProps<
           });
         });
     },
-    [agentId, busy, data.cardId, decided, send],
+    [agentId, busy, data.cardId, data.shownAt, decided, send],
   );
 
   const pressHold = useCallback(() => {
     if (busy || decided) return;
     setBusy(true);
-    hold({ agentId, cardId: data.cardId })
+    hold({ agentId, cardId: data.cardId, shownAt: data.shownAt })
       .then((out) => {
         setBusy(false);
         if (out.ok) {
@@ -166,7 +172,7 @@ export function CardDirectRow({ agentId, item, theme }: PluginTimelineItemProps<
           failed: true,
         });
       });
-  }, [agentId, busy, data.cardId, decided, hold]);
+  }, [agentId, busy, data.cardId, data.shownAt, decided, hold]);
 
   const locked = decided || stale !== "";
   const note = stale ? STALE_LABEL[stale] : "";

@@ -77,6 +77,11 @@ export const cardDirectAnswerRpc = defineRpc({
     choiceId: z.string(),
     /** 記録する回答原文。省略時は選んだ選択肢の見出し(逐語)。 */
     answer: z.string().default(""),
+    /**
+     * 押された行の `shownAt`(行のデータに入っている値)。
+     * 本文が作り直されて同じ cardId の新しい行が出たとき、古い行からの押下を `stale` で弾くために使う。
+     */
+    shownAt: z.number().default(0),
   }),
   output: z.object({
     ok: z.boolean(),
@@ -100,6 +105,8 @@ export const cardDirectHoldRpc = defineRpc({
   input: z.object({
     agentId: z.string(),
     cardId: z.string(),
+    /** 押された行の `shownAt`(answer と同じく、古い行からの押下を弾く)。 */
+    shownAt: z.number().default(0),
   }),
   output: z.object({
     ok: z.boolean(),

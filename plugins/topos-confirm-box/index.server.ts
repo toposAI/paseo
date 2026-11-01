@@ -249,12 +249,17 @@ export default function contribute(server: PluginServerContext) {
       cardId: input.cardId,
       choiceId: input.choiceId,
       answer: input.answer,
+      shownAt: input.shownAt,
     }),
   );
 
   // 「保留」= 記録せず手放して次の1問へ(2026-11-01 壁打ち4)
   server.handle(cardDirectHoldRpc, async (input, ctx) =>
-    holdCard(cardDirectDeps(ctx.paseo), { agentId: input.agentId, cardId: input.cardId }),
+    holdCard(cardDirectDeps(ctx.paseo), {
+      agentId: input.agentId,
+      cardId: input.cardId,
+      shownAt: input.shownAt,
+    }),
   );
 
   server.handle(cardDirectStateRpc, async (_input, ctx) => {

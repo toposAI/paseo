@@ -68,6 +68,20 @@ export function runJudgmentCli(
   args: readonly string[],
   input?: string,
 ): Promise<Record<string, unknown>> {
+  return runJudgmentCliWithCode(cli, args, input).then((r) => r.out);
+}
+
+/**
+ * 同じ呼び出しで**終了コードも返す**。
+ *
+ * `finish` は失敗(記録していない)でも JSON を出す(終了コード4/6/9 など)。JSON が読めたことを
+ * 成功と取り違えると、記録できていないのに「記録しました」と画面に出る(2026-11-01 出口レビュー指摘1)。
+ */
+export function runJudgmentCliWithCode(
+  cli: JudgmentCli,
+  args: readonly string[],
+  input?: string,
+): Promise<{ out: Record<string, unknown>; code: number }> {
   return new Promise((resolve, reject) => {
     const child = execFile(
       cli.python,
@@ -87,7 +101,7 @@ export function runJudgmentCli(
           parsed = null;
         }
         if (parsed) {
-          resolve(parsed);
+          resolve({ out: parsed, code: typeof error?.code === "number" ? error.code : 0 });
           return;
         }
         reject(
@@ -107,9 +121,10 @@ export function runJudgmentCli(
 function runJudgmentExit(
   cli: JudgmentCli,
   args: readonly string[],
+  input?: string,
 ): Promise<{ code: number; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       cli.python,
       [cli.script, ...args],
       { cwd: path.dirname(cli.script), timeout: CLI_TIMEOUT_MS, killSignal: "SIGKILL" },
@@ -121,6 +136,7 @@ function runJudgmentExit(
         resolve({ code: typeof error?.code === "number" ? error.code : 0, stderr: `${stderr}` });
       },
     );
+    if (input !== undefined && child.stdin) child.stdin.end(input);
   });
 }
 
@@ -346,7 +362,18 @@ export interface AnswerInput {
   cardId: string;
   choiceId: string;
   answer: string;
+  /** 押された行の `shownAt`。渡されたら、いまの行と違えば `stale` で弾く。 */
+  shownAt?: number;
 }
+
+/** `finish` が「記録できた(または記録済み)」を表す status。それ以外は失敗として扱う。 */
+const RECORDED_STATUSES = new Set([
+  "queued",
+  "already_queued",
+  "addendum",
+  "already_recorded",
+  "forwarded",
+]);
 
 export interface AnswerResult {
   ok: boolean;
@@ -365,6 +392,64 @@ function markAnswered(stateDir: string, input: AnswerInput, recorded: string): v
   writeRowState(stateDir, after);
 }
 
+/** 押された行がいまの行かを機械的に見る(門2・門2b・門3・門4)。問題なければ null。 */
+function rowGate(
+  deps: ShowDeps,
+  row: AgentRowState | undefined,
+  input: { cardId: string; shownAt?: number },
+): { reason: string; recorded?: string } | null {
+  // 門2: いま出している行ではない(古い行・別スレの行)
+  if (!row || row.cardId !== input.cardId) return { reason: "stale" };
+  // 門2b: 同じ cardId でも、差し替えで止めた行・別の時刻に出した行からの押下
+  if (
+    input.shownAt &&
+    (input.shownAt !== row.shownAt || (row.retired ?? []).includes(input.shownAt))
+  )
+    return { reason: "stale" };
+  // 門3: 押し直し(連打・二度押し)
+  if (row.answered[input.cardId])
+    return { reason: "duplicate", recorded: row.answered[input.cardId].recorded };
+  // 門4: カードの本文が作り直された
+  const sha = cardSha(deps.stateDir, input.cardId);
+  if (!sha || sha !== row.cardSha) return { reason: "changed" };
+  return null;
+}
+
+/**
+ * `finish` を1回打ち、**記録できたかを終了コードと status の両方で確かめる**。
+ *
+ * `finish` は記録していないときも JSON を出す(終了コード4/6/9 など)。JSON が読めたことを
+ * 成功と取り違えると、記録できていないのに「記録しました」と画面に出る(2026-11-01 出口レビュー指摘1)。
+ */
+async function recordAnswer(
+  cli: JudgmentCli,
+  window: string,
+  input: { cardId: string; choiceId: string },
+  answer: string,
+): Promise<
+  { ok: true; recorded: string; out: Record<string, unknown> } | { ok: false; reason: string }
+> {
+  let out: Record<string, unknown>;
+  let code = 0;
+  try {
+    const res = await runJudgmentCliWithCode(
+      cli,
+      ["finish", "--window", window, "--id", input.cardId, "--chosen", input.choiceId],
+      answer,
+    );
+    out = res.out;
+    code = res.code;
+  } catch (error) {
+    return { ok: false, reason: `finish_failed: ${(error as Error).message}`.slice(0, 300) };
+  }
+  const recorded = String(out.status ?? "");
+  if (code !== 0 && code !== 8)
+    return { ok: false, reason: `finish_failed: exit ${code} ${recorded}`.slice(0, 300) };
+  if (!RECORDED_STATUSES.has(recorded))
+    return { ok: false, reason: `not_recorded: ${recorded}`.slice(0, 300) };
+  return { ok: true, recorded, out };
+}
+
 export async function answerCard(deps: ShowDeps, input: AnswerInput): Promise<AnswerResult> {
   const env = deps.env ?? process.env;
   const fail = (reason: string): AnswerResult => ({
@@ -376,16 +461,10 @@ export async function answerCard(deps: ShowDeps, input: AnswerInput): Promise<An
   });
   // 門1: 出題停止の印(本物の PAUSED.json は外さない。外すのは人が判断する)
   if (isPaused(env)) return fail("paused");
-  const state = readRowState(deps.stateDir);
-  const row = state.agents[input.agentId];
-  // 門2: いま出している行ではない(古い行・別スレの行)
-  if (!row || row.cardId !== input.cardId) return fail("stale");
-  // 門3: 押し直し(連打・二度押し)
-  if (row.answered[input.cardId])
-    return { ...fail("duplicate"), recorded: row.answered[input.cardId].recorded };
-  // 門4: カードの本文が作り直された
-  const sha = cardSha(deps.stateDir, input.cardId);
-  if (!sha || sha !== row.cardSha) return fail("changed");
+  const row = readRowState(deps.stateDir).agents[input.agentId];
+  const gate = rowGate(deps, row, input);
+  if (gate) return { ...fail(gate.reason), recorded: gate.recorded ?? "" };
+  if (!row) return fail("stale");
 
   const option = row.options.find((o) => o.id === input.choiceId);
   const answer = (input.answer || option?.label || "").trim();
@@ -393,27 +472,18 @@ export async function answerCard(deps: ShowDeps, input: AnswerInput): Promise<An
   if (!deps.cli) return fail("judgment_cli_missing");
 
   // 記録は `finish` に任せる(記録の条件・二重記録よけは Python 側が持つ)
-  let out: Record<string, unknown>;
-  try {
-    out = await runJudgmentCli(
-      deps.cli,
-      ["finish", "--window", row.window, "--id", input.cardId, "--chosen", input.choiceId],
-      answer,
-    );
-  } catch (error) {
-    return fail(`finish_failed: ${(error as Error).message}`.slice(0, 300));
-  }
-  const recorded = String(out.status ?? "");
-  markAnswered(deps.stateDir, input, recorded);
+  const res = await recordAnswer(deps.cli, row.window, input, answer);
+  if (!res.ok) return fail(res.reason);
+  markAnswered(deps.stateDir, input, res.recorded);
 
   // 次の1問(`finish` は次の件+カードを返す)。出せないときは何も貼らない
-  const nextItem = pickItem(out) ?? {};
+  const nextItem = pickItem(res.out) ?? {};
   const nextCard = nextItem.card as Record<string, unknown> | null | undefined;
   if (nextItem.has_card && nextCard && typeof nextCard === "object") {
     const nextCardId = await appendCardRow(deps, input.agentId, row.window, nextCard);
-    return { ok: true, recorded, reason: "", nextCardId, shownNext: true };
+    return { ok: true, recorded: res.recorded, reason: "", nextCardId, shownNext: true };
   }
-  return { ok: true, recorded, reason: "", nextCardId: "", shownNext: false };
+  return { ok: true, recorded: res.recorded, reason: "", nextCardId: "", shownNext: false };
 }
 
 // ---------------------------------------------------------------- 保留(release)
@@ -434,7 +504,7 @@ export interface HoldResult {
  */
 export async function holdCard(
   deps: ShowDeps,
-  input: { agentId: string; cardId: string },
+  input: { agentId: string; cardId: string; shownAt?: number },
 ): Promise<HoldResult> {
   const env = deps.env ?? process.env;
   const fail = (reason: string): HoldResult => ({
@@ -448,6 +518,11 @@ export async function holdCard(
   const state = readRowState(deps.stateDir);
   const row = state.agents[input.agentId];
   if (!row || row.cardId !== input.cardId) return fail("stale");
+  if (
+    input.shownAt &&
+    (input.shownAt !== row.shownAt || (row.retired ?? []).includes(input.shownAt))
+  )
+    return fail("stale");
   if (row.answered[input.cardId]) return fail("duplicate");
   if (row.held?.includes(input.cardId)) return fail("duplicate");
 
@@ -570,6 +645,89 @@ async function rowOnScreen(deps: ShowDeps, agentId: string, cardId: string): Pro
   }
 }
 
+// ---------------------------------------------------------------- カードの無い件
+
+/**
+ * カードの無い件(カードを作れない・作り直し中)を、窓口Aの代わりに裏方2へ回した回数。
+ *
+ * 窓口Aは2026-11-01から質問を出さないので、旧手順にあった「`card` が null なら
+ * `consult --no-answer` で裏方へ回す」を機械がやる。効かないときに20秒ごとに叩き続けないよう、
+ * 件ごとに回数を数えて3回で止める(状態は行とは別のファイルに持つ)。
+ */
+function cardlessFile(stateDir: string): string {
+  return path.join(stateDir, "card_direct_cardless.json");
+}
+
+function readCardless(stateDir: string): Record<string, number> {
+  try {
+    const raw = JSON.parse(fs.readFileSync(cardlessFile(stateDir), "utf8"));
+    if (raw && typeof raw === "object") return raw as Record<string, number>;
+  } catch {
+    // 無い・壊れている=まだ回していない
+  }
+  return {};
+}
+
+const CARDLESS_MAX_ATTEMPTS = 3;
+
+/**
+ * カードの無い件を裏方へ回す(1件につき最大3回)。成功したら以後は回さない。
+ * 戻り値は「回したか」。
+ */
+async function moveCardlessToBackstage(
+  deps: ShowDeps,
+  agentId: string,
+  window: string,
+  cardId: string,
+): Promise<boolean> {
+  if (!deps.cli || !cardId) return false;
+  const key = `${agentId}|${cardId}`;
+  const tried = readCardless(deps.stateDir);
+  if ((tried[key] ?? 0) >= CARDLESS_MAX_ATTEMPTS) return false;
+  let ok = false;
+  try {
+    const res = await runJudgmentExit(
+      deps.cli,
+      ["consult", "--window", window, "--id", cardId, "--no-answer"],
+      "カード無し",
+    );
+    // 3 は「次の件が無いだけ」で consult 自体は成功している
+    ok = res.code === 0 || res.code === 3;
+  } catch {
+    ok = false;
+  }
+  tried[key] = ok ? CARDLESS_MAX_ATTEMPTS : (tried[key] ?? 0) + 1;
+  try {
+    fs.mkdirSync(deps.stateDir, { recursive: true });
+    fs.writeFileSync(cardlessFile(deps.stateDir), JSON.stringify(tried), "utf8");
+  } catch {
+    // 記録できないだけなら次回もう一度試す(止めない)
+  }
+  return ok;
+}
+
+/**
+ * カードが無いときの後始末。
+ *
+ * カードが無い(点検の印が切れた・作り直し中・出せる件が無い)ので、表示中の行は押せなくする。
+ * 件そのものはあるのにカードが無いときは、窓口Aが黙って待つと画面に出ないまま列が止まるので、
+ * 機械が裏方へ回す(旧手順の consult --no-answer をここへ移した。出口レビュー指摘3)。
+ */
+async function cardlessOutcome(
+  deps: ShowDeps,
+  target: string,
+  openRow: AgentRowState | undefined,
+  item: Record<string, unknown>,
+  out: Record<string, unknown>,
+): Promise<AutoAskResult> {
+  const cardlessId = String(item.id ?? "");
+  if (cardlessId)
+    await moveCardlessToBackstage(deps, target, String(item.window ?? "A"), cardlessId);
+  if (!openRow) return noShow(String(item.card_note ?? out.say ?? "no_card").slice(0, 300));
+  retireRow(deps.stateDir, target, openRow.shownAt);
+  return noShow("card_missing", openRow.cardId);
+}
+
 /** `next` の返り値をそのまま行にする(出さないときは理由だけ)。 */
 async function showFromNext(
   deps: ShowDeps,
@@ -581,10 +739,7 @@ async function showFromNext(
   const item = pickItem(out) ?? {};
   const card = item.card as Record<string, unknown> | null | undefined;
   if (!item.has_card || !card || typeof card !== "object") {
-    // カードが無い(点検の印が切れた・作り直し中・出せる件が無い)。表示中の行は押せなくする
-    if (!openRow) return noShow(String(item.card_note ?? out.say ?? "no_card").slice(0, 300));
-    retireRow(deps.stateDir, target, openRow.shownAt);
-    return noShow("card_missing", openRow.cardId);
+    return cardlessOutcome(deps, target, openRow, item, out);
   }
   const cardId = String(card.id ?? "");
   const sha = cardSha(deps.stateDir, cardId);
