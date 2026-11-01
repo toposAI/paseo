@@ -2371,15 +2371,17 @@ export class AgentManager {
   async unarchiveSnapshot(
     agentId: string,
     updates?: { workspaceId?: string; labels?: AgentLabelPatch },
+    via?: string,
   ): Promise<boolean> {
     return this.runLifecycleMutation(agentId, () =>
-      this.unarchiveSnapshotUnlocked(agentId, updates),
+      this.unarchiveSnapshotUnlocked(agentId, updates, via),
     );
   }
 
   private async unarchiveSnapshotUnlocked(
     agentId: string,
     updates?: { workspaceId?: string; labels?: AgentLabelPatch },
+    via?: string,
   ): Promise<boolean> {
     const registry = this.requireRegistry();
     const record = await registry.get(agentId);
@@ -2399,6 +2401,11 @@ export class AgentManager {
       archivedAt: null,
       updatedAt: new Date().toISOString(),
     });
+    // Trace which path lifted the archive (who/when), so a surprise unarchive can be attributed later.
+    this.logger.info(
+      { agentId, previousArchivedAt: record.archivedAt, via: via ?? "unknown" },
+      "Agent unarchived",
+    );
 
     if (this.getAgent(agentId)) {
       this.notifyAgentState(agentId);

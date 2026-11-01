@@ -264,8 +264,9 @@ export async function unarchiveAgentState(
   agentManager: AgentUnarchiveController,
   agentId: string,
   updates?: { workspaceId?: string; labels?: Record<string, string | null> },
+  via?: string,
 ): Promise<boolean> {
-  const unarchived = await agentManager.unarchiveSnapshot(agentId, updates);
+  const unarchived = await agentManager.unarchiveSnapshot(agentId, updates, via);
   if (!unarchived) return false;
   agentManager.notifyAgentState(agentId);
   return true;
@@ -385,7 +386,15 @@ export async function sendPromptToAgent(
     if (!unarchive) {
       return { disposition: "turn_started" };
     }
-    if (await unarchiveAgentState(params.agentStorage, params.agentManager, params.agentId)) {
+    if (
+      await unarchiveAgentState(
+        params.agentStorage,
+        params.agentManager,
+        params.agentId,
+        undefined,
+        "send_prompt",
+      )
+    ) {
       archivedAtToRestore = record.archivedAt;
     }
   }
