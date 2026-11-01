@@ -12,6 +12,8 @@ import {
 } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { useToast } from "@getpaseo/plugin/client/react-native";
+import { CardDirectRow } from "./client/CardDirectRow";
+import { CARD_DIRECT_KIND, CARD_DIRECT_VERSION, CardDirectDataSchema } from "./shared/card-direct";
 import { ChildThreadsSidebar, CHILD_THREADS_SCREEN_ID } from "./client/ChildThreadsSidebar";
 import { ChildThreadsView } from "./client/ChildThreadsView";
 import { ConceptNoteView } from "./client/ConceptNoteView";
@@ -561,6 +563,15 @@ export default function contribute(ctx: PluginClientContext) {
   setScreenOpener(openBoxScreen);
   // ヘッダボタンはワークスペース単位でしか登録できないため、サイドバー項目(常駐)が
   // ホストのワークスペース一覧を見て各々へ登録する(`useRegisteredHeaderButtons` が登録簿を持つ)。
+
+  // 判断カードの行(2026-11-01 試作)。サーバー側が `judgment_window.py next` の返したカードを
+  // そのままタイムライン行として貼り、ここは描くだけ。本文はモデルの返答に出さない。
+  ctx.addTimelineRenderer({
+    kind: CARD_DIRECT_KIND,
+    version: CARD_DIRECT_VERSION,
+    schema: CardDirectDataSchema,
+    Component: CardDirectRow,
+  });
 
   ctx.addScreen({ id: CHILD_THREADS_SCREEN_ID, title: "子スレ", Component: ChildThreadsScreen });
   ctx.addSidebarHeaderItem({

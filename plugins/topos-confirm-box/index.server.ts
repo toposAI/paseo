@@ -212,8 +212,83 @@ import {
   questionResponse,
 } from "./server/permits.js";
 import type { PermitAgentLike } from "./server/permits.js";
+import {
+  answerCard,
+  holdCard,
+  judgmentStateDir,
+  readRowState,
+  resolveJudgmentCli,
+  showNext,
+  startAutoAsk,
+  type ShowDeps,
+} from "./server/card-direct.js";
+import {
+  cardDirectAnswerRpc,
+  cardDirectHoldRpc,
+  cardDirectShowRpc,
+  cardDirectStateRpc,
+} from "./shared/card-direct.js";
 
 export default function contribute(server: PluginServerContext) {
+  // 自動出題(モデルを呼ばない)。**最初にハンドラが呼ばれた時点**で始める: プラグインのサーバーは
+  // `contribute` の時点では PaseoApi を持たず、行の貼り先(スレ)も画面が開いて読み込まれるまで
+  // 触れないため。画面は状態を10秒ごとに読むので、デーモン再起動後もそこで始まる。
+  let autoAsk: ReturnType<typeof startAutoAsk> | null = null;
+  const ensureAutoAsk = (paseo: PaseoApi): void => {
+    if (autoAsk) return;
+    autoAsk = startAutoAsk({ paseo, cli: resolveJudgmentCli(), stateDir: judgmentStateDir() });
+  };
+
+  // 判断カードを機械がそのまま画面へ出す試作(2026-11-01)。判断の中身は Python 1か所に任せ、
+  // ここは「貼る」「押された回答を渡す」だけ。本文はモデルの返答に載せない。
+  const cardDirectDeps = (paseo: PaseoApi): ShowDeps => {
+    ensureAutoAsk(paseo);
+    return { paseo, cli: resolveJudgmentCli(), stateDir: judgmentStateDir() };
+  };
+
+  server.handle(cardDirectShowRpc, async (input, ctx) =>
+    showNext(cardDirectDeps(ctx.paseo), input.agentId, input.window),
+  );
+
+  server.handle(cardDirectAnswerRpc, async (input, ctx) =>
+    answerCard(cardDirectDeps(ctx.paseo), {
+      agentId: input.agentId,
+      cardId: input.cardId,
+      choiceId: input.choiceId,
+      answer: input.answer,
+      shownAt: input.shownAt,
+    }),
+  );
+
+  // 「保留」= 記録せず手放して次の1問へ(2026-11-01 壁打ち4)
+  server.handle(cardDirectHoldRpc, async (input, ctx) =>
+    holdCard(cardDirectDeps(ctx.paseo), {
+      agentId: input.agentId,
+      cardId: input.cardId,
+      shownAt: input.shownAt,
+    }),
+  );
+
+  server.handle(cardDirectStateRpc, async (_input, ctx) => {
+    // 画面が見るたびに、自動出題がまだ始まっていなければ始める(再起動後はここが起点)
+    ensureAutoAsk(ctx.paseo);
+    const state = readRowState(judgmentStateDir());
+    return {
+      paused: fs.existsSync(path.join(judgmentStateDir(), "PAUSED.json")),
+      agents: Object.fromEntries(
+        Object.entries(state.agents).map(([id, row]) => [
+          id,
+          {
+            cardId: row.cardId,
+            shownAt: row.shownAt,
+            answered: Object.keys(row.answered),
+            retired: row.retired ?? [],
+          },
+        ]),
+      ),
+    };
+  });
+
   async function collect(ctx: {
     paseo: { agents: { list(): Promise<{ entries: { agent: PermitAgentLike }[] }> } };
   }) {
@@ -1556,7 +1631,9 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  return () => {};
+  return () => {
+    autoAsk?.stop();
+  };
 }
 
 /** 生存スレの索引。`live: false` はデーモンの一覧を読み切れていない(「無い」と断定できない)。 */
