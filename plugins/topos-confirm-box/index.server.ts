@@ -205,8 +205,54 @@ import {
   questionResponse,
 } from "./server/permits.js";
 import type { PermitAgentLike } from "./server/permits.js";
+import {
+  answerCard,
+  judgmentStateDir,
+  readRowState,
+  resolveJudgmentCli,
+  showNext,
+  type ShowDeps,
+} from "./server/card-direct.js";
+import {
+  cardDirectAnswerRpc,
+  cardDirectShowRpc,
+  cardDirectStateRpc,
+} from "./shared/card-direct.js";
 
 export default function contribute(server: PluginServerContext) {
+  // 判断カードを機械がそのまま画面へ出す試作(2026-11-01)。判断の中身は Python 1か所に任せ、
+  // ここは「貼る」「押された回答を渡す」だけ。本文はモデルの返答に載せない。
+  const cardDirectDeps = (paseo: PaseoApi): ShowDeps => ({
+    paseo,
+    cli: resolveJudgmentCli(),
+    stateDir: judgmentStateDir(),
+  });
+
+  server.handle(cardDirectShowRpc, async (input, ctx) =>
+    showNext(cardDirectDeps(ctx.paseo), input.agentId, input.window),
+  );
+
+  server.handle(cardDirectAnswerRpc, async (input, ctx) =>
+    answerCard(cardDirectDeps(ctx.paseo), {
+      agentId: input.agentId,
+      cardId: input.cardId,
+      choiceId: input.choiceId,
+      answer: input.answer,
+    }),
+  );
+
+  server.handle(cardDirectStateRpc, async () => {
+    const state = readRowState(judgmentStateDir());
+    return {
+      agents: Object.fromEntries(
+        Object.entries(state.agents).map(([id, row]) => [
+          id,
+          { cardId: row.cardId, shownAt: row.shownAt, answered: Object.keys(row.answered) },
+        ]),
+      ),
+    };
+  });
+
   async function collect(ctx: {
     paseo: { agents: { list(): Promise<{ entries: { agent: PermitAgentLike }[] }> } };
   }) {
