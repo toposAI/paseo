@@ -982,3 +982,17 @@ test("受け入れ1(R2-7): 閉じた子司令塔の未完の行は上段に残�
   assert.equal(ccGroup?.heading?.thread.status, "実装中", "状態(登録簿の語彙)は書き換えない");
   assert.equal(ccGroup?.heading?.thread.machineState, "closed");
 });
+
+test("buildUpperRows: 完了+ピン止め+親の行は残り、入力の順を保つ(pin-order と pinned-done-row の組)", () => {
+  const rows = buildUpperRows(
+    [
+      { ...thread("done-parent", "完了"), pinned: true, groupingParent: true },
+      { ...thread("kid", "実装中"), pinned: true },
+    ],
+    new Map(),
+  );
+  assert.deepEqual(
+    rows.map((r) => r.thread.agentId),
+    ["done-parent", "kid"],
+  );
+});
