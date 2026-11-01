@@ -8233,8 +8233,10 @@ export class Session {
       const agentId = resolved.agentId;
 
       const prompt = buildAgentPrompt(msg.text, msg.images, msg.attachments);
-      // A human typing in a terminal has no PASEO_AGENT_ID, so only a named sender is agent-origin.
-      const isAgentOriginMessage = Boolean(msg.sourceAgentId) || this.clientType === "mcp";
+      // CLI/MCP sends are automation (agents, launchd jobs, scripts) unless the CLI says a human
+      // typed it: the CLI then sends an explicit "interrupt", which skips the queue.
+      const isAgentOriginMessage =
+        Boolean(msg.sourceAgentId) || this.clientType === "cli" || this.clientType === "mcp";
       this.sessionLogger.trace(
         {
           agentId,

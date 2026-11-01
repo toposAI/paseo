@@ -36,6 +36,14 @@ export interface AgentSendOptions extends CommandOptions {
   promptFile?: string;
 }
 
+// A person typing in a terminal has a TTY and is not running inside an agent. Agents' tools,
+// launchd jobs and scripts have neither, so their messages wait for the turn boundary.
+function isHumanAtTerminal(): boolean {
+  return Boolean(
+    process.stdin.isTTY && process.stdout.isTTY && !process.env.PASEO_AGENT_ID?.trim(),
+  );
+}
+
 export function addSendOptions(cmd: Command): Command {
   return cmd
     .description("Send a message/task to an existing agent")
@@ -51,7 +59,7 @@ export function addSendOptions(cmd: Command): Command {
     )
     .option(
       "--interrupt",
-      "If the agent is mid-turn, interrupt it now. Default: wait and deliver at the turn boundary",
+      "If the agent is mid-turn, interrupt it now. Default from a terminal you type in: interrupt; from agents, scripts and launchd: wait for the turn boundary",
     );
 }
 
@@ -203,7 +211,7 @@ export async function runSendCommand(
 
     let activeTurnBehavior: "steer" | "interrupt" | undefined;
     if (options.steer) activeTurnBehavior = "steer";
-    else if (options.interrupt) activeTurnBehavior = "interrupt";
+    else if (options.interrupt || isHumanAtTerminal()) activeTurnBehavior = "interrupt";
 
     // Send the message
     await client.sendAgentMessage(agentIdArg, promptInput, {
