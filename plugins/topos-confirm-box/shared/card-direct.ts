@@ -122,8 +122,8 @@ export const cardDirectStateRpc = defineRpc({
         cardId: z.string().default(""),
         shownAt: z.number().default(0),
         answered: z.array(z.string()).default([]),
-        /** 差し替えで止めた行(押しても記録しない)。 */
-        retired: z.array(z.string()).default([]),
+        /** 差し替えで止めた行(`shownAt`。同じカードを出し直しても古い行だけ止まる)。 */
+        retired: z.array(z.number()).default([]),
       }),
     ),
   }),

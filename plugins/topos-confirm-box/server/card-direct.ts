@@ -137,8 +137,8 @@ interface AgentRowState {
   answered: Record<string, { recorded: string; choiceId: string; at: number }>;
   /** 「保留」で手放した件(回答ではないので answered とは別に持つ)。 */
   held?: string[];
-  /** 差し替えで止めた行(押しても記録しない)。直近だけ残す。 */
-  retired?: string[];
+  /** 差し替えで止めた行(`shownAt`)。同じカードを出し直しても古い行だけ止まる。直近だけ残す。 */
+  retired?: number[];
 }
 
 const RETIRED_KEEP = 20;
@@ -264,13 +264,13 @@ export async function appendCardRow(
 }
 
 /** 行を「もう押せない」印にする(差し替え・カード消失)。件そのものは触らない。 */
-function retireRow(stateDir: string, agentId: string, cardId: string): void {
-  if (!cardId) return;
+function retireRow(stateDir: string, agentId: string, shownAt: number): void {
+  if (!shownAt) return;
   const state = readRowState(stateDir);
   const row = state.agents[agentId];
   if (!row || !row.cardId) return;
-  const retired = (row.retired ?? []).filter((id) => id !== cardId);
-  retired.push(cardId);
+  const retired = (row.retired ?? []).filter((at) => at !== shownAt);
+  retired.push(shownAt);
   row.retired = retired.slice(-RETIRED_KEEP);
   writeRowState(stateDir, state);
 }
@@ -543,6 +543,33 @@ export async function autoAskOnce(deps: ShowDeps, agentId = ""): Promise<AutoAsk
   return showFromNext(deps, target, openRow, out);
 }
 
+/**
+ * その行が**いま画面(タイムライン)に載っているか**。
+ *
+ * 行はデーモンのメモリ上にしか無いので、デーモンを再起動すると消える。状態ファイルだけを見て
+ * 「もう出している」と判断すると、再起動後に質問が画面から消えたままになる。読めないとき
+ * (スレがまだ読み込まれていない)は「出ている」側に倒す=二重に出さない。
+ */
+async function rowOnScreen(deps: ShowDeps, agentId: string, cardId: string): Promise<boolean> {
+  try {
+    const page = await deps.paseo.agents.ref(agentId).timeline.refetch({
+      limit: 200,
+      projection: "canonical",
+    });
+    const entries = (page?.entries ?? []) as { item?: Record<string, unknown> }[];
+    return entries.some((e) => {
+      const it = (e.item ?? e) as {
+        type?: string;
+        kind?: string;
+        data?: { cardId?: string };
+      };
+      return it.type === "plugin" && it.kind === CARD_DIRECT_KIND && it.data?.cardId === cardId;
+    });
+  } catch {
+    return true;
+  }
+}
+
 /** `next` の返り値をそのまま行にする(出さないときは理由だけ)。 */
 async function showFromNext(
   deps: ShowDeps,
@@ -556,15 +583,18 @@ async function showFromNext(
   if (!item.has_card || !card || typeof card !== "object") {
     // カードが無い(点検の印が切れた・作り直し中・出せる件が無い)。表示中の行は押せなくする
     if (!openRow) return noShow(String(item.card_note ?? out.say ?? "no_card").slice(0, 300));
-    retireRow(deps.stateDir, target, openRow.cardId);
+    retireRow(deps.stateDir, target, openRow.shownAt);
     return noShow("card_missing", openRow.cardId);
   }
   const cardId = String(card.id ?? "");
   const sha = cardSha(deps.stateDir, cardId);
-  // すでに同じ本文の行が出ている=何もしない(`next` が印の期限を延ばしている)
-  if (openRow && openRow.cardId === cardId && openRow.cardSha === sha) return noShow("");
+  // 同じ本文の行が「いま画面にあれば」何もしない(`next` が印の期限を延ばしている)。
+  // 画面から消えている(デーモン再起動で行が消えた)ときは、同じ1問を出し直す。
+  if (openRow && openRow.cardId === cardId && openRow.cardSha === sha) {
+    if (await rowOnScreen(deps, target, cardId)) return noShow("");
+  }
   const retired = openRow?.cardId ?? "";
-  if (retired) retireRow(deps.stateDir, target, retired);
+  if (openRow) retireRow(deps.stateDir, target, openRow.shownAt);
   const shownId = await appendCardRow(deps, target, String(item.window ?? "A"), card);
   return { shown: true, cardId: shownId, reason: "", retired };
 }

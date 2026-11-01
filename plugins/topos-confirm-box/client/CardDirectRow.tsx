@@ -54,14 +54,15 @@ function alignToTop(node: unknown): void {
 
 /** この行がまだ押せるかを、いま出している行と突き合わせる。 */
 function staleOf(
-  out: { paused: boolean; agents: Record<string, { cardId: string; retired: string[] }> },
+  out: { paused: boolean; agents: Record<string, { cardId: string; retired: number[] }> },
   agentId: string,
   cardId: string,
+  shownAt: number,
 ): "" | "paused" | "retired" {
   if (out.paused) return "paused";
   const row = out.agents[agentId];
-  if (!row || row.retired.includes(cardId) || (row.cardId && row.cardId !== cardId))
-    return "retired";
+  if (!row || row.retired.includes(shownAt)) return "retired";
+  if (row.cardId && row.cardId !== cardId) return "retired";
   return "";
 }
 
@@ -94,7 +95,7 @@ export function CardDirectRow({ agentId, item, theme }: PluginTimelineItemProps<
     const check = (): void => {
       stateOf({ agentId })
         .then((out) => {
-          if (!stopped) setStale(staleOf(out, agentId, data.cardId));
+          if (!stopped) setStale(staleOf(out, agentId, data.cardId, data.shownAt));
           return undefined;
         })
         .catch(() => {
@@ -107,7 +108,7 @@ export function CardDirectRow({ agentId, item, theme }: PluginTimelineItemProps<
       stopped = true;
       clearInterval(timer);
     };
-  }, [agentId, data.cardId, decided, stateOf]);
+  }, [agentId, data.cardId, data.shownAt, decided, stateOf]);
 
   const choose = useCallback(
     (optionId: string, label: string) => {
