@@ -115,6 +115,7 @@ import {
   AttachmentThumbnail,
 } from "@/components/attachment-pill";
 import { AttachmentLightbox, type ImageLightboxSource } from "@/components/attachment-lightbox";
+import { useChatImageViewer } from "@/components/chat-image-viewer";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { isWeb, isNative } from "@/constants/platform";
 import type { AgentCapabilityFlags } from "@getpaseo/protocol/agent-types";
@@ -465,6 +466,14 @@ export const UserMessage = memo(function UserMessage({
   const [isHovered, setIsHovered] = useState(false);
   const [lightboxMetadata, setLightboxMetadata] = useState<UserMessageImageAttachment | null>(null);
   const handleLightboxClose = useCallback(() => setLightboxMetadata(null), []);
+  const chatImageViewer = useChatImageViewer();
+  // Inside a chat the shared viewer steps through every image; alone it shows just this one.
+  const handleOpenImage = useCallback(
+    (image: UserMessageImageAttachment) => {
+      if (!chatImageViewer?.openUserImage(image.id)) setLightboxMetadata(image);
+    },
+    [chatImageViewer],
+  );
   const lightboxSource = useMemo<ImageLightboxSource | null>(
     () => (lightboxMetadata ? { type: "attachment", metadata: lightboxMetadata } : null),
     [lightboxMetadata],
@@ -551,7 +560,7 @@ export const UserMessage = memo(function UserMessage({
             <UserMessageImagePill
               key={image.id}
               image={image}
-              onOpen={setLightboxMetadata}
+              onOpen={handleOpenImage}
               accessibilityLabel={t("composer.attachments.openImage")}
             />
           ))}
@@ -903,7 +912,10 @@ function AssistantMarkdownImage({
   const { t } = useTranslation();
   const { height: windowHeight } = useWindowDimensions();
   const [viewerOpen, setViewerOpen] = useState(false);
-  const openViewer = useCallback(() => setViewerOpen(true), []);
+  const chatImageViewer = useChatImageViewer();
+  const openViewer = useCallback(() => {
+    if (!chatImageViewer?.openAssistantImage(source, occurrenceKey)) setViewerOpen(true);
+  }, [chatImageViewer, occurrenceKey, source]);
   const closeViewer = useCallback(() => setViewerOpen(false), []);
   const containerStyle = useMemo<StyleProp<ViewStyle>>(
     () => ({

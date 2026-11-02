@@ -146,3 +146,26 @@ export function panContent(input: {
     input.limits,
   );
 }
+
+export type ViewportSwipeDirection = "previous" | "next";
+
+export const SWIPE_MIN_DISTANCE = 56;
+// Scale values this close to the fitted size still count as "not zoomed in".
+export const SWIPE_MAX_SCALE = 1.02;
+
+/**
+ * A horizontal flick over an image that is not zoomed in moves to the neighbouring image.
+ * Once zoomed (or after a second finger touched down) the same drag pans or pinches instead.
+ */
+export function resolveSwipe(input: {
+  deltaX: number;
+  deltaY: number;
+  scale: number;
+  usedSecondPointer: boolean;
+}): ViewportSwipeDirection | null {
+  "worklet";
+  if (input.usedSecondPointer || input.scale > SWIPE_MAX_SCALE) return null;
+  const distanceX = Math.abs(input.deltaX);
+  if (distanceX < SWIPE_MIN_DISTANCE || distanceX < Math.abs(input.deltaY) * 1.5) return null;
+  return input.deltaX < 0 ? "next" : "previous";
+}
