@@ -115,6 +115,7 @@ vi.mock("@/components/zoomable-viewport/image", () => ({
         "data-source": props.uri,
         role: "img",
         "data-has-swipe": String(typeof props.onSwipe === "function"),
+        "data-always-controls": String(props.alwaysShowControls === true),
         onClick: () => (props.onSwipe as ((direction: string) => void) | undefined)?.("next"),
       },
       actions.map((action) =>
@@ -217,6 +218,14 @@ describe("AttachmentLightbox", () => {
     const image = queryByTestId("attachment-lightbox-image");
     expect(image).not.toBeNull();
     expect(image?.getAttribute("data-source")).toBe("blob:preview");
+  });
+
+  it("keeps the zoom and close buttons shown without hover", () => {
+    render(<AttachmentLightbox source={attachmentSource} onClose={vi.fn()} />);
+
+    expect(queryByTestId("attachment-lightbox-image")?.getAttribute("data-always-controls")).toBe(
+      "true",
+    );
   });
 
   it("renders a direct timeline image without resolving attachment storage", () => {
