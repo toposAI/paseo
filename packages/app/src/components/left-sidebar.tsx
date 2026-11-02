@@ -35,6 +35,7 @@ import { builtinSidebarNavLabelKey, type BuiltinSidebarNavId } from "@/sidebar-n
 import { useSidebarNavItems } from "@/sidebar-nav/use-sidebar-nav-items";
 import { usePanelStore } from "@/stores/panel-store";
 import { useOwnsWindowChromeCorner, WindowChromeSafeArea } from "@/utils/desktop-window";
+import { getDictation139Bridge, switchDictation139App } from "@/utils/dictation139-bridge";
 import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { buildSettingsRoute } from "@/utils/host-routes";
@@ -353,6 +354,24 @@ function MobileSidebar({
           pointerEvents="box-none"
           style={styles.mobileCloseButtonRow}
         >
+          {/* 139番アプリ内(JS橋あり)だけ「T」を出し、個人版Toposの画面へ切り替える。 */}
+          {getDictation139Bridge() ? (
+            <Pressable
+              style={styles.mobileSwitchAppButton}
+              onPress={switchDictation139App}
+              testID="sidebar-switch-to-topos"
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel="Toposへ切り替え"
+              hitSlop={8}
+            >
+              <Text
+                style={{ color: theme.colors.foregroundMuted, fontWeight: "700", fontSize: 16 }}
+              >
+                T
+              </Text>
+            </Pressable>
+          ) : null}
           <Pressable
             style={styles.mobileCloseButton}
             onPress={closeSidebar}
@@ -549,7 +568,17 @@ const styles = StyleSheet.create((theme) => ({
     left: 0,
     right: 0,
     zIndex: 2,
-    alignItems: "flex-end",
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  mobileSwitchAppButton: {
+    marginRight: theme.spacing[1],
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surfaceSidebar,
   },
   mobileCloseButton: {
     // The 16px X paints farther inside its 32px hit target than the 14px Settings2 glyph.
