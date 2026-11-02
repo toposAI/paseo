@@ -76,7 +76,6 @@ export function OpenProjectScreen() {
             description={t("openProject.tiles.addProject.description")}
             onPress={handleOpenPicker}
             testID="open-project-submit"
-            accent
           />
           <HomeTile
             icon={Inbox}

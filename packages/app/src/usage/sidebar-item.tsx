@@ -26,6 +26,7 @@ import { UsageMeter } from "./meter";
 import {
   choosePinnedUsageLayout,
   METER_GAP,
+  localizeShortLabel,
   MIN_METER_WIDTH,
   resolvePinnedUsage,
   splitPinnedUsageRows,
@@ -283,7 +284,9 @@ function PinnedUsageLine({
             >
               {window.percentText}
               {layout === "percents" || window.shortLabel === "" ? null : (
-                <Text style={styles.windowLabel}>{` ${window.shortLabel}`}</Text>
+                <Text
+                  style={styles.windowLabel}
+                >{` ${localizeShortLabel(window.shortLabel)}`}</Text>
               )}
             </Text>
           </Fragment>
