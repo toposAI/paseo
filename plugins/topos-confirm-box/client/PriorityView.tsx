@@ -300,6 +300,8 @@ const rowDataSet = { priorityRow: "1" };
 const detailDataSet = { priorityDetail: "1" };
 const gap6 = { gap: 6 };
 const gap8 = { gap: 8 };
+// 右下の丸いボタンが末尾の行(状態の列)に重ならないよう、一覧の下に余白を取る
+const listBottomGap = { gap: 8, paddingBottom: 80 };
 const detailCard = { gap: 4 };
 const detailThreadRow = {
   flexDirection: "row" as const,
@@ -438,6 +440,14 @@ function RestoreRow({
   return <LedgerRow text={project.name} actionLabel="戻す" styles={styles} onAction={restore} />;
 }
 
+/** 中身の子スレの状態を日本語1語で出す(内部の status/machineState の生の語は出さない)。 */
+function threadStatusWord(t: DetailThread): string {
+  if (t.status === "完了") return "完了";
+  if (t.machineState === "waiting_approval") return "判断待ち";
+  if (t.live ?? t.machineState === "running") return "動いている";
+  return "待機";
+}
+
 function ThreadLine({
   thread,
   styles,
@@ -454,7 +464,7 @@ function ThreadLine({
       <Text style={textStyle} numberOfLines={1}>
         {thread.title}
       </Text>
-      <Text style={styles.muted}>{`${thread.status}/${thread.machineState ?? "?"}`}</Text>
+      <Text style={styles.muted}>{threadStatusWord(thread)}</Text>
     </Pressable>
   );
 }
@@ -853,7 +863,7 @@ export function PriorityView({
   }, [detailId, led.data]);
 
   return (
-    <View style={gap8}>
+    <View style={listBottomGap}>
       <Text style={styles.muted}>
         {`開発の優先順位(全${projects.length}件・今動いている子スレ ${runningTotal} 件)。行タップで中身(説明・子スレ・未決の判断)を開きます。並べ替えは長押し(PCはドラッグ)。右端の箱アイコンでアーカイブ、⇣ で常時の方針へ。どちらも戻せます。確認箱の判断は上位の項目が先に並びます`}
       </Text>
