@@ -16,7 +16,7 @@ export function SwitchToToposRow() {
       style={isCompact ? styles.switchAppButtonRowCompact : styles.switchAppButtonRow}
     >
       <Pressable
-        style={styles.switchAppButton}
+        style={isCompact ? styles.switchAppButtonCompact : styles.switchAppButton}
         onPress={switchDictation139App}
         testID="sidebar-switch-to-topos"
         accessible
@@ -46,6 +46,16 @@ const styles = StyleSheet.create((theme) => ({
     justifyContent: "flex-end",
     alignItems: "center",
   },
+  switchAppButtonCompact: {
+    // ToposのPと右端をそろえる(iPhone幅)。
+    marginRight: theme.spacing[2] + 4,
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surfaceSidebar,
+  },
   // ToposのPと同じ濃い色・太字。
   switchAppText: {
     color: theme.colors.foreground,
@@ -53,8 +63,8 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: 18,
   },
   switchAppButton: {
-    // Same right rail as the footer Settings glyph (the 16px glyph paints inside its 32px target).
-    marginRight: theme.spacing[2] + 1.5,
+    // ToposのPと右端をそろえる(PC幅)。
+    marginRight: theme.spacing[2] - 1,
     width: 32,
     height: 32,
     alignItems: "center",
