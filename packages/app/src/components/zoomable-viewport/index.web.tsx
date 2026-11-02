@@ -54,6 +54,7 @@ export function ZoomableViewport({
   minScale = DEFAULT_MIN_SCALE,
   onPressOutsideContent,
   onSwipe,
+  alwaysShowControls,
   style,
   testID,
   wheelActivation = "modifier",
@@ -322,7 +323,7 @@ export function ZoomableViewport({
     }),
     [fittedContent, transform],
   );
-  const controlsVisible = isHovered || isFocusWithin || hasTouchInput;
+  const controlsVisible = alwaysShowControls || isHovered || isFocusWithin || hasTouchInput;
   const handleFocus = useCallback(() => setIsFocusWithin(true), []);
   const handleBlur = useCallback(() => setIsFocusWithin(false), []);
   const handleMouseEnter = useCallback(() => setIsHovered(true), []);

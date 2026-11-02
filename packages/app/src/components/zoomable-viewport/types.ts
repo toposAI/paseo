@@ -20,6 +20,8 @@ export interface ZoomableViewportProps {
   onPressOutsideContent?: () => void;
   /** A horizontal swipe while not zoomed in; the caller moves to the neighbouring image. */
   onSwipe?: (direction: ViewportSwipeDirection) => void;
+  /** Keep the buttons shown (and clickable) without hover, e.g. in a full-screen viewer. */
+  alwaysShowControls?: boolean;
   style?: StyleProp<ViewStyle>;
   testID?: string;
   wheelActivation?: "always" | "modifier";

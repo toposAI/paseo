@@ -142,6 +142,7 @@ function LightboxImageView({ url, contentSize, failed, onClose, onSwipe }: Light
       onError={handleImageError}
       onPressOutsideContent={onClose}
       onSwipe={onSwipe}
+      alwaysShowControls
       style={styles.imageViewport}
       testID="attachment-lightbox"
       uri={url}

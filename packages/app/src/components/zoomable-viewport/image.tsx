@@ -16,6 +16,7 @@ interface ZoomableImageProps {
   onError?: () => void;
   onPressOutsideContent?: () => void;
   onSwipe?: (direction: ViewportSwipeDirection) => void;
+  alwaysShowControls?: boolean;
   style?: StyleProp<ViewStyle>;
   testID?: string;
   wheelActivation?: "always" | "modifier";
@@ -32,6 +33,7 @@ export function ZoomableImage({
   onError,
   onPressOutsideContent,
   onSwipe,
+  alwaysShowControls,
   style,
   testID = "zoomable-image",
   wheelActivation = "always",
@@ -84,6 +86,7 @@ export function ZoomableImage({
       minScale={minScale}
       onPressOutsideContent={onPressOutsideContent}
       onSwipe={onSwipe}
+      alwaysShowControls={alwaysShowControls}
       style={style}
       testID={testID}
       wheelActivation={wheelActivation}
