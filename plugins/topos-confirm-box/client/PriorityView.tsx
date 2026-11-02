@@ -285,7 +285,7 @@ const rankRow = {
 };
 const grow = { flex: 1, minWidth: 0 };
 const rowCard = { paddingVertical: 4, paddingHorizontal: 6, gap: 0 };
-const rankNo = { minWidth: 16, textAlign: "right" as const };
+const rankNo = { width: 24, flexShrink: 0, textAlign: "right" as const };
 const iconBtn = {
   padding: 4,
   borderRadius: 4,
@@ -320,6 +320,9 @@ function StatusChip({ text, color }: { text: string; color: string }) {
       borderWidth: 1,
       borderRadius: 4,
       paddingHorizontal: 4,
+      // 「動9」と「動45」で幅が変わらないよう固定する
+      minWidth: 34,
+      textAlign: "center" as const,
     }),
     [color],
   );
@@ -347,7 +350,12 @@ function RankRow({
   const labelStyle = useMemo(() => [styles.text, grow], [styles.text]);
   const noStyle = useMemo(() => [styles.muted, rankNo, noSelect], [styles.muted]);
   const running = project.running ?? 0;
-  const label = `${project.isNew ? "【新規】" : ""}${project.thread ? `${project.name} ›` : project.name}`;
+  const mark = project.isNew
+    ? project.note.startsWith("構想から追加")
+      ? "【構想】"
+      : "【新規】"
+    : "";
+  const label = `${mark}${project.thread ? `${project.name} ›` : project.name}`;
   return (
     <View style={cardStyle}>
       <View style={handleStyle} {...({ dataSet: handleDataSet } as object)}>
