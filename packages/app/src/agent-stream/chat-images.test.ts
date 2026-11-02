@@ -48,6 +48,15 @@ describe("collectChatImages", () => {
     ]);
   });
 
+  it("ignores image syntax shown inside code", () => {
+    const entries = collectChatImages(
+      [assistant("m3", "`![a](/x.png)`\n```\n![b](/y.png)\n```\n![c](/z.png)")],
+      "agent-1",
+    );
+
+    expect(entries.map((entry) => entry.type === "assistant" && entry.source)).toEqual(["/z.png"]);
+  });
+
   it("finds the clicked user image by its attachment id", () => {
     const entries = collectChatImages(items, "agent-1");
 

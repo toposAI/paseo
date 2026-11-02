@@ -25,6 +25,11 @@ export type ChatImageEntry =
       name: string;
     };
 
+/** Image syntax inside code is shown as text, not rendered, so it is not part of the chat's images. */
+function stripCode(markdown: string): string {
+  return markdown.replace(/```[\s\S]*?(```|$)/g, "").replace(/`[^`\n]*`/g, "");
+}
+
 export function collectChatImages(items: readonly StreamItem[], agentId: string): ChatImageEntry[] {
   const entries: ChatImageEntry[] = [];
   for (const item of items) {
@@ -38,7 +43,7 @@ export function collectChatImages(items: readonly StreamItem[], agentId: string)
         });
       }
     } else if (item.kind === "assistant_message") {
-      parseAssistantImageMarkdownEntries(item.text).forEach((image, index) => {
+      parseAssistantImageMarkdownEntries(stripCode(item.text)).forEach((image, index) => {
         entries.push({
           type: "assistant",
           key: `assistant:${item.id}:${index}`,

@@ -259,6 +259,7 @@ function LightboxCommentBar({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<CommentStatus>("idle");
   const inputRef = useRef<EditingTextInputHandle>(null);
+  const sendingRef = useRef(false);
   const draft = drafts[imageKey] ?? "";
   const canSend = draft.trim().length > 0 && status !== "sending";
 
@@ -272,17 +273,22 @@ function LightboxCommentBar({
   );
   const handleSend = useCallback(async () => {
     const text = draft.trim();
-    if (!text || status === "sending") return;
+    // A ref, not `status`: two taps in one frame both see the stale "idle" state.
+    if (!text || sendingRef.current) return;
+    sendingRef.current = true;
     setStatus("sending");
     try {
       await comment.onSubmit(text);
       setDrafts((current) => ({ ...current, [imageKey]: "" }));
       inputRef.current?.reset();
       setStatus("idle");
-    } catch {
+    } catch (error) {
+      console.warn("[chat-image-viewer] comment failed", error);
       setStatus("failed");
+    } finally {
+      sendingRef.current = false;
     }
-  }, [comment, draft, imageKey, status]);
+  }, [comment, draft, imageKey]);
   const barStyle = useMemo(
     () => [styles.commentBar, bottomInset > 0 ? { marginBottom: bottomInset } : null],
     [bottomInset],
