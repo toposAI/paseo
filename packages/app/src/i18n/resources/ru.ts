@@ -380,6 +380,12 @@ export const ru: TranslationResources = {
     attachments: {
       dismissImage: "Закрыть изображение",
       closeImage: "Закрыть изображение",
+      previousImage: "Предыдущее изображение",
+      nextImage: "Следующее изображение",
+      imageCounter: "{{current}} / {{total}}",
+      imageCommentPlaceholder: "Комментарий к изображению",
+      sendImageComment: "Отправить комментарий",
+      imageCommentFailed: "Не удалось отправить комментарий",
       imageLoadFailed: "Не удалось загрузить изображение",
       imageUnavailable: "Изображение недоступно",
       imagePreviewUnavailable: "Предварительный просмотр изображения недоступен.",

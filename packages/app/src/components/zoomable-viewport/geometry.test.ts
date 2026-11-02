@@ -6,6 +6,7 @@ import {
   isActivePinchUpdate,
   isPointInsideTransformedContent,
   panContent,
+  resolveSwipe,
   zoomContentAtPoint,
 } from "./geometry";
 
@@ -104,5 +105,27 @@ describe("zoomable viewport geometry", () => {
         maxScale: 8,
       }),
     ).toEqual({ scale: 0.25, x: 0, y: 0 });
+  });
+});
+
+describe("resolveSwipe", () => {
+  const base = { deltaX: -120, deltaY: 10, scale: 1, usedSecondPointer: false };
+
+  it("maps a left flick to the next image and a right flick to the previous one", () => {
+    expect(resolveSwipe(base)).toBe("next");
+    expect(resolveSwipe({ ...base, deltaX: 120 })).toBe("previous");
+  });
+
+  it("ignores short drags and mostly vertical drags", () => {
+    expect(resolveSwipe({ ...base, deltaX: -20 })).toBeNull();
+    expect(resolveSwipe({ ...base, deltaX: -100, deltaY: 90 })).toBeNull();
+  });
+
+  it("leaves a zoomed-in image to panning", () => {
+    expect(resolveSwipe({ ...base, scale: 2 })).toBeNull();
+  });
+
+  it("does not treat a pinch as a swipe", () => {
+    expect(resolveSwipe({ ...base, usedSecondPointer: true })).toBeNull();
   });
 });

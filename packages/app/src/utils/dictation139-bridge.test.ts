@@ -1,5 +1,9 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { subscribeDictation139 } from "@/utils/dictation139-bridge";
+import {
+  getDictation139Bridge,
+  subscribeDictation139,
+  switchDictation139App,
+} from "@/utils/dictation139-bridge";
 
 beforeAll(() => {
   // node環境にはwindowが無いため、イベント配送だけをEventTargetで代用する。
@@ -56,5 +60,25 @@ describe("subscribeDictation139", () => {
     unsub();
     dispatchResult("x");
     expect(calls).toBe(0);
+  });
+});
+
+describe("switchDictation139App", () => {
+  it("橋が無い(ブラウザ)ときは何も起きず、橋があるときだけswitchAppを送る", () => {
+    const w = globalThis as unknown as { window?: Record<string, unknown> };
+    const saved = w.window;
+    try {
+      w.window = new EventTarget() as unknown as Record<string, unknown>;
+      expect(getDictation139Bridge()).toBeNull();
+      expect(() => switchDictation139App()).not.toThrow();
+      const sent: unknown[] = [];
+      (w.window as Record<string, unknown>).webkit = {
+        messageHandlers: { dictation139: { postMessage: (m: unknown) => sent.push(m) } },
+      };
+      switchDictation139App();
+      expect(sent).toEqual([{ action: "switchApp" }]);
+    } finally {
+      w.window = saved;
+    }
   });
 });

@@ -382,6 +382,12 @@ export const fr: TranslationResources = {
     attachments: {
       dismissImage: "Ignorer l’image",
       closeImage: "Fermer l’image",
+      previousImage: "Image précédente",
+      nextImage: "Image suivante",
+      imageCounter: "{{current}} / {{total}}",
+      imageCommentPlaceholder: "Commenter cette image",
+      sendImageComment: "Envoyer le commentaire",
+      imageCommentFailed: "Impossible d’envoyer le commentaire",
       imageLoadFailed: "Impossible de charger l’image",
       imageUnavailable: "Image indisponible",
       imagePreviewUnavailable: "Aperçu de l’image indisponible.",

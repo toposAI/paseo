@@ -167,14 +167,20 @@ export function parseAssistantImageOnlyBlock(block: string): AssistantImageEntry
   if (block.replace(MARKDOWN_IMAGE_PATTERN, "").trim().length > 0) {
     return null;
   }
+  const entries = parseAssistantImageMarkdownEntries(block);
+  return entries.length > 0 ? entries : null;
+}
+
+/** Every image of a Markdown text, in order, whether or not text surrounds it. */
+export function parseAssistantImageMarkdownEntries(markdown: string): AssistantImageEntry[] {
   const entries: AssistantImageEntry[] = [];
-  for (const match of block.matchAll(MARKDOWN_IMAGE_WITH_ALT_PATTERN)) {
+  for (const match of markdown.matchAll(MARKDOWN_IMAGE_WITH_ALT_PATTERN)) {
     const source = normalizeAssistantImageSourceToken(match[2] ?? "");
     if (source) {
       entries.push({ source, alt: match[1] || undefined });
     }
   }
-  return entries.length > 0 ? entries : null;
+  return entries;
 }
 
 export interface AssistantMessageHeightEstimateInput {

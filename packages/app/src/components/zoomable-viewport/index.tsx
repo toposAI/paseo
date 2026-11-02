@@ -8,6 +8,7 @@ import {
   fitContentSize,
   isActivePinchUpdate,
   isPointInsideTransformedContent,
+  resolveSwipe,
   zoomContentAtPoint,
   type ViewportSize,
 } from "./geometry";
@@ -26,6 +27,7 @@ export function ZoomableViewport({
   maxScale = DEFAULT_MAX_SCALE,
   minScale = DEFAULT_MIN_SCALE,
   onPressOutsideContent,
+  onSwipe,
   style,
   testID,
 }: ZoomableViewportProps) {
@@ -41,6 +43,7 @@ export function ZoomableViewport({
   const pinchFocalY = useSharedValue(0);
   const pinchReady = useSharedValue(false);
   const pinchTouchCount = useSharedValue(0);
+  const swipeEligible = useSharedValue(false);
   const fittedContent = useMemo(
     () => (viewport ? fitContentSize(contentSize, viewport, fit) : null),
     [contentSize, fit, viewport],
@@ -62,6 +65,7 @@ export function ZoomableViewport({
         .onBegin(() => {
           startX.value = translateX.value;
           startY.value = translateY.value;
+          swipeEligible.value = true;
         })
         .onUpdate((event) => {
           if (!fittedContent || !viewport || scale.value <= minScale) return;
@@ -69,8 +73,29 @@ export function ZoomableViewport({
           const maxY = Math.max(0, (fittedContent.height * scale.value - viewport.height) / 2);
           translateX.value = Math.min(maxX, Math.max(-maxX, startX.value + event.translationX));
           translateY.value = Math.min(maxY, Math.max(-maxY, startY.value + event.translationY));
+        })
+        .onEnd((event, success) => {
+          if (!success || !onSwipe) return;
+          const direction = resolveSwipe({
+            deltaX: event.translationX,
+            deltaY: event.translationY,
+            scale: scale.value,
+            usedSecondPointer: !swipeEligible.value,
+          });
+          if (direction) runOnJS(onSwipe)(direction);
         }),
-    [fittedContent, minScale, scale, startX, startY, translateX, translateY, viewport],
+    [
+      fittedContent,
+      minScale,
+      onSwipe,
+      scale,
+      startX,
+      startY,
+      swipeEligible,
+      translateX,
+      translateY,
+      viewport,
+    ],
   );
 
   const pinchGesture = useMemo(
@@ -78,6 +103,8 @@ export function ZoomableViewport({
       Gesture.Pinch()
         .onTouchesDown((event) => {
           pinchTouchCount.value = event.numberOfTouches;
+          // A second finger turns the gesture into a pinch; it must not also count as a swipe.
+          if (event.numberOfTouches >= 2) swipeEligible.value = false;
         })
         .onTouchesUp((event) => {
           pinchTouchCount.value = event.numberOfTouches;
@@ -128,6 +155,7 @@ export function ZoomableViewport({
       startScale,
       startX,
       startY,
+      swipeEligible,
       translateX,
       translateY,
       viewport,
@@ -150,7 +178,11 @@ export function ZoomableViewport({
           if (!success || !fittedContent || !viewport || !onPressOutsideContent) return;
           const isInside = isPointInsideTransformedContent({
             point: { x: event.x, y: event.y },
-            transform: { scale: scale.value, x: translateX.value, y: translateY.value },
+            transform: {
+              scale: scale.value,
+              x: translateX.value,
+              y: translateY.value,
+            },
             fittedContent,
             viewport,
           });
@@ -175,7 +207,11 @@ export function ZoomableViewport({
     (factor: number) => {
       if (!fittedContent || !viewport) return;
       const next = zoomContentAtPoint({
-        transform: { scale: scale.value, x: translateX.value, y: translateY.value },
+        transform: {
+          scale: scale.value,
+          x: translateX.value,
+          y: translateY.value,
+        },
         scale: scale.value * factor,
         focalPoint: { x: viewport.width / 2, y: viewport.height / 2 },
         fittedContent,
@@ -199,7 +235,9 @@ export function ZoomableViewport({
   const translationStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }, { translateY: translateY.value }],
   }));
-  const scaleStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const scaleStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
   const frameStyle = useMemo(
     () => [
       styles.contentFrame,

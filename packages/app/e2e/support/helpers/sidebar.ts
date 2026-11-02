@@ -236,9 +236,15 @@ export async function openMobileAgentSidebar(page: Page): Promise<void> {
 }
 
 export async function closeMobileAgentSidebar(page: Page): Promise<void> {
-  const closeButton = page.getByTestId("sidebar-close");
-  await expect(closeButton).toBeInViewport({ ratio: 1, timeout: 5_000 });
-  await closeButton.click();
+  // The sidebar has no close button; it closes with a left swipe.
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error("closeMobileAgentSidebar needs a viewport");
+  const y = viewport.height / 2;
+  await page.mouse.move(viewport.width * 0.85, y);
+  await page.mouse.down();
+  await page.mouse.move(viewport.width * 0.5, y + 4, { steps: 8 });
+  await page.mouse.move(viewport.width * 0.1, y + 8, { steps: 8 });
+  await page.mouse.up();
 }
 
 // The mobile sidebar panel animates via translateX. Waiting for its header to be fully visible

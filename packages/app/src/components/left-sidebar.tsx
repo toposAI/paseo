@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { FolderPlus, GitBranch, Settings, X } from "lucide-react-native";
+import { FolderPlus, GitBranch, Settings } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
@@ -35,6 +35,7 @@ import { builtinSidebarNavLabelKey, type BuiltinSidebarNavId } from "@/sidebar-n
 import { useSidebarNavItems } from "@/sidebar-nav/use-sidebar-nav-items";
 import { usePanelStore } from "@/stores/panel-store";
 import { useOwnsWindowChromeCorner, WindowChromeSafeArea } from "@/utils/desktop-window";
+import { SwitchToToposRow } from "./switch-to-topos-row";
 import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { buildSettingsRoute } from "@/utils/host-routes";
@@ -56,7 +57,6 @@ const NAV_IDS_IN_USE: readonly BuiltinSidebarNavId[] = ["new-workspace", "search
 interface SidebarLabels {
   settings: string;
   usage: string;
-  closeSidebar: string;
 }
 
 interface SidebarSharedProps {
@@ -96,7 +96,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     (): SidebarLabels => ({
       settings: t("sidebar.actions.settings"),
       usage: t(builtinSidebarNavLabelKey("usage")),
-      closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
   );
@@ -343,34 +342,12 @@ function MobileSidebar({
     >
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
+        <SwitchToToposRow />
         <SidebarNavRows
           style={styles.sidebarHeaderGroup}
           only={NAV_IDS_IN_USE}
           onBeforeNavigate={closeSidebar}
         />
-        <WindowChromeSafeArea
-          placement="inline"
-          pointerEvents="box-none"
-          style={styles.mobileCloseButtonRow}
-        >
-          <Pressable
-            style={styles.mobileCloseButton}
-            onPress={closeSidebar}
-            testID="sidebar-close"
-            nativeID="sidebar-close"
-            accessible
-            accessibilityRole="button"
-            accessibilityLabel={labels.closeSidebar}
-            hitSlop={8}
-          >
-            {({ hovered, pressed }) => (
-              <X
-                size={theme.iconSize.md}
-                color={hovered || pressed ? theme.colors.foreground : theme.colors.foregroundMuted}
-              />
-            )}
-          </Pressable>
-        </WindowChromeSafeArea>
 
         <SidebarFooter
           theme={theme}
@@ -492,6 +469,7 @@ function DesktopSidebar({ theme, labels, handleSettings, insetsTop, active }: De
           ) : (
             <TitlebarDragRegion />
           )}
+          <SwitchToToposRow />
           <SidebarNavRows style={sidebarHeaderGroupStyle} only={NAV_IDS_IN_USE} />
         </View>
 
@@ -542,25 +520,6 @@ const styles = StyleSheet.create((theme) => ({
   sidebarContent: {
     flex: 1,
     minHeight: 0,
-  },
-  mobileCloseButtonRow: {
-    position: "absolute",
-    top: theme.spacing[3],
-    left: 0,
-    right: 0,
-    zIndex: 2,
-    alignItems: "flex-end",
-  },
-  mobileCloseButton: {
-    // The 16px X paints farther inside its 32px hit target than the 14px Settings2 glyph.
-    // This optical inset puts their painted right edges on the same sidebar rail.
-    marginRight: theme.spacing[2] + 1.5,
-    width: 32,
-    height: 32,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.surfaceSidebar,
   },
   desktopSidebarBorder: {
     borderRightWidth: 1,
