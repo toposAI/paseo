@@ -378,6 +378,12 @@ export const ko: TranslationResources = {
     attachments: {
       dismissImage: "이미지 닫기",
       closeImage: "이미지 닫기",
+      previousImage: "이전 이미지",
+      nextImage: "다음 이미지",
+      imageCounter: "{{current}} / {{total}}",
+      imageCommentPlaceholder: "이 이미지에 댓글 달기",
+      sendImageComment: "댓글 보내기",
+      imageCommentFailed: "댓글을 보내지 못했습니다",
       imageLoadFailed: "이미지를 불러올 수 없습니다",
       imageUnavailable: "이미지를 사용할 수 없습니다",
       imagePreviewUnavailable: "이미지 미리보기를 사용할 수 없습니다.",

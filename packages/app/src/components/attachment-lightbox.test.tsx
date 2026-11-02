@@ -72,6 +72,11 @@ vi.mock("react-i18next", () => ({
         "message.attachments.closeImage": "Close image",
         "message.attachments.dismissImage": "Dismiss image",
         "message.attachments.imageLoadFailed": "Couldn't load image",
+        "message.attachments.previousImage": "Previous image",
+        "message.attachments.nextImage": "Next image",
+        "message.attachments.imageCommentPlaceholder": "Comment on this image",
+        "message.attachments.sendImageComment": "Send comment",
+        "message.attachments.imageCommentFailed": "Couldn't send the comment",
       })[key] ?? key,
   }),
 }));
@@ -90,6 +95,9 @@ vi.mock("lucide-react-native", () => {
     React.createElement("span", { ...props, "data-icon": name });
   return {
     X: createIcon("X"),
+    ChevronLeft: createIcon("ChevronLeft"),
+    ChevronRight: createIcon("ChevronRight"),
+    Send: createIcon("Send"),
   };
 });
 
@@ -106,6 +114,8 @@ vi.mock("@/components/zoomable-viewport/image", () => ({
         "data-testid": `${String(props.testID)}-image`,
         "data-source": props.uri,
         role: "img",
+        "data-has-swipe": String(typeof props.onSwipe === "function"),
+        onClick: () => (props.onSwipe as ((direction: string) => void) | undefined)?.("next"),
       },
       actions.map((action) =>
         React.createElement(
@@ -131,6 +141,14 @@ vi.mock("react-native", async () => {
   return { ...actual, Modal };
 });
 
+vi.mock("@/assistant-image/use-assistant-image", () => ({
+  useAssistantImage: () => ({
+    status: "loaded",
+    binding: { uri: "blob:assistant-resolved" },
+    aspectRatio: 0.5,
+  }),
+}));
+
 vi.mock("@/attachments/use-attachment-preview-url", () => ({
   useAttachmentPreviewUrl: (metadata: AttachmentMetadata | null) =>
     useAttachmentPreviewUrlMock(metadata),
@@ -154,6 +172,7 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
+  useAttachmentPreviewUrlMock.mockReset();
   useAttachmentPreviewUrlMock.mockReturnValue("blob:preview");
 });
 
@@ -205,7 +224,7 @@ describe("AttachmentLightbox", () => {
 
     const image = queryByTestId("attachment-lightbox-image");
     expect(image?.getAttribute("data-source")).toBe("blob:assistant-image");
-    expect(useAttachmentPreviewUrlMock).toHaveBeenLastCalledWith(null);
+    expect(useAttachmentPreviewUrlMock).not.toHaveBeenCalled();
   });
 
   it("calls onClose when the backdrop is pressed", () => {
@@ -249,5 +268,153 @@ describe("AttachmentLightbox", () => {
     });
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// react-dom does not see a synthetic `input` event dispatched into jsdom here, so reach the
+// handler React-Native-Web attached to the element instead.
+function typeInto(input: HTMLInputElement, text: string) {
+  const propsKey = Object.keys(input).find((key) => key.startsWith("__reactProps$"))!;
+  const props = (input as unknown as Record<string, { onChange: (event: unknown) => void }>)[
+    propsKey
+  ]!;
+  input.value = text;
+  act(() => {
+    props.onChange({ target: { value: text }, nativeEvent: {} });
+  });
+}
+
+describe("AttachmentLightbox gallery", () => {
+  function renderGallery(
+    index: number,
+    total: number,
+    handlers: { onPrevious?: () => void; onNext?: () => void } = {},
+    comment?: { onSubmit: (text: string) => Promise<void> },
+  ) {
+    render(
+      <AttachmentLightbox
+        source={attachmentSource}
+        onClose={vi.fn()}
+        // oxlint-disable-next-line react-perf/jsx-no-new-object-as-prop -- test fixture
+        gallery={{
+          imageKey: `image-${index}`,
+          index,
+          total,
+          onPrevious: handlers.onPrevious ?? vi.fn(),
+          onNext: handlers.onNext ?? vi.fn(),
+        }}
+        comment={comment}
+      />,
+    );
+  }
+
+  it("shows the position and steps with the side buttons", () => {
+    const onPrevious = vi.fn();
+    const onNext = vi.fn();
+    renderGallery(1, 3, { onPrevious, onNext });
+
+    expect(queryByTestId("attachment-lightbox-counter")?.textContent).toBe(
+      "message.attachments.imageCounter",
+    );
+    click(queryByTestId("attachment-lightbox-next")!);
+    click(queryByTestId("attachment-lightbox-previous")!);
+
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(onPrevious).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops at both ends instead of wrapping", () => {
+    const onPrevious = vi.fn();
+    const onNext = vi.fn();
+    renderGallery(0, 3, { onPrevious, onNext });
+    expect(queryByTestId("attachment-lightbox-previous")).toBeNull();
+    expect(queryByTestId("attachment-lightbox-next")).not.toBeNull();
+
+    renderGallery(2, 3, { onPrevious, onNext });
+    expect(queryByTestId("attachment-lightbox-next")).toBeNull();
+    expect(queryByTestId("attachment-lightbox-previous")).not.toBeNull();
+    expect(onPrevious).not.toHaveBeenCalled();
+    expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it("moves with the arrow keys", () => {
+    const onPrevious = vi.fn();
+    const onNext = vi.fn();
+    renderGallery(1, 3, { onPrevious, onNext });
+
+    act(() => {
+      window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight" }));
+      window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowLeft" }));
+    });
+
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(onPrevious).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not move on a swipe past the last image", () => {
+    const onNext = vi.fn();
+    renderGallery(2, 3, { onNext });
+
+    click(queryByTestId("attachment-lightbox-image")!);
+
+    expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it("offers no swipe, counter or buttons for a single image", () => {
+    render(<AttachmentLightbox source={attachmentSource} onClose={vi.fn()} />);
+
+    expect(queryByTestId("attachment-lightbox-image")?.getAttribute("data-has-swipe")).toBe(
+      "false",
+    );
+    expect(queryByTestId("attachment-lightbox-counter")).toBeNull();
+    expect(queryByTestId("attachment-lightbox-comment-bar")).toBeNull();
+  });
+
+  it("resolves an assistant image through its own hook", () => {
+    render(
+      <AttachmentLightbox
+        // oxlint-disable-next-line react-perf/jsx-no-new-object-as-prop -- test fixture
+        source={{ type: "assistant", source: "/tmp/a.png", occurrenceKey: "agent:1:viewer:0" }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(queryByTestId("attachment-lightbox-image")?.getAttribute("data-source")).toBe(
+      "blob:assistant-resolved",
+    );
+  });
+
+  it("sends the comment text and clears the box", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderGallery(0, 2, {}, { onSubmit });
+    const input = queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement;
+
+    typeInto(input, "  ここが気になる  ");
+    await act(async () => {
+      queryByTestId("attachment-lightbox-comment-send")!.dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true }),
+      );
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith("ここが気になる");
+    expect((queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement).value).toBe("");
+  });
+
+  it("keeps the text and says so when the send fails", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new Error("down"));
+    renderGallery(0, 2, {}, { onSubmit });
+    const input = queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement;
+
+    typeInto(input, "hello");
+    await act(async () => {
+      queryByTestId("attachment-lightbox-comment-send")!.dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true }),
+      );
+    });
+
+    expect(queryByTestId("attachment-lightbox-comment-error")).not.toBeNull();
+    expect((queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement).value).toBe(
+      "hello",
+    );
   });
 });

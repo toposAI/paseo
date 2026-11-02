@@ -1,4 +1,5 @@
 import { ChatFind, ChatFindExpansion } from "@/agent-stream/chat-find";
+import { ChatImageViewerProvider } from "@/components/chat-image-viewer";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import React, {
   forwardRef,
@@ -418,7 +419,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const sessionAgentTitle = useSessionStore(
       (state) => state.sessions[resolvedServerId]?.agents.get(agentId)?.title ?? null,
     );
-    const forkAgent = useForkAgent({ serverId: resolvedServerId, toast, readOnly });
+    const forkAgent = useForkAgent({
+      serverId: resolvedServerId,
+      toast,
+      readOnly,
+    });
     const supportsAgentForkContextCursor = useSessionStore(
       (state) =>
         state.sessions[resolvedServerId]?.serverInfo?.features?.agentForkContextCursor === true,
@@ -828,7 +833,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               {(renderFullContent) => (
                 <AssistantMessage
                   renderFullContent={renderFullContent}
-                  occurrenceKey={createAssistantImageOccurrenceKey({ agentId, itemId: item.id })}
+                  occurrenceKey={createAssistantImageOccurrenceKey({
+                    agentId,
+                    itemId: item.id,
+                  })}
                   message={item.text}
                   timestamp={item.timestamp.getTime()}
                   workspaceRoot={workspaceRoot}
@@ -1122,7 +1130,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const scrollToBottomContainerStyle = useMemo(
       () => [
         stylesheet.scrollToBottomContainer,
-        { bottom: resolveBottomOverlayControlOffset(bottomOverlayControlClearance) },
+        {
+          bottom: resolveBottomOverlayControlOffset(bottomOverlayControlClearance),
+        },
       ],
       [bottomOverlayControlClearance],
     );
@@ -1285,85 +1295,95 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [effectiveStreamItems, effectiveStreamHead],
     );
     return (
-      <ChatFind
+      <ChatImageViewerProvider
         agentId={agentId}
         serverId={resolvedServerId}
-        epoch={timelineEpoch}
+        client={client}
+        workspaceRoot={workspaceRoot}
         items={findItems}
-        viewportRef={viewportRef}
-        revealLoadedMessage={revealLoadedHistory}
-        visibleMessageIds={visibleMessageIds}
       >
-        <ToolCallSheetProvider>
-          <AssistantSelectionCopySurface style={stylesheet.container}>
-            <MessageOuterSpacingProvider disableOuterSpacing>
-              {streamRenderStrategy.render({
-                agentId,
-                segments: renderModel.segments,
-                historyRowRevision,
-                liveHeadRowRevision: expandedToolCallGroupIds,
-                boundary,
-                renderers,
-                listEmptyComponent,
-                viewportRef,
-                routeBottomAnchorRequest,
-                isAuthoritativeHistoryReady,
-                onNearBottomChange: setIsNearBottom,
-                onReadingPositionChange: handleReadingPositionChange,
-                onNearHistoryStart: loadOlder,
-                isLoadingOlderHistory: isLoadingOlder,
-                hasOlderHistory: hasOlder,
-                olderHistoryProgressKey: progressKey,
-                scrollEnabled: streamScrollEnabled,
-                listStyle: stylesheet.list,
-                baseListContentContainerStyle: stylesheet.listContentContainer,
-                forwardListContentContainerStyle: stylesheet.forwardListContentContainer,
-                contentMaxWidth,
-                imageContext: { serverId: resolvedServerId, workspaceRoot },
-              })}
-            </MessageOuterSpacingProvider>
-            <ChatOutlineRail
-              prompts={chatOutline.prompts}
-              activePrompt={chatOutline.activePrompt}
-              onJumpToPrompt={chatOutline.jumpToPrompt}
-            />
-            <ToposSelectionActions serverId={resolvedServerId} agentId={agentId} />
-            {toposChatStyle && toposCollapsed ? (
-              <View style={stylesheet.toposFabContainer} pointerEvents="box-none">
-                <Pressable
-                  style={stylesheet.toposFab}
-                  onPress={handleToposExpandComposer}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("composer.toposExpand")}
-                  testID="topos-composer-fab"
-                >
-                  {isTurnActive ? (
-                    <ActivityIndicator size="small" color={stylesheet.scrollToBottomIcon.color} />
-                  ) : (
-                    <MessageCircle size={24} color={stylesheet.scrollToBottomIcon.color} />
-                  )}
-                  {toposHasPendingAsk || toposHasNew ? (
-                    <View
-                      style={[
-                        stylesheet.toposFabDot,
-                        toposHasPendingAsk ? stylesheet.toposFabDotAsk : stylesheet.toposFabDotNew,
-                      ]}
-                      testID={toposHasPendingAsk ? "topos-fab-dot-ask" : "topos-fab-dot-new"}
-                    />
-                  ) : null}
-                </Pressable>
-              </View>
-            ) : null}
-            {(!isNearBottom || isTimelineDetached) && !toposKeyboardOpen && (
-              <View style={scrollToBottomContainerStyle} pointerEvents="box-none">
-                <Animated.View entering={scrollIndicatorFadeIn} exiting={scrollIndicatorFadeOut}>
-                  <ScrollToBottomButton count={newArrivalCount} onPress={scrollToBottom} />
-                </Animated.View>
-              </View>
-            )}
-          </AssistantSelectionCopySurface>
-        </ToolCallSheetProvider>
-      </ChatFind>
+        <ChatFind
+          agentId={agentId}
+          serverId={resolvedServerId}
+          epoch={timelineEpoch}
+          items={findItems}
+          viewportRef={viewportRef}
+          revealLoadedMessage={revealLoadedHistory}
+          visibleMessageIds={visibleMessageIds}
+        >
+          <ToolCallSheetProvider>
+            <AssistantSelectionCopySurface style={stylesheet.container}>
+              <MessageOuterSpacingProvider disableOuterSpacing>
+                {streamRenderStrategy.render({
+                  agentId,
+                  segments: renderModel.segments,
+                  historyRowRevision,
+                  liveHeadRowRevision: expandedToolCallGroupIds,
+                  boundary,
+                  renderers,
+                  listEmptyComponent,
+                  viewportRef,
+                  routeBottomAnchorRequest,
+                  isAuthoritativeHistoryReady,
+                  onNearBottomChange: setIsNearBottom,
+                  onReadingPositionChange: handleReadingPositionChange,
+                  onNearHistoryStart: loadOlder,
+                  isLoadingOlderHistory: isLoadingOlder,
+                  hasOlderHistory: hasOlder,
+                  olderHistoryProgressKey: progressKey,
+                  scrollEnabled: streamScrollEnabled,
+                  listStyle: stylesheet.list,
+                  baseListContentContainerStyle: stylesheet.listContentContainer,
+                  forwardListContentContainerStyle: stylesheet.forwardListContentContainer,
+                  contentMaxWidth,
+                  imageContext: { serverId: resolvedServerId, workspaceRoot },
+                })}
+              </MessageOuterSpacingProvider>
+              <ChatOutlineRail
+                prompts={chatOutline.prompts}
+                activePrompt={chatOutline.activePrompt}
+                onJumpToPrompt={chatOutline.jumpToPrompt}
+              />
+              <ToposSelectionActions serverId={resolvedServerId} agentId={agentId} />
+              {toposChatStyle && toposCollapsed ? (
+                <View style={stylesheet.toposFabContainer} pointerEvents="box-none">
+                  <Pressable
+                    style={stylesheet.toposFab}
+                    onPress={handleToposExpandComposer}
+                    accessibilityRole="button"
+                    accessibilityLabel={t("composer.toposExpand")}
+                    testID="topos-composer-fab"
+                  >
+                    {isTurnActive ? (
+                      <ActivityIndicator size="small" color={stylesheet.scrollToBottomIcon.color} />
+                    ) : (
+                      <MessageCircle size={24} color={stylesheet.scrollToBottomIcon.color} />
+                    )}
+                    {toposHasPendingAsk || toposHasNew ? (
+                      <View
+                        style={[
+                          stylesheet.toposFabDot,
+                          toposHasPendingAsk
+                            ? stylesheet.toposFabDotAsk
+                            : stylesheet.toposFabDotNew,
+                        ]}
+                        testID={toposHasPendingAsk ? "topos-fab-dot-ask" : "topos-fab-dot-new"}
+                      />
+                    ) : null}
+                  </Pressable>
+                </View>
+              ) : null}
+              {(!isNearBottom || isTimelineDetached) && !toposKeyboardOpen && (
+                <View style={scrollToBottomContainerStyle} pointerEvents="box-none">
+                  <Animated.View entering={scrollIndicatorFadeIn} exiting={scrollIndicatorFadeOut}>
+                    <ScrollToBottomButton count={newArrivalCount} onPress={scrollToBottom} />
+                  </Animated.View>
+                </View>
+              )}
+            </AssistantSelectionCopySurface>
+          </ToolCallSheetProvider>
+        </ChatFind>
+      </ChatImageViewerProvider>
     );
   },
 );

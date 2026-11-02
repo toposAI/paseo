@@ -6,6 +6,7 @@ import {
   fitContentSize,
   isPointInsideTransformedContent,
   panContent,
+  resolveSwipe,
   zoomContentAtPoint,
   type ViewportPoint,
   type ViewportSize,
@@ -52,6 +53,7 @@ export function ZoomableViewport({
   maxScale = DEFAULT_MAX_SCALE,
   minScale = DEFAULT_MIN_SCALE,
   onPressOutsideContent,
+  onSwipe,
   style,
   testID,
   wheelActivation = "modifier",
@@ -60,6 +62,10 @@ export function ZoomableViewport({
   const pointersRef = useRef(new Map<number, ViewportPoint>());
   const gestureRef = useRef<ActiveGesture | null>(null);
   const suppressClickRef = useRef(false);
+  const swipeRef = useRef<{
+    start: ViewportPoint;
+    usedSecondPointer: boolean;
+  } | null>(null);
   const transformRef = useRef<ViewportTransform>(FIT_TRANSFORM);
   const [viewport, setViewport] = useState<ViewportSize | null>(null);
   const [transform, setTransform] = useState<ViewportTransform>(FIT_TRANSFORM);
@@ -84,7 +90,10 @@ export function ZoomableViewport({
     if (!canvas) return;
     const observer = new ResizeObserver(([entry]) => {
       if (!entry || entry.contentRect.width <= 0 || entry.contentRect.height <= 0) return;
-      setViewport({ width: entry.contentRect.width, height: entry.contentRect.height });
+      setViewport({
+        width: entry.contentRect.width,
+        height: entry.contentRect.height,
+      });
     });
     observer.observe(canvas);
     return () => observer.disconnect();
@@ -145,8 +154,16 @@ export function ZoomableViewport({
     if (event.pointerType !== "mouse") setHasTouchInput(true);
     if (pointersRef.current.size === 0) suppressClickRef.current = false;
     event.currentTarget.setPointerCapture(event.pointerId);
-    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    pointersRef.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
     const points = Array.from(pointersRef.current.values());
+    if (points.length === 1) {
+      swipeRef.current = { start: points[0], usedSecondPointer: false };
+    } else if (swipeRef.current) {
+      swipeRef.current.usedSecondPointer = true;
+    }
     if (points.length >= 2) {
       gestureRef.current = {
         type: "pinch",
@@ -168,7 +185,10 @@ export function ZoomableViewport({
   const movePointer = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (!pointersRef.current.has(event.pointerId) || !fittedContent || !viewport) return;
-      pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      pointersRef.current.set(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY,
+      });
       const gesture = gestureRef.current;
       const points = Array.from(pointersRef.current.values());
       if (gesture?.type === "pinch" && points.length >= 2) {
@@ -193,7 +213,11 @@ export function ZoomableViewport({
           viewport,
           limits,
         });
-        gestureRef.current = { type: "pinch", distance: nextDistance, midpoint: nextMidpoint };
+        gestureRef.current = {
+          type: "pinch",
+          distance: nextDistance,
+          midpoint: nextMidpoint,
+        };
         commitTransform(next);
         return;
       }
@@ -240,6 +264,28 @@ export function ZoomableViewport({
     setIsDragging(false);
   }, []);
 
+  const finishPointer = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const swipe = swipeRef.current;
+      const wasLastPointer =
+        pointersRef.current.size === 1 && pointersRef.current.has(event.pointerId);
+      endPointer(event);
+      if (!swipe || !wasLastPointer || !onSwipe) return;
+      swipeRef.current = null;
+      const direction = resolveSwipe({
+        deltaX: event.clientX - swipe.start.x,
+        deltaY: event.clientY - swipe.start.y,
+        scale: transformRef.current.scale,
+        usedSecondPointer: swipe.usedSecondPointer,
+      });
+      if (direction) {
+        suppressClickRef.current = true;
+        onSwipe(direction);
+      }
+    },
+    [endPointer, onSwipe],
+  );
+
   const handleCanvasClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       if (suppressClickRef.current) {
@@ -249,7 +295,10 @@ export function ZoomableViewport({
       if (!fittedContent || !viewport || !onPressOutsideContent) return;
       const bounds = event.currentTarget.getBoundingClientRect();
       const isInside = isPointInsideTransformedContent({
-        point: { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
+        point: {
+          x: event.clientX - bounds.left,
+          y: event.clientY - bounds.top,
+        },
         transform: transformRef.current,
         fittedContent,
         viewport,
@@ -293,7 +342,7 @@ export function ZoomableViewport({
         onPointerCancel={endPointer}
         onPointerDown={beginPointer}
         onPointerMove={movePointer}
-        onPointerUp={endPointer}
+        onPointerUp={finishPointer}
         ref={canvasRef}
         role={accessibilityLabel ? "img" : undefined}
         style={renderedCanvasStyle}
