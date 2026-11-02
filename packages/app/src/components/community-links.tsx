@@ -10,6 +10,9 @@ import { openExternalUrl } from "@/utils/open-external-url";
 const renderGitHubIcon = (color: string) => <GitHubIcon color={color} size={14} />;
 const renderDiscordIcon = (color: string) => <DiscordIcon color={color} size={14} />;
 
+// Topos: upstream promo links (GitHub star / sponsor / Discord) are hidden.
+const SHOW_COMMUNITY_LINKS = false;
+
 export function CommunityLinks() {
   const handleOpenGitHub = useCallback(() => {
     void openExternalUrl("https://github.com/getpaseo/paseo");
@@ -22,6 +25,10 @@ export function CommunityLinks() {
   const handleOpenDiscord = useCallback(() => {
     void openExternalUrl("https://discord.gg/jz8T2uahpH");
   }, []);
+
+  if (!SHOW_COMMUNITY_LINKS) {
+    return null;
+  }
 
   return (
     <View style={styles.row}>
