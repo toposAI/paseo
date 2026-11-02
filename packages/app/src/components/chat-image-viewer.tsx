@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import {
   collectChatImages,
@@ -8,6 +16,11 @@ import {
   type ChatImageEntry,
 } from "@/agent-stream/chat-images";
 import { AttachmentLightbox, type ImageLightboxSource } from "@/components/attachment-lightbox";
+import {
+  captureScrollPositions,
+  restoreScrollPositions,
+  type ScrollPositionSnapshot,
+} from "@/components/scroll-position-snapshot";
 import { dispatchComposerAgentMessage } from "@/composer/actions";
 import { resolveComposerAttachmentSubmitFormat } from "@/composer/attachments/submit";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
@@ -74,11 +87,25 @@ export function ChatImageViewerProvider({
   const index = openKey === null ? -1 : entries.findIndex((entry) => entry.key === openKey);
   const current = index >= 0 ? entries[index]! : null;
 
-  const close = useCallback(() => setOpenKey(null), []);
+  const scrollBeforeOpenRef = useRef<ScrollPositionSnapshot | null>(null);
+
+  const close = useCallback(() => {
+    setOpenKey(null);
+    const snapshot = scrollBeforeOpenRef.current;
+    scrollBeforeOpenRef.current = null;
+    if (!snapshot) return;
+    // The chat behind the viewer must be exactly where it was when the viewer opened.
+    restoreScrollPositions(snapshot);
+    requestAnimationFrame(() => restoreScrollPositions(snapshot));
+    setTimeout(() => restoreScrollPositions(snapshot), 250);
+  }, []);
   const openIndex = useCallback(
     (nextIndex: number) => {
       const entry = entries[nextIndex];
       if (!entry) return false;
+      if (scrollBeforeOpenRef.current === null && typeof document !== "undefined") {
+        scrollBeforeOpenRef.current = captureScrollPositions(document.body);
+      }
       setOpenKey(entry.key);
       return true;
     },
