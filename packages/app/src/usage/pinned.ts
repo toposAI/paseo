@@ -55,6 +55,22 @@ export const STALE_REPORT_AGE_MS = 15 * 60_000;
   return trimmed;
 }
 
+const SHORT_LABEL_UNITS: Record<string, string> = {
+  wk: "週",
+  mo: "月",
+  d: "日",
+  h: "時間",
+  m: "分",
+};
+
+/** Display-only: the stored labels ("wk", "5h") stay as the plugin names them. */
+export function localizeShortLabel(label: string): string {
+  return label.replace(
+    /(^|\s)(\d*)(wk|mo|d|h|m)(?=\s|$)/g,
+    (_, lead: string, n: string, unit: string) => `${lead}${n}${SHORT_LABEL_UNITS[unit]}`,
+  );
+}
+
 export type PinnedUsageLayout = "meters" | "labels" | "percents";
 
 // A meter narrower than this is a sliver that reads as noise rather than a share.

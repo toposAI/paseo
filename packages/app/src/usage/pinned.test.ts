@@ -3,6 +3,7 @@ import { usageCopy } from "./copy";
 import type { UsagePreferences } from "./preferences";
 import {
   choosePinnedUsageLayout,
+  localizeShortLabel,
   normalizeShortLabel,
   resolvePinnedUsage,
   splitPinnedUsageRows,
@@ -563,5 +564,15 @@ describe("normalizeShortLabel", () => {
     expect(normalizeShortLabel("Weekly")).toBe("wk");
     expect(normalizeShortLabel("wk")).toBe("wk");
     expect(normalizeShortLabel("mo")).toBe("mo");
+  });
+});
+
+describe("localizeShortLabel", () => {
+  it("shows the short window names in Japanese", () => {
+    expect(localizeShortLabel("wk")).toBe("週");
+    expect(localizeShortLabel("5h")).toBe("5時間");
+    expect(localizeShortLabel("30d")).toBe("30日");
+    expect(localizeShortLabel("Opus wk")).toBe("Opus 週");
+    expect(localizeShortLabel("Session")).toBe("Session");
   });
 });

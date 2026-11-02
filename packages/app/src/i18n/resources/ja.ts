@@ -1594,11 +1594,11 @@ export const ja: TranslationResources = {
       },
       importSession: {
         title: "セッションをインポート",
-        description: "最近の外部CLIセッションを取り込む",
+        description: "外部CLIセッションを取込",
       },
       setupProviders: {
         title: "プロバイダーをセットアップ",
-        description: "Claude Code、Codexなどを設定",
+        description: "Claude Code等を設定",
       },
       pairDevice: {
         title: "デバイスをペアリング",
