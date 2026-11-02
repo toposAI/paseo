@@ -9,7 +9,7 @@ const { theme } = vi.hoisted(() => ({
   theme: {
     spacing: { 1: 4, 2: 8 },
     borderRadius: { lg: 8 },
-    colors: { foregroundMuted: "#aaa", surfaceSidebar: "#111" },
+    colors: { foreground: "#111", foregroundMuted: "#aaa", surfaceSidebar: "#111" },
   },
 }));
 
@@ -19,6 +19,8 @@ vi.mock("react-native-unistyles", () => ({
       typeof factory === "function" ? (factory as (t: typeof theme) => unknown)(theme) : factory,
   },
 }));
+
+vi.mock("@/constants/layout", () => ({ useIsCompactFormFactor: () => false }));
 
 vi.mock("@/utils/desktop-window", () => ({
   WindowChromeSafeArea: ({ children }: { children: React.ReactNode }) =>

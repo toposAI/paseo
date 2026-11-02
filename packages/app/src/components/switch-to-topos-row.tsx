@@ -1,17 +1,19 @@
 import { Pressable, Text } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { WindowChromeSafeArea } from "@/utils/desktop-window";
 import { getDictation139Bridge, switchDictation139App } from "@/utils/dictation139-bridge";
 
 // 139番アプリ内(JS橋あり)だけ「T」を出し、個人版Toposの画面へ切り替える。
 // Topos側の「P」と同じ右上の角に置く。×は無い(サイドバーは項目選択・左スワイプで閉じる)。
 export function SwitchToToposRow() {
+  const isCompact = useIsCompactFormFactor();
   if (!getDictation139Bridge()) return null;
   return (
     <WindowChromeSafeArea
       placement="inline"
       pointerEvents="box-none"
-      style={styles.switchAppButtonRow}
+      style={isCompact ? styles.switchAppButtonRowCompact : styles.switchAppButtonRow}
     >
       <Pressable
         style={styles.switchAppButton}
@@ -36,10 +38,19 @@ const styles = StyleSheet.create((theme) => ({
     justifyContent: "flex-end",
     alignItems: "center",
   },
+  // iPhone幅のToposは「P」が約6px低い位置にあるのでそろえる。
+  switchAppButtonRowCompact: {
+    marginTop: theme.spacing[2] + 6,
+    marginBottom: theme.spacing[1],
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
+  },
+  // ToposのPと同じ濃い色・太字。
   switchAppText: {
-    color: theme.colors.foregroundMuted,
+    color: theme.colors.foreground,
     fontWeight: "700",
-    fontSize: 16,
+    fontSize: 18,
   },
   switchAppButton: {
     // Same right rail as the footer Settings glyph (the 16px glyph paints inside its 32px target).
