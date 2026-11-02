@@ -449,7 +449,12 @@ export function buildPriorityDetail(
   const members = threads
     .filter((t) => t.agentId !== project.thread && isMember(project, t, membership))
     .sort(liveFirst);
-  const others = members.slice(0, DETAIL_RELATED_MAX);
+  // 動いているスレは**上限で切らない**(未割当に全スレの題名を並べる=漏れ防止)。上限は終わった行にだけ効く
+  const liveMembers = members.filter(isLive);
+  const others = [
+    ...liveMembers,
+    ...members.filter((t) => !isLive(t)).slice(0, DETAIL_RELATED_MAX),
+  ];
   return {
     note: project.note ?? "",
     thread: byId ? { ...byId } : null,

@@ -375,14 +375,18 @@ test("実機の一覧を引けないとき: 登録簿の自己申告だけで数
   assert.equal(countRunning(p, threads), 1);
 });
 
-test("中身が上限30で切れても全数と動の数は切られない", () => {
+test("中身の上限30は終わった行にだけ効き、動いているスレは全部並ぶ(全数と動の数も切られない)", () => {
   const p = { id: "u", name: "未割当", note: "", thread: null };
   const ids = Array.from({ length: 35 }, (_, i) => `x${i}`);
-  const threads = ids.map((id) => th(id, `題名${id}`));
-  const mem = { keywords: [], threads: ids };
+  const done = Array.from({ length: 33 }, (_, i) => `d${i}`);
+  const threads = [
+    ...ids.map((id) => th(id, `題名${id}`)),
+    ...done.map((id) => th(id, `終${id}`, "完了", "idle")),
+  ];
+  const mem = { keywords: [], threads: [...ids, ...done] };
   const d = buildPriorityDetail(p, threads, [], mem);
-  assert.equal(d.related.length, 30);
-  assert.equal(d.relatedTotal, 35);
+  assert.equal(d.related.length, 35 + 30); // 動35は全部・終わった行は30まで
+  assert.equal(d.relatedTotal, 68);
   assert.equal(d.relatedLive, 35);
   assert.equal(countRunning(p, threads, mem), 35);
 });
