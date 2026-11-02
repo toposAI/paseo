@@ -56,7 +56,6 @@ export const STALE_REPORT_AGE_MS = 15 * 60_000;
 }
 
 const SHORT_LABEL_UNITS: Record<string, string> = {
-  wk: "週",
   mo: "月",
   d: "日",
   h: "時間",
@@ -66,7 +65,7 @@ const SHORT_LABEL_UNITS: Record<string, string> = {
 /** Display-only: the stored labels ("wk", "5h") stay as the plugin names them. */
 export function localizeShortLabel(label: string): string {
   return label.replace(
-    /(^|\s)(\d*)(wk|mo|d|h|m)(?=\s|$)/g,
+    /(^|\s)(\d*)(mo|d|h|m)(?=\s|$)/g,
     (_, lead: string, n: string, unit: string) => `${lead}${n}${SHORT_LABEL_UNITS[unit]}`,
   );
 }
