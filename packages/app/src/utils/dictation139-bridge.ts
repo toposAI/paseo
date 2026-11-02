@@ -1,7 +1,7 @@
 // 139番iOSアプリ(Dictation139)のWKWebView内でのみ、ネイティブが
 // `dictation139` というメッセージハンドラを注入する。通常のブラウザには無い。
 interface Dictation139Bridge {
-  postMessage(message: { action: "openRecording" | "toggleRecording" }): void;
+  postMessage(message: { action: "openRecording" | "toggleRecording" | "switchApp" }): void;
 }
 
 export type Dictation139State = "idle" | "recording" | "sending" | "error";
@@ -12,6 +12,11 @@ export function getDictation139Bridge(): Dictation139Bridge | null {
     window as { webkit?: { messageHandlers?: { dictation139?: Dictation139Bridge } } }
   ).webkit;
   return webkit?.messageHandlers?.dictation139 ?? null;
+}
+
+/** 139番アプリ内でPaseo⇄Toposの画面を切り替える(アプリ内でのみ有効。ブラウザでは何も起きない)。 */
+export function switchDictation139App(): void {
+  getDictation139Bridge()?.postMessage({ action: "switchApp" });
 }
 
 /** 録音画面を開かず、その場で録音の開始/停止を切り替える。 */
