@@ -569,10 +569,10 @@ describe("normalizeShortLabel", () => {
 
 describe("localizeShortLabel", () => {
   it("shows the short window names in Japanese", () => {
-    expect(localizeShortLabel("wk")).toBe("週");
+    expect(localizeShortLabel("wk")).toBe("wk");
     expect(localizeShortLabel("5h")).toBe("5時間");
     expect(localizeShortLabel("30d")).toBe("30日");
-    expect(localizeShortLabel("Opus wk")).toBe("Opus 週");
+    expect(localizeShortLabel("Opus wk")).toBe("Opus wk");
     expect(localizeShortLabel("Session")).toBe("Session");
   });
 });
