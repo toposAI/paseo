@@ -347,11 +347,6 @@ function MobileSidebar({
     >
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
-        <SidebarNavRows
-          style={styles.sidebarHeaderGroup}
-          only={NAV_IDS_IN_USE}
-          onBeforeNavigate={closeSidebar}
-        />
         <WindowChromeSafeArea
           placement="inline"
           pointerEvents="box-none"
@@ -389,6 +384,11 @@ function MobileSidebar({
             )}
           </Pressable>
         </WindowChromeSafeArea>
+        <SidebarNavRows
+          style={styles.sidebarHeaderGroup}
+          only={NAV_IDS_IN_USE}
+          onBeforeNavigate={closeSidebar}
+        />
 
         <SidebarFooter
           theme={theme}
@@ -561,12 +561,10 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minHeight: 0,
   },
+  // New workspace 行と重ならないよう、ボタン行は独立した行として流す。
   mobileCloseButtonRow: {
-    position: "absolute",
-    top: theme.spacing[3],
-    left: 0,
-    right: 0,
-    zIndex: 2,
+    marginTop: theme.spacing[2],
+    marginBottom: theme.spacing[1],
     flexDirection: "row",
     justifyContent: "flex-end",
     alignItems: "center",
