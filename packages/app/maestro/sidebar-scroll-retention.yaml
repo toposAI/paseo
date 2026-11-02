@@ -49,5 +49,7 @@ appId: sh.paseo.debug
     id: sidebar-workspace-row-${SCROLLED_WORKSPACE}
 - assertNotVisible:
     id: sidebar-workspace-row-${TOP_WORKSPACE}
-- tapOn:
-    id: sidebar-close
+- swipe:
+    start: "85%,50%"
+    end: "10%,50%"
+    duration: 300

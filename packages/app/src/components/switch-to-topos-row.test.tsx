@@ -64,7 +64,6 @@ describe("SwitchToToposRow", () => {
     const postMessage = vi.fn();
     setBridge(postMessage);
     await act(async () => root.render(<SwitchToToposRow />));
-    expect(container.querySelector('[data-testid="sidebar-close"]')).toBeNull();
     const button = container.querySelector('[data-testid="sidebar-switch-to-topos"]');
     expect(button?.textContent).toBe("T");
     await act(async () => {
