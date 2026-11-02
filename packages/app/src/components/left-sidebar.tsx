@@ -317,6 +317,9 @@ function SidebarFooterRows({ onBeforeNavigate }: { onBeforeNavigate?: () => void
   );
 }
 
+// ×ボタンと当たり判定が重ならないよう右側は広げない。
+const SWITCH_APP_BUTTON_HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 0 };
+
 function MobileSidebar({
   theme,
   labels,
@@ -363,13 +366,9 @@ function MobileSidebar({
               accessible
               accessibilityRole="button"
               accessibilityLabel="Toposへ切り替え"
-              hitSlop={8}
+              hitSlop={SWITCH_APP_BUTTON_HIT_SLOP}
             >
-              <Text
-                style={{ color: theme.colors.foregroundMuted, fontWeight: "700", fontSize: 16 }}
-              >
-                T
-              </Text>
+              <Text style={styles.mobileSwitchAppText}>T</Text>
             </Pressable>
           ) : null}
           <Pressable
@@ -570,6 +569,12 @@ const styles = StyleSheet.create((theme) => ({
     zIndex: 2,
     flexDirection: "row",
     justifyContent: "flex-end",
+    alignItems: "center",
+  },
+  mobileSwitchAppText: {
+    color: theme.colors.foregroundMuted,
+    fontWeight: "700",
+    fontSize: 16,
   },
   mobileSwitchAppButton: {
     marginRight: theme.spacing[1],

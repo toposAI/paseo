@@ -65,17 +65,20 @@ describe("subscribeDictation139", () => {
 
 describe("switchDictation139App", () => {
   it("橋が無い(ブラウザ)ときは何も起きず、橋があるときだけswitchAppを送る", () => {
-    const w = globalThis as { window?: Record<string, unknown> };
+    const w = globalThis as unknown as { window?: Record<string, unknown> };
     const saved = w.window;
-    w.window = new EventTarget() as unknown as Record<string, unknown>;
-    expect(getDictation139Bridge()).toBeNull();
-    expect(() => switchDictation139App()).not.toThrow();
-    const sent: unknown[] = [];
-    (w.window as Record<string, unknown>).webkit = {
-      messageHandlers: { dictation139: { postMessage: (m: unknown) => sent.push(m) } },
-    };
-    switchDictation139App();
-    expect(sent).toEqual([{ action: "switchApp" }]);
-    w.window = saved;
+    try {
+      w.window = new EventTarget() as unknown as Record<string, unknown>;
+      expect(getDictation139Bridge()).toBeNull();
+      expect(() => switchDictation139App()).not.toThrow();
+      const sent: unknown[] = [];
+      (w.window as Record<string, unknown>).webkit = {
+        messageHandlers: { dictation139: { postMessage: (m: unknown) => sent.push(m) } },
+      };
+      switchDictation139App();
+      expect(sent).toEqual([{ action: "switchApp" }]);
+    } finally {
+      w.window = saved;
+    }
   });
 });
