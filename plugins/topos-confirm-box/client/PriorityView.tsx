@@ -459,6 +459,14 @@ function ThreadLine({
   );
 }
 
+/** 中身の見出し。上限で切られたときは全数と省略した件数を出す(切られたことを黙らせない)。 */
+function threadCountText(shown: number, total?: number, live?: number): string {
+  const all = total ?? shown;
+  const liveText = live === undefined ? "" : `・動${live}`;
+  const cut = all > shown ? `。上限のため${all - shown}件は省略(動いている順に表示)` : "";
+  return `子スレ ${all} 件${liveText}(生きている順)${cut}`;
+}
+
 /** 一覧の行をタップして開く「中身」。何が残っているか(担当スレ・同じ題名の子スレ・未決の判断)を出す。 */
 function DetailPanel({
   id,
@@ -507,7 +515,9 @@ function DetailPanel({
     <View style={panelStyle} {...({ dataSet: detailDataSet } as object)}>
       <Text style={styles.subject}>中身</Text>
       <Text style={styles.text}>{data.note ? `説明: ${data.note}` : "説明は台帳に未記入です"}</Text>
-      <Text style={styles.muted}>{`子スレ ${rows.length} 件(生きている順)`}</Text>
+      <Text style={styles.muted}>
+        {threadCountText(rows.length, data.relatedTotal, data.relatedLive)}
+      </Text>
       {rows.length === 0 ? (
         <Text style={styles.muted}>この項目に紐づく子スレは登録簿に見つかりません</Text>
       ) : (

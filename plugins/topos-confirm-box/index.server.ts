@@ -203,6 +203,7 @@ import {
   sayToLedger,
   splitArchived,
   type DetailThread,
+  resolveLiveThreads,
 } from "./server/priority.js";
 import type { PriorityProject } from "./shared/contract.js";
 import {
@@ -229,6 +230,35 @@ import {
   cardDirectShowRpc,
   cardDirectStateRpc,
 } from "./shared/card-direct.js";
+
+/**
+ * 優先順位の「動」の印と中身の母集合。登録簿(`child_threads.json`)だけでなく、サイドバーと同じ
+ * Paseo の実機の一覧(`paseo ls` 相当)を重ねる。登録簿だけで数えると、孫スレや人が直接建てたスレが
+ * 画面に出ず、データ側の注記(`paseo ls` から数える)と本数がずれる(2026-11-02 指摘9)。
+ * 登録簿が読めなくても一覧で足りる。両方読めなければ空(アーカイブは止めない=確認を出さないだけ)。
+ */
+async function readLiveThreads(
+  ctx: { paseo: { agents: Parameters<typeof listAllAgents>[0] } },
+  dir: string,
+): Promise<DetailThread[]> {
+  let registry: DetailThread[] = [];
+  try {
+    registry = readChildThreads(dir).map((t) => ({
+      agentId: t.agentId,
+      title: t.title,
+      status: t.status,
+      machineState: t.machineState,
+    }));
+  } catch {
+    registry = [];
+  }
+  try {
+    const listed = await listAllAgents(ctx.paseo.agents);
+    return resolveLiveThreads(registry, listed.agents);
+  } catch {
+    return resolveLiveThreads(registry, null); // 一覧を引けない: 登録簿の自己申告だけで数える従来の動き
+  }
+}
 
 export default function contribute(server: PluginServerContext) {
   // 自動出題(モデルを呼ばない)。**最初にハンドラが呼ばれた時点**で始める: プラグインのサーバーは
@@ -883,22 +913,12 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.handle(priorityListRpc, async () => {
+  server.handle(priorityListRpc, async (_input, ctx) => {
     const dir = resolveConfirmBoxDir();
     const { projects: all, updatedTs } = readLedger(dir);
     const { visible, archived, standing } = splitArchived(all);
     // 動いている子スレの件数は一覧を作るたびに数える(保存しない=古い数を出さない)
-    let threads: DetailThread[] = [];
-    try {
-      threads = readChildThreads(dir).map((t) => ({
-        agentId: t.agentId,
-        title: t.title,
-        status: t.status,
-        machineState: t.machineState,
-      }));
-    } catch {
-      threads = []; // 数えられない=0件であってもアーカイブは止めない(確認を出さないだけ)
-    }
+    const threads = await readLiveThreads(ctx, dir);
     const withRunning = (rows: PriorityProject[]): PriorityProject[] =>
       rows.map((p) => ({
         ...p,
@@ -929,23 +949,12 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  server.handle(priorityDetailRpc, async (input) => {
+  server.handle(priorityDetailRpc, async (input, ctx) => {
     const dir = resolveConfirmBoxDir();
     const project = findProject(dir, input.id);
     if (!project) return null;
     // 登録簿が読めなくても中身(説明・未決の判断)は出す。子スレ欄だけ空になる
-    let threads: { agentId: string; title: string; status: string; machineState: string | null }[] =
-      [];
-    try {
-      threads = readChildThreads(dir).map((t) => ({
-        agentId: t.agentId,
-        title: t.title,
-        status: t.status,
-        machineState: t.machineState,
-      }));
-    } catch {
-      threads = [];
-    }
+    const threads = await readLiveThreads(ctx, dir);
     return buildPriorityDetail(
       project,
       threads,

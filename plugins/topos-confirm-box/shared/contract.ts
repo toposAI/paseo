@@ -377,6 +377,7 @@ export const PriorityDetailSchema = z.object({
       title: z.string(),
       status: z.string(),
       machineState: z.string().nullable(),
+      live: z.boolean().optional(),
     })
     .nullable(),
   /** 同じ題名を持つ**ほかの**子スレ(今回の目当てがまだ動いているか)。動いている順に最大10件。 */
@@ -386,8 +387,12 @@ export const PriorityDetailSchema = z.object({
       title: z.string(),
       status: z.string(),
       machineState: z.string().nullable(),
+      live: z.boolean().optional(),
     }),
   ),
+  /** 担当スレの総数と動いている数。`related` は上限で切るので、全数はここで分かる。 */
+  relatedTotal: z.number().optional(),
+  relatedLive: z.number().optional(),
   /** この項目名を `project` に持つ、未決の確認箱の項目(最大10件)。 */
   pendingQuestions: z.array(z.object({ id: z.string(), subject: z.string(), ts: z.number() })),
 });

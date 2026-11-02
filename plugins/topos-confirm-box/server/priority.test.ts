@@ -7,6 +7,7 @@ import {
   archiveProject,
   buildPriorityDetail,
   countRunning,
+  resolveLiveThreads,
   LEDGER_FILE,
   markStanding,
   moveProject,
@@ -320,4 +321,68 @@ test("横の台帳の読み込み: 行が無い・ファイルが無いときは
   );
   assert.deepEqual(readMembershipRow(dir, "a"), { keywords: ["x"], threads: ["t"] });
   assert.equal(readMembershipRow(dir, "b"), null);
+});
+
+test("母集合を実機の一覧へ揃える: 登録簿に無い動いているスレも未割当の数と中身に入る", () => {
+  const unassigned = { id: "unassigned", name: "未割当", note: "", thread: null };
+  const mem = { keywords: [], threads: ["g1", "g2", "g3", "g4", "gone"] };
+  // 登録簿には g1 だけ。g2〜g4 は孫スレ/人が建てたスレで登録簿に無い
+  const registry = [
+    th("g1", "単発A", "実装中", "running"),
+    th("gone", "消えた", "実装中", "running"),
+  ];
+  const agents = [
+    { id: "g1", title: "単発A", status: "running" },
+    { id: "g2", title: "単発B", status: "idle" },
+    { id: "g3", title: "単発C", status: "running" },
+    { id: "g4", title: "単発D", status: "closed" }, // 宣言なしの closed は動いていない
+    { id: "zz", title: "未割当に含めない", status: "running" },
+  ];
+  const threads = resolveLiveThreads(registry, agents);
+  assert.equal(countRunning(unassigned, threads, mem), 3); // g1,g2,g3。gone は一覧に居ない=終わった
+  const d = buildPriorityDetail(unassigned, threads, [], mem);
+  assert.equal(d.relatedTotal, 5);
+  assert.equal(d.relatedLive, 3);
+  assert.deepEqual(
+    d.related
+      .map((t) => t.agentId)
+      .slice(0, 3)
+      .sort(),
+    ["g1", "g2", "g3"], // 動いている順
+  );
+});
+
+test("実機の一覧の判定規則: データ側 live_agents と同じ(完了済みidleは除く・running は待機以外)", () => {
+  const registry = [
+    th("a", "t", "完了", "idle"),
+    th("b", "t", "待機", "running"),
+    th("c", "t", "実装中", "closed"),
+  ];
+  const out = resolveLiveThreads(registry, [
+    { id: "a", status: "idle" },
+    { id: "b", status: "running" },
+    { id: "c", status: "closed" },
+    { id: "d", status: "error" },
+    { id: "e", status: "idle", archivedAt: "2026-01-01" },
+  ]);
+  const live = Object.fromEntries(out.map((t) => [t.agentId, t.live]));
+  assert.deepEqual(live, { a: false, b: false, c: true, d: false });
+});
+
+test("実機の一覧を引けないとき: 登録簿の自己申告だけで数える従来の動き", () => {
+  const p = { id: "ep", name: "案件", note: "", thread: "a1" };
+  const threads = resolveLiveThreads([th("a1", "案件"), th("c3", "案件", "完了")], null);
+  assert.equal(countRunning(p, threads), 1);
+});
+
+test("中身が上限30で切れても全数と動の数は切られない", () => {
+  const p = { id: "u", name: "未割当", note: "", thread: null };
+  const ids = Array.from({ length: 35 }, (_, i) => `x${i}`);
+  const threads = ids.map((id) => th(id, `題名${id}`));
+  const mem = { keywords: [], threads: ids };
+  const d = buildPriorityDetail(p, threads, [], mem);
+  assert.equal(d.related.length, 30);
+  assert.equal(d.relatedTotal, 35);
+  assert.equal(d.relatedLive, 35);
+  assert.equal(countRunning(p, threads, mem), 35);
 });

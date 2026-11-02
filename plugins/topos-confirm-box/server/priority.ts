@@ -286,13 +286,70 @@ export interface DetailThread {
   title: string;
   status: string;
   machineState: string | null;
+  /**
+   * 動いているか(`resolveLiveThreads` が `paseo ls` の状態から決めた値)。
+   * 無いとき(一覧を引けなかった)は登録簿の自己申告だけで数える従来の動きに戻る。
+   */
+  live?: boolean;
+}
+
+/** `paseo ls` の1行のうち、動いているかの判定に要る所だけ。 */
+export interface LiveAgentLike {
+  id?: unknown;
+  title?: unknown;
+  status?: unknown;
+  archivedAt?: unknown;
+}
+
+const asStr = (v: unknown): string => (typeof v === "string" ? v : "");
+
+/**
+ * 登録簿の子スレに、Paseo の実機の一覧(サイドバーと同じ母集合)を重ねる。
+ * 数える元をデータ側(`confirm_box_project_priority.live_agents`)と揃えるための関数で、判定規則も同じ:
+ * running=動いている(登録簿が「待機」なら除く) / idle=動いている(登録簿が「完了」「待機」なら除く) /
+ * それ以外(error・closed)は登録簿が「実装中」「ユーザー判断待ち」のときだけ動いているとみなす。
+ * 登録簿に無いスレ(人が直接建てた・孫スレ)も一覧から足す。一覧に居ない登録簿の行は「終わった」(live=false)。
+ * `agents` が null(一覧を引けなかった)なら登録簿をそのまま返す。
+ */
+export function resolveLiveThreads(
+  registry: readonly DetailThread[],
+  agents: readonly LiveAgentLike[] | null,
+): DetailThread[] {
+  if (!agents) return registry.map((t) => ({ ...t }));
+  const reg = new Map(registry.map((t) => [t.agentId, t]));
+  const listed = new Set<string>();
+  const out: DetailThread[] = [];
+  for (const a of agents) {
+    const id = asStr(a.id);
+    if (!id || a.archivedAt) continue;
+    listed.add(id);
+    const known = reg.get(id);
+    const declared = known?.status ?? "";
+    const st = asStr(a.status);
+    const live =
+      st === "running"
+        ? declared !== "待機"
+        : st === "idle"
+          ? declared !== "完了" && declared !== "待機"
+          : declared === "実装中" || declared === "ユーザー判断待ち";
+    const title = asStr(a.title).trim() || known?.title || id.slice(0, 8);
+    out.push({
+      agentId: id,
+      title,
+      status: known?.status ?? (live ? "実装中" : "待機中"),
+      machineState: st || known?.machineState || null,
+      live,
+    });
+  }
+  for (const t of registry) if (!listed.has(t.agentId)) out.push({ ...t, live: false });
+  return out;
 }
 
 const DETAIL_RELATED_MAX = 30;
 const DETAIL_QUESTIONS_MAX = 10;
 /** 動いている行を先に出す(「まだ動いているのか」が開いてすぐ分かる)。 */
 function liveFirst(a: DetailThread, b: DetailThread): number {
-  const live = (t: DetailThread) => (t.status === "完了" ? 1 : 0);
+  const live = (t: DetailThread) => (isLive(t) ? 0 : 1);
   return live(a) - live(b) || a.title.localeCompare(b.title, "ja");
 }
 
@@ -306,13 +363,13 @@ export function countRunning(
   threads: readonly DetailThread[],
   membership?: MembershipRow | null,
 ): number {
-  return threads.filter(
-    (t) =>
-      isMember(project, t, membership) &&
-      t.status !== "完了" &&
-      t.status !== "待機" &&
-      t.machineState !== "closed",
-  ).length;
+  return threads.filter((t) => isMember(project, t, membership) && isLive(t)).length;
+}
+
+/** 動いているか。`live` があればそれを正とし、無ければ登録簿の自己申告と機械状態で判じる。 */
+function isLive(t: DetailThread): boolean {
+  if (t.live !== undefined) return t.live;
+  return t.status !== "完了" && t.status !== "待機" && t.machineState !== "closed";
 }
 
 /** 横の台帳 `priority_membership.json` の1行(担当スレ id と題名キーワード)。 */
@@ -383,17 +440,22 @@ export function buildPriorityDetail(
   note: string;
   thread: DetailThread | null;
   related: DetailThread[];
+  /** 担当スレの総数と、そのうち動いている数(`related` が上限で切られても全数が分かる)。 */
+  relatedTotal: number;
+  relatedLive: number;
   pendingQuestions: { id: string; subject: string; ts: number }[];
 } {
   const byId = project.thread ? (threads.find((t) => t.agentId === project.thread) ?? null) : null;
-  const others = threads
+  const members = threads
     .filter((t) => t.agentId !== project.thread && isMember(project, t, membership))
-    .sort(liveFirst)
-    .slice(0, DETAIL_RELATED_MAX);
+    .sort(liveFirst);
+  const others = members.slice(0, DETAIL_RELATED_MAX);
   return {
     note: project.note ?? "",
     thread: byId ? { ...byId } : null,
     related: others,
+    relatedTotal: members.length + (byId ? 1 : 0),
+    relatedLive: members.filter(isLive).length + (byId && isLive(byId) ? 1 : 0),
     pendingQuestions: pending.slice(0, DETAIL_QUESTIONS_MAX),
   };
 }
