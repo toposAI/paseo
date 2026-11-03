@@ -35,7 +35,6 @@ import { builtinSidebarNavLabelKey, type BuiltinSidebarNavId } from "@/sidebar-n
 import { useSidebarNavItems } from "@/sidebar-nav/use-sidebar-nav-items";
 import { usePanelStore } from "@/stores/panel-store";
 import { useOwnsWindowChromeCorner, WindowChromeSafeArea } from "@/utils/desktop-window";
-import { SwitchToToposRow } from "./switch-to-topos-row";
 import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { buildSettingsRoute } from "@/utils/host-routes";
@@ -342,7 +341,6 @@ function MobileSidebar({
     >
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
-        <SwitchToToposRow />
         <SidebarNavRows
           style={styles.sidebarHeaderGroup}
           only={NAV_IDS_IN_USE}
@@ -469,7 +467,6 @@ function DesktopSidebar({ theme, labels, handleSettings, insetsTop, active }: De
           ) : (
             <TitlebarDragRegion />
           )}
-          <SwitchToToposRow />
           <SidebarNavRows style={sidebarHeaderGroupStyle} only={NAV_IDS_IN_USE} />
         </View>
 

@@ -4,6 +4,7 @@ import { memo, useCallback, useMemo, useRef, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, View, type StyleProp, type ViewStyle } from "react-native";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
+import { SwitchToToposButton } from "@/components/switch-to-topos-button";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { PluginSidebarItem } from "@/plugins/sidebar-items";
 import { canCreateWorktreeForProjectKind } from "@/projects/host-projects";
@@ -17,6 +18,7 @@ import { useSidebarNavItems } from "@/sidebar-nav/use-sidebar-nav-items";
 import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
+import { getDictation139Bridge } from "@/utils/dictation139-bridge";
 import {
   buildNewWorkspaceRoute,
   buildSchedulesRoute,
@@ -83,6 +85,12 @@ const SidebarNewWorkspaceRow = memo(function SidebarNewWorkspaceRow({
   onBeforeNavigate,
 }: SidebarNavRowProps) {
   const { t } = useTranslation();
+  const hasSwitchAppButton = getDictation139Bridge() !== null;
+  // 139番アプリ内だけ、T(Toposへ切り替え)をこの行の右端に並べる。
+  const switchAppTrailing = useMemo(
+    () => (hasSwitchAppButton ? <SwitchToToposButton /> : undefined),
+    [hasSwitchAppButton],
+  );
   const shortcutKeys = useShortcutKeys(builtinSidebarNavShortcutAction("new-workspace"));
   const activeWorkspaceSelection = useActiveWorkspaceSelection();
   const activeWorkspaceServerId = activeWorkspaceSelection?.serverId ?? null;
@@ -122,6 +130,7 @@ const SidebarNewWorkspaceRow = memo(function SidebarNewWorkspaceRow({
       testID="sidebar-global-new-workspace"
       variant="compact"
       shortcutKeys={shortcutKeys}
+      trailing={switchAppTrailing}
     />
   );
 });

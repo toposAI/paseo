@@ -20,17 +20,10 @@ vi.mock("react-native-unistyles", () => ({
   },
 }));
 
-vi.mock("@/constants/layout", () => ({ useIsCompactFormFactor: () => false }));
-
-vi.mock("@/utils/desktop-window", () => ({
-  WindowChromeSafeArea: ({ children }: { children: React.ReactNode }) =>
-    React.createElement("div", { "data-testid": "safe-area" }, children),
-}));
-
 vi.stubGlobal("React", React);
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
-import { SwitchToToposRow } from "./switch-to-topos-row";
+import { SwitchToToposButton } from "./switch-to-topos-button";
 
 function setBridge(postMessage: ((m: { action: string }) => void) | null) {
   (window as unknown as { webkit?: unknown }).webkit = postMessage
@@ -38,7 +31,7 @@ function setBridge(postMessage: ((m: { action: string }) => void) | null) {
     : undefined;
 }
 
-describe("SwitchToToposRow", () => {
+describe("SwitchToToposButton", () => {
   let root: Root;
   let container: HTMLElement;
 
@@ -56,14 +49,14 @@ describe("SwitchToToposRow", () => {
 
   it("renders nothing outside the 139 app (no bridge)", async () => {
     setBridge(null);
-    await act(async () => root.render(<SwitchToToposRow />));
+    await act(async () => root.render(<SwitchToToposButton />));
     expect(container.innerHTML).toBe("");
   });
 
   it("shows only the T button (no close button) and switches app on press", async () => {
     const postMessage = vi.fn();
     setBridge(postMessage);
-    await act(async () => root.render(<SwitchToToposRow />));
+    await act(async () => root.render(<SwitchToToposButton />));
     const button = container.querySelector('[data-testid="sidebar-switch-to-topos"]');
     expect(button?.textContent).toBe("T");
     await act(async () => {
