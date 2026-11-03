@@ -504,6 +504,12 @@ export const coordinatorTargetRpc = defineRpc({
     agentId: z.string().nullable(),
     /** ハブ(総司令塔・子司令塔)のスレID。宛先がこの中なら「この話題だけ」表示にする。 */
     hubIds: z.array(z.string()).optional(),
+    /**
+     * 振り替え先の候補(優先順)。`agentId` が閉じている時に次に試す。
+     * 総司令塔は退役済みで `agentId` がアーカイブを指すことがあるため、その後継(裏方1)を載せる。
+     * 生死は端末がデーモンへ聞いて選ぶ(`pickCoordinatorTarget`)。
+     */
+    fallbackIds: z.array(z.string()).optional(),
   }),
 });
 

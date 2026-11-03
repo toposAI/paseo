@@ -111,6 +111,50 @@ export function shouldFallbackToCoordinator(opts: {
   return !opts.agentId || opts.closedText !== null;
 }
 
+/**
+ * 送り先として使える agent id か(完全な UUID だけ)。
+ *
+ * 投函に `thread_ref.id` として短縮ID(`1af1a9b` のような人が読む用の接頭辞)が入っていることがあり、
+ * それを宛先にすると送信が必ず失敗する(2026-11-03 実データ: 確認箱の項目 `ceace31d68914a05` の
+ * `thread_ref.id` が `1af1a9b`)。使えないIDは「投函元が無い」と同じ扱いにして総司令塔へ振り替える。
+ */
+export function isUsableAgentId(id: string | null | undefined): boolean {
+  return (
+    typeof id === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+  );
+}
+
+/** 振り替え先の候補を優先順に並べる(空・重複を落とす)。 */
+export function coordinatorCandidates(
+  primary: string | null | undefined,
+  extra: readonly string[] = [],
+): string[] {
+  const out: string[] = [];
+  for (const id of [primary ?? "", ...extra]) {
+    const clean = id.trim();
+    if (clean && !out.includes(clean)) out.push(clean);
+  }
+  return out;
+}
+
+/**
+ * 振り替え先の候補の生死から、実際に送る1本を選ぶ。
+ * `live`: true=生きている、false=閉じている(アーカイブ済み)、null=読めず不明。
+ *
+ * 生きている先を最優先し、無ければ**不明**を最後の手段にする(読めないだけで送信を止めない=
+ * 従来の fail-open)。全部閉じていれば null(=送信不可。理由を画面に出す)。
+ * 総司令塔が退役して閉じている時は、後継(裏方1)が生きていればそこへ送る。
+ */
+export function pickCoordinatorTarget(
+  candidates: readonly { id: string; live: boolean | null }[],
+): string | null {
+  const alive = candidates.find((c) => c.live === true);
+  if (alive) return alive.id;
+  const unknown = candidates.find((c) => c.live === null);
+  return unknown ? unknown.id : null;
+}
+
 /** 総司令塔へ送る発言の先頭にカード題名とIDを付ける(本文はそのまま後ろに残す)。 */
 export function withCardHeader(
   text: string,

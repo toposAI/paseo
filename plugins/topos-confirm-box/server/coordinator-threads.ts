@@ -43,6 +43,36 @@ export function readGeneralCoordinatorId(stateDir: string = coordinatorStateDir(
   }
 }
 
+/** `coordinator_id` を1本読む(無い・形が不正なら null)。 */
+function readCoordinatorIdFile(file: string): string | null {
+  try {
+    const id = fs.readFileSync(file, "utf8").trim();
+    return /^[A-Za-z0-9-]{8,64}$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 振り替え先の候補(優先順)。**先頭が総司令塔、2番目がその後継(裏方1)**。
+ *
+ * 総司令塔(general)は 2026-10-26 のユーザー決定で退役し、`coordinators.json` は
+ * `coordinator_retired: true` / `successor_coordinator_name: coordinator_backstage` になっている。
+ * ところが `domains/general/coordinator_id` は退役したスレ(アーカイブ済み)を指したままなので、
+ * これを唯一の宛先にすると確認箱のチャットが「総司令塔も閉じています(送信できません)」で
+ * 止まる(2026-11-03 ユーザー報告「確認箱からチャットしようとしてもできない」)。
+ * 起こしデーモンと同じ後継(裏方1)を候補に足し、生死は client がデーモンへ聞いて選ぶ。
+ * 裏方の実行時IDは `~/.local/state/toposai/backoffice/coordinator_id`(日次で乗り換わるので焼き込まない)。
+ */
+export function readFallbackCoordinatorIds(stateDir: string = coordinatorStateDir()): string[] {
+  const parent = path.dirname(stateDir);
+  const ids = [
+    readCoordinatorIdFile(path.join(stateDir, "domains", "general", "coordinator_id")),
+    readCoordinatorIdFile(path.join(parent, "backoffice", "coordinator_id")),
+  ];
+  return [...new Set(ids.filter((id): id is string => id !== null))];
+}
+
 export function readCoordinatorIds(stateDir: string = coordinatorStateDir()): string[] {
   const base = path.join(stateDir, "domains");
   let names: string[];

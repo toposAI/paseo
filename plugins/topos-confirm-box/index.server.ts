@@ -117,7 +117,7 @@ import {
   markCoordinators,
   markOpenableParents,
   readCoordinatorIds,
-  readGeneralCoordinatorId,
+  readFallbackCoordinatorIds,
 } from "./server/coordinator-threads.js";
 import {
   applyThreadAccess,
@@ -1061,10 +1061,17 @@ export default function contribute(server: PluginServerContext) {
   });
   server.handle(sharedProjectAiPollRpc, async (input) => aiJobs.poll(input.jobId));
 
-  server.handle(coordinatorTargetRpc, async () => ({
-    agentId: readGeneralCoordinatorId(),
-    hubIds: readCoordinatorIds(),
-  }));
+  server.handle(coordinatorTargetRpc, async () => {
+    // 総司令塔が退役してアーカイブ済みのスレを指していることがある(2026-10-26 ユーザー決定)。
+    // その場合の後継(裏方1)も候補に返し、生死は端末がデーモンへ聞いて選ぶ
+    // (`pickCoordinatorTarget`)。ここで一覧を引くと重いので、生死の判定は端末側に置く。
+    const fallbackIds = readFallbackCoordinatorIds();
+    return {
+      agentId: fallbackIds[0] ?? null,
+      hubIds: readCoordinatorIds(),
+      fallbackIds: fallbackIds.slice(1),
+    };
+  });
 
   server.handle(cardChatListRpc, async (input) => {
     try {

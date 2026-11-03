@@ -57,8 +57,10 @@ import {
 import type { ConfirmBoxItem } from "../shared/contract.js";
 import {
   COORDINATOR_FALLBACK_NOTICE,
+  coordinatorCandidates,
   isHubTarget,
   pendingLabel,
+  pickCoordinatorTarget,
   shouldFallbackToCoordinator,
   shouldSubmitOnEnter,
   threadUnavailableReason,
@@ -469,7 +471,9 @@ export function CardChatPane({
     return () => clearInterval(timer);
   }, [topic, refreshTopic]);
 
-  // 振り替える時だけ総司令塔のIDを引き、閉じていないか確かめる(閉じていれば送信を止める)。
+  // 振り替える時だけ振り替え先のIDを引き、閉じていないか確かめる(閉じていれば送信を止める)。
+  // 総司令塔(general)は退役済みでアーカイブを指すことがあるため、候補(総司令塔→後継の裏方1)を
+  // 順に読み、**生きている先**を選ぶ(`pickCoordinatorTarget`。2026-11-03 ユーザー報告の修理)。
   useEffect(() => {
     if (!fallback || !serverId) return undefined;
     let alive = true;
@@ -477,12 +481,26 @@ export function CardChatPane({
     coordinatorRpc({})
       .then(async (res) => {
         if (!alive) return null;
-        setCoordId(res.agentId);
         setHubIds(res.hubIds ?? []);
-        if (!res.agentId) return null;
-        const state = await readAgentStateOn(serverId, res.agentId);
+        const ids = coordinatorCandidates(res.agentId, res.fallbackIds ?? []);
+        setCoordId(ids[0] ?? null);
+        const states: { id: string; live: boolean | null }[] = [];
+        for (const id of ids) {
+          let live: boolean | null = null;
+          try {
+            const state = await readAgentStateOn(serverId, id);
+            live = state ? state.archivedAt == null : null;
+          } catch {
+            // 読めない=不明。送信は試せる側に倒す(従来と同じ)。
+            live = null;
+          }
+          states.push({ id, live });
+        }
         if (!alive) return null;
-        setCoordClosed(state?.archivedAt != null);
+        const picked = pickCoordinatorTarget(states);
+        // 選べなかった時も先頭IDを残す(「見つかりません」と「閉じています」を取り違えない)。
+        setCoordId(picked ?? ids[0] ?? null);
+        setCoordClosed(picked === null);
         return null;
       })
       .catch(() => {

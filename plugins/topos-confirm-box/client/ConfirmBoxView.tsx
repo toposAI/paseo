@@ -61,7 +61,7 @@ import { openThreadInPane } from "./open-pane-thread.js";
 import type { OpenThreadContext } from "./open-pane-thread.js";
 import { resolveOpenThreadId } from "./thread-target.js";
 import { useCoordinatorTargets } from "./useCoordinatorTargets.js";
-import { shouldSwitchPaneOnCardPress } from "../shared/card-pane.js";
+import { isUsableAgentId, shouldSwitchPaneOnCardPress } from "../shared/card-pane.js";
 import { useCardPaneRoute } from "./useCardPaneRoute.js";
 import { useConfirmBoxPane } from "./useConfirmBoxPane.js";
 import { QuestionAnswer } from "./QuestionAnswer.js";
@@ -1135,8 +1135,9 @@ function paneTargets(
  * 「スレを開く」の宛先は別(`resolveOpenThreadId` = 投函に `thread_id` があれば投函元そのもの)。
  */
 function threadAgentId(item: ConfirmBoxItem): string | null {
-  if (item.threadRef?.kind === "paseo_agent") return item.threadRef.id;
-  return item.agentId;
+  const id = item.threadRef?.kind === "paseo_agent" ? item.threadRef.id : item.agentId;
+  // 短縮IDは宛先にできない(送信が必ず失敗する)。「投函元が無い」と同じ扱いで総司令塔へ振り替える。
+  return isUsableAgentId(id) ? id : null;
 }
 
 function formatCreated(ts: number): string {

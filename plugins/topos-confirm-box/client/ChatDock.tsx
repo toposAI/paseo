@@ -9,7 +9,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { getPaseoClient, useHosts, useRpc } from "@getpaseo/plugin/client";
 import { coordinatorTargetRpc } from "../shared/contract.js";
-import { DOCK_FALLBACK_CONTEXT, pickDockTarget } from "../shared/card-pane.js";
+import {
+  DOCK_FALLBACK_CONTEXT,
+  coordinatorCandidates,
+  pickCoordinatorTarget,
+  pickDockTarget,
+} from "../shared/card-pane.js";
 import { BubbleIcon } from "./Icons.js";
 import { readAgentStateOn } from "./agent-read.js";
 import { notifyBoxChanged } from "./events.js";
@@ -323,12 +328,29 @@ function useDockTarget(fixedId: string | null) {
       if (retryTimer) clearTimeout(retryTimer);
     };
   }, [fixedId, serverId, retry]);
+  // 固定の常駐会話スレが閉じている時だけ、振り替え先(総司令塔→その後継)の生死を見て選ぶ。
   useEffect(() => {
-    if (fixedAlive !== false) return undefined;
+    if (fixedAlive !== false || !serverId) return undefined;
     let alive = true;
     coordinatorRpc({})
-      .then((res) => {
-        if (alive) setCoordId(res.agentId ?? null);
+      .then(async (res) => {
+        if (!alive) return null;
+        // 総司令塔は退役済みでアーカイブを指すことがある。候補(総司令塔→後継の裏方1)を
+        // 順に読み、生きている先へ送る(`pickCoordinatorTarget`)。
+        const ids = coordinatorCandidates(res.agentId, res.fallbackIds ?? []);
+        const states: { id: string; live: boolean | null }[] = [];
+        for (const id of ids) {
+          let live: boolean | null = null;
+          try {
+            const state = await readAgentStateOn(serverId, id);
+            live = state ? state.archivedAt == null : null;
+          } catch {
+            live = null;
+          }
+          states.push({ id, live });
+        }
+        if (!alive) return null;
+        setCoordId(pickCoordinatorTarget(states) ?? ids[0] ?? null);
         return null;
       })
       .catch(() => {
@@ -337,7 +359,7 @@ function useDockTarget(fixedId: string | null) {
     return () => {
       alive = false;
     };
-  }, [fixedAlive, coordinatorRpc]);
+  }, [fixedAlive, coordinatorRpc, serverId]);
   const target = pickDockTarget({ fixedId, fixedAlive, coordinatorId: coordId });
   let reason: string | undefined;
   if (!target.agentId) {
