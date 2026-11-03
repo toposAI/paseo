@@ -300,6 +300,8 @@ const rowDataSet = { priorityRow: "1" };
 const detailDataSet = { priorityDetail: "1" };
 const gap6 = { gap: 6 };
 const gap8 = { gap: 8 };
+// 「送る」は入力欄の右下に寄せる
+const sendBtnAlign = { alignSelf: "flex-end" as const };
 // 右下の丸いボタンが末尾の行(状態の列)に重ならないよう、一覧の下に余白を取る
 const listBottomGap = { gap: 8, paddingBottom: 80 };
 const detailCard = { gap: 4 };
@@ -355,7 +357,9 @@ function RankRow({
       ? "【構想】"
       : "【新規】"
     : "";
-  const label = `${mark}${project.thread ? `${project.name} ›` : project.name}`;
+  // 【構想】の印と重ならないよう、題名先頭の「構想: 」は落とす
+  const name = mark === "【構想】" ? project.name.replace(/^構想[:\uFF1A]\s*/, "") : project.name;
+  const label = `${mark}${project.thread ? `${name} ›` : name}`;
   return (
     <View style={cardStyle}>
       <View style={handleStyle} {...({ dataSet: handleDataSet } as object)}>
@@ -850,6 +854,7 @@ export function PriorityView({
     }),
     [colors],
   );
+  const sendBtnStyle = useMemo(() => [styles.btnRec, sendBtnAlign], [styles.btnRec]);
   const sendPress = useCallback(
     () => void led.sendText(text).then((ok) => ok && setText("")),
     [led, text],
@@ -920,7 +925,7 @@ export function PriorityView({
         multiline
         style={input}
       />
-      <Pressable accessibilityRole="button" style={styles.btnRec} onPress={sendPress}>
+      <Pressable accessibilityRole="button" style={sendBtnStyle} onPress={sendPress}>
         <Text style={styles.btnRecText}>送る</Text>
       </Pressable>
       {standing.length > 0 ? (
