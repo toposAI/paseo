@@ -321,7 +321,7 @@ function StatusChip({ text, color }: { text: string; color: string }) {
       borderRadius: 4,
       paddingHorizontal: 4,
       // 「動9」と「動45」で幅が変わらないよう固定する
-      minWidth: 34,
+      width: 40,
       textAlign: "center" as const,
     }),
     [color],
