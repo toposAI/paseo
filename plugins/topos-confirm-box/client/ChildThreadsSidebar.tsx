@@ -1523,7 +1523,9 @@ const styles = StyleSheet.create({
   trailing: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 2,
+    // 状態の札と件数・シェブロンの間。詰めすぎると札の右端と数字がくっついて見える(2026-11-03)。
+    // 上の絞り込みの札(`chips`)と同じ 6 にそろえる。
+    gap: 6,
   },
   notice: {
     paddingHorizontal: 12,
