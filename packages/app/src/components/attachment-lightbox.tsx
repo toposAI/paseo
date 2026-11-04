@@ -558,9 +558,6 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[1],
   },
   commentRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
     maxWidth: 640,
     width: "100%",
     alignSelf: "center",
