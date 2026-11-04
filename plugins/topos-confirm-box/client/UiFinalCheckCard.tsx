@@ -30,6 +30,27 @@ const zoomWrap = {
 const zoomImg = { width: "100%" as const, flex: 1 };
 const zoomText = { color: "#fff", fontSize: 14 };
 
+function Thumb({
+  source,
+  index,
+  onZoom,
+}: {
+  source: { uri: string };
+  index: number;
+  onZoom: (index: number) => void;
+}) {
+  const press = useCallback(() => onZoom(index), [onZoom, index]);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${shotLabel(index, false)}を拡大`}
+      onPress={press}
+    >
+      <Image source={source} style={index === 0 ? PC_BOX : PHONE_BOX} resizeMode="contain" />
+    </Pressable>
+  );
+}
+
 export function UiFinalCheckCard({
   item,
   styles,
@@ -47,7 +68,7 @@ export function UiFinalCheckCard({
   const shots = useMemo(() => splitShots(item.images), [item.images]);
   const sources = useMemo(
     () => shots.finals.map((i) => ({ uri: `data:${i.mimeType};base64,${i.data}` })),
-    [shots]
+    [shots],
   );
   const ok = useCallback(() => {
     setDone(true);
@@ -70,14 +91,7 @@ export function UiFinalCheckCard({
         </Text>
         <View style={row}>
           {sources.map((source, i) => (
-            <Pressable
-              key={source.uri}
-              accessibilityRole="button"
-              accessibilityLabel={`${shotLabel(i, false)}を拡大`}
-              onPress={() => setZoom(i)}
-            >
-              <Image source={source} style={i === 0 ? PC_BOX : PHONE_BOX} resizeMode="contain" />
-            </Pressable>
+            <Thumb key={source.uri} source={source} index={i} onZoom={setZoom} />
           ))}
         </View>
         {approved ? (

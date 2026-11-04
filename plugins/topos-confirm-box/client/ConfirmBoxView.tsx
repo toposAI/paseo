@@ -179,14 +179,14 @@ export function ConfirmBoxView({
   const [listWidth, setListWidth] = useState(0);
   const onListLayout = useCallback(
     (e: LayoutChangeEvent) => setListWidth(Math.floor(e.nativeEvent.layout.width)),
-    []
+    [],
   );
   const listCols = listColumns(listWidth, wide);
   const cellWidth = listCellWidth(listWidth, listCols);
   // lint(jsx-no-new-object-as-prop)対策: 1枚ぶんの幅は幅が変わったときだけ作り直す。
   const cellStyle = useMemo(
     () => (cellWidth === undefined ? undefined : { width: cellWidth }),
-    [cellWidth]
+    [cellWidth],
   );
   const { shownTab, tabs, selectTab } = useBoxTabs(mode, initialTab, onOpenPriority);
   // カードチャットは画面を問わずこのペインに一本化した(旧・自由記述欄は廃止=2026-10-22ユーザー決定)。
@@ -208,7 +208,7 @@ export function ConfirmBoxView({
       setDepth("chat");
       openPaneFor(item);
     },
-    [openPaneFor]
+    [openPaneFor],
   );
   const s = useMemo(() => {
     const tap = touch ? { minHeight: 44, justifyContent: "center" as const } : {};
@@ -423,7 +423,7 @@ export function ConfirmBoxView({
       void reload();
       notifyBoxChanged();
     },
-    [decide, permit, depth, reload]
+    [decide, permit, depth, reload],
   );
 
   /** 却下(コメント必須)。成功したら true を返し、カードは一覧から消える。 */
@@ -453,7 +453,7 @@ export function ConfirmBoxView({
       notifyBoxChanged();
       return true;
     },
-    [decide, depth, reload]
+    [decide, depth, reload],
   );
 
   /** 質問への回答。押された選択肢/自由記述を `answers` として送る。 */
@@ -477,7 +477,7 @@ export function ConfirmBoxView({
       void reload();
       notifyBoxChanged();
     },
-    [permit, reload]
+    [permit, reload],
   );
 
   // 判断タブは判断印のある項目と Paseo 承認待ちだけ。通知・バグ報告・完了報告は専用タブにだけ出す。
@@ -490,7 +490,7 @@ export function ConfirmBoxView({
         newestFirst: sortNew,
         legacy: !legacyOff,
       }),
-    [data, showDone, prio, sortNew, legacyOff]
+    [data, showDone, prio, sortNew, legacyOff],
   );
 
   const chip = (label: string, on: boolean, press: () => void) => (
@@ -574,7 +574,7 @@ export function ConfirmBoxView({
           <View style={s.row}>
             {chip("全て", prio === "all", () => setPrio("all"))}
             {(Object.keys(PRIORITY_LABEL) as (keyof typeof PRIORITY_LABEL)[]).map((k) =>
-              chip(PRIORITY_LABEL[k], prio === k, () => setPrio(k))
+              chip(PRIORITY_LABEL[k], prio === k, () => setPrio(k)),
             )}
             {chip(sortNew ? "新しい順" : "優先度順", true, () => setSortNew((v) => !v))}
             {chip("決定済みも表示", showDone, () => setShowDone((v) => !v))}
@@ -699,13 +699,13 @@ function boxHeight(containerWidth: number | undefined, windowHeight: number): nu
 function isBoxWide(
   containerWidth: number | undefined,
   windowSize: { width: number; height: number },
-  layout: PluginHostProps["layout"] | undefined
+  layout: PluginHostProps["layout"] | undefined,
 ): boolean {
   const width = layoutWidth(containerWidth, windowSize.width);
   return isWideLayout(
     width,
     boxHeight(containerWidth, windowSize.height),
-    layout?.compact ?? false
+    layout?.compact ?? false,
   );
 }
 
@@ -732,7 +732,7 @@ function useHeaderNav({
         openScreen({ screenId: "main", params: { tab: id } });
       }
     },
-    [openScreen, shownTab]
+    [openScreen, shownTab],
   );
   const [reloadN, setReloadN] = useState(0);
   const refreshFromHeader = useCallback(async () => {
@@ -758,7 +758,7 @@ function useHeaderToggle(shownTab: TabId) {
   }, [shownTab]);
   const headerToggle = useMemo<HeaderToggle | null>(
     () => (toggleInfo ? { ...toggleInfo, onPress } : null),
-    [toggleInfo, onPress]
+    [toggleInfo, onPress],
   );
   return { showAll, setToggleInfo, headerToggle };
 }
@@ -803,7 +803,7 @@ type TabId = "items" | "bugs" | "notify" | "priority";
 function useBoxTabs(
   mode: BoxTabMode,
   initialTab: "items" | "bugs" | "notify" | "priority" = "bugs",
-  onOpenPriority?: () => void
+  onOpenPriority?: () => void,
 ): {
   shownTab: TabId;
   tabs: readonly (typeof TABS)[number][];
@@ -824,7 +824,7 @@ function useBoxTabs(
       }
       setPicked(id);
     },
-    [onOpenPriority]
+    [onOpenPriority],
   );
   return { shownTab, tabs, selectTab };
 }
@@ -939,7 +939,7 @@ function useBreakdownLine(): string | null {
         // 合計が数えられなかった(null)応答では前回の行を残す。消すと「件が無くなった」と読めるため
         if (alive && r.presentableTotal !== null) {
           setLine(
-            judgmentBreakdownLabel(r.presentable, r.presentableConsulting, r.presentableTotal)
+            judgmentBreakdownLabel(r.presentable, r.presentableConsulting, r.presentableTotal),
           );
         }
       } catch {
@@ -1083,7 +1083,7 @@ function usePaneOpenThread({
         // 同じ相手なら主ペイン化するかは、**実際に開いた後**の宛先で判定する(`open-pane-thread.ts`)。
         // ここで URL の相手から先に決めると、宛先が振り替わったときに誤って畳む。
         ...(wide ? { placement: "right" as const } : {}),
-        title: item !== null ? item.subject ?? threadTitle : null,
+        title: item !== null ? (item.subject ?? threadTitle) : null,
         coordinatorId: coordinators?.agentId ?? null,
         hubIds: coordinators?.hubIds,
         direct: item === null,
@@ -1119,7 +1119,7 @@ function usePaneOpenThread({
  */
 function currentPaneWithAnswer(
   pane: ReturnType<typeof useCardPaneRoute>["pane"],
-  answerId: string | null
+  answerId: string | null,
 ): OpenThreadContext["currentPane"] {
   if (pane?.kind !== "card") return pane;
   return { kind: "card", id: pane.id, answerId };
@@ -1127,7 +1127,7 @@ function currentPaneWithAnswer(
 
 function paneTargets(
   paneItem: ConfirmBoxItem | null,
-  paneThreadId: string | null
+  paneThreadId: string | null,
 ): { answer: string | null; open: string | null } {
   if (!paneItem) return { answer: paneThreadId, open: paneThreadId };
   return {
@@ -1347,7 +1347,7 @@ function ItemCard({
   const deny = useCallback(() => void onChoose(item, "__deny"), [item, onChoose]);
   const answer = useCallback(
     (answers: Record<string, string>) => void onAnswer(item, answers),
-    [item, onAnswer]
+    [item, onAnswer],
   );
   const created = useMemo(() => formatCreated(item.ts), [item.ts]);
   // 添付画像の data URI はデータが変わったときだけ作り直す(lint: jsx-no-new-object-as-prop)。
@@ -1356,7 +1356,7 @@ function ItemCard({
       (item.images ?? []).map((image) => ({
         uri: `data:${image.mimeType};base64,${image.data}`,
       })),
-    [item.images]
+    [item.images],
   );
   const questions = item.questions ?? NO_QUESTIONS;
   return (

@@ -10,8 +10,19 @@ export const UFC_GROUP = "ui-final-check";
 /** 「OK」ボタンの選択肢 id(投函側の約束)。 */
 export const UFC_OK_ID = "a";
 
-export function isUiFinalCheck(item: { subject: string; group: string | null }): boolean {
-  return item.group === UFC_GROUP || item.subject.startsWith(UFC_SUBJECT_PREFIX);
+/**
+ * group が `ui-final-check` なら確定。件名の接頭辞だけで判定するときは、OK 用の選択肢 `a` があることも要る
+ * (似た件名の通常カードを奪い、ボタンが別の選択肢を押してしまうのを防ぐ)。
+ */
+export function isUiFinalCheck(item: {
+  subject: string;
+  group: string | null;
+  options: readonly { id: string }[];
+}): boolean {
+  if (item.group === UFC_GROUP) return true;
+  return (
+    item.subject.startsWith(UFC_SUBJECT_PREFIX) && item.options.some((o) => o.id === UFC_OK_ID)
+  );
 }
 
 export interface UfcImage {
@@ -37,7 +48,7 @@ export function fitInside(
   width: number,
   height: number,
   maxW: number,
-  maxH: number
+  maxH: number,
 ): { width: number; height: number } {
   if (!(width > 0) || !(height > 0)) return { width: maxW, height: maxH };
   const scale = Math.min(maxW / width, maxH / height, 1);
