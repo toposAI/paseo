@@ -81,7 +81,8 @@ export function ChatImageViewerProvider({
   children,
 }: ChatImageViewerProviderProps) {
   const { settings } = useAppSettings();
-  const sendBehavior = settings.sendBehavior === "steer" ? "steer" : "interrupt";
+  const sendBehavior: "steer" | "interrupt" =
+    settings.sendBehavior === "steer" ? "steer" : "interrupt";
   const entries = useMemo(() => collectChatImages(items, agentId), [agentId, items]);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const index = openKey === null ? -1 : entries.findIndex((entry) => entry.key === openKey);
@@ -173,8 +174,18 @@ export function ChatImageViewerProvider({
     [current, entries.length, goNext, goPrevious, index],
   );
   const comment = useMemo(
-    () => (client ? { onSubmit: submitComment } : undefined),
-    [client, submitComment],
+    () =>
+      client
+        ? {
+            onSubmit: submitComment,
+            client,
+            serverId,
+            agentId,
+            cwd: workspaceRoot ?? "",
+            sendBehavior,
+          }
+        : undefined,
+    [agentId, client, sendBehavior, serverId, submitComment, workspaceRoot],
   );
 
   return (

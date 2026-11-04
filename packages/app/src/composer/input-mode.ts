@@ -7,7 +7,7 @@
  * Callers pick a mode and nothing else. What a mode implies lives here, so the
  * two presentations cannot drift apart one prop at a time.
  */
-export type ComposerInputMode = "chat" | "terminal";
+export type ComposerInputMode = "chat" | "terminal" | "comment";
 
 export interface ComposerInputModePresentation {
   /** Attachments, dictation/voice, slash-and-@ autocomplete, and the model/mode
@@ -28,6 +28,15 @@ const PRESENTATION_BY_MODE: Record<ComposerInputMode, ComposerInputModePresentat
     showVoice: true,
     showAutocomplete: true,
     showAgentControls: true,
+    isMonospace: false,
+    accessibilityLabelKey: "composer.input.accessibilityLabel",
+  },
+  // A note on one image: the chat's text surface and dictation, none of the agent chrome.
+  comment: {
+    showAttachments: false,
+    showVoice: true,
+    showAutocomplete: false,
+    showAgentControls: false,
     isMonospace: false,
     accessibilityLabelKey: "composer.input.accessibilityLabel",
   },

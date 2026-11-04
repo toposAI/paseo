@@ -4,7 +4,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AttachmentMetadata } from "@/attachments/types";
-import { AttachmentLightbox, type ImageLightboxSource } from "./attachment-lightbox";
+import {
+  AttachmentLightbox,
+  type ImageLightboxSource,
+  type LightboxComment,
+} from "./attachment-lightbox";
 
 const { theme, imageMetadata, useAttachmentPreviewUrlMock } = vi.hoisted(() => {
   const hoistedTheme = {
@@ -98,6 +102,8 @@ vi.mock("lucide-react-native", () => {
     ChevronLeft: createIcon("ChevronLeft"),
     ChevronRight: createIcon("ChevronRight"),
     Send: createIcon("Send"),
+    ChevronDown: createIcon("ChevronDown"),
+    MessageCircle: createIcon("MessageCircle"),
   };
 });
 
@@ -293,13 +299,54 @@ function typeInto(input: HTMLInputElement, text: string) {
   });
 }
 
+// The real MessageInput needs the whole composer environment; its own behaviour is covered by its
+// tests and by the real-browser check. Here only the lightbox's wiring around it is under test.
+vi.mock("@/composer/input/input", () => {
+  function MessageInput(props: {
+    value: string;
+    onChangeText: (text: string) => void;
+    onSubmit: (payload: { text: string }) => void;
+    textReplacement: { key: string; text: string };
+    inputMode?: string;
+  }) {
+    const { value, onChangeText, onSubmit } = props;
+    const change = React.useCallback(
+      (event: { target: { value: string } }) => onChangeText(event.target.value),
+      [onChangeText],
+    );
+    const submit = React.useCallback(() => onSubmit({ text: value }), [onSubmit, value]);
+    return (
+      <div>
+        <input
+          data-testid="attachment-lightbox-comment-input"
+          data-mode={props.inputMode}
+          defaultValue={value}
+          key={props.textReplacement.key}
+          onChange={change}
+        />
+        <button type="button" data-testid="attachment-lightbox-comment-send" onClick={submit} />
+      </div>
+    );
+  }
+  return { MessageInput };
+});
+
 describe("AttachmentLightbox gallery", () => {
   function renderGallery(
     index: number,
     total: number,
     handlers: { onPrevious?: () => void; onNext?: () => void } = {},
-    comment?: { onSubmit: (text: string) => Promise<void> },
+    comment?: Pick<LightboxComment, "onSubmit">,
   ) {
+    // oxlint-disable-next-line react-perf/jsx-no-new-object-as-prop -- test fixture
+    const fullComment: LightboxComment | undefined = comment && {
+      client: null,
+      serverId: "s",
+      agentId: "a",
+      cwd: "/",
+      sendBehavior: "interrupt",
+      ...comment,
+    };
     render(
       <AttachmentLightbox
         source={attachmentSource}
@@ -312,7 +359,7 @@ describe("AttachmentLightbox gallery", () => {
           onPrevious: handlers.onPrevious ?? vi.fn(),
           onNext: handlers.onNext ?? vi.fn(),
         }}
-        comment={comment}
+        comment={fullComment}
       />,
     );
   }
@@ -396,6 +443,9 @@ describe("AttachmentLightbox gallery", () => {
   it("sends the comment text and clears the box", async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     renderGallery(0, 2, {}, { onSubmit });
+    expect(queryByTestId("attachment-lightbox-comment-input")?.getAttribute("data-mode")).toBe(
+      "comment",
+    );
     const input = queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement;
 
     typeInto(input, "  ここが気になる  ");
@@ -412,6 +462,9 @@ describe("AttachmentLightbox gallery", () => {
   it("keeps the text and says so when the send fails", async () => {
     const onSubmit = vi.fn().mockRejectedValue(new Error("down"));
     renderGallery(0, 2, {}, { onSubmit });
+    expect(queryByTestId("attachment-lightbox-comment-input")?.getAttribute("data-mode")).toBe(
+      "comment",
+    );
     const input = queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement;
 
     typeInto(input, "hello");
