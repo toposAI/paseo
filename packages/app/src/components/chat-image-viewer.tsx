@@ -173,10 +173,22 @@ export function ChatImageViewerProvider({
         : undefined,
     [current, entries.length, goNext, goPrevious, index],
   );
+  // Half-typed comments outlive the viewer: closing and reopening gives each image its text back.
+  const draftsRef = useRef<Record<string, string>>({});
+  const drafts = useMemo(
+    () => ({
+      get: (imageKey: string) => draftsRef.current[imageKey] ?? "",
+      set: (imageKey: string, text: string) => {
+        draftsRef.current[imageKey] = text;
+      },
+    }),
+    [],
+  );
   const comment = useMemo(
     () =>
       client
         ? {
+            drafts,
             onSubmit: submitComment,
             client,
             serverId,
@@ -185,7 +197,7 @@ export function ChatImageViewerProvider({
             sendBehavior,
           }
         : undefined,
-    [agentId, client, sendBehavior, serverId, submitComment, workspaceRoot],
+    [agentId, client, drafts, sendBehavior, serverId, submitComment, workspaceRoot],
   );
 
   return (

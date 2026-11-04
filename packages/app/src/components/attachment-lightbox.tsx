@@ -41,6 +41,8 @@ export interface LightboxGallery {
 }
 
 export interface LightboxComment {
+  /** Per-image draft text kept by the owner, so it survives closing the viewer. */
+  drafts: { get: (imageKey: string) => string; set: (imageKey: string, text: string) => void };
   onSubmit: (text: string) => Promise<void>;
   /** What the shared composer input needs for dictation and for how a send behaves. */
   client: DaemonClient | null;
@@ -274,15 +276,18 @@ function LightboxCommentBar({
   const sendingRef = useRef(false);
   const currentKeyRef = useRef(imageKey);
   currentKeyRef.current = imageKey;
-  const draft = drafts[imageKey] ?? "";
+  const draft = drafts[imageKey] ?? comment.drafts.get(imageKey);
 
   useEffect(() => {
     setStatus("idle");
   }, [imageKey]);
 
   const handleChange = useCallback(
-    (text: string) => setDrafts((current) => ({ ...current, [imageKey]: text })),
-    [imageKey],
+    (text: string) => {
+      comment.drafts.set(imageKey, text);
+      setDrafts((current) => ({ ...current, [imageKey]: text }));
+    },
+    [comment, imageKey],
   );
   const handleSubmit = useCallback(
     async (payload: { text: string }) => {
@@ -293,6 +298,7 @@ function LightboxCommentBar({
       setStatus("sending");
       try {
         await comment.onSubmit(text);
+        comment.drafts.set(imageKey, "");
         setDrafts((current) => ({ ...current, [imageKey]: "" }));
         // Only the input that sent it is cleared; after a switch the mounted one is another image's.
         if (currentKeyRef.current === imageKey) {

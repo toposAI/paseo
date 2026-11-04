@@ -340,6 +340,7 @@ describe("AttachmentLightbox gallery", () => {
   ) {
     // oxlint-disable-next-line react-perf/jsx-no-new-object-as-prop -- test fixture
     const fullComment: LightboxComment | undefined = comment && {
+      drafts: { get: () => "", set: () => {} },
       client: null,
       serverId: "s",
       agentId: "a",
@@ -477,6 +478,28 @@ describe("AttachmentLightbox gallery", () => {
     expect(queryByTestId("attachment-lightbox-comment-error")).not.toBeNull();
     expect((queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement).value).toBe(
       "hello",
+    );
+  });
+
+  it("gives each image its half-typed text back after the viewer is closed and reopened", () => {
+    const store: Record<string, string> = {};
+    const drafts = {
+      get: (key: string) => store[key] ?? "",
+      set: (key: string, text: string) => {
+        store[key] = text;
+      },
+    };
+    renderGallery(0, 2, {}, { drafts });
+    typeInto(queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement, "途中の文");
+    act(() => {
+      root?.unmount();
+    });
+    root = createRoot(container!);
+
+    renderGallery(0, 2, {}, { drafts });
+
+    expect((queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement).value).toBe(
+      "途中の文",
     );
   });
 });
