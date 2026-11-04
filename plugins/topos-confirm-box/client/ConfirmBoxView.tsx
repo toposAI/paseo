@@ -65,7 +65,9 @@ import { isUsableAgentId, shouldSwitchPaneOnCardPress } from "../shared/card-pan
 import { useCardPaneRoute } from "./useCardPaneRoute.js";
 import { useConfirmBoxPane } from "./useConfirmBoxPane.js";
 import { QuestionAnswer } from "./QuestionAnswer.js";
-import { UiFinalCheckCard } from "./UiFinalCheckCard.js";
+import { UfcBar, UiFinalCheckCard } from "./UiFinalCheckCard.js";
+import { useUfcFlow } from "./useUfcFlow.js";
+import { nextOpen } from "../shared/ufc-flow.js";
 import { isUiFinalCheck } from "../shared/ui-final-check.js";
 import type { QuestionAnswerColors } from "./QuestionAnswer.js";
 import type {
@@ -495,6 +497,22 @@ export function ConfirmBoxView({
     [data, showDone, prio, sortNew, legacyOff],
   );
 
+  // 「UIの最終チェック」を順に片付ける状態(見ているカード・返事待ち・未読の印)。
+  const ufcItems = useMemo(
+    () => visible.filter((v) => isUiFinalCheck(v) && v.kind === "box" && v.state !== "approved"),
+    [visible],
+  );
+  const ufcIds = useMemo(() => ufcItems.map((v) => v.id), [ufcItems]);
+  const ufc = useUfcFlow(ufcIds);
+  const ufcUnread = useMemo(
+    () =>
+      ufcItems
+        .filter((v) => ufc.flow.unread.includes(v.id))
+        .map((v) => ({ id: v.id, subject: v.subject })),
+    [ufcItems, ufc.flow.unread],
+  );
+  const ufcNextExists = nextOpen(ufcIds, ufc.flow.current, ufc.flow.waiting) !== null;
+
   const chip = (label: string, on: boolean, press: () => void) => (
     <Pressable key={label} accessibilityRole="button" style={on ? s.btnRec : s.btn} onPress={press}>
       <Text style={on ? s.btnRecText : s.btnText}>{label}</Text>
@@ -594,11 +612,37 @@ export function ConfirmBoxView({
         {notice ? <Text style={s.muted}>{notice}</Text> : null}
         {data && visible.length === 0 ? <Text style={s.muted}>判断待ちはありません</Text> : null}
         {/* PC幅は複数列(2026-10-28 ユーザー決定)。1列のときは縦に積む(すき間は listBox の gap)。 */}
+        <UfcBar
+          styles={s}
+          colors={c}
+          counts={ufc.counts}
+          everHad={ufc.everHad}
+          unreadItems={ufcUnread}
+          onSelect={ufc.choose}
+        />
         <View style={listCols > 1 ? s.grid : s.listBox} onLayout={onListLayout}>
           {visible.map((item) => (
             <View key={item.id} style={cellStyle}>
               {isUiFinalCheck(item) && item.kind === "box" ? (
-                <UiFinalCheckCard item={item} styles={s} onChoose={choose} onToggle={toggle} />
+                <UiFinalCheckCard
+                  item={item}
+                  styles={s}
+                  colors={c}
+                  compact={compact}
+                  width={UFC_PANE_WIDTH}
+                  agentId={threadAgentId(item)}
+                  flow={ufc.flow}
+                  index={ufcIds.indexOf(item.id)}
+                  total={ufcIds.length}
+                  visited={ufc.visited.includes(item.id)}
+                  nextExists={ufcNextExists}
+                  onChoose={choose}
+                  onToggle={toggle}
+                  onSent={ufc.sent}
+                  onReply={ufc.replied}
+                  onSelect={ufc.choose}
+                  onSkip={ufc.skip}
+                />
               ) : (
                 <ItemCard
                   item={item}
@@ -1142,6 +1186,9 @@ function paneTargets(
  * この欄に答えるスレ(=チャットの送り先)。サーバが決めた `threadRef`(投函元の親)を使う。
  * 「スレを開く」の宛先は別(`resolveOpenThreadId` = 投函に `thread_id` があれば投函元そのもの)。
  */
+/** カード内の会話は幅を自分で決めない(右ペインの幅調整は使わない)。 */
+const UFC_PANE_WIDTH = 0;
+
 function threadAgentId(item: ConfirmBoxItem): string | null {
   const id = item.threadRef?.kind === "paseo_agent" ? item.threadRef.id : item.agentId;
   // 短縮IDは宛先にできない(送信が必ず失敗する)。「投函元が無い」と同じ扱いで総司令塔へ振り替える。

@@ -41,7 +41,6 @@ import {
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { getPaseoClient, useHosts, useRpc } from "@getpaseo/plugin/client";
@@ -75,6 +74,7 @@ import {
 } from "../shared/pane-activity.js";
 import type { PaneActivityEvent, PaneActivityState } from "../shared/pane-activity.js";
 import { readAgentState, readAgentStateOn } from "./agent-read.js";
+import { PaneComposer } from "./PaneComposer.js";
 import { usePaneInputTools } from "./usePaneInputTools.js";
 import type { PaneImage } from "./usePaneInputTools.js";
 //  "./usePaneInputTools.js";
@@ -234,6 +234,12 @@ export function CardChatPane({
   width,
   onClose,
   onOpenThread,
+  embedded = false,
+  onSent,
+  onReply,
+  sendRef,
+  messagePrefix,
+  focusSignal,
 }: {
   item: ConfirmBoxItem | null;
   /** 投函元スレの agent ID(`threadAgentId(item)` の結果)。無ければ null。 */
@@ -246,6 +252,18 @@ export function CardChatPane({
   onClose: () => void;
   /** 元スレを Paseo のスレ画面で開く(`navigation.openAgent`)。無い画面では undefined。 */
   onOpenThread?: (() => void) | undefined;
+  /** カードの中に差し込む(見出し・カード要約・幅の調整・スライドを出さず、会話と入力欄だけ)。 */
+  embedded?: boolean;
+  /** 投函元へ送れた直後(UIの最終チェック: 返事待ちにして次のカードへ進める)。 */
+  onSent?: () => void;
+  /** 送った後に、相手の返事が増えた(UIの最終チェック: 見ていないカードに未読の印)。 */
+  onReply?: () => void;
+  /** 外の部品(画像ビューア)から、入力欄の下書きを触らずに1通送るための口。 */
+  sendRef?: { current: ((text: string) => Promise<boolean>) | null };
+  /** 送る文の先頭に付ける印(例「【直してほしい】」)。画面の吹き出しには出さない。 */
+  messagePrefix?: string;
+  /** 値が変わるたびに入力欄へフォーカスを移す(「直してほしい」ボタン)。 */
+  focusSignal?: number;
 }) {
   const hosts = useHosts();
   const serverId = hosts.find((h) => h.status === "online")?.serverId ?? null;
@@ -290,6 +308,8 @@ export function CardChatPane({
   const [liveness, setLiveness] = useState<Liveness>(UNKNOWN_LIVENESS);
   // 同じ描画フレーム内の二度押しで同じ文を2件送らない。
   const sendingRef = useRef(false);
+  // このペインから1回でも送れたか(返事の検知は送った後だけ)。
+  const sentOnce = useRef(false);
   const scrollRef = useRef<ScrollView | null>(null);
   const seq = useRef(0);
 
@@ -606,84 +626,109 @@ export function CardChatPane({
     return () => clearTimeout(timer);
   }, [lastKey]);
 
-  const send = useCallback(async () => {
-    const t = text.trim();
-    if (reason || !t || !sendAgentId || !serverId || sendingRef.current) return;
-    sendingRef.current = true;
-    setSending(true);
-    setText("");
-    const sentImages = toolImages;
-    clearImages();
-    if (!topic) {
-      seq.current += 1;
-      setLines((cur) => [...cur, { id: `u${seq.current}`, role: "user", text: t }]);
-    }
-    let askedId: string | null = null;
-    try {
-      // カードID付きで送る(司令塔宛のとき発言ログから回答済みを機械判定するため。judgment_answer_sweep.py)
-      let outgoing = item ? withCardHeader(t, item) : t;
-      if (topic && item) {
-        // 台帳へ質問を記録し(返事待ちの目印と催促の元)、返信ID+sayコマンドを付けて上位スレへ送る。
-        const asked = await askRpc({
-          id: item.id,
-          key: item.key,
-          text: t,
-          target: sendAgentId,
-        });
-        if (!asked.ok || !asked.replyId) throw new Error(asked.message);
-        askedId = asked.replyId;
-        outgoing = withSayInstruction(outgoing, {
-          replyId: asked.replyId,
-          cardId: item.id,
-        });
+  // oxlint-disable-next-line eslint/complexity
+  const send = useCallback(
+    // oxlint-disable-next-line eslint/complexity
+    async (override?: string): Promise<boolean> => {
+      const own = override === undefined;
+      const t = (own ? text : override).trim();
+      if (reason || !t || !sendAgentId || !serverId || sendingRef.current) return false;
+      sendingRef.current = true;
+      setSending(true);
+      // 外から渡された文(画像コメント)は、書きかけの下書きと添付に触らない。
+      if (own) setText("");
+      const sentImages = own ? toolImages : [];
+      if (own) clearImages();
+      let ok = false;
+      if (!topic) {
+        seq.current += 1;
+        setLines((cur) => [...cur, { id: `u${seq.current}`, role: "user", text: t }]);
       }
-      const opts = sentImages.length
-        ? {
-            images: sentImages.map((i) => ({
-              data: i.data,
-              mimeType: i.mimeType,
-            })),
-          }
-        : undefined;
-      await getPaseoClient(serverId).agents.ref(sendAgentId).send(outgoing, opts);
-      if (topic) void refreshTopic();
-      if (fallback) setCoordSent(true);
-      seeActivity({ kind: "sent" });
-      setNotice("");
-    } catch (e) {
-      setNotice(`送れません: ${e instanceof Error ? e.message : String(e)}`);
-      // 入力を失わない(書き直しや再添付を強いない)。
-      setText((cur) => (cur ? cur : t));
-      restoreImages(sentImages);
-      if (askedId && item) {
-        // 台帳には質問が残っているので取り消す(届いていない質問に催促が飛ばないように)。
-        cancelRpc({ id: item.id, key: item.key, replyId: askedId })
-          .then(() => (topic ? refreshTopic() : null))
-          .catch(() => {
-            // 取り消せなくても次の周期で催促されるだけ(受容)。
+      let askedId: string | null = null;
+      try {
+        // カードID付きで送る(司令塔宛のとき発言ログから回答済みを機械判定するため。judgment_answer_sweep.py)
+        const tagged = messagePrefix ? `${messagePrefix}${t}` : t;
+        let outgoing = item ? withCardHeader(tagged, item) : tagged;
+        if (topic && item) {
+          // 台帳へ質問を記録し(返事待ちの目印と催促の元)、返信ID+sayコマンドを付けて上位スレへ送る。
+          const asked = await askRpc({
+            id: item.id,
+            key: item.key,
+            text: tagged,
+            target: sendAgentId,
           });
+          if (!asked.ok || !asked.replyId) throw new Error(asked.message);
+          askedId = asked.replyId;
+          outgoing = withSayInstruction(outgoing, {
+            replyId: asked.replyId,
+            cardId: item.id,
+          });
+        }
+        const opts = sentImages.length
+          ? {
+              images: sentImages.map((i) => ({
+                data: i.data,
+                mimeType: i.mimeType,
+              })),
+            }
+          : undefined;
+        await getPaseoClient(serverId).agents.ref(sendAgentId).send(outgoing, opts);
+        if (topic) void refreshTopic();
+        if (fallback) setCoordSent(true);
+        seeActivity({ kind: "sent" });
+        setNotice("");
+        ok = true;
+        sentOnce.current = true;
+      } catch (e) {
+        setNotice(`送れません: ${e instanceof Error ? e.message : String(e)}`);
+        // 入力を失わない(書き直しや再添付を強いない)。
+        if (own) {
+          setText((cur) => (cur ? cur : t));
+          restoreImages(sentImages);
+        }
+        if (askedId && item) {
+          // 台帳には質問が残っているので取り消す(届いていない質問に催促が飛ばないように)。
+          cancelRpc({ id: item.id, key: item.key, replyId: askedId })
+            .then(() => (topic ? refreshTopic() : null))
+            .catch(() => {
+              // 取り消せなくても次の周期で催促されるだけ(受容)。
+            });
+        }
+      } finally {
+        sendingRef.current = false;
+        setSending(false);
       }
-    } finally {
-      sendingRef.current = false;
-      setSending(false);
-    }
-  }, [
-    text,
-    reason,
-    sendAgentId,
-    serverId,
-    fallback,
-    item,
-    seeActivity,
-    topic,
-    askRpc,
-    cancelRpc,
-    refreshTopic,
-    toolImages,
-    clearImages,
-    restoreImages,
-  ]);
+      if (ok) onSent?.();
+      return ok;
+    },
+    [
+      messagePrefix,
+      onSent,
+      text,
+      reason,
+      sendAgentId,
+      serverId,
+      fallback,
+      item,
+      seeActivity,
+      topic,
+      askRpc,
+      cancelRpc,
+      refreshTopic,
+      toolImages,
+      clearImages,
+      restoreImages,
+    ],
+  );
   const sendPress = useCallback(() => void send(), [send]);
+  if (sendRef) sendRef.current = send;
+  // 送った後に相手の返事が増えたら知らせる(履歴の初回読み込みでは鳴らさない)。
+  const replyCount = (topic ? topicMsgs : lines).filter((l) => l.role !== "user").length;
+  const seenReplies = useRef(replyCount);
+  useEffect(() => {
+    if (replyCount > seenReplies.current && sentOnce.current) onReply?.();
+    seenReplies.current = replyCount;
+  }, [replyCount, onReply]);
   // Enter で送信(PC幅のWebだけ。IME変換確定・Shift+Enter・iPhone は送らず改行のまま)。
   const onKeyPress = useCallback(
     (e: {
@@ -732,7 +777,7 @@ export function CardChatPane({
   }, [translateX]);
 
   useEffect(() => {
-    if (!compact) return;
+    if (!compact || embedded) return;
     translateX.setValue(widthRef.current);
     Animated.timing(translateX, {
       toValue: 0,
@@ -740,7 +785,7 @@ export function CardChatPane({
       easing: SLIDE_EASING,
       useNativeDriver: false,
     }).start();
-  }, [compact, translateX]);
+  }, [compact, embedded, translateX]);
 
   const animateCloseRef = useRef(animateClose);
   animateCloseRef.current = animateClose;
@@ -801,7 +846,7 @@ export function CardChatPane({
         shadowRadius: 12,
         shadowOffset: { width: -2, height: 0 },
       } as const,
-      pane: { flex: 1 },
+      pane: embedded ? {} : { flex: 1 },
       // 左端の境界(掴みやすい12px。PCは col-resize カーソル)。
       resizeHandle: {
         position: "absolute" as const,
@@ -846,6 +891,7 @@ export function CardChatPane({
         fontWeight: "600" as const,
       },
       scroll: { flex: 1 },
+      scrollEmbedded: { maxHeight: 300 },
       scrollBody: { padding: 12, gap: 10 },
       context: {
         backgroundColor: colors.surface1,
@@ -909,50 +955,6 @@ export function CardChatPane({
         fontSize: 12,
         paddingHorizontal: 12,
       },
-      inputRow: {
-        flexDirection: "row" as const,
-        alignItems: "flex-end" as const,
-        gap: 8,
-        padding: 10,
-        borderTopWidth: 1,
-        borderTopColor: colors.border,
-        backgroundColor: colors.surface1,
-        paddingBottom: "env(safe-area-inset-bottom)" as unknown as number,
-      },
-      input: {
-        flex: 1,
-        minHeight: 44,
-        maxHeight: 120,
-        color: colors.foreground,
-        backgroundColor: colors.surface0,
-        borderColor: colors.border,
-        borderWidth: 1,
-        borderRadius: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        fontSize: 14,
-      },
-      inputOff: { opacity: 0.5 },
-      toolBtn: {
-        minHeight: 44,
-        minWidth: 44,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: colors.border,
-        alignItems: "center" as const,
-        justifyContent: "center" as const,
-      },
-      toolBtnOn: {
-        minHeight: 44,
-        minWidth: 44,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: colors.accent,
-        backgroundColor: colors.surface2,
-        alignItems: "center" as const,
-        justifyContent: "center" as const,
-      },
-      toolText: { color: colors.foreground, fontSize: 18 },
       chipRow: {
         flexDirection: "row" as const,
         flexWrap: "wrap" as const,
@@ -984,28 +986,6 @@ export function CardChatPane({
         fontSize: 11,
         textAlign: "right" as const,
       },
-      sendBtn: {
-        minHeight: 44,
-        minWidth: 56,
-        borderRadius: 8,
-        backgroundColor: colors.accent,
-        alignItems: "center" as const,
-        justifyContent: "center" as const,
-      },
-      sendBtnOff: {
-        minHeight: 44,
-        minWidth: 56,
-        borderRadius: 8,
-        backgroundColor: colors.accent,
-        opacity: 0.5,
-        alignItems: "center" as const,
-        justifyContent: "center" as const,
-      },
-      sendText: {
-        color: colors.accentForeground,
-        fontSize: 14,
-        fontWeight: "600" as const,
-      },
       hint: {
         color: colors.foregroundMuted,
         fontSize: 10,
@@ -1014,7 +994,7 @@ export function CardChatPane({
         backgroundColor: colors.surface1,
       },
     }),
-    [colors, paneWidth],
+    [colors, paneWidth, embedded],
   );
 
   // lint(jsx-no-new-array-as-prop)対策: スライド用のスタイル配列を毎レンダー作り直さない。
@@ -1024,12 +1004,6 @@ export function CardChatPane({
   );
 
   const sendable = canSend(text, sendAgentId, serverId, sending, reason !== null);
-  // lint(jsx-no-new-array-as-prop)対策: 相手が居ない時の淡色は同じ配列を作り直さない。
-  const inputStyle = useMemo(
-    () => (reason ? [st.input, st.inputOff] : st.input),
-    [reason, st.input, st.inputOff],
-  );
-
   const header = (
     <View style={st.header}>
       <Pressable
@@ -1060,9 +1034,13 @@ export function CardChatPane({
 
   const body = (
     <View style={st.pane}>
-      {header}
-      <ScrollView ref={scrollRef} style={st.scroll} contentContainerStyle={st.scrollBody}>
-        <CardContext item={item} title={title} styles={st} />
+      {embedded ? null : header}
+      <ScrollView
+        ref={scrollRef}
+        style={embedded ? st.scrollEmbedded : st.scroll}
+        contentContainerStyle={st.scrollBody}
+      >
+        {embedded ? null : <CardContext item={item} title={title} styles={st} />}
         {reason ? <Text style={st.notice}>{reason}</Text> : null}
         {topic && topicMsgs.length === 0 && topicPending.length === 0 ? (
           <Text style={st.empty}>
@@ -1129,49 +1107,20 @@ export function CardChatPane({
           ))}
         </View>
       ) : null}
-      <View style={st.inputRow}>
-        {tools.attachSupported ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="画像を添付"
-            disabled={Boolean(reason)}
-            style={st.toolBtn}
-            onPress={tools.pickImages}
-          >
-            <Text style={st.toolText}>＋</Text>
-          </Pressable>
-        ) : null}
-        {tools.micSupported ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={tools.listening ? "音声入力を止める" : "音声入力"}
-            disabled={Boolean(reason)}
-            style={tools.listening ? st.toolBtnOn : st.toolBtn}
-            onPress={tools.toggleMic}
-          >
-            <Text style={st.toolText}>🎤</Text>
-          </Pressable>
-        ) : null}
-        <TextInput
-          value={text}
-          onChangeText={setText}
-          onKeyPress={onKeyPress}
-          editable={!reason}
-          placeholder={reason ?? (fallback ? "総司令塔へ送る" : "投函元スレへ送る")}
-          placeholderTextColor={colors.foregroundMuted}
-          multiline
-          maxLength={TEXT_MAX}
-          style={inputStyle}
-        />
-        <Pressable
-          accessibilityRole="button"
-          disabled={!sendable}
-          style={sendable ? st.sendBtn : st.sendBtnOff}
-          onPress={sendPress}
-        >
-          <Text style={st.sendText}>送る</Text>
-        </Pressable>
-      </View>
+      <PaneComposer
+        colors={colors}
+        text={text}
+        onChangeText={setText}
+        onKeyPress={onKeyPress}
+        tools={tools}
+        disabledReason={reason}
+        placeholder={fallback ? "総司令塔へ送る" : "投函元スレへ送る"}
+        maxLength={TEXT_MAX}
+        sendable={sendable}
+        onSend={sendPress}
+        focusSignal={focusSignal}
+        testID="pane-composer"
+      />
       <Text style={st.hint}>
         {fallback
           ? `この欄に答えるスレ: 総司令塔 · ${COORDINATOR_FALLBACK_NOTICE}(${text.length}/${TEXT_MAX}字)`
@@ -1182,6 +1131,7 @@ export function CardChatPane({
     </View>
   );
 
+  if (embedded) return body;
   if (!compact) {
     return (
       <View style={st.desktop}>
