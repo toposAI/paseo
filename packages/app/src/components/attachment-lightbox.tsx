@@ -552,6 +552,8 @@ const styles = StyleSheet.create((theme) => ({
     color: "#fff",
   },
   commentBar: {
+    // The backdrop is see-through; the chat behind must not run into the caption.
+    backgroundColor: "rgba(0,0,0,0.72)",
     paddingHorizontal: theme.spacing[3],
     paddingTop: theme.spacing[2],
     paddingBottom: theme.spacing[3],
@@ -566,7 +568,7 @@ const styles = StyleSheet.create((theme) => ({
     alignSelf: "center",
     maxWidth: 640,
     width: "100%",
-    color: theme.colors.foregroundMuted,
+    color: "rgba(255,255,255,0.8)",
     fontSize: theme.fontSize.sm,
   },
   commentError: {
