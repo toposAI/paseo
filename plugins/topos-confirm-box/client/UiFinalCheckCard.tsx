@@ -1,0 +1,111 @@
+/**
+ * 「UIの最終チェック」専用カード(案C)。件名・要約・完成版の PC/iPhone 画像・OK ボタン・
+ * 「💬 直してほしい」(押すとこのカードの中に既存のカード内チャット欄 CardChat を開き、投函元と往復する)。
+ * 画像は縦横比を保って縮小表示し、押すと拡大する。新しい経路は作らず、チャットは CardChat をそのまま使う。
+ */
+import { useCallback, useMemo, useState } from "react";
+import { Image, Modal, Pressable, Text, View } from "react-native";
+import type { ConfirmBoxItem } from "../shared/contract.js";
+import { splitShots, shotLabel, UFC_OK_ID } from "../shared/ui-final-check.js";
+import { CardChat } from "./CardChat.js";
+
+type Styles = Record<string, object>;
+
+const PC_BOX = { width: 176, height: 110 };
+const PHONE_BOX = { width: 60, height: 110 };
+const row = {
+  flexDirection: "row" as const,
+  gap: 8,
+  alignItems: "flex-end" as const,
+};
+const zoomWrap = {
+  flex: 1,
+  backgroundColor: "rgba(0,0,0,0.85)",
+  alignItems: "center" as const,
+  justifyContent: "center" as const,
+  padding: 16,
+  gap: 8,
+};
+const zoomImg = { width: "100%" as const, height: "85%" as const };
+const zoomText = { color: "#fff", fontSize: 14 };
+
+export function UiFinalCheckCard({
+  item,
+  styles,
+  onChoose,
+  onToggle,
+}: {
+  item: ConfirmBoxItem;
+  styles: Styles;
+  onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
+  onToggle: (id: string) => void;
+}) {
+  const [chatOpen, setChatOpen] = useState(false);
+  const [zoom, setZoom] = useState<number | null>(null);
+  const [done, setDone] = useState(false);
+  const shots = useMemo(() => splitShots(item.images), [item.images]);
+  const sources = useMemo(
+    () => shots.finals.map((i) => ({ uri: `data:${i.mimeType};base64,${i.data}` })),
+    [shots]
+  );
+  const ok = useCallback(() => {
+    setDone(true);
+    void onChoose(item, UFC_OK_ID);
+  }, [item, onChoose]);
+  const toggleChat = useCallback(() => setChatOpen((v) => !v), []);
+  const closeZoom = useCallback(() => setZoom(null), []);
+  const header = useCallback(() => onToggle(item.id), [onToggle, item.id]);
+  const approved = done || item.state === "approved";
+  const zoomSource = zoom === null ? null : sources[zoom];
+  return (
+    <View style={styles.cell}>
+      <View style={styles.card}>
+        <Pressable accessibilityRole="button" onPress={header}>
+          <Text style={styles.badge}>UIの最終チェック{approved ? " · OK済み" : ""}</Text>
+          <Text style={styles.subject}>{item.subject}</Text>
+        </Pressable>
+        <Text style={styles.muted} numberOfLines={2}>
+          {item.summary}
+        </Text>
+        <View style={row}>
+          {sources.map((source, i) => (
+            <Pressable
+              key={source.uri}
+              accessibilityRole="button"
+              accessibilityLabel={`${shotLabel(i, false)}を拡大`}
+              onPress={() => setZoom(i)}
+            >
+              <Image source={source} style={i === 0 ? PC_BOX : PHONE_BOX} resizeMode="contain" />
+            </Pressable>
+          ))}
+        </View>
+        {approved ? (
+          <Text style={styles.text}>✓ OK しました</Text>
+        ) : (
+          <View style={row}>
+            <Pressable accessibilityRole="button" style={styles.btnRec} onPress={ok}>
+              <Text style={styles.btnRecText}>OK(この見た目でよい)</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" style={styles.btn} onPress={toggleChat}>
+              <Text style={styles.btnText}>{chatOpen ? "▼閉じる" : "💬 直してほしい"}</Text>
+            </Pressable>
+          </View>
+        )}
+        {chatOpen ? <CardChat itemId={item.id} itemKey={item.key} styles={styles} /> : null}
+      </View>
+      <Modal
+        visible={zoomSource != null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeZoom}
+      >
+        <Pressable style={zoomWrap} onPress={closeZoom}>
+          <Text style={zoomText}>
+            {zoom === null ? "" : shotLabel(zoom, false)}(タップで閉じる)
+          </Text>
+          {zoomSource ? <Image source={zoomSource} style={zoomImg} resizeMode="contain" /> : null}
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
