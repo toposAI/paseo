@@ -64,20 +64,20 @@ export function UiFinalCheckCard({
 }) {
   const [chatOpen, setChatOpen] = useState(false);
   const [zoom, setZoom] = useState<number | null>(null);
-  const [done, setDone] = useState(false);
+  const [sending, setSending] = useState(false);
   const shots = useMemo(() => splitShots(item.images), [item.images]);
   const sources = useMemo(
     () => shots.finals.map((i) => ({ uri: `data:${i.mimeType};base64,${i.data}` })),
     [shots],
   );
   const ok = useCallback(() => {
-    setDone(true);
-    void onChoose(item, UFC_OK_ID);
+    setSending(true);
+    void onChoose(item, UFC_OK_ID).finally(() => setSending(false));
   }, [item, onChoose]);
   const toggleChat = useCallback(() => setChatOpen((v) => !v), []);
   const closeZoom = useCallback(() => setZoom(null), []);
   const header = useCallback(() => onToggle(item.id), [onToggle, item.id]);
-  const approved = done || item.state === "approved";
+  const approved = item.state === "approved";
   const zoomSource = zoom === null ? null : sources[zoom];
   return (
     <View style={styles.cell}>
@@ -94,8 +94,10 @@ export function UiFinalCheckCard({
             <Thumb key={source.uri} source={source} index={i} onZoom={setZoom} />
           ))}
         </View>
-        {approved ? (
-          <Text style={styles.text}>✓ OK しました</Text>
+        {approved || sending ? (
+          <Text style={approved ? styles.text : styles.muted}>
+            {approved ? "✓ OK しました" : "送信中…"}
+          </Text>
         ) : (
           <View style={row}>
             <Pressable accessibilityRole="button" style={styles.btnRec} onPress={ok}>
