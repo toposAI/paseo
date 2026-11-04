@@ -20,13 +20,14 @@ const row = {
 };
 const zoomWrap = {
   flex: 1,
-  backgroundColor: "rgba(0,0,0,0.85)",
+  backgroundColor: "rgba(0,0,0,0.95)",
   alignItems: "center" as const,
-  justifyContent: "center" as const,
+  justifyContent: "flex-start" as const,
   padding: 16,
-  gap: 8,
+  paddingTop: 48,
+  gap: 12,
 };
-const zoomImg = { width: "100%" as const, height: "85%" as const };
+const zoomImg = { width: "100%" as const, flex: 1 };
 const zoomText = { color: "#fff", fontSize: 14 };
 
 export function UiFinalCheckCard({
@@ -87,16 +88,16 @@ export function UiFinalCheckCard({
               <Text style={styles.btnRecText}>OK(この見た目でよい)</Text>
             </Pressable>
             <Pressable accessibilityRole="button" style={styles.btn} onPress={toggleChat}>
-              <Text style={styles.btnText}>{chatOpen ? "▼閉じる" : "💬 直してほしい"}</Text>
+              <Text style={styles.btnText}>{chatOpen ? "▼ 閉じる" : "💬 直してほしい"}</Text>
             </Pressable>
           </View>
         )}
-        {chatOpen ? (
+        {chatOpen && !approved ? (
           <CardChat
             itemId={item.id}
             itemKey={item.key}
             styles={styles}
-            placeholder="直してほしい点を書く(投函元に届き、返事もここに出ます)"
+            placeholder="直してほしい点を書く"
           />
         ) : null}
       </View>
