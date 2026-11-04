@@ -68,12 +68,12 @@ function buttonStyle(roomy: boolean) {
   return [styles.button, roomy && styles.buttonRoomy];
 }
 const WORD_JOINER = "\u2060";
-const TAIL_KEEP = 3;
+const TAIL_KEEP = 4;
 const MIN_CHARS_TO_KEEP_TAIL = 10;
 const CJK_PATTERN = /[\u3040-\u30ff\u3400-\u9fff\uff00-\uffef]/;
 
 /**
- * 折り返しで最終行に1〜2字だけ残らないよう、題名の末尾3字を結合子でつないで一緒に送る(web のみ)。
+ * 折り返しで最終行に1〜2字だけ残らないよう、題名の末尾4字を結合子でつないで一緒に送る(web のみ)。
  * 短い題名・日本語を含まない題名は折り返しの規則が違うのでそのまま。native も触らない。
  */
 export function keepLabelTailTogether(label: string): string {
