@@ -340,7 +340,7 @@ describe("AttachmentLightbox gallery", () => {
   ) {
     // oxlint-disable-next-line react-perf/jsx-no-new-object-as-prop -- test fixture
     const fullComment: LightboxComment | undefined = comment && {
-      drafts: { get: () => "", set: () => {} },
+      drafts: { get: () => "", set: () => {}, claimSend: () => () => {} },
       client: null,
       serverId: "s",
       agentId: "a",
@@ -501,5 +501,21 @@ describe("AttachmentLightbox gallery", () => {
     expect((queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement).value).toBe(
       "途中の文",
     );
+  });
+
+  it("does not send again while the same image already has a send in flight", async () => {
+    const drafts = { get: () => "", set: () => {}, claimSend: () => null };
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderGallery(0, 2, {}, { onSubmit, drafts });
+    const input = queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement;
+
+    typeInto(input, "二重");
+    await act(async () => {
+      queryByTestId("attachment-lightbox-comment-send")!.dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true }),
+      );
+    });
+
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });
