@@ -6,7 +6,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { HEADER_INNER_HEIGHT, HEADER_INNER_HEIGHT_MOBILE } from "@/constants/layout";
 import { ICON_SIZE } from "@/styles/theme";
@@ -67,6 +67,22 @@ function rowStyle(roomy: boolean, isHighlighted: boolean) {
 function buttonStyle(roomy: boolean) {
   return [styles.button, roomy && styles.buttonRoomy];
 }
+const WORD_JOINER = "\u2060";
+const TAIL_KEEP = 3;
+const MIN_CHARS_TO_KEEP_TAIL = 10;
+const CJK_PATTERN = /[\u3040-\u30ff\u3400-\u9fff\uff00-\uffef]/;
+
+/**
+ * 折り返しで最終行に1〜2字だけ残らないよう、題名の末尾3字を結合子でつないで一緒に送る(web のみ)。
+ * 短い題名・日本語を含まない題名は折り返しの規則が違うのでそのまま。native も触らない。
+ */
+export function keepLabelTailTogether(label: string): string {
+  if (Platform.OS !== "web") return label;
+  const chars = Array.from(label);
+  if (chars.length < MIN_CHARS_TO_KEEP_TAIL || !CJK_PATTERN.test(label)) return label;
+  return chars.slice(0, -TAIL_KEEP).join("") + chars.slice(-TAIL_KEEP).join(WORD_JOINER);
+}
+
 function labelStyle(roomy: boolean, isHighlighted: boolean) {
   return [styles.label, roomy && styles.labelRoomy, isHighlighted && styles.labelHighlighted];
 }
@@ -131,7 +147,7 @@ export function SidebarHeaderRow({
             <View style={iconSpacerStyle(variant)} />
           )}
           <Text style={labelStyle(roomy, isHighlighted)} numberOfLines={roomy ? 2 : undefined}>
-            {label}
+            {roomy ? label : keepLabelTailTogether(label)}
           </Text>
         </Pressable>
         {right === null ? null : (
