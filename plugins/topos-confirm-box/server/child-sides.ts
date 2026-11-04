@@ -127,6 +127,42 @@ export function readOneThreadIds(dir: string): ReadonlySet<string> {
 }
 
 /**
+ * 1件スレの印を1行足す(2026-11-04 ユーザー指示「子司令塔とか上位モデルの壁打ちスレは サイドバーの壁打ちに入れて欲しい」)。
+ * 構想ノートの深掘りスレのように題名が「壁打ちN」でないスレを、**建てる側**が建てた直後に壁打ち側へ出すために使う。
+ * 書き手は ToposAI 側 `one_thread_lane.mark_one_thread` と同じファイル・同じ形(`{version,ids}`)。
+ * 壊れたファイルは上書きしない(退避して作り直すことはしない=印が増えないだけで一覧は止まらない)。書けたら true。
+ */
+export function markOneThread(dir: string, agentId: string): boolean {
+  const id = agentId.trim().toLowerCase();
+  if (id.length < 7) return false;
+  const file = path.join(dir, CHILD_THREAD_ONE_THREAD_FILE);
+  let ids: string[] = [];
+  try {
+    const raw: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    const list = (raw as { ids?: unknown } | null)?.ids;
+    if (!Array.isArray(list)) return false;
+    ids = list.filter((v): v is string => typeof v === "string");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+  }
+  if (ids.some((v) => v.toLowerCase() === id)) return true;
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, `.${CHILD_THREAD_ONE_THREAD_FILE}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    fs.writeFileSync(
+      tmp,
+      `${JSON.stringify({ version: 1, ids: [...ids, id] }, null, 2)}\n`,
+      "utf8",
+    );
+    fs.renameSync(tmp, file);
+    return true;
+  } catch {
+    fs.rmSync(tmp, { force: true });
+    return false;
+  }
+}
+
+/**
  * 各行へ `aux`(補助スレ側か)を付ける。
  *
  * - 司令塔・子を持つ親(`groupingParent`)は原則として補助側(移せない。見出しの入れ子を壊さない)。
