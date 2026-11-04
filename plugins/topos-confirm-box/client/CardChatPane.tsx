@@ -455,11 +455,16 @@ export function CardChatPane({
     };
   }, [agentId, serverId, topic, hubPending]);
 
-  // ライブの購読。`hubPending` は deps に足さない(足すとハブ一覧の取得中に購読を張り直し、
-  // 接続直後に流れてくる過去の書き込みが二重に出る)。開いた時点の履歴は上の effect が読む。
+  // 会話の初期化。ハブ判定が確定した時点で一度だけ空にする。購読 effect 側で消すと、
+  // 購読が張り直されたときに、上の履歴 effect が読み終えた行まで巻き添えで消える。
   useEffect(() => {
     setLines([]);
     setNotice("");
+  }, [agentId, serverId, topic, hubPending]);
+
+  // ライブの購読。`hubPending` は deps に足さない(足すとハブ一覧の取得中に購読を張り直し、
+  // 接続直後に流れてくる過去の書き込みが二重に出る)。開いた時点の履歴は上の effect が読む。
+  useEffect(() => {
     if (!agentId || !serverId || topic || hubPending) return undefined;
     const handle = getPaseoClient(serverId).agents.ref(agentId);
     let alive = true;
