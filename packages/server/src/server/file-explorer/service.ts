@@ -237,7 +237,7 @@ export async function readExplorerFileBytes({
   root,
   relativePath,
 }: ReadFileParams): Promise<FileExplorerFileBytes> {
-  const filePath = await resolveScopedPath({ root, relativePath });
+  const filePath = await resolveScopedReadPath({ root, relativePath });
   const handle = await openFileForRead(filePath.resolvedPath);
 
   try {
@@ -292,7 +292,7 @@ export async function streamExplorerFile(
   { root, relativePath }: ReadFileParams,
   consume: (file: FileExplorerFileStream) => Promise<void>,
 ): Promise<void> {
-  const filePath = await resolveScopedPath({ root, relativePath });
+  const filePath = await resolveScopedReadPath({ root, relativePath });
   const handle = await openFileForRead(filePath.resolvedPath);
 
   try {
@@ -815,6 +815,45 @@ async function resolveScopedPath({
   } catch (error) {
     if (isMissingEntryError(error)) return { requestedPath, resolvedPath: requestedPath };
     throw error;
+  }
+}
+
+// Markdown image links reach us percent-encoded (e.g. `案C` as `%E6%A1%88C`). Read paths
+// try the raw path first so real file names containing `%` keep working, then the decoded one.
+// The decoded path goes through the same workspace scoping as any other path.
+async function resolveScopedReadPath(params: ScopedPathParams): Promise<ScopedPath> {
+  const raw = await resolveScopedPath(params);
+  const relativePath = params.relativePath;
+  if (
+    !relativePath ||
+    !/%[0-9A-Fa-f]{2}/.test(relativePath) ||
+    (await pathExists(raw.resolvedPath))
+  ) {
+    return raw;
+  }
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(relativePath);
+  } catch {
+    return raw;
+  }
+  if (decodedPath === relativePath) {
+    return raw;
+  }
+  try {
+    const decoded = await resolveScopedPath({ root: params.root, relativePath: decodedPath });
+    return (await pathExists(decoded.resolvedPath)) ? decoded : raw;
+  } catch {
+    return raw;
+  }
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await fs.stat(target);
+    return true;
+  } catch {
+    return false;
   }
 }
 
