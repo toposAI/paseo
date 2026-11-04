@@ -234,12 +234,16 @@ const styles = StyleSheet.create((theme) => ({
   },
   barBadge: {
     position: "absolute",
-    top: 0,
-    right: 0,
-    minWidth: 16,
-    height: 16,
-    paddingHorizontal: 4,
+    // アイコンの右上へ少しだけ外へ出し、縁をサイドバー色で抜く(2026-11-04: 帯がアイコンの
+    // 右上を覆って見える、との指摘。16px のままボタンの角に置くと 24px アイコンに食い込む)。
+    top: -2,
+    right: -2,
+    minWidth: 15,
+    height: 15,
+    paddingHorizontal: 3,
     borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: theme.colors.surfaceSidebar,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: theme.colors.statusDanger,

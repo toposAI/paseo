@@ -28,12 +28,24 @@ type StatusLabelProps = StatusLabel & {
    * 2026-10-24 ユーザー指示)。渡さない行の帯は従来どおり表示だけ(行の押下は行本体が担う)。
    */
   onPress?: () => void;
+  /**
+   * 左右の余白を詰める(絞り込みの札のように横に何枚も並べる所で使う)。
+   * iPhone幅で札が2行に折り返すのを避けるため、2026-11-04 に足した。
+   */
+  compact?: boolean;
 };
 
 /** 状態の帯。文字色は必ずここで与える(親の色を継承させない)。 */
-export function StatusBadge({ text, kind, testID, onPress }: StatusLabelProps) {
+export function StatusBadge({ text, kind, testID, onPress, compact }: StatusLabelProps) {
   const tone = STATUS_STYLE[kind];
-  const boxStyle = useMemo(() => [styles.badge, { backgroundColor: tone.background }], [tone]);
+  const boxStyle = useMemo(
+    () => [
+      styles.badge,
+      compact ? styles.badgeCompact : null,
+      { backgroundColor: tone.background },
+    ],
+    [compact, tone],
+  );
   const labelStyle = useMemo(() => [styles.text, { color: tone.text }], [tone]);
   // `style` に毎回新しい関数を渡さない(react-perf)ので、押下時の見た目はフックで1つ作る
   // (フックは早期 return より前で呼ぶ)。
@@ -82,6 +94,10 @@ const styles = StyleSheet.create({
     // 11pxでは読めないという指摘が3回(台帳 ui-be238b34bf)。13pxに上げる。
     fontSize: 13,
     fontWeight: "700",
+  },
+  // 絞り込みの札用。5枚並べてもiPhone幅(390px)で1行に収まるよう左右を詰める。
+  badgeCompact: {
+    paddingHorizontal: 6,
   },
   pressed: {
     opacity: 0.6,

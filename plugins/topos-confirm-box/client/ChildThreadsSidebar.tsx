@@ -1364,23 +1364,30 @@ function StatusCountChips({
           kind="waiting"
           testID="status-count-judgment"
           onPress={openJudgment}
+          compact
         />
       ) : null}
       {running > 0 ? (
-        <StatusBadge text={`実装中 ${running}`} kind="running" testID="status-count-running" />
+        <StatusBadge
+          text={`実装中 ${running}`}
+          kind="running"
+          testID="status-count-running"
+          compact
+        />
       ) : null}
       {coordinator > 0 ? (
         <StatusBadge
           text={`司令塔 ${coordinator}`}
           kind="running"
           testID="status-count-coordinator"
+          compact
         />
       ) : null}
       {idle > 0 ? (
-        <StatusBadge text={`待機中 ${idle}`} kind="idle" testID="status-count-idle" />
+        <StatusBadge text={`待機中 ${idle}`} kind="idle" testID="status-count-idle" compact />
       ) : null}
       {closed > 0 ? (
-        <StatusBadge text={`終了 ${closed}`} kind="closed" testID="status-count-closed" />
+        <StatusBadge text={`終了 ${closed}`} kind="closed" testID="status-count-closed" compact />
       ) : null}
     </View>
   );
@@ -1490,7 +1497,8 @@ const styles = StyleSheet.create({
   chips: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 6,
+    // 札は詰めても読みやすいので、5枚がiPhone幅(390px)で1行に収まるよう間隔を詰める(2026-11-04)。
+    gap: 4,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
@@ -1535,7 +1543,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   chevron: {
-    fontSize: 11,
+    // 11px では点のように見えて開閉の矢印だと分からない(2026-11-04 指摘)。
+    // 隣の件数(13px)と釣り合う大きさ・濃さにする。
+    fontSize: 14,
+    fontWeight: "600",
   },
   // タッチ端末でも開閉を狙えるよう当たり判定を広げる(見出し本体は司令塔を開く)。
   toggleHit: {
