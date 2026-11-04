@@ -150,6 +150,35 @@ function appendLine(lines: ChatLine[], next: ChatLine): ChatLine[] {
   return [...lines, next];
 }
 
+/** 同じ役割・同じ文の行が既にあるか。購読の張り直しで過去が流れ直した時の二重表示を防ぐ。 */
+function hasLine(lines: ChatLine[], line: ChatLine): boolean {
+  return lines.some((l) => l.role === line.role && l.text === line.text);
+}
+
+/**
+ * 履歴(`past`)と、開いた後に積まれた行(`cur`)を合わせる。
+ * 以前は `cur` が空でなければ履歴を丸ごと捨てていたため、自分の送信や購読の行が先に届くと
+ * 履歴が永久に出なかった(2026-11-05 出口レビュー指摘2)。行は履歴側を先に置き、
+ * `cur` にしか無い行だけを後ろへ足す(同じ文は履歴側を1回消して重複を避ける)。
+ */
+function mergeHistory(past: ChatLine[], cur: ChatLine[]): ChatLine[] {
+  if (cur.length === 0) return past;
+  if (past.length === 0) return cur;
+  const seen = new Map<string, number>();
+  for (const line of past) {
+    const key = `${line.role}\u0000${line.text}`;
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+  const extra = cur.filter((line) => {
+    const key = `${line.role}\u0000${line.text}`;
+    const n = seen.get(key) ?? 0;
+    if (n === 0) return true;
+    seen.set(key, n - 1);
+    return false;
+  });
+  return past.concat(extra);
+}
+
 /** 送信可否。相手が特定できていて、閉じておらず、空でなく、送信中でないこと。 */
 function canSend(
   text: string,
@@ -422,20 +451,27 @@ export function CardChatPane({
       let cursor = tail.startCursor ?? null;
       let hasOlder = tail.hasOlder === true;
       for (let page = 0; page < HISTORY_MAX_PAGES; page += 1) {
-        if (userCount >= MIN_USER_LINES || !hasOlder || !cursor) break;
+        if (!alive || userCount >= MIN_USER_LINES || !hasOlder || !cursor) break;
         const older = await handle.timeline.refetch({
           direction: "before",
           cursor,
           limit: HISTORY_PAGE,
         });
-        const added = toLines(older.entries as { item?: unknown }[], `o${page}`);
-        if (added.length === 0) break;
-        olderPages.push(added);
+        const entries = older.entries ?? [];
+        const added = toLines(entries as { item?: unknown }[], `o${page}`);
+        // 止めるのは「そのページに項目が無い」時だけ。表示できる行が0でも項目があれば
+        // さらに古いページを読む(2026-11-05 出口レビュー指摘3)。
+        if (entries.length === 0) break;
+        // 古いページを先頭へ積む(ES2023 の `toReversed` は配布先で欠けることがあるため使わない)。
+        olderPages.unshift(added);
         userCount += added.filter((l) => l.role === "user").length;
-        cursor = older.startCursor ?? null;
+        const nextCursor = older.startCursor ?? null;
+        // カーソルが進まないページを繰り返し読まない(同じページを読み続けて止まる)。
+        if (!nextCursor || nextCursor === cursor) break;
+        cursor = nextCursor;
         hasOlder = older.hasOlder === true;
       }
-      return olderPages.toReversed().flat().concat(tailLines);
+      return olderPages.flat().concat(tailLines);
     };
     load()
       .then((past) => {
@@ -444,11 +480,12 @@ export function CardChatPane({
         // ここで履歴の最後の項目から起こすと、idle のスレ(返信が残ったまま)でも「返信中…」などが先に出て、
         // 状態の読み取りより先に届く場合に止まったままになる(2026-10-27 出口レビュー round1 F1)。
         // 嘘の表示を避ける方を優先する: 履歴の読み直しと状態の読み取りがどちらも失敗したら、ラベルは出ない。
-        setLines((cur) => (cur.length === 0 ? past : cur));
+        setLines((cur) => mergeHistory(past, cur));
         return null;
       })
       .catch(() => {
-        // 履歴が読めなくても会話は続けられる(送るたびに購読側で増える)。
+        // 履歴が読めなくても会話は続けられる(送るたびに購読側で増える)。黙って落とさず1行出す。
+        if (alive) setNotice("履歴を読めませんでした(送信はできます)");
       });
     return () => {
       alive = false;
@@ -462,8 +499,9 @@ export function CardChatPane({
     setNotice("");
   }, [agentId, serverId, topic, hubPending]);
 
-  // ライブの購読。`hubPending` は deps に足さない(足すとハブ一覧の取得中に購読を張り直し、
-  // 接続直後に流れてくる過去の書き込みが二重に出る)。開いた時点の履歴は上の effect が読む。
+  // ライブの購読。履歴と同じく `hubPending` を deps に持つ。以前は持っていなかったため、
+  // ハブ一覧が未取得の間は購読が張られず、`hubIds` が入っても再実行されずに**一度も張られなかった**
+  // (2026-11-05 出口レビュー指摘1)。張り直しで過去が流れ直しても、`hasLine` で同じ行は足さない。
   useEffect(() => {
     if (!agentId || !serverId || topic || hubPending) return undefined;
     const handle = getPaseoClient(serverId).agents.ref(agentId);
@@ -481,15 +519,13 @@ export function CardChatPane({
       if (ev.item?.type !== "assistant_message") return;
       seq.current += 1;
       const line = lineFromItem(ev.item, `s${seq.current}`);
-      if (line) setLines((cur) => appendLine(cur, line));
+      if (line) setLines((cur) => (hasLine(cur, line) ? cur : appendLine(cur, line)));
     });
     return () => {
       alive = false;
       sub();
     };
-    // 既存の指摘。`hubPending` を足すと、ハブ一覧の取得中に購読が張り直されて履歴が二重に出るため今は足さない。
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId, serverId, seeActivity, topic]);
+  }, [agentId, serverId, seeActivity, topic, hubPending]);
 
   // ハブ一覧は一度だけ引く(総司令塔の生死確認は、下の振り替え時の effect が行う)。
   useEffect(() => {
