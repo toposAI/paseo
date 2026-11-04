@@ -1168,7 +1168,9 @@ function ComposerRightControlsSlot({
   const useOverflow =
     isPhoneWidth && toposChatStyle && overflowSetting && overflowItemCount >= MIN_OVERFLOW_ITEMS;
   // 139番アプリ内でだけ、録音画面(139番の音声入力)を直接開くマイクを出す。
-  const showDictationButton = showVoice && hasAgent && isWeb;
+  // 139番のマイクは文字を入力欄へ入れるだけでエージェントを必要としない。hasAgentを条件に
+  // 入れると、まだエージェントが無い「新しいワークスペース」の下書き入力欄で出なくなる(2026-11-04)。
+  const showDictationButton = showVoice && isWeb;
   const dictationBridge = showDictationButton ? getDictation139Bridge() : null;
   if (!showVoiceModeButton && !dictationBridge) return null;
   if (useOverflow) {
@@ -2206,9 +2208,9 @@ function ComposerContentImpl({
   const handleIosNativePick = useCallback(async () => {
     const files = await pickWebAnyFiles();
     if (!files) return;
-    const rasterTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-    const images = files.filter((file) => rasterTypes.includes(file.type));
-    const others = files.filter((file) => !rasterTypes.includes(file.type));
+    const rasterTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+    const images = files.filter((file) => rasterTypes.has(file.type));
+    const others = files.filter((file) => !rasterTypes.has(file.type));
     if (images.length > 0) {
       const newImages = await pickAndPersistImages({
         pickImages: async () =>
