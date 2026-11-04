@@ -272,6 +272,8 @@ function LightboxCommentBar({
   const [status, setStatus] = useState<CommentStatus>("idle");
   const [replacement, setReplacement] = useState({ key: "initial", text: "" });
   const sendingRef = useRef(false);
+  const currentKeyRef = useRef(imageKey);
+  currentKeyRef.current = imageKey;
   const draft = drafts[imageKey] ?? "";
 
   useEffect(() => {
@@ -292,11 +294,14 @@ function LightboxCommentBar({
       try {
         await comment.onSubmit(text);
         setDrafts((current) => ({ ...current, [imageKey]: "" }));
-        setReplacement((current) => ({ key: `sent-${current.key}-${Date.now()}`, text: "" }));
-        setStatus("idle");
+        // Only the input that sent it is cleared; after a switch the mounted one is another image's.
+        if (currentKeyRef.current === imageKey) {
+          setReplacement((current) => ({ key: `sent-${current.key}-${Date.now()}`, text: "" }));
+          setStatus("idle");
+        }
       } catch (error) {
         console.warn("[chat-image-viewer] comment failed", error);
-        setStatus("failed");
+        if (currentKeyRef.current === imageKey) setStatus("failed");
       } finally {
         sendingRef.current = false;
       }
@@ -338,6 +343,8 @@ function LightboxCommentBar({
           submitButtonAccessibilityLabel={t("message.attachments.sendImageComment")}
           submitButtonTestID="attachment-lightbox-comment-send"
           isSubmitLoading={status === "sending"}
+          disabled={status === "sending"}
+          preserveHeightOnSubmit
           inputMode="comment"
           textReplacement={replacement}
         />
