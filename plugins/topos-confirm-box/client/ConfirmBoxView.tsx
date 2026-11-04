@@ -190,6 +190,8 @@ export function ConfirmBoxView({
   );
   const { shownTab, tabs, selectTab } = useBoxTabs(mode, initialTab, onOpenPriority);
   // カードチャットは画面を問わずこのペインに一本化した(旧・自由記述欄は廃止=2026-10-22ユーザー決定)。
+  // 例外: UIの最終チェックのカードだけは、ユーザー指示(2026-11-04「そのまま投函元とチャットできるように」)で
+  // カード内に CardChat を出す(UiFinalCheckCard)。
   // ヘッダのポップオーバーも幅<720なので、ペインは全画面スライドとして重なる。
   // ペインの相手は2種: カードの投函元スレ(💬)と、優先順位の行の担当スレ(行タップ)。
   // どちらも同じペイン・同じURL面(`?card=` / `?thread=`)を使う(2026-10-23 ユーザー指示)。

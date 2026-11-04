@@ -8,8 +8,10 @@ test("group が ui-final-check、または 接頭辞+選択肢a で UIの最終�
     isUiFinalCheck({ subject: "UIの最終チェック: 設定", group: null, options: ab }),
     true,
   );
-  assert.equal(isUiFinalCheck({ subject: "別の件", group: "ui-final-check", options: [] }), true);
+  assert.equal(isUiFinalCheck({ subject: "別の件", group: "ui-final-check", options: ab }), true);
   assert.equal(isUiFinalCheck({ subject: "通常の判断", group: "f80", options: ab }), false);
+  // group があっても OK 用の選択肢 a が無ければ通常カードのまま
+  assert.equal(isUiFinalCheck({ subject: "別の件", group: "ui-final-check", options: [] }), false);
   // 似た件名でも OK 用の選択肢 a が無い通常カードは奪わない
   assert.equal(
     isUiFinalCheck({ subject: "UIの最終チェックの進め方", group: null, options: [{ id: "x" }] }),

@@ -11,18 +11,16 @@ export const UFC_GROUP = "ui-final-check";
 export const UFC_OK_ID = "a";
 
 /**
- * group が `ui-final-check` なら確定。件名の接頭辞だけで判定するときは、OK 用の選択肢 `a` があることも要る
- * (似た件名の通常カードを奪い、ボタンが別の選択肢を押してしまうのを防ぐ)。
+ * group が `ui-final-check` か、件名が接頭辞で始まり、かつどちらも OK 用の選択肢 `a` がある件だけ。
+ * a が無い件は OK ボタンが存在しない選択肢を送ってしまうので、通常カードのままにする。
  */
 export function isUiFinalCheck(item: {
   subject: string;
   group: string | null;
   options: readonly { id: string }[];
 }): boolean {
-  if (item.group === UFC_GROUP) return true;
-  return (
-    item.subject.startsWith(UFC_SUBJECT_PREFIX) && item.options.some((o) => o.id === UFC_OK_ID)
-  );
+  if (!item.options.some((o) => o.id === UFC_OK_ID)) return false;
+  return item.group === UFC_GROUP || item.subject.startsWith(UFC_SUBJECT_PREFIX);
 }
 
 export interface UfcImage {

@@ -3,7 +3,7 @@
  * 「💬 直してほしい」(押すとこのカードの中に既存のカード内チャット欄 CardChat を開き、投函元と往復する)。
  * 画像は縦横比を保って縮小表示し、押すと拡大する。新しい経路は作らず、チャットは CardChat をそのまま使う。
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Image, Modal, Pressable, Text, View } from "react-native";
 import type { ConfirmBoxItem } from "../shared/contract.js";
 import { splitShots, shotLabel, UFC_OK_ID } from "../shared/ui-final-check.js";
@@ -65,14 +65,20 @@ export function UiFinalCheckCard({
   const [chatOpen, setChatOpen] = useState(false);
   const [zoom, setZoom] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
+  const okRef = useRef(false);
   const shots = useMemo(() => splitShots(item.images), [item.images]);
   const sources = useMemo(
     () => shots.finals.map((i) => ({ uri: `data:${i.mimeType};base64,${i.data}` })),
     [shots],
   );
   const ok = useCallback(() => {
+    if (okRef.current) return;
+    okRef.current = true;
     setSending(true);
-    void onChoose(item, UFC_OK_ID).finally(() => setSending(false));
+    void onChoose(item, UFC_OK_ID).finally(() => {
+      okRef.current = false;
+      setSending(false);
+    });
   }, [item, onChoose]);
   const toggleChat = useCallback(() => setChatOpen((v) => !v), []);
   const closeZoom = useCallback(() => setZoom(null), []);
@@ -91,7 +97,7 @@ export function UiFinalCheckCard({
         </Text>
         <View style={row}>
           {sources.map((source, i) => (
-            <Thumb key={source.uri} source={source} index={i} onZoom={setZoom} />
+            <Thumb key={shotLabel(i, false)} source={source} index={i} onZoom={setZoom} />
           ))}
         </View>
         {approved || sending ? (
