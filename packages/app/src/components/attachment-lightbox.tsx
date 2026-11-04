@@ -553,7 +553,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   commentBar: {
     // The backdrop is see-through; the chat behind must not run into the caption.
-    backgroundColor: "rgba(0,0,0,0.72)",
+    backgroundColor: "rgba(0,0,0,0.92)",
     paddingHorizontal: theme.spacing[3],
     paddingTop: theme.spacing[2],
     paddingBottom: theme.spacing[3],
