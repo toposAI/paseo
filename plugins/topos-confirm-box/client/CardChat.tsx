@@ -24,10 +24,13 @@ export function CardChat({
   itemId,
   itemKey,
   styles,
+  placeholder = "このカードの論点について聞く",
 }: {
   itemId: string;
   itemKey?: string | null;
   styles: Styles;
+  /** 入力欄の案内文(UIの最終チェックは「直してほしい点」にする)。 */
+  placeholder?: string;
 }) {
   const list = useRpc(cardChatListRpc);
   const say = useRpc(cardChatSayRpc);
@@ -97,7 +100,7 @@ export function CardChat({
       <TextInput
         value={text}
         onChangeText={setText}
-        placeholder="このカードの論点について聞く"
+        placeholder={placeholder}
         multiline
         style={inputStyle}
       />

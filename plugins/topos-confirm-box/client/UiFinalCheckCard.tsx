@@ -91,7 +91,14 @@ export function UiFinalCheckCard({
             </Pressable>
           </View>
         )}
-        {chatOpen ? <CardChat itemId={item.id} itemKey={item.key} styles={styles} /> : null}
+        {chatOpen ? (
+          <CardChat
+            itemId={item.id}
+            itemKey={item.key}
+            styles={styles}
+            placeholder="直してほしい点を書く(投函元に届き、返事もここに出ます)"
+          />
+        ) : null}
       </View>
       <Modal
         visible={zoomSource != null}
