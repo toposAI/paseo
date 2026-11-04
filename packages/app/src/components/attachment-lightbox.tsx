@@ -593,7 +593,8 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
   },
   commentError: {
-    color: theme.colors.foregroundMuted,
+    // On the near-black bar the muted foreground is hard to see; a failed send must be noticed.
+    color: "rgba(255,255,255,0.95)",
     fontSize: theme.fontSize.sm,
     textAlign: "center",
   },
