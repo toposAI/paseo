@@ -86,6 +86,16 @@ const SLIDE_MS = 220;
 const SLIDE_EASING = Easing.bezier(0.25, 0.1, 0.25, 1);
 /** 開いた時に読む履歴の件数(元スレの直近だけ。全履歴は重い)。 */
 const HISTORY_LIMIT = 30;
+/**
+ * 開き直した時に「自分の発言」が窓から落ちないための下限。
+ * ツール呼び出しの多いスレは30項目が数分で埋まる(実測: 2026-11-05 のスレで
+ * ユーザー発言1件の後ろに91項目)。足りなければ古い方をページで足す。
+ */
+const MIN_USER_LINES = 5;
+/** 古い方を足すときの1ページ(アプリ本体 `use-load-older-agent-history.ts` と同じ40)。 */
+const HISTORY_PAGE = 40;
+/** 古い方を足す上限ページ数(重いスレで無限に読まない)。 */
+const HISTORY_MAX_PAGES = 6;
 /** 送信欄の上限。Paseo の composer に合わせた素朴な値(サーバ側で切り詰めはしない)。 */
 const TEXT_MAX = 4000;
 /** 生死(アーカイブ済みか)の見直し間隔。購読で拾えない経路(別端末からのアーカイブ等)の取りこぼし用。 */
@@ -378,31 +388,81 @@ export function CardChatPane({
   // 読み込まれて status が closed→idle になる。解除ではないのでサイドバー(アーカイブ済みは載せない)には
   // 戻らず、投函元が閉じているカードでも過去のやり取りを読める利点があるため、ここでは止めない
   // (止めるかは product 判断。2026-11-01 出口レビュー指摘2は「読み取りの解除」ではなく「読み込み」)。
+  // 履歴の読み直し。購読とは別の effect に分ける(理由は下の購読 effect の注記)。
+  //
+  // 2026-11-05 の不具合(ユーザー報告「チャット欄閉じてまた開くと、さっき投げたチャットが消えてる」):
+  // 以前はこの読み直しが購読と同じ effect に居り、`hubPending`(= ハブ一覧 `hubIds` が未取得)の間は
+  // return していた。ペインを開いた直後は必ず未取得なので履歴を一度も読まず、`hubIds` が入っても
+  // 依存配列に `hubPending` が無いため effect は再実行されず、**二度と読まれなかった**。
+  // 送信時の自分の行は `send()` がローカルに積むだけ(台帳にも履歴にも依存しない)なので、
+  // 閉じて開き直すとその行だけが消えて見えた。ここだけ `hubPending` を deps に持ち、
+  // ハブ一覧が引けた時点で読み直す(ハブ宛=話題表示に決まったら `topic` が立って読まない)。
+  useEffect(() => {
+    if (!agentId || !serverId || topic || hubPending) return undefined;
+    const handle = getPaseoClient(serverId).agents.ref(agentId);
+    let alive = true;
+    const toLines = (
+      entries: ReadonlyArray<{ item?: unknown }> | undefined,
+      prefix: string,
+    ): ChatLine[] => {
+      const out: ChatLine[] = [];
+      (entries ?? []).forEach((entry, idx) => {
+        const line = lineFromItem(entry.item as TimelineItemLike, `${prefix}${idx}`);
+        if (line) out.push(line);
+      });
+      return out;
+    };
+    // 直近だけ読んで、ユーザー発言が少なければ古い方を足す(閉じて開き直した時に
+    // 自分の発言が「直近30項目」から外れて消えて見えるのを防ぐ)。
+    const load = async (): Promise<ChatLine[]> => {
+      const tail = await handle.timeline.refetch({ limit: HISTORY_LIMIT });
+      const tailLines = toLines(tail.entries as { item?: unknown }[], "h");
+      const olderPages: ChatLine[][] = [];
+      let userCount = tailLines.filter((l) => l.role === "user").length;
+      let cursor = tail.startCursor ?? null;
+      let hasOlder = tail.hasOlder === true;
+      for (let page = 0; page < HISTORY_MAX_PAGES; page += 1) {
+        if (userCount >= MIN_USER_LINES || !hasOlder || !cursor) break;
+        const older = await handle.timeline.refetch({
+          direction: "before",
+          cursor,
+          limit: HISTORY_PAGE,
+        });
+        const added = toLines(older.entries as { item?: unknown }[], `o${page}`);
+        if (added.length === 0) break;
+        olderPages.push(added);
+        userCount += added.filter((l) => l.role === "user").length;
+        cursor = older.startCursor ?? null;
+        hasOlder = older.hasOlder === true;
+      }
+      return olderPages.toReversed().flat().concat(tailLines);
+    };
+    load()
+      .then((past) => {
+        if (!alive) return null;
+        // 開いた時点の表示(「ツールを実行中…」等)は、スレの状態を読む effect が下で起こす。
+        // ここで履歴の最後の項目から起こすと、idle のスレ(返信が残ったまま)でも「返信中…」などが先に出て、
+        // 状態の読み取りより先に届く場合に止まったままになる(2026-10-27 出口レビュー round1 F1)。
+        // 嘘の表示を避ける方を優先する: 履歴の読み直しと状態の読み取りがどちらも失敗したら、ラベルは出ない。
+        setLines((cur) => (cur.length === 0 ? past : cur));
+        return null;
+      })
+      .catch(() => {
+        // 履歴が読めなくても会話は続けられる(送るたびに購読側で増える)。
+      });
+    return () => {
+      alive = false;
+    };
+  }, [agentId, serverId, topic, hubPending]);
+
+  // ライブの購読。`hubPending` は deps に足さない(足すとハブ一覧の取得中に購読を張り直し、
+  // 接続直後に流れてくる過去の書き込みが二重に出る)。開いた時点の履歴は上の effect が読む。
   useEffect(() => {
     setLines([]);
     setNotice("");
     if (!agentId || !serverId || topic || hubPending) return undefined;
     const handle = getPaseoClient(serverId).agents.ref(agentId);
     let alive = true;
-    handle.timeline
-      .refetch({ limit: HISTORY_LIMIT })
-      .then((res) => {
-        if (!alive) return null;
-        const past: ChatLine[] = [];
-        (res.entries ?? []).forEach((entry, idx) => {
-          const line = lineFromItem(entry.item as TimelineItemLike, `h${idx}`);
-          if (line) past.push(line);
-        });
-        setLines((cur) => (cur.length === 0 ? past : cur));
-        // 開いた時点の表示(「ツールを実行中…」等)は、スレの状態を読む effect が下で起こす。
-        // ここで履歴の最後の項目から起こすと、idle のスレ(返信が残ったまま)でも「返信中…」などが先に出て、
-        // 状態の読み取りより先に届く場合に止まったままになる(2026-10-27 出口レビュー round1 F1)。
-        // 嘘の表示を避ける方を優先する: 履歴の読み直しと状態の読み取りがどちらも失敗したら、ラベルは出ない。
-        return null;
-      })
-      .catch(() => {
-        // 履歴が読めなくても会話は続けられる(送るたびに購読側で増える)。
-      });
     const sub = handle.timeline.subscribe((evt) => {
       if (!alive) return;
       const ev = (evt as { event?: { type?: string; item?: TimelineItemLike } }).event;
