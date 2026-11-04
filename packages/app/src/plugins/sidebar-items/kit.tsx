@@ -236,13 +236,15 @@ const styles = StyleSheet.create((theme) => ({
     position: "absolute",
     // アイコンの右上へ少しだけ外へ出し、縁をサイドバー色で抜く(2026-11-04: 帯がアイコンの
     // 右上を覆って見える、との指摘。16px のままボタンの角に置くと 24px アイコンに食い込む)。
-    top: -2,
-    right: -2,
-    minWidth: 15,
-    height: 15,
+    // 15px では数字が潰れ気味、との再指摘(2026-11-04)があったので 17px・縁 2px・数字 11px に。
+    // 大きくした分は top/right を 1px ずつ外へずらし、アイコンへ食い込む量を変えない。
+    top: -3,
+    right: -3,
+    minWidth: 17,
+    height: 17,
     paddingHorizontal: 3,
-    borderRadius: 8,
-    borderWidth: 1.5,
+    borderRadius: 9,
+    borderWidth: 2,
     borderColor: theme.colors.surfaceSidebar,
     alignItems: "center",
     justifyContent: "center",

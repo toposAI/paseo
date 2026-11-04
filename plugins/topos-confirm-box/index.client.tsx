@@ -101,7 +101,8 @@ function SidebarSectionLink({
   );
 }
 
-const badgeText = { color: "#ffffff", fontSize: 10, fontWeight: "700" as const };
+// 10px では下部バーの丸バッジ(17px)の中で数字が潰れ気味、との点検指摘(2026-11-04)があり 11px へ。
+const badgeText = { color: "#ffffff", fontSize: 11, fontWeight: "700" as const };
 
 /** 件数そのままのバッジ。0/取得前は出さない(既存の確認箱バッジと同じ)。
  * `unknown`(数え切れていない)は件数の代わりに「!」を出す(0 件と読ませない)。 */

@@ -291,3 +291,36 @@ export function BubbleIcon({ color, size = 24 }: IconProps) {
     </View>
   );
 }
+
+/**
+ * 開閉の矢印。文字の ▸ / ▾ は 11〜14px にしても点のように見える、との指摘(2026-11-04)が
+ * あったため、線で描く。右と下の枠線で作った角を回して向きを変える(文字より太さが安定する)。
+ * 開いているときは下向き、閉じているときは右向き。
+ */
+export function ChevronIcon({ color, size = 16, open }: IconProps & { open: boolean }) {
+  const thickness = Math.max(1.8, size / 7);
+  const st = useMemo(
+    () => ({
+      wrap: {
+        width: size,
+        height: size,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
+      },
+      mark: {
+        width: size * 0.5,
+        height: size * 0.5,
+        borderRightWidth: thickness,
+        borderBottomWidth: thickness,
+        borderColor: color,
+        transform: [{ rotate: open ? "45deg" : "-45deg" }],
+      },
+    }),
+    [color, open, size, thickness],
+  );
+  return (
+    <View style={st.wrap}>
+      <View style={st.mark} />
+    </View>
+  );
+}

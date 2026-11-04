@@ -22,6 +22,7 @@
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import type { LayoutChangeEvent } from "react-native";
 import {
   useRpc,
   type PluginPopoverProps,
@@ -70,6 +71,7 @@ import type { ThreadMenuIntent } from "../shared/thread-menu.js";
 import { ConceptNotesList, useSidebarNotes } from "./ConceptNotes.js";
 import { SharedProjectsList } from "./SharedProjects.js";
 import { StatusBadge } from "./sidebar-badge.js";
+import { ChevronIcon } from "./Icons.js";
 import { stateDotIcons } from "./StateDot.js";
 import type { StateDotIcon } from "./StateDot.js";
 import { appearanceOf } from "../shared/state-dot.js";
@@ -1104,7 +1106,6 @@ function SideSection({
     [onReorderGroup, side],
   );
   const textStyle = useMemo(() => ({ color: statusColor }), [statusColor]);
-  const chevronStyle = useMemo(() => [styles.chevron, { color: statusColor }], [statusColor]);
   const count = groups.reduce((n, g) => n + g.rows.length, 0);
   const label = SIDE_LABEL[side];
   const trailing = useMemo(
@@ -1126,11 +1127,11 @@ function SideSection({
           hitSlop={8}
           style={styles.toggleHit}
         >
-          <Text style={chevronStyle}>{open ? "▾" : "▸"}</Text>
+          <ChevronIcon color={statusColor} open={open} size={16} />
         </Pressable>
       </View>
     ),
-    [chevronStyle, count, label, open, side, textStyle, toggle, waiting],
+    [count, label, open, side, statusColor, textStyle, toggle, waiting],
   );
   // 空の側も、行を運んでいる間は見出しだけ出す(空の側へ移せなくなるのを避ける)。
   if (groups.length === 0 && dragThread === null) return null;
@@ -1198,7 +1199,6 @@ function ThreadGroupSection({
   }, [group.key, onOpenCoordinator, onToggle]);
   const toggle = useCallback(() => onToggle(group.key), [group.key, onToggle]);
   const textStyle = useMemo(() => ({ color: statusColor }), [statusColor]);
-  const chevronStyle = useMemo(() => [styles.chevron, { color: statusColor }], [statusColor]);
   const count = group.rows.length;
   // 見出しの状態(子司令塔)。件数の左に出す(帯の文字・色は行と同じ規則)。
   const headingStatus = group.heading
@@ -1228,11 +1228,11 @@ function ThreadGroupSection({
             hitSlop={8}
             style={styles.toggleHit}
           >
-            <Text style={chevronStyle}>{open ? "▾" : "▸"}</Text>
+            <ChevronIcon color={statusColor} open={open} size={16} />
           </Pressable>
         </View>
       ),
-    [chevronStyle, count, group.key, group.title, headingStatus, open, pinned, textStyle, toggle],
+    [count, group.key, group.title, headingStatus, open, pinned, statusColor, textStyle, toggle],
   );
   const shown = pinned || open || group.key === "";
   return (
@@ -1344,6 +1344,43 @@ function useBoxTotal(): number | undefined {
   return total;
 }
 
+const CHIP_GAP = 4;
+const CHIP_PADDING = 12;
+
+interface Chip {
+  key: string;
+  node: React.ReactNode;
+}
+
+/**
+ * 札を幅に合わせて行へ割る。素の折り返し(flexWrap)だと、狭い幅で最後の行に1枚だけ残り
+ * (例 4+1)、左に寄った1枚が浮いて見える(2026-11-04 点検指摘)。最後の行が1枚だけのときは
+ * 前の行から1枚移して 3+2 のように揃える。
+ */
+function balanceChipRows(chips: readonly Chip[], widths: Record<string, number>, avail: number) {
+  const rows: Chip[][] = [];
+  let line: Chip[] = [];
+  let used = 0;
+  for (const chip of chips) {
+    const w = widths[chip.key] ?? 0;
+    const need = line.length > 0 ? w + CHIP_GAP : w;
+    if (line.length > 0 && used + need > avail) {
+      rows.push(line);
+      line = [chip];
+      used = w;
+    } else {
+      line.push(chip);
+      used += need;
+    }
+  }
+  if (line.length > 0) rows.push(line);
+  const last = rows.length - 1;
+  if (last > 0 && rows[last].length === 1 && rows[last - 1].length >= 3) {
+    rows[last].unshift(rows[last - 1].pop() as Chip);
+  }
+  return rows;
+}
+
 function StatusCountChips({
   rows,
   openScreen,
@@ -1355,40 +1392,97 @@ function StatusCountChips({
   const { running, coordinator, idle, closed } = counted;
   const judgment = chipJudgmentCount(counted.judgment, useBoxTotal());
   const openJudgment = useCallback(() => openScreen({ screenId: BOX_TAB_SCREEN_ID }), [openScreen]);
+  const chips = useMemo(() => {
+    const list: Chip[] = [];
+    if (judgment > 0) {
+      list.push({
+        key: "judgment",
+        node: (
+          <StatusBadge
+            text={`判断 ${judgment}`}
+            kind="waiting"
+            testID="status-count-judgment"
+            onPress={openJudgment}
+            compact
+          />
+        ),
+      });
+    }
+    if (running > 0) {
+      list.push({
+        key: "running",
+        node: (
+          <StatusBadge
+            text={`実装中 ${running}`}
+            kind="running"
+            testID="status-count-running"
+            compact
+          />
+        ),
+      });
+    }
+    if (coordinator > 0) {
+      list.push({
+        key: "coordinator",
+        node: (
+          <StatusBadge
+            text={`司令塔 ${coordinator}`}
+            kind="running"
+            testID="status-count-coordinator"
+            compact
+          />
+        ),
+      });
+    }
+    if (idle > 0) {
+      list.push({
+        key: "idle",
+        node: (
+          <StatusBadge text={`待機中 ${idle}`} kind="idle" testID="status-count-idle" compact />
+        ),
+      });
+    }
+    if (closed > 0) {
+      list.push({
+        key: "closed",
+        node: (
+          <StatusBadge text={`終了 ${closed}`} kind="closed" testID="status-count-closed" compact />
+        ),
+      });
+    }
+    return list;
+  }, [closed, coordinator, idle, judgment, openJudgment, running]);
+  // 行割りは実測幅で決める(文字幅の見積もりだと環境でずれる)。測れるまでは素の折り返し。
+  const [avail, setAvail] = useState(0);
+  const [widths, setWidths] = useState<Record<string, number>>({});
+  const onBoxLayout = useCallback((e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    setAvail((prev) => (Math.abs(prev - w) > 0.5 ? w : prev));
+  }, []);
+  const onChipLayout = useCallback(
+    (key: string) => (e: LayoutChangeEvent) => {
+      const w = e.nativeEvent.layout.width;
+      setWidths((prev) => {
+        if (w <= 0 || Math.abs((prev[key] ?? -1) - w) <= 0.5) return prev;
+        return { ...prev, [key]: w };
+      });
+    },
+    [],
+  );
   if (judgment + running + coordinator + idle + closed === 0) return null;
+  const measured = avail > 0 && chips.every((c) => widths[c.key] !== undefined);
+  const lines = measured ? balanceChipRows(chips, widths, avail - CHIP_PADDING * 2) : [chips];
   return (
-    <View style={styles.chips} testID="status-count-chips">
-      {judgment > 0 ? (
-        <StatusBadge
-          text={`判断 ${judgment}`}
-          kind="waiting"
-          testID="status-count-judgment"
-          onPress={openJudgment}
-          compact
-        />
-      ) : null}
-      {running > 0 ? (
-        <StatusBadge
-          text={`実装中 ${running}`}
-          kind="running"
-          testID="status-count-running"
-          compact
-        />
-      ) : null}
-      {coordinator > 0 ? (
-        <StatusBadge
-          text={`司令塔 ${coordinator}`}
-          kind="running"
-          testID="status-count-coordinator"
-          compact
-        />
-      ) : null}
-      {idle > 0 ? (
-        <StatusBadge text={`待機中 ${idle}`} kind="idle" testID="status-count-idle" compact />
-      ) : null}
-      {closed > 0 ? (
-        <StatusBadge text={`終了 ${closed}`} kind="closed" testID="status-count-closed" compact />
-      ) : null}
+    <View style={styles.chips} testID="status-count-chips" onLayout={onBoxLayout}>
+      {lines.map((line) => (
+        <View key={line.map((c) => c.key).join("|")} style={styles.chipLine}>
+          {line.map((chip) => (
+            <View key={chip.key} onLayout={onChipLayout(chip.key)}>
+              {chip.node}
+            </View>
+          ))}
+        </View>
+      ))}
     </View>
   );
 }
@@ -1495,12 +1589,17 @@ function ThreadRow({
 
 const styles = StyleSheet.create({
   chips: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    // 札は詰めても読みやすいので、5枚がiPhone幅(390px)で1行に収まるよう間隔を詰める(2026-11-04)。
-    gap: 4,
-    paddingHorizontal: 12,
+    // 行割りは `balanceChipRows` が決める(最後の行に1枚だけ残る形を避ける)。
+    gap: CHIP_GAP,
+    paddingHorizontal: CHIP_PADDING,
     paddingVertical: 6,
+  },
+  chipLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    // 測れていない間の逃げ(1行に収まらないぶんは素の折り返しへ)。
+    flexWrap: "wrap",
+    gap: CHIP_GAP,
   },
   // 外枠: 絶対配置のメニューの基準。中身の大きさはこれまでどおり(自身は高さを取らない)。
   root: {
@@ -1532,8 +1631,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     // 状態の札と件数・シェブロンの間。詰めすぎると札の右端と数字がくっついて見える(2026-11-03)。
-    // 上の絞り込みの札(`chips`)と同じ 6 にそろえる。
-    gap: 6,
+    // 6 ではまだ詰まって見える、との点検指摘(2026-11-04)があり 8 へ。
+    gap: 8,
   },
   notice: {
     paddingHorizontal: 12,
@@ -1542,15 +1641,10 @@ const styles = StyleSheet.create({
   noticeText: {
     fontSize: 12,
   },
-  chevron: {
-    // 11px では点のように見えて開閉の矢印だと分からない(2026-11-04 指摘)。
-    // 隣の件数(13px)と釣り合う大きさ・濃さにする。
-    fontSize: 14,
-    fontWeight: "600",
-  },
   // タッチ端末でも開閉を狙えるよう当たり判定を広げる(見出し本体は司令塔を開く)。
+  // 幅は矢印(16px)より少し広いだけにする。32px だと件数から矢印までが離れて見える(2026-11-04 指摘)。
   toggleHit: {
-    minWidth: 32,
+    minWidth: 20,
     minHeight: 32,
     alignItems: "center",
     justifyContent: "center",
