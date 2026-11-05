@@ -336,10 +336,11 @@ describe("AttachmentLightbox gallery", () => {
     index: number,
     total: number,
     handlers: { onPrevious?: () => void; onNext?: () => void } = {},
-    comment?: Pick<LightboxComment, "onSubmit">,
+    comment?: Pick<LightboxComment, "onSubmit"> & Partial<Pick<LightboxComment, "drafts">>,
   ) {
     // oxlint-disable-next-line react-perf/jsx-no-new-object-as-prop -- test fixture
     const fullComment: LightboxComment | undefined = comment && {
+      drafts: { get: () => "", set: () => {}, claimSend: () => () => {} },
       client: null,
       serverId: "s",
       agentId: "a",
@@ -478,5 +479,45 @@ describe("AttachmentLightbox gallery", () => {
     expect((queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement).value).toBe(
       "hello",
     );
+  });
+
+  it("gives each image its half-typed text back after the viewer is closed and reopened", () => {
+    const store: Record<string, string> = {};
+    const drafts = {
+      get: (key: string) => store[key] ?? "",
+      set: (key: string, text: string) => {
+        store[key] = text;
+      },
+      claimSend: () => () => {},
+    };
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderGallery(0, 2, {}, { onSubmit, drafts });
+    typeInto(queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement, "途中の文");
+    act(() => {
+      root?.unmount();
+    });
+    root = createRoot(container!);
+
+    renderGallery(0, 2, {}, { onSubmit, drafts });
+
+    expect((queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement).value).toBe(
+      "途中の文",
+    );
+  });
+
+  it("does not send again while the same image already has a send in flight", async () => {
+    const drafts = { get: () => "", set: () => {}, claimSend: () => null };
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderGallery(0, 2, {}, { onSubmit, drafts });
+    const input = queryByTestId("attachment-lightbox-comment-input") as HTMLInputElement;
+
+    typeInto(input, "二重");
+    await act(async () => {
+      queryByTestId("attachment-lightbox-comment-send")!.dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true }),
+      );
+    });
+
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

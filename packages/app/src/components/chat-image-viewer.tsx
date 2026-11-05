@@ -173,10 +173,32 @@ export function ChatImageViewerProvider({
         : undefined,
     [current, entries.length, goNext, goPrevious, index],
   );
+  // Half-typed comments outlive the viewer: closing and reopening gives each image its text back.
+  const draftsRef = useRef<Record<string, string>>({});
+  const sendingKeysRef = useRef(new Set<string>());
+  const drafts = useMemo(
+    () => ({
+      get: (imageKey: string) => draftsRef.current[imageKey] ?? "",
+      set: (imageKey: string, text: string) => {
+        draftsRef.current[imageKey] = text;
+      },
+      // Lives here, not in the comment box: closing and reopening the viewer must not
+      // let the same comment go out twice while the first send is still in flight.
+      claimSend: (imageKey: string) => {
+        if (sendingKeysRef.current.has(imageKey)) return null;
+        sendingKeysRef.current.add(imageKey);
+        return () => {
+          sendingKeysRef.current.delete(imageKey);
+        };
+      },
+    }),
+    [],
+  );
   const comment = useMemo(
     () =>
       client
         ? {
+            drafts,
             onSubmit: submitComment,
             client,
             serverId,
@@ -185,7 +207,7 @@ export function ChatImageViewerProvider({
             sendBehavior,
           }
         : undefined,
-    [agentId, client, sendBehavior, serverId, submitComment, workspaceRoot],
+    [agentId, client, drafts, sendBehavior, serverId, submitComment, workspaceRoot],
   );
 
   return (

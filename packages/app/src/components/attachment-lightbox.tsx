@@ -41,6 +41,13 @@ export interface LightboxGallery {
 }
 
 export interface LightboxComment {
+  /** Per-image draft text kept by the owner, so it survives closing the viewer. */
+  drafts: {
+    get: (imageKey: string) => string;
+    set: (imageKey: string, text: string) => void;
+    /** Returns a release function, or null when this image already has a send in flight. */
+    claimSend: (imageKey: string) => (() => void) | null;
+  };
   onSubmit: (text: string) => Promise<void>;
   /** What the shared composer input needs for dictation and for how a send behaves. */
   client: DaemonClient | null;
@@ -274,25 +281,31 @@ function LightboxCommentBar({
   const sendingRef = useRef(false);
   const currentKeyRef = useRef(imageKey);
   currentKeyRef.current = imageKey;
-  const draft = drafts[imageKey] ?? "";
+  const draft = drafts[imageKey] ?? comment.drafts.get(imageKey);
 
   useEffect(() => {
     setStatus("idle");
   }, [imageKey]);
 
   const handleChange = useCallback(
-    (text: string) => setDrafts((current) => ({ ...current, [imageKey]: text })),
-    [imageKey],
+    (text: string) => {
+      comment.drafts.set(imageKey, text);
+      setDrafts((current) => ({ ...current, [imageKey]: text }));
+    },
+    [comment, imageKey],
   );
   const handleSubmit = useCallback(
     async (payload: { text: string }) => {
       const text = payload.text.trim();
       // A ref, not `status`: two taps in one frame both see the stale "idle" state.
       if (!text || sendingRef.current) return;
+      const release = comment.drafts.claimSend(imageKey);
+      if (!release) return;
       sendingRef.current = true;
       setStatus("sending");
       try {
         await comment.onSubmit(text);
+        comment.drafts.set(imageKey, "");
         setDrafts((current) => ({ ...current, [imageKey]: "" }));
         // Only the input that sent it is cleared; after a switch the mounted one is another image's.
         if (currentKeyRef.current === imageKey) {
@@ -303,6 +316,7 @@ function LightboxCommentBar({
         console.warn("[chat-image-viewer] comment failed", error);
         if (currentKeyRef.current === imageKey) setStatus("failed");
       } finally {
+        release();
         sendingRef.current = false;
       }
     },
@@ -579,7 +593,8 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
   },
   commentError: {
-    color: theme.colors.foregroundMuted,
+    // On the near-black bar the muted foreground is hard to see; a failed send must be noticed.
+    color: "rgba(255,255,255,0.95)",
     fontSize: theme.fontSize.sm,
     textAlign: "center",
   },
