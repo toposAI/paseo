@@ -104,3 +104,11 @@
 - `topos.feedback.reports.list` … 報告ファイルの読み取り
 - `topos.confirmbox.ack` / `topos.confirmbox.ackall` … 既読・確認の追記(箱の契約どおり)
 - `confirmBoxCountRpc` の出力に `notifications` / `bugs` / `childDone` を追加(バッジ用)
+
+## 報告タブ(2026-11-05)
+
+- 登録: `scripts/report_file_url.py` が報告書(.md)の URL を作るたびに `scripts/report_inbox.py` が `reports.jsonl` へ追記する(報告元は `$PASEO_AGENT_ID`)。ここは読むだけ(`server/reports.ts`)。
+- 既読: `report_reads.jsonl` に `{id, sha}`。報告書が更新されると sha が変わり未読に戻る。
+- 本文は許可範囲(reviews/ の .md・画像、final/ の画像)だけを読み、画像は data URI で返す(Mac Studio 以外からも読める)。
+- コメント: 箱のイベント列へ `id="report:<id>"` の chat を書き、返信ワーカー(`confirm_box_reply_worker.py`)が報告元スレへ届ける(閉じていれば復元)。報告元不明の報告にはコメント欄を出さない。
+- 入力欄は共有の `PaneComposer`。幅300px未満では入力欄を1段目、マイク・送るを2段目に置く。

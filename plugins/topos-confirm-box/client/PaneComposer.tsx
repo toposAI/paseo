@@ -7,7 +7,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
-import { composerHeight } from "../shared/composer-height.js";
 import type { usePaneInputTools } from "./usePaneInputTools.js";
 
 export interface ComposerColors {
@@ -56,9 +55,21 @@ export function PaneComposer({
   testID?: string;
 }): ReactNode {
   const inputRef = useRef<TextInput | null>(null);
-  const [inputW, setInputW] = useState(160);
-  const handleLayout = useCallback(
-    (e: { nativeEvent: { layout: { width: number } } }) => setInputW(e.nativeEvent.layout.width),
+  // 複数行は内容の高さに合わせて maxHeight まで縦に伸ばす(web の textarea は高さを自動で増やさないため)。
+  const [grownHeight, setGrownHeight] = useState(44);
+  // 幅が狭い(PC のポップオーバー等)ときは、入力欄を1段目いっぱいに出し、マイクと送るを2段目に置く。
+  const [narrow, setNarrow] = useState(false);
+  const onRowLayout = useCallback((e: { nativeEvent: { layout: { width: number } } }) => {
+    setNarrow(e.nativeEvent.layout.width < 300);
+  }, []);
+  useEffect(() => {
+    if (text === "") setGrownHeight(44);
+  }, [text]);
+  const onContentSizeChange = useCallback(
+    (e: { nativeEvent: { contentSize: { height: number } } }) => {
+      const h = Math.ceil(e.nativeEvent.contentSize.height) + 18;
+      setGrownHeight(Math.min(120, Math.max(44, h)));
+    },
     [],
   );
   useEffect(() => {
@@ -76,6 +87,7 @@ export function PaneComposer({
     const send = {
       minHeight: 44,
       minWidth: 56,
+      marginLeft: "auto" as const,
       borderRadius: 8,
       backgroundColor: colors.accent,
       alignItems: "center" as const,
@@ -84,6 +96,7 @@ export function PaneComposer({
     return {
       row: {
         flexDirection: "row" as const,
+        flexWrap: "wrap" as const,
         alignItems: "flex-end" as const,
         gap: 8,
         padding: 10,
@@ -93,7 +106,10 @@ export function PaneComposer({
         paddingBottom: "env(safe-area-inset-bottom)" as unknown as number,
       },
       input: {
-        flex: 1,
+        flexGrow: 1,
+        flexShrink: 1,
+        flexBasis: 72,
+        minWidth: 72,
         minHeight: 44,
         maxHeight: 120,
         color: colors.foreground,
@@ -114,13 +130,30 @@ export function PaneComposer({
       sendText: { color: colors.accentForeground, fontSize: 14, fontWeight: "600" as const },
     };
   }, [colors]);
-  const height = composerHeight(text, inputW - 22);
-  const inputStyle = useMemo(
-    () => (disabledReason ? [st.input, st.inputOff, { height }] : [st.input, { height }]),
-    [disabledReason, st.input, st.inputOff, height],
+  const inputStyle = useMemo(() => {
+    const base = narrow ? [st.input, { flexBasis: "100%" as unknown as number }] : [st.input];
+    return disabledReason
+      ? [...base, st.inputOff, { height: grownHeight }]
+      : [...base, { height: grownHeight }];
+  }, [disabledReason, grownHeight, narrow, st.input, st.inputOff]);
+  const inputEl = (
+    <TextInput
+      ref={inputRef}
+      value={text}
+      onChangeText={onChangeText}
+      onKeyPress={onKeyPress}
+      editable={!disabledReason}
+      placeholder={disabledReason ?? placeholder}
+      placeholderTextColor={colors.foregroundMuted}
+      multiline
+      onContentSizeChange={onContentSizeChange}
+      maxLength={maxLength}
+      style={inputStyle}
+    />
   );
   return (
-    <View style={st.row} testID={testID}>
+    <View style={st.row} testID={testID} onLayout={onRowLayout}>
+      {narrow ? inputEl : null}
       {tools.attachSupported ? (
         <Pressable
           accessibilityRole="button"
@@ -143,19 +176,7 @@ export function PaneComposer({
           <Text style={st.toolText}>🎤</Text>
         </Pressable>
       ) : null}
-      <TextInput
-        ref={inputRef}
-        value={text}
-        onChangeText={onChangeText}
-        onKeyPress={onKeyPress}
-        editable={!disabledReason}
-        placeholder={disabledReason ?? placeholder}
-        placeholderTextColor={colors.foregroundMuted}
-        multiline
-        onLayout={handleLayout}
-        maxLength={maxLength}
-        style={inputStyle}
-      />
+      {narrow ? null : inputEl}
       <Pressable
         accessibilityRole="button"
         disabled={!sendable}

@@ -86,6 +86,16 @@ const SLIDE_MS = 220;
 const SLIDE_EASING = Easing.bezier(0.25, 0.1, 0.25, 1);
 /** 開いた時に読む履歴の件数(元スレの直近だけ。全履歴は重い)。 */
 const HISTORY_LIMIT = 30;
+/**
+ * 開き直した時に「自分の発言」が窓から落ちないための下限。
+ * ツール呼び出しの多いスレは30項目が数分で埋まる(実測: 2026-11-05 のスレで
+ * ユーザー発言1件の後ろに91項目)。足りなければ古い方をページで足す。
+ */
+const MIN_USER_LINES = 5;
+/** 古い方を足すときの1ページ(アプリ本体 `use-load-older-agent-history.ts` と同じ40)。 */
+const HISTORY_PAGE = 40;
+/** 古い方を足す上限ページ数(重いスレで無限に読まない)。 */
+const HISTORY_MAX_PAGES = 6;
 /** 送信欄の上限。Paseo の composer に合わせた素朴な値(サーバ側で切り詰めはしない)。 */
 const TEXT_MAX = 4000;
 /** 生死(アーカイブ済みか)の見直し間隔。購読で拾えない経路(別端末からのアーカイブ等)の取りこぼし用。 */
@@ -138,6 +148,50 @@ function appendLine(lines: ChatLine[], next: ChatLine): ChatLine[] {
     return [...lines.slice(0, -1), { ...last, text: last.text + next.text }];
   }
   return [...lines, next];
+}
+
+/** 同じ役割・同じ文の行が既にあるか。購読の張り直しで過去が流れ直した時の二重表示を防ぐ。 */
+function hasLine(lines: ChatLine[], line: ChatLine): boolean {
+  return lines.some((l) => l.role === line.role && l.text === line.text);
+}
+
+/**
+ * 履歴(`past`)と、開いた後に積まれた行(`cur`)を合わせる。
+ * 以前は `cur` が空でなければ履歴を丸ごと捨てていたため、自分の送信や購読の行が先に届くと
+ * 履歴が永久に出なかった(2026-11-05 出口レビュー指摘2)。行は履歴側を先に置き、
+ * `cur` にしか無い行だけを後ろへ足す。
+ *
+ * ユーザー行は**前方一致**でも重複とみなす: 送信時にローカルへ積むのは打った文そのものだが、
+ * スレへ送る文にはカードの見出しが付く(`withCardHeader`)ため、履歴側の文は長い。
+ * assistant 行は連結の都合で文が揺れるので、完全一致の時だけ重複とみなす(取りこぼしを避ける)。
+ */
+function mergeHistory(past: ChatLine[], cur: ChatLine[]): ChatLine[] {
+  if (cur.length === 0) return past;
+  if (past.length === 0) return cur;
+  const seen = new Map<string, number>();
+  for (const line of past) {
+    const key = `${line.role}\u0000${line.text}`;
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+  const alreadyThere = (line: ChatLine): boolean => {
+    const key = `${line.role}\u0000${line.text}`;
+    const n = seen.get(key) ?? 0;
+    if (n > 0) {
+      seen.set(key, n - 1);
+      return true;
+    }
+    if (line.role !== "user" || line.text.length === 0) return false;
+    // 見出し付きの同じ発言。
+    const prefixed = past.filter((p) => p.role === "user" && p.text.startsWith(line.text));
+    if (prefixed.length === 0) return false;
+    const keys = prefixed.map((p) => `${p.role}\u0000${p.text}`);
+    const hit = keys.find((k) => (seen.get(k) ?? 0) > 0);
+    if (!hit) return false;
+    seen.set(hit, (seen.get(hit) ?? 0) - 1);
+    return true;
+  };
+  const extra = cur.filter((line) => !alreadyThere(line));
+  return past.concat(extra);
 }
 
 /** 送信可否。相手が特定できていて、閉じておらず、空でなく、送信中でないこと。 */
@@ -270,6 +324,8 @@ export function CardChatPane({
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [text, setText] = useState("");
   const [notice, setNotice] = useState("");
+  // 履歴の読み込みが終わるまで購読を張らない(下の購読 effect の注記)。
+  const [historyReady, setHistoryReady] = useState(false);
   const appendDictated = useCallback((said: string) => setText((cur) => cur + said), []);
   const tools = usePaneInputTools(appendDictated);
   const { images: toolImages, clearImages, restoreImages, resetTools } = tools;
@@ -398,31 +454,116 @@ export function CardChatPane({
   // 読み込まれて status が closed→idle になる。解除ではないのでサイドバー(アーカイブ済みは載せない)には
   // 戻らず、投函元が閉じているカードでも過去のやり取りを読める利点があるため、ここでは止めない
   // (止めるかは product 判断。2026-11-01 出口レビュー指摘2は「読み取りの解除」ではなく「読み込み」)。
+  // 履歴の読み直し。購読とは別の effect に分ける(理由は下の購読 effect の注記)。
+  //
+  // 2026-11-05 の不具合(ユーザー報告「チャット欄閉じてまた開くと、さっき投げたチャットが消えてる」):
+  // 以前はこの読み直しが購読と同じ effect に居り、`hubPending`(= ハブ一覧 `hubIds` が未取得)の間は
+  // return していた。ペインを開いた直後は必ず未取得なので履歴を一度も読まず、`hubIds` が入っても
+  // 依存配列に `hubPending` が無いため effect は再実行されず、**二度と読まれなかった**。
+  // 送信時の自分の行は `send()` がローカルに積むだけ(台帳にも履歴にも依存しない)なので、
+  // 閉じて開き直すとその行だけが消えて見えた。ここだけ `hubPending` を deps に持ち、
+  // ハブ一覧が引けた時点で読み直す(ハブ宛=話題表示に決まったら `topic` が立って読まない)。
   useEffect(() => {
-    setLines([]);
-    setNotice("");
     if (!agentId || !serverId || topic || hubPending) return undefined;
     const handle = getPaseoClient(serverId).agents.ref(agentId);
     let alive = true;
-    handle.timeline
-      .refetch({ limit: HISTORY_LIMIT })
-      .then((res) => {
+    const toLines = (
+      entries: ReadonlyArray<{ item?: unknown }> | undefined,
+      prefix: string,
+    ): ChatLine[] => {
+      const out: ChatLine[] = [];
+      (entries ?? []).forEach((entry, idx) => {
+        const line = lineFromItem(entry.item as TimelineItemLike, `${prefix}${idx}`);
+        if (line) out.push(line);
+      });
+      return out;
+    };
+    // 直近だけ読んで、ユーザー発言が少なければ古い方を足す(閉じて開き直した時に
+    // 自分の発言が「直近30項目」から外れて消えて見えるのを防ぐ)。
+    const load = async (): Promise<{ past: ChatLine[]; partial: boolean }> => {
+      const tail = await handle.timeline.refetch({ limit: HISTORY_LIMIT });
+      const tailLines = toLines(tail.entries as { item?: unknown }[], "h");
+      const olderPages: ChatLine[][] = [];
+      let partial = false;
+      let userCount = tailLines.filter((l) => l.role === "user").length;
+      let cursor = tail.startCursor ?? null;
+      let hasOlder = tail.hasOlder === true;
+      for (let page = 0; page < HISTORY_MAX_PAGES; page += 1) {
+        if (!alive || userCount >= MIN_USER_LINES || !hasOlder || !cursor) break;
+        let older: Awaited<ReturnType<typeof handle.timeline.refetch>>;
+        try {
+          older = await handle.timeline.refetch({
+            direction: "before",
+            cursor,
+            limit: HISTORY_PAGE,
+          });
+        } catch {
+          // 古いページが読めなくても、読めた分(直近30項目)は捨てない
+          // (2026-11-05 出口レビュー2巡目 指摘3)。
+          partial = true;
+          break;
+        }
+        const entries = older.entries ?? [];
+        const added = toLines(entries as { item?: unknown }[], `o${page}`);
+        // 止めるのは「そのページに項目が無い」時だけ。表示できる行が0でも項目があれば
+        // さらに古いページを読む(2026-11-05 出口レビュー指摘3)。
+        if (entries.length === 0) break;
+        // 古いページを先頭へ積む(ES2023 の `toReversed` は配布先で欠けることがあるため使わない)。
+        olderPages.unshift(added);
+        userCount += added.filter((l) => l.role === "user").length;
+        const nextCursor = older.startCursor ?? null;
+        // カーソルが進まないページを繰り返し読まない(同じページを読み続けて止まる)。
+        if (!nextCursor || nextCursor === cursor) break;
+        cursor = nextCursor;
+        hasOlder = older.hasOlder === true;
+      }
+      return { past: olderPages.flat().concat(tailLines), partial };
+    };
+    load()
+      .then(({ past, partial }) => {
         if (!alive) return null;
-        const past: ChatLine[] = [];
-        (res.entries ?? []).forEach((entry, idx) => {
-          const line = lineFromItem(entry.item as TimelineItemLike, `h${idx}`);
-          if (line) past.push(line);
-        });
-        setLines((cur) => (cur.length === 0 ? past : cur));
+        if (partial) setNotice("古い履歴の一部を読めませんでした");
         // 開いた時点の表示(「ツールを実行中…」等)は、スレの状態を読む effect が下で起こす。
         // ここで履歴の最後の項目から起こすと、idle のスレ(返信が残ったまま)でも「返信中…」などが先に出て、
         // 状態の読み取りより先に届く場合に止まったままになる(2026-10-27 出口レビュー round1 F1)。
         // 嘘の表示を避ける方を優先する: 履歴の読み直しと状態の読み取りがどちらも失敗したら、ラベルは出ない。
+        setLines((cur) => mergeHistory(past, cur));
+        setHistoryReady(true);
         return null;
       })
       .catch(() => {
-        // 履歴が読めなくても会話は続けられる(送るたびに購読側で増える)。
+        // 履歴が読めなくても会話は続けられる(送るたびに購読側で増える)。黙って落とさず1行出す。
+        if (alive) {
+          setNotice("履歴を読めませんでした(送信はできます)");
+          // 読めなくても購読は始める(ここで false のままだと返事が一切流れない)。
+          setHistoryReady(true);
+        }
       });
+    return () => {
+      alive = false;
+    };
+  }, [agentId, serverId, topic, hubPending]);
+
+  // 会話の初期化。ハブ判定が確定した時点で一度だけ空にする。購読 effect 側で消すと、
+  // 購読が張り直されたときに、上の履歴 effect が読み終えた行まで巻き添えで消える。
+  useEffect(() => {
+    setLines([]);
+    setNotice("");
+    setHistoryReady(false);
+  }, [agentId, serverId, topic, hubPending]);
+
+  // ライブの購読。履歴と同じく `hubPending` を deps に持つ。以前は持っていなかったため、
+  // ハブ一覧が未取得の間は購読が張られず、`hubIds` が入っても再実行されずに**一度も張られなかった**
+  // (2026-11-05 出口レビュー指摘1)。
+  //
+  // `historyReady` が立つまで張らない(2026-11-05 出口レビュー2巡目 指摘2)。購読は接続直後に過去を
+  // 流し直すので、履歴より先に張ると assistant の発言が間に user 行の無いまま1行に連結され、
+  // 履歴と文が一致せず**その塊が履歴の後ろに二重で並ぶ**。履歴を読み終えてから張れば、replay は
+  // 履歴と同文で `hasLine` に落ちる。読み込み中に届いた返事は、張った直後の replay で拾う。
+  useEffect(() => {
+    if (!agentId || !serverId || topic || hubPending || !historyReady) return undefined;
+    const handle = getPaseoClient(serverId).agents.ref(agentId);
+    let alive = true;
     const sub = handle.timeline.subscribe((evt) => {
       if (!alive) return;
       const ev = (evt as { event?: { type?: string; item?: TimelineItemLike } }).event;
@@ -436,15 +577,13 @@ export function CardChatPane({
       if (ev.item?.type !== "assistant_message") return;
       seq.current += 1;
       const line = lineFromItem(ev.item, `s${seq.current}`);
-      if (line) setLines((cur) => appendLine(cur, line));
+      if (line) setLines((cur) => (hasLine(cur, line) ? cur : appendLine(cur, line)));
     });
     return () => {
       alive = false;
       sub();
     };
-    // 既存の指摘。`hubPending` を足すと、ハブ一覧の取得中に購読が張り直されて履歴が二重に出るため今は足さない。
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId, serverId, seeActivity, topic]);
+  }, [agentId, serverId, seeActivity, topic, hubPending, historyReady]);
 
   // ハブ一覧は一度だけ引く(総司令塔の生死確認は、下の振り替え時の effect が行う)。
   useEffect(() => {

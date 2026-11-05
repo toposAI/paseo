@@ -3,7 +3,7 @@ import { ActivityIndicator, Keyboard, Modal, Platform, Pressable, Text, View } f
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { StyleSheet } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ChevronLeft, ChevronRight, Send, X } from "lucide-react-native";
+import { ChevronLeft, ChevronRight, X } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-url";
@@ -11,7 +11,7 @@ import { isNative, isWeb } from "@/constants/platform";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { SPACING } from "@/styles/theme";
 import { WindowChromeRootRegion } from "@/utils/desktop-window";
-import { EditingTextInput, type EditingTextInputHandle } from "@/components/ui/text-input";
+import { MessageInput } from "@/composer/input/input";
 import { ZoomableImage } from "@/components/zoomable-viewport/image";
 import type { ViewportSize, ViewportSwipeDirection } from "@/components/zoomable-viewport/geometry";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
@@ -41,7 +41,20 @@ export interface LightboxGallery {
 }
 
 export interface LightboxComment {
+  /** Per-image draft text kept by the owner, so it survives closing the viewer. */
+  drafts: {
+    get: (imageKey: string) => string;
+    set: (imageKey: string, text: string) => void;
+    /** Returns a release function, or null when this image already has a send in flight. */
+    claimSend: (imageKey: string) => (() => void) | null;
+  };
   onSubmit: (text: string) => Promise<void>;
+  /** What the shared composer input needs for dictation and for how a send behaves. */
+  client: DaemonClient | null;
+  serverId: string;
+  agentId: string;
+  cwd: string;
+  sendBehavior: "interrupt" | "steer";
 }
 
 interface AttachmentLightboxProps {
@@ -247,56 +260,71 @@ function GalleryControls({
 
 type CommentStatus = "idle" | "sending" | "failed";
 
+const NO_ATTACHMENTS: never[] = [];
+
 function LightboxCommentBar({
   imageKey,
+  position,
   comment,
   bottomInset,
 }: {
   imageKey: string;
+  /** Which image of the chat the comment is about; shown so it is never unclear. */
+  position: { current: number; total: number } | null;
   comment: LightboxComment;
   bottomInset: number;
 }) {
   const { t } = useTranslation();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<CommentStatus>("idle");
-  const inputRef = useRef<EditingTextInputHandle>(null);
+  const [replacement, setReplacement] = useState({ key: "initial", text: "" });
   const sendingRef = useRef(false);
-  const draft = drafts[imageKey] ?? "";
-  const canSend = draft.trim().length > 0 && status !== "sending";
+  const currentKeyRef = useRef(imageKey);
+  currentKeyRef.current = imageKey;
+  const draft = drafts[imageKey] ?? comment.drafts.get(imageKey);
 
   useEffect(() => {
     setStatus("idle");
   }, [imageKey]);
 
   const handleChange = useCallback(
-    (text: string) => setDrafts((current) => ({ ...current, [imageKey]: text })),
-    [imageKey],
+    (text: string) => {
+      comment.drafts.set(imageKey, text);
+      setDrafts((current) => ({ ...current, [imageKey]: text }));
+    },
+    [comment, imageKey],
   );
-  const handleSend = useCallback(async () => {
-    const text = draft.trim();
-    // A ref, not `status`: two taps in one frame both see the stale "idle" state.
-    if (!text || sendingRef.current) return;
-    sendingRef.current = true;
-    setStatus("sending");
-    try {
-      await comment.onSubmit(text);
-      setDrafts((current) => ({ ...current, [imageKey]: "" }));
-      inputRef.current?.reset();
-      setStatus("idle");
-    } catch (error) {
-      console.warn("[chat-image-viewer] comment failed", error);
-      setStatus("failed");
-    } finally {
-      sendingRef.current = false;
-    }
-  }, [comment, draft, imageKey]);
+  const handleSubmit = useCallback(
+    async (payload: { text: string }) => {
+      const text = payload.text.trim();
+      // A ref, not `status`: two taps in one frame both see the stale "idle" state.
+      if (!text || sendingRef.current) return;
+      const release = comment.drafts.claimSend(imageKey);
+      if (!release) return;
+      sendingRef.current = true;
+      setStatus("sending");
+      try {
+        await comment.onSubmit(text);
+        comment.drafts.set(imageKey, "");
+        setDrafts((current) => ({ ...current, [imageKey]: "" }));
+        // Only the input that sent it is cleared; after a switch the mounted one is another image's.
+        if (currentKeyRef.current === imageKey) {
+          setReplacement((current) => ({ key: `sent-${current.key}-${Date.now()}`, text: "" }));
+          setStatus("idle");
+        }
+      } catch (error) {
+        console.warn("[chat-image-viewer] comment failed", error);
+        if (currentKeyRef.current === imageKey) setStatus("failed");
+      } finally {
+        release();
+        sendingRef.current = false;
+      }
+    },
+    [comment, imageKey],
+  );
   const barStyle = useMemo(
     () => [styles.commentBar, bottomInset > 0 ? { marginBottom: bottomInset } : null],
     [bottomInset],
-  );
-  const sendButtonStyle = useMemo(
-    () => [styles.sendButton, !canSend ? styles.sendButtonDisabled : null],
-    [canSend],
   );
 
   return (
@@ -306,35 +334,34 @@ function LightboxCommentBar({
           {t("message.attachments.imageCommentFailed")}
         </Text>
       ) : null}
+      <Text style={styles.commentCaption} testID="attachment-lightbox-comment-caption">
+        {position && position.total > 1
+          ? `${t("message.attachments.imageCounter", position)} · ${t("message.attachments.imageCommentPlaceholder")}`
+          : t("message.attachments.imageCommentPlaceholder")}
+      </Text>
       <View style={styles.commentRow}>
-        <EditingTextInput
+        <MessageInput
           key={imageKey}
-          ref={inputRef}
-          initialValue={draft}
-          accessibilityLabel={t("message.attachments.imageCommentPlaceholder")}
-          editable={status !== "sending"}
+          value={draft}
           onChangeText={handleChange}
-          onSubmitEditing={handleSend}
+          onSubmit={handleSubmit}
+          attachments={NO_ATTACHMENTS}
+          attachmentMenuItems={NO_ATTACHMENTS}
+          cwd={comment.cwd}
+          client={comment.client}
+          isReadyForDictation={comment.client !== null}
+          voiceServerId={comment.serverId}
+          voiceAgentId={comment.agentId}
+          defaultSendBehavior={comment.sendBehavior}
           placeholder={t("message.attachments.imageCommentPlaceholder")}
-          placeholderTextColor={styles.placeholder.color}
-          returnKeyType="send"
-          style={styles.commentInput}
-          testID="attachment-lightbox-comment-input"
+          submitButtonAccessibilityLabel={t("message.attachments.sendImageComment")}
+          submitButtonTestID="attachment-lightbox-comment-send"
+          isSubmitLoading={status === "sending"}
+          disabled={status === "sending"}
+          preserveHeightOnSubmit
+          inputMode="comment"
+          textReplacement={replacement}
         />
-        <Pressable
-          accessibilityLabel={t("message.attachments.sendImageComment")}
-          accessibilityRole="button"
-          disabled={!canSend}
-          onPress={handleSend}
-          style={sendButtonStyle}
-          testID="attachment-lightbox-comment-send"
-        >
-          {status === "sending" ? (
-            <ActivityIndicator size="small" />
-          ) : (
-            <Send size={18} color={styles.sendIcon.color} />
-          )}
-        </Pressable>
       </View>
     </View>
   );
@@ -343,6 +370,15 @@ function LightboxCommentBar({
 export function AttachmentLightbox({ source, onClose, gallery, comment }: AttachmentLightboxProps) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const galleryIndex = gallery?.index;
+  const galleryTotal = gallery?.total;
+  const galleryPosition = useMemo(
+    () =>
+      galleryIndex === undefined || galleryTotal === undefined
+        ? null
+        : { current: galleryIndex + 1, total: galleryTotal },
+    [galleryIndex, galleryTotal],
+  );
   const modalLayer = useGlobalWebOverlayLayer("modal", isWeb && source !== null);
   const keyboardInset = useKeyboardInset(source !== null && comment !== undefined);
 
@@ -408,6 +444,7 @@ export function AttachmentLightbox({ source, onClose, gallery, comment }: Attach
   }
 
   const imageKey = gallery?.imageKey ?? "single";
+  const position = galleryPosition;
 
   return (
     <Modal transparent animationType="fade" statusBarTranslucent visible onRequestClose={onClose}>
@@ -442,6 +479,7 @@ export function AttachmentLightbox({ source, onClose, gallery, comment }: Attach
               {comment ? (
                 <LightboxCommentBar
                   imageKey={imageKey}
+                  position={position}
                   comment={comment}
                   bottomInset={keyboardInset}
                 />
@@ -535,53 +573,28 @@ const styles = StyleSheet.create((theme) => ({
     color: "#fff",
   },
   commentBar: {
+    // The backdrop is see-through; the chat behind must not run into the caption.
+    backgroundColor: "rgba(0,0,0,0.92)",
     paddingHorizontal: theme.spacing[3],
     paddingTop: theme.spacing[2],
     paddingBottom: theme.spacing[3],
     gap: theme.spacing[1],
   },
   commentRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
     maxWidth: 640,
     width: "100%",
     alignSelf: "center",
   },
-  commentInput: {
-    flex: 1,
-    minWidth: 0,
-    height: 44,
-    paddingHorizontal: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface1,
-    color: theme.colors.foreground,
-    // 16px keeps iOS Safari from zooming the page when the field is focused.
-    fontSize: 16,
-  },
-  placeholder: {
-    color: theme.colors.foregroundMuted,
-  },
-  sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: theme.borderRadius.lg,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.colors.surface2,
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
-  },
-  sendButtonDisabled: {
-    opacity: 0.45,
-  },
-  sendIcon: {
-    color: theme.colors.foreground,
+  commentCaption: {
+    alignSelf: "center",
+    maxWidth: 640,
+    width: "100%",
+    color: "rgba(255,255,255,0.8)",
+    fontSize: theme.fontSize.sm,
   },
   commentError: {
-    color: theme.colors.foregroundMuted,
+    // On the near-black bar the muted foreground is hard to see; a failed send must be noticed.
+    color: "rgba(255,255,255,0.95)",
     fontSize: theme.fontSize.sm,
     textAlign: "center",
   },

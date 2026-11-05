@@ -256,6 +256,39 @@ export function BellIcon({ color, size = 24 }: IconProps) {
   );
 }
 
+/** 書類(枠+3本線)。確認箱の「報告」タブ。 */
+export function ReportIcon({ color, size = 24 }: IconProps) {
+  const u = size / 24;
+  const st = useMemo(
+    () => ({
+      page: {
+        width: 16 * u,
+        height: 20 * u,
+        marginTop: 2 * u,
+        alignSelf: "center" as const,
+        borderWidth: 1.8 * u,
+        borderColor: color,
+        borderRadius: 2.5 * u,
+        justifyContent: "center" as const,
+        alignItems: "center" as const,
+        gap: 2.6 * u,
+      },
+      line: { width: 8 * u, height: 1.6 * u, backgroundColor: color, borderRadius: u },
+      box: { width: size, height: size },
+    }),
+    [color, u, size],
+  );
+  return (
+    <View style={st.box}>
+      <View style={st.page}>
+        <View style={st.line} />
+        <View style={st.line} />
+        <View style={st.line} />
+      </View>
+    </View>
+  );
+}
+
 /** 吹き出し(塗り単色+左下のしっぽ)。 */
 export function BubbleIcon({ color, size = 24 }: IconProps) {
   const st = useMemo(

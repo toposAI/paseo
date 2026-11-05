@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import {
   applyAuxGroup,
+  markOneThread,
   readChildThreadSides,
   readOneThreadIds,
   writeChildThreadSide,
@@ -258,4 +259,17 @@ test("ピン止めは両群をまたいで1か所にまとまり、各群には�
   assert.deepEqual(ids(sides.pinned), ["a2", "w2"]);
   assert.deepEqual(ids(sides.walltalk), ["w1"]);
   assert.deepEqual(ids(sides.aux), ["a1"]);
+});
+
+test("1件スレの印を足す: 新規作成/重複しない/壊れたファイルは触らない/短いidは拒否", () => {
+  const dir = tmp();
+  assert.equal(markOneThread(dir, "ABCDEF12-0000"), true);
+  assert.equal(markOneThread(dir, "abcdef12-0000"), true);
+  assert.equal(markOneThread(dir, "short"), false);
+  assert.deepEqual([...readOneThreadIds(dir)], ["abcdef12-0000"]);
+  assert.equal(markOneThread(dir, "fedcba98-1111"), true);
+  assert.deepEqual([...readOneThreadIds(dir)], ["abcdef12-0000", "fedcba98-1111"]);
+  fs.writeFileSync(path.join(dir, CHILD_THREAD_ONE_THREAD_FILE), "{broken");
+  assert.equal(markOneThread(dir, "11111111-2222"), false);
+  assert.equal(fs.readFileSync(path.join(dir, CHILD_THREAD_ONE_THREAD_FILE), "utf8"), "{broken");
 });
