@@ -71,3 +71,20 @@ describe("last workspace selection", () => {
     });
   });
 });
+
+it("forget drops a matching selection and clears storage, ignoring other workspaces", () => {
+  let cleared = 0;
+  const store = createLastWorkspaceSelectionStore({
+    read: async () => null,
+    write: async () => {},
+    clear: async () => {
+      cleared += 1;
+    },
+  });
+  store.remember({ serverId: "s", workspaceId: "w1" });
+  store.forget({ serverId: "s", workspaceId: "w2" });
+  expect(store.getSelection()).toEqual({ serverId: "s", workspaceId: "w1" });
+  store.forget({ serverId: "s", workspaceId: "w1" });
+  expect(store.getSelection()).toBeNull();
+  expect(cleared).toBe(1);
+});

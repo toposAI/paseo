@@ -59,6 +59,10 @@ export function getIsLastWorkspaceSelectionHydrated(): boolean {
   return lastWorkspaceSelectionStore.isHydrated();
 }
 
+export function forgetLastWorkspaceSelection(selection: ActiveWorkspaceSelection): void {
+  lastWorkspaceSelectionStore.forget(selection);
+}
+
 export function navigateToWorkspace(input: NavigateToWorkspaceInput): string {
   return navigateToWorkspacePure(input, navigateDeps());
 }

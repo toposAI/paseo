@@ -145,3 +145,34 @@ test("an invalid async client entry is disposed and its rejected continuation is
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(h.plugins.getSnapshot()).toEqual([]);
 });
+
+test("a host that was never fetched is idle, not absent-from-catalog", () => {
+  const { plugins } = registry();
+  expect(plugins.getCatalogStatus("srv")).toBe("idle");
+  plugins.setCatalogStatus("srv", "loading");
+  expect(plugins.getCatalogStatus("srv")).toBe("loading");
+});
+
+test("installing a catalog marks the host ready and removeHost forgets the status", () => {
+  const { plugins, client } = registry();
+  plugins.setCatalogStatus("srv", "loading");
+  plugins.installCatalog("srv", [], { client, audio });
+  expect(plugins.getCatalogStatus("srv")).toBe("ready");
+  plugins.removeHost("srv");
+  expect(plugins.getCatalogStatus("srv")).toBe("idle");
+});
+
+test("status changes notify subscribers and retry reaches the registered handler", () => {
+  const { plugins } = registry();
+  let notified = 0;
+  let retried = 0;
+  plugins.subscribe(() => (notified += 1));
+  const unregister = plugins.registerRetry("srv", () => (retried += 1));
+  plugins.setCatalogStatus("srv", "failed");
+  plugins.setCatalogStatus("srv", "failed");
+  plugins.retryCatalog("srv");
+  unregister();
+  plugins.retryCatalog("srv");
+  expect(notified).toBe(1);
+  expect(retried).toBe(1);
+});

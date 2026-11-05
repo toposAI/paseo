@@ -11,12 +11,17 @@ import type { InstalledPlugin } from "./types";
 
 type CatalogPlugin = Awaited<ReturnType<DaemonClient["getPluginCatalog"]>>[number];
 
+/** idle = not requested yet. A host with no entry here has never been seen. */
+export type PluginCatalogStatus = "idle" | "loading" | "ready" | "failed" | "unsupported";
+
 export class PluginRegistry {
   private readonly byHost = new Map<string, InstalledPlugin[]>();
   private readonly listeners = new Set<() => void>();
   private snapshot: InstalledPlugin[] = [];
   private readonly disposed = new WeakSet<InstalledPlugin>();
   private readonly evaluationErrors = new Map<string, string>();
+  private readonly statuses = new Map<string, PluginCatalogStatus>();
+  private readonly retryHandlers = new Map<string, () => void>();
 
   constructor(
     private readonly dependencies: {
@@ -31,6 +36,27 @@ export class PluginRegistry {
   };
 
   getSnapshot = (): InstalledPlugin[] => this.snapshot;
+
+  getCatalogStatus = (serverId: string): PluginCatalogStatus =>
+    this.statuses.get(serverId) ?? "idle";
+
+  /** Marks a host's catalog as not (fully) known without discarding what is already installed. */
+  setCatalogStatus(serverId: string, status: PluginCatalogStatus): void {
+    if (this.getCatalogStatus(serverId) === status) return;
+    this.statuses.set(serverId, status);
+    for (const listener of this.listeners) listener();
+  }
+
+  registerRetry(serverId: string, retry: () => void): () => void {
+    this.retryHandlers.set(serverId, retry);
+    return () => {
+      if (this.retryHandlers.get(serverId) === retry) this.retryHandlers.delete(serverId);
+    };
+  }
+
+  retryCatalog(serverId: string): void {
+    this.retryHandlers.get(serverId)?.();
+  }
 
   getEvaluationError(serverId: string, pluginId: string): string | undefined {
     return this.evaluationErrors.get(`${serverId}/${pluginId}`);
@@ -135,6 +161,7 @@ export class PluginRegistry {
       }
     }
     this.byHost.set(serverId, installed);
+    this.statuses.set(serverId, "ready");
     this.publish();
     const installedTimelineBundles = installed
       .filter((plugin) => plugin.timelineTransformers.length > 0)
@@ -146,8 +173,12 @@ export class PluginRegistry {
   }
 
   removeHost(serverId: string): void {
+    this.statuses.delete(serverId);
     const installed = this.byHost.get(serverId);
-    if (!installed) return;
+    if (!installed) {
+      for (const listener of this.listeners) listener();
+      return;
+    }
     for (const plugin of installed) this.dispose(plugin);
     for (const key of this.evaluationErrors.keys()) {
       if (key.startsWith(`${serverId}/`)) this.evaluationErrors.delete(key);
@@ -198,6 +229,14 @@ export function useInstalledPlugin(serverId: string, pluginId: string): Installe
     useInstalledPlugins().find(
       (plugin) => plugin.serverId === serverId && plugin.id === pluginId,
     ) ?? null
+  );
+}
+
+export function usePluginCatalogStatus(serverId: string): PluginCatalogStatus {
+  return useSyncExternalStore(
+    pluginRegistry.subscribe,
+    () => pluginRegistry.getCatalogStatus(serverId),
+    () => pluginRegistry.getCatalogStatus(serverId),
   );
 }
 

@@ -684,6 +684,7 @@ export class PluginService {
   }
 
   private recordFailure(pluginId: string, error: unknown): void {
+    this.logger.warn({ err: error, pluginId }, "Plugin failure recorded");
     this.errors.set(pluginId, error instanceof Error ? error.message : String(error));
   }
 

@@ -105,6 +105,10 @@ import {
   useWorkspaceSetupStore,
 } from "@/stores/workspace-setup-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
+import {
+  forgetLastWorkspaceSelection,
+  getLastWorkspaceSelection,
+} from "@/stores/navigation-active-workspace-store";
 import { useWorkspaceTerminalSessionRetention } from "@/terminal/hooks/use-workspace-terminal-session-retention";
 import type { CheckoutStatusPayload } from "@/git/use-status-query";
 import { confirmDialog } from "@/utils/confirm-dialog";
@@ -1285,6 +1289,25 @@ function useWorkspaceRouteActions(normalizedServerId: string): {
   };
 }
 
+/**
+ * The host index restores the remembered workspace before the list is fetched; once the list
+ * proves it gone, forget it and fall back to the default route instead of a dead end.
+ */
+function useForgetMissingRememberedWorkspace(
+  kind: WorkspaceRouteState["kind"],
+  serverId: string,
+  workspaceId: string,
+): void {
+  const router = useRouter();
+  useEffect(() => {
+    if (kind !== "missing") return;
+    const remembered = getLastWorkspaceSelection();
+    if (remembered?.serverId !== serverId || remembered.workspaceId !== workspaceId) return;
+    forgetLastWorkspaceSelection(remembered);
+    router.replace(buildHostRootRoute(serverId) as Href);
+  }, [kind, router, serverId, workspaceId]);
+}
+
 function useResolvedWorkspaceRouteState(input: {
   serverId: string;
   workspace: WorkspaceDescriptor | null;
@@ -1567,6 +1590,7 @@ function useLastMainPane(input: {
   return lastMainPaneRef;
 }
 
+// oxlint-disable-next-line complexity -- pre-existing at 989c5b701 (integ merge); not touched here
 function WorkspaceScreenContent({
   serverId,
   workspaceId,
@@ -1792,6 +1816,11 @@ function WorkspaceScreenContent({
     hasHydratedWorkspaces,
     recovery: workspaceRecovery.state,
   });
+  useForgetMissingRememberedWorkspace(
+    workspaceRouteState.kind,
+    normalizedServerId,
+    normalizedWorkspaceId,
+  );
   const workspaceHeaderCheckoutState = buildWorkspaceHeaderCheckoutState({
     isCheckoutStatusLoading,
     isError: checkoutQuery.isError,
@@ -3896,6 +3925,7 @@ function WorkspaceScreenContent({
       </View>
     ),
     [
+      // oxlint-disable-next-line react-hooks/exhaustive-deps -- pre-existing at 989c5b701 (integ merge)
       headerTabSwitcher,
       isMobile,
       workspaceDescriptor,

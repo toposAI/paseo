@@ -65,6 +65,17 @@ export function createLastWorkspaceSelectionStore(storage: LastWorkspaceSelectio
     void storage.write(JSON.stringify(normalized)).catch(() => {});
   }
 
+  /** Drops the remembered selection only if it still points at the given workspace. */
+  function forget(target: ActiveWorkspaceSelection) {
+    if (selection?.serverId !== target.serverId || selection.workspaceId !== target.workspaceId) {
+      return;
+    }
+    selection = null;
+    revision += 1;
+    notifyListeners();
+    void storage.clear().catch(() => {});
+  }
+
   function hydrate(): Promise<void> {
     if (hydrationPromise) {
       return hydrationPromise;
@@ -98,6 +109,7 @@ export function createLastWorkspaceSelectionStore(storage: LastWorkspaceSelectio
     hydrate,
     isHydrated: () => hydrated,
     remember,
+    forget,
     subscribe: (listener: () => void): (() => void) => {
       listeners.add(listener);
       return () => {

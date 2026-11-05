@@ -3,7 +3,7 @@ import type { PluginScreenParams, PluginScreenProps } from "@getpaseo/plugin/cli
 import type { PluginTheme } from "@getpaseo/plugin";
 import { X } from "lucide-react-native";
 import { useCallback, useMemo, type ComponentType } from "react";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { HeaderIconBadge } from "@/components/headers/header-icon-badge";
 import { HeaderToggleButton } from "@/components/headers/header-toggle-button";
@@ -18,7 +18,12 @@ import type { ShortcutKey } from "@/utils/format-shortcut";
 import { usePluginHostNavigation } from "./host-navigation";
 import { resolvePluginIcon } from "./icons";
 import { toPluginTheme } from "./theme";
-import { useInstalledPlugin, usePluginInstallations } from "./registry";
+import {
+  pluginRegistry,
+  useInstalledPlugin,
+  usePluginCatalogStatus,
+  usePluginInstallations,
+} from "./registry";
 import { buildPluginSurfaceRoute, pluginScreenParamsFromRoute } from "./routes";
 import {
   legacySidebarItemHostKey,
@@ -33,6 +38,7 @@ import {
   resolvePluginSurfaceContribution,
   type PluginSurfaceContributionIdentity,
 } from "./surface-contribution";
+import { resolveSurfaceNoticeKind, type SurfaceNoticeKind } from "./surface-notice";
 import { resolvePluginPlatform } from "./platform";
 
 const EMPTY_SHORTCUT_KEYS: ShortcutKey[] = [];
@@ -128,6 +134,29 @@ function PluginHostFilter({
   );
 }
 
+const NOTICE_TEXT: Record<SurfaceNoticeKind, string> = {
+  loading: "プラグインを読み込み中…",
+  failed: "プラグインを読み込めませんでした。",
+  offline: "プラグインのホストに接続できません。",
+  unavailable: "このプラグイン画面は利用できません。",
+};
+
+function SurfaceNotice({ kind, onRetry }: { kind: SurfaceNoticeKind; onRetry: () => void }) {
+  const canRetry = kind === "loading" || kind === "failed";
+  return (
+    <View style={styles.notice} testID={`plugin-surface-${kind}`}>
+      <Text style={kind === "loading" ? styles.noticeText : styles.errorText}>
+        {NOTICE_TEXT[kind]}
+      </Text>
+      {canRetry ? (
+        <Pressable accessibilityRole="button" onPress={onRetry} testID="plugin-surface-retry">
+          <Text style={styles.retryText}>再試行</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 export function PluginSurfaceScreen() {
   const routeParams = useLocalSearchParams<{
     serverId?: string | string[];
@@ -147,6 +176,7 @@ export function PluginSurfaceScreen() {
     return { kind: contributionKind, id: contributionId };
   }, [contributionId, contributionKind]);
   const plugin = useInstalledPlugin(serverId, pluginId);
+  const catalogStatus = usePluginCatalogStatus(serverId);
   const installations = usePluginInstallations(pluginId);
   const hosts = useHosts();
   const client = useHostRuntimeClient(serverId);
@@ -173,6 +203,7 @@ export function PluginSurfaceScreen() {
     if (router.canGoBack()) router.back();
     else router.replace(`/h/${encodeURIComponent(serverId)}`);
   }, [serverId]);
+  const retryCatalog = useCallback(() => pluginRegistry.retryCatalog(serverId), [serverId]);
   const layout = useMemo(() => ({ compact, platform: resolvePluginPlatform() }), [compact]);
   const host = useMemo(() => ({ id: serverId, label: hostLabel }), [hostLabel, serverId]);
   const headerLeft = useMemo(
@@ -237,9 +268,10 @@ export function PluginSurfaceScreen() {
             />
           </SurfaceErrorBoundary>
         ) : (
-          <Text style={styles.errorText}>
-            {plugin && surface ? "Plugin host is offline." : "This plugin surface is unavailable."}
-          </Text>
+          <SurfaceNotice
+            kind={resolveSurfaceNoticeKind({ plugin, surface, catalogStatus })}
+            onRetry={retryCatalog}
+          />
         )}
       </View>
     </View>
@@ -254,8 +286,19 @@ const styles = StyleSheet.create((theme) => ({
   body: {
     flex: 1,
   },
+  notice: {
+    padding: theme.spacing[4],
+    gap: theme.spacing[2],
+    alignItems: "flex-start",
+  },
+  noticeText: {
+    color: theme.colors.foregroundMuted,
+  },
   errorText: {
     color: theme.colors.statusDanger,
-    padding: theme.spacing[4],
+  },
+  retryText: {
+    color: theme.colors.foreground,
+    textDecorationLine: "underline",
   },
 }));
