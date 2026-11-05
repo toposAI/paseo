@@ -6,6 +6,9 @@ import { useHostFeatureAvailabilityMap } from "@/runtime/host-features";
 import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { pluginRegistry } from "./registry";
 
+// Hosts whose socket dropped after a catalog was loaded; cleared by the next successful refresh.
+const reconnecting = new Set<string>();
+
 export function PluginCatalogSync({
   serverId,
   client,
@@ -31,13 +34,19 @@ export function PluginCatalogSync({
       return;
     }
     if (!audio) {
+      // No audio engine: the catalog can never load, so say so instead of staying "idle".
       pluginRegistry.removeHost(serverId);
+      pluginRegistry.setCatalogStatus(serverId, "unsupported");
       return;
     }
     if (!connected) {
       // Keep the last catalog while the socket is down: dropping it made every open surface
       // claim "unavailable" until the catalog came back. The reconnect refresh replaces it.
-      pluginRegistry.setCatalogStatus(serverId, "loading");
+      // A host that already has plugins stays "ready"; the surface shows its own offline notice.
+      if (!pluginRegistry.getSnapshot().some((plugin) => plugin.serverId === serverId)) {
+        pluginRegistry.setCatalogStatus(serverId, "loading");
+      }
+      reconnecting.add(serverId);
       return;
     }
     const refresh = (replacePluginId?: string) => {
@@ -54,6 +63,12 @@ export function PluginCatalogSync({
                 client,
                 audio,
               });
+              // Settings may have changed while the socket was down; the events were missed.
+              if (reconnecting.delete(serverId)) {
+                for (const plugin of pluginRegistry.getSnapshot()) {
+                  if (plugin.serverId === serverId) void plugin.queryClient.invalidateQueries();
+                }
+              }
             }
             return undefined;
           })
