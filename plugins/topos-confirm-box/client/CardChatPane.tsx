@@ -284,6 +284,20 @@ function composerPlaceholder(reason: string | null, fallback: boolean): string {
   return fallback ? "総司令塔へ送る" : "投函元スレへ送る";
 }
 
+/** 入力欄の下の案内。送れない理由があるときは「送ります」と言わない(上の理由表示と矛盾しないように)。 */
+function composerHint(
+  reason: string | null,
+  fallback: boolean,
+  answerLabel: string,
+  len: number,
+): string {
+  if (reason) return `${len}/${TEXT_MAX}字`;
+  if (fallback) {
+    return `この欄に答えるスレ: 総司令塔 · ${COORDINATOR_FALLBACK_NOTICE}(${len}/${TEXT_MAX}字)`;
+  }
+  return `この欄に答えるスレ: ${answerLabel} · ${len}/${TEXT_MAX}字(この画面の外のスレにも同じ発言が残ります)`;
+}
+
 // 既存の指摘(complexity 57)。ペインの分割は今回の変更(状態の読み取り)と無関係なので触らない。
 // oxlint-disable-next-line eslint/complexity
 export function CardChatPane({
@@ -1293,11 +1307,7 @@ export function CardChatPane({
         testID="pane-composer"
       />
       <Text style={st.hint}>
-        {fallback
-          ? `この欄に答えるスレ: 総司令塔 · ${COORDINATOR_FALLBACK_NOTICE}(${text.length}/${TEXT_MAX}字)`
-          : `この欄に答えるスレ: ${
-              item?.answerLabel ?? "投函元のスレ"
-            } · ${text.length}/${TEXT_MAX}字(この画面の外のスレにも同じ発言が残ります)`}
+        {composerHint(reason, fallback, item?.answerLabel ?? "投函元のスレ", text.length)}
       </Text>
     </View>
   );
