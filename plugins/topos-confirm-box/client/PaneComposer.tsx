@@ -4,9 +4,10 @@
  * Paseo本体の composer はプラグインから import できない(ChatDock.tsx 冒頭)ため、見た目・高さ・ボタン並びを
  * ここ1か所に集め、複数行は maxHeight 120 まで縦に伸びる。
  */
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
+import { composerHeight } from "../shared/composer-height.js";
 import type { usePaneInputTools } from "./usePaneInputTools.js";
 
 export interface ComposerColors {
@@ -55,6 +56,11 @@ export function PaneComposer({
   testID?: string;
 }): ReactNode {
   const inputRef = useRef<TextInput | null>(null);
+  const [inputW, setInputW] = useState(160);
+  const handleLayout = useCallback(
+    (e: { nativeEvent: { layout: { width: number } } }) => setInputW(e.nativeEvent.layout.width),
+    [],
+  );
   useEffect(() => {
     if (focusSignal) inputRef.current?.focus();
   }, [focusSignal]);
@@ -108,9 +114,10 @@ export function PaneComposer({
       sendText: { color: colors.accentForeground, fontSize: 14, fontWeight: "600" as const },
     };
   }, [colors]);
+  const height = composerHeight(text, inputW - 22);
   const inputStyle = useMemo(
-    () => (disabledReason ? [st.input, st.inputOff] : st.input),
-    [disabledReason, st.input, st.inputOff],
+    () => (disabledReason ? [st.input, st.inputOff, { height }] : [st.input, { height }]),
+    [disabledReason, st.input, st.inputOff, height],
   );
   return (
     <View style={st.row} testID={testID}>
@@ -145,6 +152,7 @@ export function PaneComposer({
         placeholder={disabledReason ?? placeholder}
         placeholderTextColor={colors.foregroundMuted}
         multiline
+        onLayout={handleLayout}
         maxLength={maxLength}
         style={inputStyle}
       />
