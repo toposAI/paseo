@@ -844,17 +844,7 @@ export default function contribute(server: PluginServerContext) {
         noteNote = `・ノート更新 ${file.split("/").pop()}`;
       } else if (!reject) {
         // 箱側の UFC 行で答えたときは、claim しているノートも閉じる(open のまま残さない)
-        const boxItem = readConfirmBox(resolveConfirmBoxDir()).items.find(
-          (i) => i.key === input.key,
-        );
-        const label = boxItem?.options.find((o) => o.id === input.chosen)?.label ?? null;
-        const file = answerClaimingNote(
-          input.key,
-          !!boxItem && boxItem.kind === "box" && isUiFinalCheck(boxItem),
-          input.chosen,
-          label,
-          input.reason,
-        );
+        const file = answerUfcClaimingNote(input.key, input.chosen, input.reason);
         if (file) noteNote = `・ノート更新 ${file.split("/").pop()}`;
       }
       try {
@@ -1709,6 +1699,14 @@ const PENDING_RETRY_WAIT_MS = 5_000;
  * 既定にするが、その選択は端末側にあり插件からは読めない。読めるようになるまでは決まった場所
  * (`~/repos/_coordinator-spawned`、無ければホーム)に置く。`TOPOS_CONCEPT_THREAD_CWD` で差し替え可。
  */
+/** 箱側の UFC 行への回答で、claim しているノートも閉じる。ノートを閉じたらそのファイルのパス、なければ null。 */
+function answerUfcClaimingNote(key: string, chosen: string | null, reason: string): string | null {
+  const boxItem = readConfirmBox(resolveConfirmBoxDir()).items.find((i) => i.key === key);
+  const label = boxItem?.options.find((o) => o.id === chosen)?.label ?? null;
+  const isUfc = !!boxItem && boxItem.kind === "box" && isUiFinalCheck(boxItem);
+  return answerClaimingNote(key, isUfc, chosen, label, reason);
+}
+
 function conceptThreadCwd(env: NodeJS.ProcessEnv = process.env): string {
   const configured = env.TOPOS_CONCEPT_THREAD_CWD?.trim();
   if (configured) return configured;
