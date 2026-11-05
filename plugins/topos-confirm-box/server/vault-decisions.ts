@@ -25,6 +25,7 @@ import { resolveConfirmBoxDir } from "./box.js";
 import { BACKGROUND_MAX, SUMMARY_MAX, SUBJECT_MAX, normalizePriority } from "./normalize.js";
 
 import { VAULT_DECISION_SOURCE } from "../shared/judgment-open.js";
+import { isUiFinalCheck } from "../shared/ui-final-check.js";
 
 export { VAULT_DECISION_SOURCE };
 export const VAULT_KEY_PREFIX = "vault:";
@@ -236,6 +237,8 @@ export interface VaultDecisionRead {
    * Vault ノート化(deposit→ノート)されると、箱側の行を画面に出さない(併存をやめて一本化)。
    */
   claimedKeys: string[];
+  /** legacy_keys の箱側 key → そのノート由来項目の key(UFC 行を残すとき、ノート側の項目を除くのに使う)。 */
+  claimedBy: Record<string, string>;
 }
 
 /**
@@ -324,6 +327,7 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
     const skipped: { name: string; reason: string }[] = [];
     const seen = new Set<string>();
     const claimed = new Set<string>();
+    const claimedBy: Record<string, string> = {};
     let waiting = 0;
     for (const name of names) {
       try {
@@ -334,7 +338,8 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
           continue;
         }
         const text = fs.readFileSync(full, "utf8");
-        for (const k of claimableKeys(text)) claimed.add(k);
+        const claimKeys = claimableKeys(text);
+        for (const k of claimKeys) claimed.add(k);
         const item = parseDecisionNote(text, st.mtimeMs, routing);
         if (!item) continue; // open/waiting_materials 以外・frontmatter なしは対象外(欠落ではない)
         // ファイル名と id が違うノートは、回答の書き先が別ノートになるので出さない
@@ -346,6 +351,7 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
           continue;
         }
         seen.add(item.key ?? "");
+        for (const k of claimKeys) claimedBy[k] = item.key ?? "";
         if (/^waiting_materials$/i.test(splitFrontmatter(text)?.front.state ?? "")) {
           waiting += 1;
           continue;
@@ -363,6 +369,7 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
       skipped,
       waiting,
       claimedKeys: [...claimed],
+      claimedBy,
     };
   } catch (error) {
     return {
@@ -372,6 +379,7 @@ export function readVaultDecisions(env: NodeJS.ProcessEnv = process.env): VaultD
       skipped: [],
       waiting: 0,
       claimedKeys: [],
+      claimedBy: {},
     };
   }
 }
@@ -398,18 +406,26 @@ export function applyVaultSource(
   vaultItems: readonly ConfirmBoxItem[],
   vaultFailed = false,
   claimedKeys: readonly string[] = [],
+  claimedBy: Readonly<Record<string, string>> = {},
 ): { items: ConfirmBoxItem[]; hidden: ConfirmBoxItem[] } {
   const hidden: ConfirmBoxItem[] = [];
   const kept: ConfirmBoxItem[] = [];
   const claimed = new Set(claimedKeys);
+  // 「UIの最終チェック」は画像つきの箱側の行でしか描けないので、ノートがあっても箱側を残し、ノート由来の項目を除く
+  const dropVaultKeys = new Set<string>();
   for (const item of boxItems) {
     // Vault にノートがある(legacy_keys)判断は箱側の行を出さない。permit は対象外
     const claimedByNote =
       item.kind !== "permit" && item.judgment === true && !!item.key && claimed.has(item.key);
-    if (!vaultFailed && (claimedByNote || isHiddenLegacyJudgment(item))) hidden.push(item);
+    if (!vaultFailed && claimedByNote && item.kind === "box" && isUiFinalCheck(item)) {
+      kept.push(item);
+      const noteKey = claimedBy[item.key ?? ""];
+      if (noteKey) dropVaultKeys.add(noteKey);
+    } else if (!vaultFailed && (claimedByNote || isHiddenLegacyJudgment(item))) hidden.push(item);
     else kept.push(item);
   }
-  return { items: [...kept, ...vaultItems], hidden };
+  const vaultKept = vaultItems.filter((v) => !dropVaultKeys.has(v.key ?? ""));
+  return { items: [...kept, ...vaultKept], hidden };
 }
 
 // ---------------------------------------------------------------- 回答の書き戻し

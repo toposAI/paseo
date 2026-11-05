@@ -100,7 +100,7 @@ function ImageViewer({
       body: { flex: 1, padding: 12 },
       img: { width: "100%" as const, flex: 1 },
       notice: { color: "#ffb4a8", fontSize: 12, padding: 8 },
-      dock: { backgroundColor: colors.surface1 },
+      dock: { backgroundColor: colors.surface1, paddingBottom: 12 },
     }),
     [colors.surface1],
   );
@@ -350,6 +350,8 @@ export function UiFinalCheckCard({
   );
 }
 
+const barBox = { paddingTop: 8, paddingBottom: 4, gap: 6 };
+
 /** 一覧の上の件数行。残り(返事待ちを除く)・返事待ち・未読の返事から1タップで戻る。 */
 export function UfcBar({
   styles,
@@ -370,7 +372,7 @@ export function UfcBar({
     return everHad ? <Text style={styles.text}>✓ UIの最終チェックは全部片付きました</Text> : null;
   }
   return (
-    <View style={bullets}>
+    <View style={barBox}>
       <Text style={styles.text}>
         UIの最終チェック 残り {counts.remaining}件 · 返事待ち {counts.waiting}件
       </Text>

@@ -184,6 +184,47 @@ test("箱側の旧 judgment 行・旧形式は隠し、permit と通知は残す
   );
 });
 
+test("UFC 行はノートが claim しても箱側を残し、ノート由来項目を除く。通常 judgment は従来どおり隠す", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(
+    path.join(dir, "j-ufc.md"),
+    NOTE("j-ufc", "open").replace("legacy_keys: []", "legacy_keys: [ufc-1]"),
+  );
+  fs.writeFileSync(
+    path.join(dir, "j-nor.md"),
+    NOTE("j-nor", "open").replace("legacy_keys: []", "legacy_keys: [nor-1]"),
+  );
+  const read = readVaultDecisions({ TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir });
+  const ufc = item({
+    id: "u",
+    judgment: true,
+    key: "ufc-1",
+    group: "ui-final-check",
+    subject: "UIの最終チェック: 画面",
+    options: [
+      { id: "a", label: "OK" },
+      { id: "b", label: "直す" },
+    ],
+  });
+  const nor = item({ id: "n", judgment: true, key: "nor-1" });
+  const r = applyVaultSource([ufc, nor], read.items, false, read.claimedKeys, read.claimedBy);
+  assert.deepEqual(
+    r.items.map((i) => i.id),
+    ["u", ...read.items.filter((i) => i.key === "vault:j-nor").map((i) => i.id)],
+  );
+  assert.equal(read.items.length, 2);
+  assert.deepEqual(
+    r.hidden.map((i) => i.id),
+    ["n"],
+  );
+  // Vault を読めなかったときは変えない(両方残る)
+  const f = applyVaultSource([ufc, nor], [], true, read.claimedKeys, read.claimedBy);
+  assert.deepEqual(
+    f.items.map((i) => i.id),
+    ["u", "n"],
+  );
+});
+
 test("hide イベントで隠れ、unhide で戻る", () => {
   const base = { t: "item", ts: 1, id: "i1", subject: "x" };
   const hidden = foldBoxEvents([base, { t: "hide", id: "i1", ts: 2 }]);

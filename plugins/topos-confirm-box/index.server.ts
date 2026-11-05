@@ -338,7 +338,13 @@ export default function contribute(server: PluginServerContext) {
     // --- 判断項目の出所は Vault の判断ノートに一本化する(箱側の旧 judgment 行は隠すだけ)
     if (vaultSourceEnabled()) {
       const vault = readVaultDecisions();
-      items = applyVaultSource(items, vault.items, vault.error !== null, vault.claimedKeys).items;
+      items = applyVaultSource(
+        items,
+        vault.items,
+        vault.error !== null,
+        vault.claimedKeys,
+        vault.claimedBy,
+      ).items;
       const skippedNote = vault.skipped.length
         ? `(読めず${vault.skipped.length}件: ${vault.skipped
             .slice(0, 3)
