@@ -30,6 +30,11 @@ import {
   cardChatAskRpc,
   cardChatCancelRpc,
   cardChatSayRpc,
+  reportsAckAllRpc,
+  reportsCommentRpc,
+  reportsImageRpc,
+  reportsListRpc,
+  reportsOpenRpc,
   countUrgentUnreadNotifications,
   isNotificationItem,
   priorityArchiveRpc,
@@ -75,6 +80,16 @@ import { feedbackReportsListRpc, countOpenReports } from "./shared/feedback.js";
 import { readFeedbackReports } from "./server/feedback.js";
 import { loadProgressContext } from "./server/feedback-progress.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
+import {
+  commentOnReport,
+  countUnreadReports,
+  listReports,
+  markAllReportsRead,
+  markReportRead,
+  readReportBody,
+  readReportImage,
+  readReportRows,
+} from "./server/reports.js";
 import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/box.js";
 import {
   VAULT_KEY_PREFIX,
@@ -751,6 +766,7 @@ export default function contribute(server: PluginServerContext) {
       failedSources: sources.filter((src) => !src.ok).length,
       notifications: countUrgentUnreadNotifications(items),
       bugs,
+      reports: safeUnreadReports(),
       generatedAt,
     };
   });
@@ -1654,6 +1670,68 @@ export default function contribute(server: PluginServerContext) {
       };
     } catch {
       return { ok: false };
+    }
+  });
+
+  // 報告タブ。保存は reports.jsonl(登録は scripts/report_inbox.py)と report_reads.jsonl(既読)。
+  function safeUnreadReports(): number {
+    try {
+      return countUnreadReports(resolveConfirmBoxDir());
+    } catch {
+      return 0;
+    }
+  }
+
+  server.handle(reportsListRpc, async (_input, ctx) => {
+    const dir = resolveConfirmBoxDir();
+    let names = new Map<string, string>();
+    try {
+      names = new Map((await readLiveThreads(ctx, dir)).map((t) => [t.agentId, t.title]));
+    } catch {
+      // 名前が引けなくても一覧は出す(登録時の名前か id の先頭を使う)
+    }
+    const reports = listReports(dir).map((r) => ({
+      id: r.id,
+      ts: r.ts,
+      title: r.title,
+      path: r.path,
+      url: r.url,
+      agentId: r.agentId,
+      agentName: r.agentName || (r.agentId ? (names.get(r.agentId) ?? r.agentId.slice(0, 8)) : ""),
+      unread: r.unread,
+    }));
+    return { reports, unread: reports.filter((r) => r.unread).length };
+  });
+
+  server.handle(reportsOpenRpc, async (input) => {
+    try {
+      const dir = resolveConfirmBoxDir();
+      const row = readReportRows(dir).find((r) => r.id === input.id);
+      if (!row) return { ok: false, message: "この報告は見つかりません", markdown: "" };
+      const body = readReportBody(row);
+      if (body.ok) markReportRead(dir, row.id);
+      return body;
+    } catch (error) {
+      return { ok: false, message: `開けません: ${(error as Error).message}`, markdown: "" };
+    }
+  });
+
+  server.handle(reportsAckAllRpc, async () => {
+    try {
+      const n = markAllReportsRead(resolveConfirmBoxDir());
+      return { ok: true, message: `報告 ${n}件を既読にしました` };
+    } catch (error) {
+      return { ok: false, message: `記録できません: ${(error as Error).message}` };
+    }
+  });
+
+  server.handle(reportsImageRpc, async (input) => readReportImage(input.path));
+
+  server.handle(reportsCommentRpc, async (input) => {
+    try {
+      return commentOnReport(resolveConfirmBoxDir(), input.id, input.text);
+    } catch (error) {
+      return { ok: false, message: `送れません: ${(error as Error).message}` };
     }
   });
 
