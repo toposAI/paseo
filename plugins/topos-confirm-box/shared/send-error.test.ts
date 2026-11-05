@@ -1,24 +1,29 @@
-import { describe, expect, it } from "vitest";
-import { sendErrorNotice } from "./send-error.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { SEND_FAILED_NOTICE, sendErrorNotice } from "./send-error.js";
 
 describe("sendErrorNotice", () => {
-  it("Agent not found は日本語にしてIDを出さない", () => {
-    const m = sendErrorNotice(new Error("Agent not found: e7c1e629-1111-4222-8333-444455556666"));
-    expect(m).toBe("送れません: 宛先のスレが見つかりません");
+  afterEach(() => vi.restoreAllMocks());
+
+  it("理由が何であっても同じ文言で、IDを画面に出さない", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const raw of [
+      "Agent not found: e7c1e629-1111-4222-8333-444455556666",
+      "timeout for e7c1e629",
+      "child-20261105-160752-6486 は閉じています",
+    ]) {
+      expect(sendErrorNotice(new Error(raw))).toBe(SEND_FAILED_NOTICE);
+    }
+    expect(SEND_FAILED_NOTICE).not.toMatch(/[0-9a-f]{8}/);
   });
-  it("他の理由からも16進のIDを取り除く", () => {
-    const m = sendErrorNotice(new Error("timeout for e7c1e629-1111-4222-8333-444455556666"));
-    expect(m).not.toMatch(/[0-9a-f]{8}/);
+
+  it("詳しい理由はログに残す", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    sendErrorNotice(new Error("Agent not found: e7c1e629"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("Agent not found: e7c1e629"));
   });
-  it("日付や child-… のような名前は消さない", () => {
-    expect(sendErrorNotice(new Error("期限 20261105 を過ぎています"))).toBe(
-      "送れません: 期限 20261105 を過ぎています",
-    );
-    expect(sendErrorNotice(new Error("child-20261105-160752-6486 は閉じています"))).toBe(
-      "送れません: child-20261105-160752-6486 は閉じています",
-    );
-  });
-  it("8桁の短いIDは取り除く", () => {
-    expect(sendErrorNotice(new Error("busy e7c1e629"))).toBe("送れません: busy");
+
+  it("Error以外の値でも落ちない", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(sendErrorNotice("boom")).toBe(SEND_FAILED_NOTICE);
   });
 });
