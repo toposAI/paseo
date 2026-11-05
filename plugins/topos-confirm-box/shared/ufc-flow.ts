@@ -52,9 +52,11 @@ export function ufcCounts(ids: readonly string[], flow: UfcFlow): UfcCounts {
 /** 投函元へ送った: そのカードを返事待ちにして、次の未回答カードへ進む(無ければそのまま)。 */
 export function afterSent(flow: UfcFlow, ids: readonly string[], id: string): UfcFlow {
   const waiting = flow.waiting.includes(id) ? flow.waiting : [...flow.waiting, id];
-  const unread = flow.unread.filter((x) => x !== id);
   const next = nextOpen(ids, id, waiting);
-  return { current: flow.current === id ? (next ?? id) : flow.current, waiting, unread };
+  const current = flow.current === id ? (next ?? id) : flow.current;
+  // 進んだ先のカードは見えているので、未読の印は外す。
+  const unread = flow.unread.filter((x) => x !== id && x !== current);
+  return { current, waiting, unread };
 }
 
 /** 返事が届いた: 見ているカードなら印なし、見ていなければ未読の印。返事待ちは解く。 */
@@ -84,7 +86,6 @@ export function reconcile(
   ids: readonly string[],
 ): UfcFlow {
   const waiting = flow.waiting.filter((x) => ids.includes(x));
-  const unread = flow.unread.filter((x) => ids.includes(x));
   let current = flow.current;
   if (current === null || !ids.includes(current)) {
     // 消えたカードの直後(前の並びでの次)を優先する。
@@ -93,6 +94,7 @@ export function reconcile(
     current =
       after.find((x) => !waiting.includes(x)) ?? nextOpen(ids, null, waiting) ?? ids[0] ?? null;
   }
+  const unread = flow.unread.filter((x) => ids.includes(x) && x !== current);
   if (
     current === flow.current &&
     waiting.length === flow.waiting.length &&

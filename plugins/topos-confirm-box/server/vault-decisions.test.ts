@@ -226,6 +226,27 @@ test("UFC 行はノートが claim しても箱側を残し、ノート由来項
   );
 });
 
+test("answered のノートが claim する UFC 行は復活させず従来どおり隠す", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(
+    path.join(dir, "j-ufc.md"),
+    NOTE("j-ufc", "answered").replace("legacy_keys: []", "legacy_keys: [ufc-1]"),
+  );
+  const read = readVaultDecisions({ TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir });
+  const ufc = item({
+    id: "u",
+    judgment: true,
+    key: "ufc-1",
+    group: "ui-final-check",
+    subject: "UIの最終チェック: 画面",
+  });
+  const r = applyVaultSource([ufc], read.items, false, read.claimedKeys, read.claimedBy);
+  assert.deepEqual(
+    r.hidden.map((i) => i.id),
+    ["u"],
+  );
+});
+
 test("UFC 行への回答は claim しているノートも answered にする。UFC でなければ触らない", () => {
   const dir = tmpDir();
   fs.writeFileSync(

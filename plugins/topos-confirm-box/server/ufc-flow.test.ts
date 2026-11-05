@@ -21,6 +21,16 @@ test("送ったカードは返事待ちで残り、次の未回答へ進む", ()
   assert.deepEqual(ufcCounts(ids, f), { remaining: 2, waiting: 1, unread: 0 });
 });
 
+test("送って進んだ先のカードが未読なら、見えているので印を外す", () => {
+  const f = afterSent({ current: "a", waiting: [], unread: ["b"] }, ids, "a");
+  assert.deepEqual(f, { current: "b", waiting: ["a"], unread: [] });
+});
+
+test("reconcile で見ているカードになった未読は印を外す", () => {
+  const f = reconcile({ current: "a", waiting: [], unread: ["b"] }, ["a", "b"], ["b"]);
+  assert.deepEqual(f, { current: "b", waiting: [], unread: [] });
+});
+
 test("全部返事待ちなら動かない", () => {
   let f = afterSent(start, ids, "a");
   f = afterSent(f, ids, "b");
@@ -49,7 +59,8 @@ test("未読の印から戻ると印が外れ、後回しは返事待ちを飛�
 test("OK で消えたら直後の未回答カードへ。返事待ちの印は消えたカード分を落とす", () => {
   const f: UfcFlow = { current: "b", waiting: ["c"], unread: ["a"] };
   const r = reconcile(f, ids, ["a", "c"]);
-  assert.deepEqual(r, { current: "a", waiting: ["c"], unread: ["a"] });
+  // 次に見るカードが未読だった場合は、見えているので印を外す
+  assert.deepEqual(r, { current: "a", waiting: ["c"], unread: [] });
   assert.deepEqual(reconcile(f, ids, ids), f);
   assert.equal(reconcile(f, ids, []).current, null);
 });

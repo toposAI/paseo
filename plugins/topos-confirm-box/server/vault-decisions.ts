@@ -417,10 +417,11 @@ export function applyVaultSource(
     // Vault にノートがある(legacy_keys)判断は箱側の行を出さない。permit は対象外
     const claimedByNote =
       item.kind !== "permit" && item.judgment === true && !!item.key && claimed.has(item.key);
-    if (!vaultFailed && claimedByNote && item.kind === "box" && isUiFinalCheck(item)) {
+    // ノートがまだ open/waiting(claimedBy にある)ときだけ残す。answered のノートの箱行は従来どおり隠す
+    const noteKey = claimedBy[item.key ?? ""];
+    if (!vaultFailed && claimedByNote && noteKey && item.kind === "box" && isUiFinalCheck(item)) {
       kept.push(item);
-      const noteKey = claimedBy[item.key ?? ""];
-      if (noteKey) dropVaultKeys.add(noteKey);
+      dropVaultKeys.add(noteKey);
     } else if (!vaultFailed && (claimedByNote || isHiddenLegacyJudgment(item))) hidden.push(item);
     else kept.push(item);
   }

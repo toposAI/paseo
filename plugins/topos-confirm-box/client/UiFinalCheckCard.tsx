@@ -274,78 +274,82 @@ export function UiFinalCheckCard({
       </View>
     ) : null;
 
-  if (!isCurrent && !approved) {
-    return (
-      <View style={cell}>
-        <Pressable accessibilityRole="button" style={styles.card} onPress={select}>
-          <View style={rowWrap}>
-            <Text style={chip}>🖼 UIの最終チェック</Text>
-            <Text style={stateChip}>{STATUS_TEXT[status]}</Text>
-          </View>
-          <Text style={styles.subject} numberOfLines={1}>
-            {item.subject}
-          </Text>
-        </Pressable>
-        {pane}
-      </View>
-    );
-  }
+  // 畳む/開くで pane の位置と親を変えない(変えるとペインがマウントし直され、返事の検知と下書きが消える)。
+  const collapsed = !isCurrent && !approved;
   return (
     <View style={cell}>
       <View style={styles.card}>
-        <Pressable accessibilityRole="button" onPress={header}>
-          <View style={rowWrap}>
-            <Text style={chip}>🖼 UIの最終チェック</Text>
-            <Text style={styles.muted}>{approved ? "OK済み" : `${index + 1} / ${total}`}</Text>
-          </View>
-          <Text style={styles.subject}>{item.subject}</Text>
-        </Pressable>
-        <ScrollView horizontal contentContainerStyle={row}>
-          {sources.map((source, i) => (
-            <Thumb key={shotLabel(i, false)} source={source} index={i} onZoom={setZoom} />
-          ))}
-        </ScrollView>
-        {fixes.length > 0 ? (
-          <View style={bullets}>
-            <Text style={styles.muted}>直した点</Text>
-            {fixes.map((f) => (
-              <Text key={f} style={styles.text}>
-                ・{f}
-              </Text>
-            ))}
-          </View>
-        ) : null}
-        {approved ? (
-          <Text style={styles.text}>✓ OK しました</Text>
+        {collapsed ? (
+          <Pressable accessibilityRole="button" onPress={select}>
+            <View style={rowWrap}>
+              <Text style={chip}>🖼 UIの最終チェック</Text>
+              <Text style={stateChip}>{STATUS_TEXT[status]}</Text>
+            </View>
+            <Text style={styles.subject} numberOfLines={1}>
+              {item.subject}
+            </Text>
+          </Pressable>
         ) : (
-          <View style={rowWrap}>
-            <Pressable
-              accessibilityRole="button"
-              disabled={sending}
-              style={styles.btnRec}
-              onPress={ok}
-            >
-              <Text style={styles.btnRecText}>{sending ? "送信中…" : "OK(この見た目でよい)"}</Text>
+          <>
+            <Pressable accessibilityRole="button" onPress={header}>
+              <View style={rowWrap}>
+                <Text style={chip}>🖼 UIの最終チェック</Text>
+                <Text style={styles.muted}>{approved ? "OK済み" : `${index + 1} / ${total}`}</Text>
+              </View>
+              <Text style={styles.subject}>{item.subject}</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" style={styles.btn} onPress={focusInput}>
-              <Text style={styles.btnText}>💬 直してほしい</Text>
-            </Pressable>
-            {nextExists ? (
-              <Pressable accessibilityRole="button" style={styles.btn} onPress={onSkip}>
-                <Text style={styles.btnText}>次へ ›</Text>
-              </Pressable>
+            <ScrollView horizontal contentContainerStyle={row}>
+              {sources.map((source, i) => (
+                <Thumb key={shotLabel(i, false)} source={source} index={i} onZoom={setZoom} />
+              ))}
+            </ScrollView>
+            {fixes.length > 0 ? (
+              <View style={bullets}>
+                <Text style={styles.muted}>直した点</Text>
+                {fixes.map((f) => (
+                  <Text key={f} style={styles.text}>
+                    ・{f}
+                  </Text>
+                ))}
+              </View>
             ) : null}
-          </View>
+            {approved ? (
+              <Text style={styles.text}>✓ OK しました</Text>
+            ) : (
+              <View style={rowWrap}>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={sending}
+                  style={styles.btnRec}
+                  onPress={ok}
+                >
+                  <Text style={styles.btnRecText}>
+                    {sending ? "送信中…" : "OK(この見た目でよい)"}
+                  </Text>
+                </Pressable>
+                <Pressable accessibilityRole="button" style={styles.btn} onPress={focusInput}>
+                  <Text style={styles.btnText}>💬 直してほしい</Text>
+                </Pressable>
+                {nextExists ? (
+                  <Pressable accessibilityRole="button" style={styles.btn} onPress={onSkip}>
+                    <Text style={styles.btnText}>次へ ›</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            )}
+          </>
         )}
         {pane}
       </View>
-      <ImageViewer
-        source={zoomSource}
-        label={zoom === null ? "" : shotLabel(zoom, false)}
-        colors={colors}
-        send={approved ? null : sendImageComment}
-        onClose={closeZoom}
-      />
+      {collapsed ? null : (
+        <ImageViewer
+          source={zoomSource}
+          label={zoom === null ? "" : shotLabel(zoom, false)}
+          colors={colors}
+          send={approved ? null : sendImageComment}
+          onClose={closeZoom}
+        />
+      )}
     </View>
   );
 }

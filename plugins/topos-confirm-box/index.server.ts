@@ -1706,11 +1706,16 @@ function answerUfcClaimingNote(
   reject: boolean,
 ): string {
   if (reject) return "";
-  const boxItem = readConfirmBox(resolveConfirmBoxDir()).items.find((i) => i.key === key);
-  const label = boxItem?.options.find((o) => o.id === chosen)?.label ?? null;
-  const isUfc = !!boxItem && boxItem.kind === "box" && isUiFinalCheck(boxItem);
-  const file = answerClaimingNote(key, isUfc, chosen, label, reason);
-  return file ? `・ノート更新 ${file.split("/").pop()}` : "";
+  // ノートを閉じるのは副作用。失敗しても箱側の回答(正本)は止めない。
+  try {
+    const boxItem = readConfirmBox(resolveConfirmBoxDir()).items.find((i) => i.key === key);
+    const label = boxItem?.options.find((o) => o.id === chosen)?.label ?? null;
+    const isUfc = !!boxItem && boxItem.kind === "box" && isUiFinalCheck(boxItem);
+    const file = answerClaimingNote(key, isUfc, chosen, label, reason);
+    return file ? `・ノート更新 ${file.split("/").pop()}` : "";
+  } catch {
+    return "・ノートは閉じられませんでした(箱側の回答は記録します)";
+  }
 }
 
 function conceptThreadCwd(env: NodeJS.ProcessEnv = process.env): string {
