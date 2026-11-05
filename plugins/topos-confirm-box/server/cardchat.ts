@@ -263,10 +263,18 @@ export function panePending(
   return out;
 }
 
-/** 画面で見た印(`t:"seen"`)。未読の返事を消すためだけに使う(未知の t は他の読み手が無視する)。 */
+/**
+ * 画面で見た印(`t:"seen"`)。未読の返事を消すためだけに使う(未知の t は他の読み手が無視する)。
+ * **既に読んでいる(最後の返事より新しい seen がある)ときは書かない**: 開く・選ぶ・跳ぶたびに
+ * 1行増えると台帳が無制限に伸びるため(2026-11-05 出口レビュー指摘1)。
+ */
 export function markSeen(dir: string, target: CardChatTarget, now: number = Date.now()): boolean {
   const id = (target.id ?? "").trim().slice(0, ID_MAX);
   if (!id) return false;
+  const rows = boxRows(dir);
+  const mine = cardMatcher(targetKeys(target));
+  const { lastReplyAt } = replyStats(rows, mine, now);
+  if (lastReplyAt === null || lastSeenAt(rows, mine) >= lastReplyAt) return false;
   appendLines(dir, chatsFile(), [
     { t: "seen", id, key: (target.key ?? "").trim().slice(0, ID_MAX) || null, ts: now },
   ]);

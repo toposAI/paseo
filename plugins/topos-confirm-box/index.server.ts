@@ -408,11 +408,21 @@ export default function contribute(server: PluginServerContext) {
     const all = [...items, ...permitItems].sort(compareConfirmBoxItems);
     // 返事待ち・未読の印は ask 台帳から作る(画面のメモリに持たない。再読み込み・絞り込み切替で消えない)。
     const now = Date.now();
+    // 台帳が読めない項目は印を載せない(一覧そのものは返す)。印の計算で一覧を落とさない。
     const boxRowsForMarks = boxRows(dir);
     const ufcMarks: Record<string, ReturnType<typeof cardChatMarks>> = {};
     for (const item of all) {
       if (item.kind !== "box" || !isUiFinalCheck(item)) continue;
-      ufcMarks[item.id] = cardChatMarks(dir, { id: item.id, key: item.key }, now, boxRowsForMarks);
+      try {
+        ufcMarks[item.id] = cardChatMarks(
+          dir,
+          { id: item.id, key: item.key },
+          now,
+          boxRowsForMarks,
+        );
+      } catch {
+        // 印なしで続ける(applyMarks は載っていない id を画面側の値のまま残す)
+      }
     }
     return {
       items: all,

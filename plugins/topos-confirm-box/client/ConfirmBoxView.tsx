@@ -503,15 +503,13 @@ export function ConfirmBoxView({
   );
 
   // 「UIの最終チェック」を順に片付ける状態(見ているカード・返事待ち・未読の印)。
-  // **絞り込み(優先度・旧形式・OK済み)で隠れても UFC の並びは変えない**: 以前は visible から
-  // 作っていたため、絞り込みを切り替えると reconcile が「消えた」と見なし、返事待ちの印まで
-  // 落としていた(2026-11-05 修正)。印そのものはサーバの ask 台帳(`ufcMarks`)から作る。
+  // 並び・件数・「次へ」は**画面に出ているカード**(visible)だけで作る。全件から作ると、
+  // 絞り込みで隠れたカードを current に選べてしまい、押しても何も開かない(2026-11-05 出口レビュー指摘5)。
+  // 絞り込みで隠れても印が消えないのは、印の正がサーバの ask 台帳(`ufcMarks`)側にあるため
+  // (戻したときに applyMarks が台帳から載せ直す)。
   const ufcItems = useMemo(
-    () =>
-      (data?.items ?? []).filter(
-        (v) => isUiFinalCheck(v) && v.kind === "box" && v.state !== "approved",
-      ),
-    [data],
+    () => visible.filter((v) => isUiFinalCheck(v) && v.kind === "box" && v.state !== "approved"),
+    [visible],
   );
   const ufcIds = useMemo(() => ufcItems.map((v) => v.id), [ufcItems]);
   const ufc = useUfcFlow(ufcIds, data?.ufcMarks ?? {});

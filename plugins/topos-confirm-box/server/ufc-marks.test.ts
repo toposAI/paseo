@@ -166,6 +166,34 @@ test("7日より古い質問・返事は数えない", () => {
   assert.equal(m.replies, 0);
 });
 
+test("返事待ちの間に見た印を書いても、返事待ちは消えない", () => {
+  const dir = tmp();
+  askFromPane(dir, target, "直してほしい", "agent-1", now - 1000);
+  markSeen(dir, target, now - 500);
+  const m = cardChatMarks(dir, target, now);
+  assert.equal(m.waiting, true);
+  assert.equal(m.unread, false);
+});
+
+test("既に読んでいれば見た印を書き足さない(開くたびに台帳が伸びない)", () => {
+  const dir = tmp();
+  const out = askFromPane(dir, target, "直してほしい", "agent-1", now - 3000);
+  appendRaw(dir, {
+    t: "reply",
+    id: target.id,
+    ts: now - 2000,
+    re: out.replyId,
+    by: "origin_thread",
+    text: "直しました",
+  });
+  const before = fs.readFileSync(eventsFile(dir), "utf-8").split("\n").filter(Boolean).length;
+  assert.equal(markSeen(dir, target, now - 1000), true);
+  assert.equal(markSeen(dir, target, now - 900), false);
+  assert.equal(markSeen(dir, target, now - 800), false);
+  const after = fs.readFileSync(eventsFile(dir), "utf-8").split("\n").filter(Boolean).length;
+  assert.equal(after, before + 1);
+});
+
 test("投函元スレが生きているかは見ない(スレが閉じても返事待ちは残す)", () => {
   const dir = tmp();
   askFromPane(dir, target, "直してほしい", "agent-that-was-archived", now - 1000);
