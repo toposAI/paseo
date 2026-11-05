@@ -186,7 +186,7 @@ function ReportCard({
       {report.progress ? (
         <Text style={report.progress.stage === "stale" ? styles.warn : styles.meta}>
           進捗: {FEEDBACK_PROGRESS_LABEL[report.progress.stage]} — {report.progress.detail}
-          {report.progress.threadId ? `(子スレ ${report.progress.threadId.slice(0, 8)})` : ""}
+          {report.progress.threadId ? "(子スレで対応中)" : ""}
         </Text>
       ) : null}
       {open ? <Text style={styles.text}>{report.text}</Text> : null}
