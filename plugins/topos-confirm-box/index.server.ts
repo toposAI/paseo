@@ -842,10 +842,9 @@ export default function contribute(server: PluginServerContext) {
           reject,
         });
         noteNote = `・ノート更新 ${file.split("/").pop()}`;
-      } else if (!reject) {
+      } else {
         // 箱側の UFC 行で答えたときは、claim しているノートも閉じる(open のまま残さない)
-        const file = answerUfcClaimingNote(input.key, input.chosen, input.reason);
-        if (file) noteNote = `・ノート更新 ${file.split("/").pop()}`;
+        noteNote = answerUfcClaimingNote(input.key, input.chosen, input.reason, reject);
       }
       try {
         appendDecision(resolveConfirmBoxDir(), {
@@ -1704,7 +1703,8 @@ function answerUfcClaimingNote(key: string, chosen: string | null, reason: strin
   const boxItem = readConfirmBox(resolveConfirmBoxDir()).items.find((i) => i.key === key);
   const label = boxItem?.options.find((o) => o.id === chosen)?.label ?? null;
   const isUfc = !!boxItem && boxItem.kind === "box" && isUiFinalCheck(boxItem);
-  return answerClaimingNote(key, isUfc, chosen, label, reason);
+  const file = answerClaimingNote(key, isUfc, chosen, label, reason);
+  return file ? `・ノート更新 ${file.split("/").pop()}` : "";
 }
 
 function conceptThreadCwd(env: NodeJS.ProcessEnv = process.env): string {
