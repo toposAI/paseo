@@ -84,11 +84,13 @@ test("台帳の印: 台帳が返事待ちを解いたら、画面のメモリの
   assert.equal(ufcStatus(f, "a"), "unread");
 });
 
-test("台帳の印: 見ているカードには未読を付けない。台帳に無い項目は画面の印を残す", () => {
+test("台帳の印: 見ているカードの未読も台帳どおり残す(既読は開いた時に台帳へ書く)", () => {
+  // 再読み込み直後は先頭の未回答カードが current になる。ここで印を落とすと、
+  // 再読み込みのたびに「返事が届きました」が消えてしまう(2026-11-05)。
   const f = applyMarks({ current: "a", waiting: ["c"], unread: [] }, ids, {
     a: { waiting: false, unread: true },
   });
-  assert.deepEqual(f, { current: "a", waiting: ["c"], unread: [] });
+  assert.deepEqual(f, { current: "a", waiting: ["c"], unread: ["a"] });
   // 一覧から消えた id は落とす
   const g = applyMarks({ current: "a", waiting: ["z"], unread: [] }, ids, {});
   assert.deepEqual(g, { current: "a", waiting: [], unread: [] });

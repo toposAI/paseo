@@ -523,17 +523,28 @@ export function ConfirmBoxView({
     [ufcItems, ufc.flow.unread],
   );
   const ufcNextExists = nextOpen(ufcIds, ufc.flow.current, ufc.flow.waiting) !== null;
-  // 見ているカードの返事は「見た」と台帳へ書く(未読の印が次の取得から消える)。
+  // 返事を読んだ(=そのカードの会話を開いた)ときだけ「見た」と台帳へ書く。
+  // 画面に並んでいるだけでは既読にしない: 再読み込み・絞り込み切替で印が消えてしまうため(2026-11-05)。
   const seenRpc = useRpc(cardChatSeenRpc);
-  const currentUfc = ufc.flow.current;
-  useEffect(() => {
-    if (!currentUfc || data?.ufcMarks?.[currentUfc]?.unread !== true) return;
-    const target = ufcItems.find((v) => v.id === currentUfc);
-    if (!target) return;
-    void seenRpc({ id: target.id, key: target.key ?? null }).catch(() => {
-      // 書けなくても印が残るだけ(次に開いたときもう一度送る)。
-    });
-  }, [currentUfc, data, ufcItems, seenRpc]);
+  const markSeen = useCallback(
+    (id: string) => {
+      const target = ufcItems.find((v) => v.id === id);
+      if (!target) return;
+      void seenRpc({ id: target.id, key: target.key ?? null }).catch(() => {
+        // 書けなくても印が残るだけ(次に開いたときもう一度送る)。
+      });
+    },
+    [ufcItems, seenRpc],
+  );
+  // 件数行の「💬 返事が届きました」から跳んだときも、その場で読んだものとして扱う。
+  const chooseUfc = ufc.choose;
+  const jumpToUfc = useCallback(
+    (id: string) => {
+      chooseUfc(id);
+      markSeen(id);
+    },
+    [chooseUfc, markSeen],
+  );
 
   const chip = (label: string, on: boolean, press: () => void) => (
     <Pressable key={label} accessibilityRole="button" style={on ? s.btnRec : s.btn} onPress={press}>
@@ -642,7 +653,7 @@ export function ConfirmBoxView({
           counts={ufc.counts}
           everHad={ufc.everHad}
           unreadItems={ufcUnread}
-          onSelect={ufc.choose}
+          onSelect={jumpToUfc}
         />
         <View style={listCols > 1 ? s.grid : s.listBox} onLayout={onListLayout}>
           {visible.map((item) => (
@@ -665,6 +676,7 @@ export function ConfirmBoxView({
                   onSent={ufc.sent}
                   onReply={ufc.replied}
                   onSelect={ufc.choose}
+                  onSeen={markSeen}
                   onSkip={ufc.skip}
                 />
               ) : (

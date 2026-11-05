@@ -13,7 +13,7 @@ import { Image, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import type { ConfirmBoxItem } from "../shared/contract.js";
 import { splitShots, shotLabel, UFC_OK_ID } from "../shared/ui-final-check.js";
 import { ufcStatus } from "../shared/ufc-flow.js";
-import type { UfcCounts, UfcFlow } from "../shared/ufc-flow.js";
+import type { UfcCounts, UfcFlow, UfcStatus } from "../shared/ufc-flow.js";
 import { CardChatPane } from "./CardChatPane.js";
 import type { PaneColors } from "./CardChatPane.js";
 import { PaneComposer } from "./PaneComposer.js";
@@ -142,6 +142,23 @@ const STATUS_TEXT = {
   unread: "💬 返事が届きました",
 } as const;
 
+/**
+ * 開いているカードのヘッダにも状態の印を出す(再読み込みで印が消えないようにするため)。
+ * OK済み・未回答のときは何も出さない。分岐をここへ出してカード本体の複雑さを増やさない。
+ */
+function CardStateMark({
+  approved,
+  status,
+  style,
+}: {
+  approved: boolean;
+  status: UfcStatus;
+  style: object;
+}) {
+  if (approved || status === "open") return null;
+  return <Text style={style}>{STATUS_TEXT[status]}</Text>;
+}
+
 export function UiFinalCheckCard({
   item,
   styles,
@@ -159,6 +176,7 @@ export function UiFinalCheckCard({
   onSent,
   onReply,
   onSelect,
+  onSeen,
   onSkip,
 }: {
   item: ConfirmBoxItem;
@@ -178,6 +196,8 @@ export function UiFinalCheckCard({
   onSent: (id: string) => void;
   onReply: (id: string) => void;
   onSelect: (id: string) => void;
+  /** そのカードの会話を開いた(返事を読んだ)ことを台帳へ書く。 */
+  onSeen: (id: string) => void;
   onSkip: () => void;
 }) {
   const [zoom, setZoom] = useState<number | null>(null);
@@ -199,12 +219,26 @@ export function UiFinalCheckCard({
       setSending(false);
     });
   }, [item, onChoose]);
-  const focusInput = useCallback(() => setFocusN((n) => n + 1), []);
+  // 会話を開く(💬)か、畳んだカードを開いたら「その返事は見た」と台帳へ書く。
+  // 画面に出ているだけでは既読にしない: 再読み込み・絞り込み切替で印が勝手に消えないため。
+  const focusInput = useCallback(() => {
+    onSeen(item.id);
+    setFocusN((n) => n + 1);
+  }, [onSeen, item.id]);
   const closeZoom = useCallback(() => setZoom(null), []);
   const header = useCallback(() => onToggle(item.id), [onToggle, item.id]);
-  const select = useCallback(() => onSelect(item.id), [onSelect, item.id]);
+  const select = useCallback(() => {
+    onSelect(item.id);
+    onSeen(item.id);
+  }, [onSelect, onSeen, item.id]);
   const sent = useCallback(() => onSent(item.id), [onSent, item.id]);
-  const replied = useCallback(() => onReply(item.id), [onReply, item.id]);
+  // 開いているカードに返事が届いたら、その場で読んだものとして台帳へ書く。
+  // 書かないと、再読み込みのたびに未読の印がよみがえる(2026-11-05)。
+  const isOpenCard = flow.current === item.id;
+  const replied = useCallback(() => {
+    onReply(item.id);
+    if (isOpenCard) onSeen(item.id);
+  }, [isOpenCard, onReply, onSeen, item.id]);
   const sendImageComment = useCallback(async (text: string) => {
     const f = sendRef.current;
     return f ? f(text) : false;
@@ -295,6 +329,8 @@ export function UiFinalCheckCard({
               <View style={rowWrap}>
                 <Text style={chip}>🖼 UIの最終チェック</Text>
                 <Text style={styles.muted}>{approved ? "OK済み" : `${index + 1} / ${total}`}</Text>
+                {/* 開いているカードでも、返事待ち・未読は消さずに出す(再読み込みで印が消えないため)。 */}
+                <CardStateMark approved={approved} status={status} style={stateChip} />
               </View>
               <Text style={styles.subject}>{item.subject}</Text>
             </Pressable>
