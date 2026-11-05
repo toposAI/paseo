@@ -60,8 +60,6 @@ export function inferDomain(hint: string): string | null {
   return null;
 }
 
-const shortId = (id: string): string => id.slice(0, 7);
-
 function matchId(candidate: string, id: string): boolean {
   return candidate === id || (candidate.length >= 6 && id.startsWith(candidate));
 }
@@ -77,7 +75,7 @@ function domainOfCoordinator(domains: DomainCoordinators, id: string): string | 
 function labelFor(id: string, title: string | null, domains: DomainCoordinators): string {
   const domain = domainOfCoordinator(domains, id);
   const name = (domain && DOMAIN_LABEL[domain]) || title || "";
-  return name ? `${shortId(id)} ${name}` : shortId(id);
+  return name || "名前のないスレ";
 }
 
 /**

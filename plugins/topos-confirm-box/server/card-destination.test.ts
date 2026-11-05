@@ -24,14 +24,14 @@ test("親があれば親(0378115 の例: F-80司令塔)", () => {
   const d = resolveCardDestination(["0378115"], "j-x", c);
   assert.equal(d.id, F80);
   assert.equal(d.reason, "parent");
-  assert.equal(d.label, "afe8d17 F-80司令塔");
+  assert.equal(d.label, "F-80司令塔");
 });
 
 test("親が司令塔でなくても親へ(上のスレは司令塔とは限らない)", () => {
   const c = ctx([entry({ agentId: CHILD, parentAgentId: PARENT_THREAD, parentTitle: "設計スレ" })]);
   const d = resolveCardDestination(["c1111111"], "j-x", c);
   assert.equal(d.id, PARENT_THREAD);
-  assert.equal(d.label, "9999999 設計スレ");
+  assert.equal(d.label, "設計スレ");
 });
 
 test("親が無ければ投函元本人", () => {
@@ -54,7 +54,7 @@ test("未登録の投函元は未登録と明示し、領域推定で領域司�
   const c = ctx([]);
   const f = resolveCardDestination(["deadbeef"], "j-20261025-f80-proper-noun", c);
   assert.equal(f.id, F80);
-  assert.equal(f.label, "未登録の投函元 → afe8d17 F-80司令塔");
+  assert.equal(f.label, "未登録の投函元 → F-80司令塔");
   const g = resolveCardDestination([], "j-misc", c);
   assert.equal(g.id, GENERAL);
   assert.match(g.label, /未登録/);

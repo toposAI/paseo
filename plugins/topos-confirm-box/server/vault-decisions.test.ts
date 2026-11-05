@@ -458,7 +458,7 @@ test("チャット宛先: 登録簿の親スレを threadRef にし、答える�
     kind: "paseo_agent",
     id: "afe8d176-d92c-4cb2-933b-8dfe790d3c20",
   });
-  assert.equal(parsed.answerLabel, "afe8d17 F-80司令塔");
+  assert.equal(parsed.answerLabel, "F-80司令塔");
 });
 
 test("スレを開く宛先: threads の1本目(=投函元)を threadId に入れる(thread_ref=親 とは別)", () => {

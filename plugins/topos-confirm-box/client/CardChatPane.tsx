@@ -32,6 +32,7 @@
  *   (判定はペインに今開いている相手1本だけなので、`server/thread-liveness.ts` のように全件を辿らない)。
  * 引けなかったときは**印を付けない**(不明を「閉じています」と言い換えない)。
  */
+import { sendErrorNotice } from "../shared/send-error.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -761,8 +762,13 @@ export function CardChatPane({
   const lastLine = lines.at(-1);
   const lastKey = lastLine ? `${lastLine.id}:${lastLine.text.length}` : "";
   useEffect(() => {
+    // 画像・折り返しで高さが後から伸びても最下部が入力欄に隠れないよう、遅れてもう一度末尾へ寄せる。
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
-    return () => clearTimeout(timer);
+    const settle = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 350);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(settle);
+    };
   }, [lastKey]);
 
   // oxlint-disable-next-line eslint/complexity
@@ -819,7 +825,7 @@ export function CardChatPane({
         ok = true;
         sentOnce.current = true;
       } catch (e) {
-        setNotice(`送れません: ${e instanceof Error ? e.message : String(e)}`);
+        setNotice(sendErrorNotice(e));
         // 入力を失わない(書き直しや再添付を強いない)。
         if (own) {
           setText((cur) => (cur ? cur : t));
@@ -1031,7 +1037,7 @@ export function CardChatPane({
       },
       scroll: { flex: 1 },
       scrollEmbedded: { maxHeight: 300 },
-      scrollBody: { padding: 12, gap: 10 },
+      scrollBody: { padding: 12, paddingBottom: 24, gap: 10 },
       context: {
         backgroundColor: colors.surface1,
         borderColor: colors.border,
@@ -1264,7 +1270,7 @@ export function CardChatPane({
         {fallback
           ? `この欄に答えるスレ: 総司令塔 · ${COORDINATOR_FALLBACK_NOTICE}(${text.length}/${TEXT_MAX}字)`
           : `この欄に答えるスレ: ${
-              item?.answerLabel ?? (agentId ? agentId.slice(0, 7) : "不明")
+              item?.answerLabel ?? "投函元のスレ"
             } · ${text.length}/${TEXT_MAX}字(この画面の外のスレにも同じ発言が残ります)`}
       </Text>
     </View>

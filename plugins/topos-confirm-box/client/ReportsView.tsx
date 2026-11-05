@@ -54,7 +54,7 @@ function describe(error: string | null, loaded: boolean, total: number, unread: 
 }
 
 function origin(r: ReportRowView): string {
-  return r.agentId ? `${r.agentName || r.agentId.slice(0, 8)}` : "報告元不明";
+  return r.agentId ? `${r.agentName || "名前のないスレ"}` : "報告元不明";
 }
 
 // oxlint-disable-next-line eslint/complexity

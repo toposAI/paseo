@@ -64,15 +64,14 @@ function isOpen(agent: DirectoryAgent | undefined): agent is DirectoryAgent {
   return agent !== undefined && agent.archivedAt == null && agent.status !== "closed";
 }
 
-function noticeFor(reason: ThreadTargetReason, agentId: string | null): string | null {
-  const who = agentId ? agentId.slice(0, 8) : "";
+function noticeFor(reason: ThreadTargetReason): string | null {
   switch (reason) {
     case "domain-coordinator":
-      return `カードのスレが一覧に無いので、この話題の司令塔(${who})を開きます`;
+      return `カードのスレが一覧に無いので、この話題の司令塔を開きます`;
     case "destination":
-      return `カードのスレが閉じているので、このカードに答えるスレ(${who})を開きます`;
+      return `カードのスレが閉じているので、このカードに答えるスレを開きます`;
     case "general-coordinator":
-      return `カードのスレが一覧に無いので、総司令塔(${who})を開きます`;
+      return `カードのスレが一覧に無いので、総司令塔を開きます`;
     case "no-live-thread":
       return "カードのスレが一覧に無く、代わりのスレも見つからないので全画面で開きます";
     default:
@@ -81,7 +80,7 @@ function noticeFor(reason: ThreadTargetReason, agentId: string | null): string |
 }
 
 function pick(agentId: string, reason: ThreadTargetReason): ThreadTargetResult {
-  return { agentId, reason, notice: noticeFor(reason, agentId) };
+  return { agentId, reason, notice: noticeFor(reason) };
 }
 
 /**
@@ -111,7 +110,7 @@ export function resolveThreadTarget(input: ThreadTargetInput): ThreadTargetResul
   return {
     agentId: input.target,
     reason: "no-live-thread",
-    notice: noticeFor("no-live-thread", input.target),
+    notice: noticeFor("no-live-thread"),
   };
 }
 
