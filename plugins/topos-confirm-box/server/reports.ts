@@ -80,7 +80,7 @@ export function readReportRows(dir: string): ReportRow[] {
       title: str(r.title) || "(題名なし)",
       path: str(r.path),
       rel: str(r.rel),
-      url: str(r.url),
+      url: /^https?:\/\//i.test(str(r.url)) ? str(r.url) : "",
       sha: str(r.sha),
       agentId: str(r.agent_id).trim(),
       agentName: str(r.agent_name).trim(),
@@ -122,6 +122,7 @@ function appendLines(dir: string, file: string, objs: readonly unknown[]): void 
 export function markReportRead(dir: string, id: string, now: number = Date.now()): boolean {
   const row = readReportRows(dir).find((r) => r.id === id);
   if (!row) return false;
+  if (readShas(dir).get(id) === row.sha) return true; // 既に同じ版を既読済みなら行を足さない
   appendLines(dir, REPORT_READS_FILE, [{ t: "read", id, sha: row.sha, ts: now }]);
   return true;
 }
