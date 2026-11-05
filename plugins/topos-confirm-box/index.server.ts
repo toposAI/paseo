@@ -1706,7 +1706,7 @@ export default function contribute(server: PluginServerContext) {
     try {
       names = new Map((await readLiveThreads(ctx, dir)).map((t) => [t.agentId, t.title]));
     } catch {
-      // 名前が引けなくても一覧は出す(登録時の名前か id の先頭を使う)
+      // 名前が引けなくても一覧は出す(登録時の名前か汎用名。内部IDは出さない)
     }
     const reports = listReports(dir).map((r) => ({
       id: r.id,
@@ -1715,7 +1715,7 @@ export default function contribute(server: PluginServerContext) {
       path: r.path,
       url: r.url,
       agentId: r.agentId,
-      agentName: r.agentName || (r.agentId ? (names.get(r.agentId) ?? r.agentId.slice(0, 8)) : ""),
+      agentName: r.agentName || (r.agentId ? (names.get(r.agentId) ?? "報告元のスレ") : ""),
       unread: r.unread,
     }));
     return { reports, unread: reports.filter((r) => r.unread).length };

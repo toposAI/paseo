@@ -1269,7 +1269,7 @@ export function CardChatPane({
         {fallback
           ? `この欄に答えるスレ: 総司令塔 · ${COORDINATOR_FALLBACK_NOTICE}(${text.length}/${TEXT_MAX}字)`
           : `この欄に答えるスレ: ${
-              item?.answerLabel ?? (agentId ? agentId.slice(0, 7) : "不明")
+              item?.answerLabel ?? "投函元のスレ"
             } · ${text.length}/${TEXT_MAX}字(この画面の外のスレにも同じ発言が残ります)`}
       </Text>
     </View>
