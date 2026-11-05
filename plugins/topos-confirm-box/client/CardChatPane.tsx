@@ -358,6 +358,8 @@ export function CardChatPane({
   const [topicView, setTopicView] = useState(true);
   const [topicMsgs, setTopicMsgs] = useState<TopicMessage[]>([]);
   const [topicPending, setTopicPending] = useState<TopicPending[]>([]);
+  // 話題の履歴を1回読めたか。読む前の空表示を「返事なし」の基準にしない(誤判定の防止)。
+  const [topicReady, setTopicReady] = useState(false);
   const askRpc = useRpc(cardChatAskRpc);
   const cancelRpc = useRpc(cardChatCancelRpc);
   const listRpc = useRpc(cardChatListRpc);
@@ -617,6 +619,7 @@ export function CardChatPane({
       if (gen !== topicGen.current) return;
       setTopicMsgs(res.messages);
       setTopicPending(res.pending ?? []);
+      setTopicReady(true);
     } catch {
       // 読めなかった回は前の表示を保つ。
     }
@@ -625,6 +628,7 @@ export function CardChatPane({
     topicGen.current += 1;
     setTopicMsgs([]);
     setTopicPending([]);
+    setTopicReady(false);
     if (!topic) return undefined;
     void refreshTopic();
     const timer = setInterval(() => void refreshTopic(), TOPIC_POLL_MS);
@@ -868,12 +872,28 @@ export function CardChatPane({
   const sendPress = useCallback(() => void send(), [send]);
   if (sendRef) sendRef.current = send;
   // 送った後に相手の返事が増えたら知らせる(履歴の初回読み込みでは鳴らさない)。
-  const replyCount = (topic ? topicMsgs : lines).filter((l) => l.role !== "user").length;
-  const seenReplies = useRef(replyCount);
+  // 受領(ack)は返事ではないので数えない(以前は非user行をすべて数え、ackで未読の印が付いていた)。
+  // 履歴を読む前の空表示を基準にすると、読み込みで増えた分を「届いた」と誤判定するので、
+  // 読み込み後の最初の描画で基準を取り直す(5b/7 の誤判定)。
+  const historyLoaded = topic ? topicReady : historyReady;
+  const replyCount = (topic ? topicMsgs : lines).filter(
+    (l) => l.role === "reply" && l.by !== "ack",
+  ).length;
+  const seenReplies = useRef(0);
+  const repliesBaselined = useRef(false);
   useEffect(() => {
+    if (!historyLoaded) {
+      repliesBaselined.current = false;
+      return;
+    }
+    if (!repliesBaselined.current) {
+      repliesBaselined.current = true;
+      seenReplies.current = replyCount;
+      return;
+    }
     if (replyCount > seenReplies.current && sentOnce.current) onReply?.();
     seenReplies.current = replyCount;
-  }, [replyCount, onReply]);
+  }, [replyCount, historyLoaded, onReply]);
   // Enter で送信(PC幅のWebだけ。IME変換確定・Shift+Enter・iPhone は送らず改行のまま)。
   const onKeyPress = useCallback(
     (e: {

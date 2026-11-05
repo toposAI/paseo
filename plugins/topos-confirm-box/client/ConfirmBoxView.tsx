@@ -28,6 +28,7 @@ import {
   confirmBoxDecideRpc,
   confirmBoxListRpc,
   confirmBoxPermitRpc,
+  cardChatSeenRpc,
   countOpen,
   judgmentTabRows,
   rejectComment,
@@ -502,12 +503,18 @@ export function ConfirmBoxView({
   );
 
   // 「UIの最終チェック」を順に片付ける状態(見ているカード・返事待ち・未読の印)。
+  // **絞り込み(優先度・旧形式・OK済み)で隠れても UFC の並びは変えない**: 以前は visible から
+  // 作っていたため、絞り込みを切り替えると reconcile が「消えた」と見なし、返事待ちの印まで
+  // 落としていた(2026-11-05 修正)。印そのものはサーバの ask 台帳(`ufcMarks`)から作る。
   const ufcItems = useMemo(
-    () => visible.filter((v) => isUiFinalCheck(v) && v.kind === "box" && v.state !== "approved"),
-    [visible],
+    () =>
+      (data?.items ?? []).filter(
+        (v) => isUiFinalCheck(v) && v.kind === "box" && v.state !== "approved",
+      ),
+    [data],
   );
   const ufcIds = useMemo(() => ufcItems.map((v) => v.id), [ufcItems]);
-  const ufc = useUfcFlow(ufcIds);
+  const ufc = useUfcFlow(ufcIds, data?.ufcMarks ?? {});
   const ufcUnread = useMemo(
     () =>
       ufcItems
@@ -516,6 +523,17 @@ export function ConfirmBoxView({
     [ufcItems, ufc.flow.unread],
   );
   const ufcNextExists = nextOpen(ufcIds, ufc.flow.current, ufc.flow.waiting) !== null;
+  // 見ているカードの返事は「見た」と台帳へ書く(未読の印が次の取得から消える)。
+  const seenRpc = useRpc(cardChatSeenRpc);
+  const currentUfc = ufc.flow.current;
+  useEffect(() => {
+    if (!currentUfc || data?.ufcMarks?.[currentUfc]?.unread !== true) return;
+    const target = ufcItems.find((v) => v.id === currentUfc);
+    if (!target) return;
+    void seenRpc({ id: target.id, key: target.key ?? null }).catch(() => {
+      // 書けなくても印が残るだけ(次に開いたときもう一度送る)。
+    });
+  }, [currentUfc, data, ufcItems, seenRpc]);
 
   const chip = (label: string, on: boolean, press: () => void) => (
     <Pressable key={label} accessibilityRole="button" style={on ? s.btnRec : s.btn} onPress={press}>

@@ -316,26 +316,35 @@ export function UiFinalCheckCard({
             {approved ? (
               <Text style={styles.text}>✓ OK しました</Text>
             ) : (
-              <View style={rowWrap}>
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={sending}
-                  style={styles.btnRec}
-                  onPress={ok}
-                >
-                  <Text style={styles.btnRecText}>
-                    {sending ? "送信中…" : "OK(この見た目でよい)"}
-                  </Text>
-                </Pressable>
-                <Pressable accessibilityRole="button" style={styles.btn} onPress={focusInput}>
-                  <Text style={styles.btnText}>💬 直してほしい</Text>
-                </Pressable>
-                {nextExists ? (
-                  <Pressable accessibilityRole="button" style={styles.btn} onPress={onSkip}>
-                    <Text style={styles.btnText}>次へ ›</Text>
+              <>
+                <View style={rowWrap}>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={sending}
+                    style={styles.btnRec}
+                    onPress={ok}
+                  >
+                    <Text style={styles.btnRecText}>
+                      {sending ? "送信中…" : "OK(この見た目でよい)"}
+                    </Text>
                   </Pressable>
+                  <Pressable accessibilityRole="button" style={styles.btn} onPress={focusInput}>
+                    <Text style={styles.btnText}>💬 直してほしい</Text>
+                  </Pressable>
+                  {nextExists ? (
+                    <Pressable accessibilityRole="button" style={styles.btn} onPress={onSkip}>
+                      <Text style={styles.btnText}>次へ ›</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+                {/* 投函元のスレがもう無いカードでも「返事待ち」は消さない(返事は総司令塔へ振り替わる)。
+                    そのことが分かるよう、印の意味だけ1行で添える。 */}
+                {status === "waiting" && agentId === null ? (
+                  <Text style={styles.muted}>
+                    投函元のスレが無いので、返事は総司令塔から届きます
+                  </Text>
                 ) : null}
-              </View>
+              </>
             )}
           </>
         )}

@@ -263,6 +263,96 @@ export function panePending(
   return out;
 }
 
+/** 画面で見た印(`t:"seen"`)。未読の返事を消すためだけに使う(未知の t は他の読み手が無視する)。 */
+export function markSeen(dir: string, target: CardChatTarget, now: number = Date.now()): boolean {
+  const id = (target.id ?? "").trim().slice(0, ID_MAX);
+  if (!id) return false;
+  appendLines(dir, chatsFile(), [
+    { t: "seen", id, key: (target.key ?? "").trim().slice(0, ID_MAX) || null, ts: now },
+  ]);
+  return true;
+}
+
+export interface CardChatMarks {
+  /** 送ったが、まだ ack 以外の返事が無い質問がある(＝返事待ち)。 */
+  waiting: boolean;
+  /** 返事が届いていて、まだ画面で見ていない(＝未読)。 */
+  unread: boolean;
+  /** 届いた返事の数(受領 ack は数えない)。 */
+  replies: number;
+  /** いちばん新しい返事の時刻(無ければ null)。 */
+  lastReplyAt: number | null;
+}
+
+/**
+ * 一覧に出す印(返事待ち・未読)を**台帳から**作る。画面のメモリではなく毎回ここから作るので、
+ * 再読み込み・絞り込み切替でも消えない(2026-11-05 ユーザー決定)。
+ * 7日より古い質問・返事は数えない(Python `QUESTION_MAX_AGE_S` と同じ)。
+ */
+export function cardChatMarks(
+  dir: string,
+  target: CardChatTarget,
+  now: number = Date.now(),
+  preRead?: Record<string, unknown>[],
+): CardChatMarks {
+  const rows = preRead ?? boxRows(dir);
+  const mine = cardMatcher(targetKeys(target));
+  const waiting = panePending(dir, target, now, rows).length > 0;
+  const { replies, lastReplyAt } = replyStats(rows, mine, now);
+  const seenAt = lastSeenAt(rows, mine);
+  // 返事待ちが残っている間は「届いた」とは言わない(まだ次の返事を待っている)。
+  const unread = !waiting && lastReplyAt !== null && lastReplyAt > seenAt;
+  return { waiting, unread, replies, lastReplyAt };
+}
+
+type RowMatcher = (row: Record<string, unknown>) => boolean;
+
+/** この項目から出したペイン質問のID(返事の `re` 照合用)。 */
+function askedIds(rows: Record<string, unknown>[], mine: RowMatcher): Set<string> {
+  const asked = new Set<string>();
+  for (const r of rows) {
+    if (r.t !== "chat" || r.source !== "pane" || !mine(r)) continue;
+    const re = field(r, "client_message_id");
+    if (re) asked.add(re);
+  }
+  return asked;
+}
+
+/** この項目の画面で最後に見た時刻(無ければ 0)。 */
+function lastSeenAt(rows: Record<string, unknown>[], mine: RowMatcher): number {
+  let seenAt = 0;
+  for (const r of rows) {
+    if (r.t !== "seen" || typeof r.ts !== "number" || !mine(r)) continue;
+    seenAt = Math.max(seenAt, r.ts);
+  }
+  return seenAt;
+}
+
+/** 届いた返事の数と最新時刻。受領(ack)は返事に数えない。7日超は数えない。 */
+function replyStats(
+  rows: Record<string, unknown>[],
+  mine: RowMatcher,
+  now: number,
+): { replies: number; lastReplyAt: number | null } {
+  const asked = askedIds(rows, mine);
+  let replies = 0;
+  let lastReplyAt: number | null = null;
+  for (const r of rows) {
+    if (!isCountableReply(r, now)) continue;
+    // 返事は「この項目宛」か「この項目から出した質問への返事」だけ数える。
+    if (!mine(r) && !asked.has(field(r, "re"))) continue;
+    replies += 1;
+    const ts = r.ts as number;
+    if (lastReplyAt === null || ts > lastReplyAt) lastReplyAt = ts;
+  }
+  return { replies, lastReplyAt };
+}
+
+function isCountableReply(r: Record<string, unknown>, now: number): boolean {
+  if (r.t !== "reply" || typeof r.ts !== "number" || field(r, "by") === "ack") return false;
+  return r.ts >= now - PANE_MAX_AGE_MS;
+}
+
 /** 箱のイベント列から、その項目の質問と返事。返事は `re`(質問ID)でも照合する。 */
 function boxMessages(rows: Record<string, unknown>[], keys: string[]): CardChatMessage[] {
   const mine = cardMatcher(keys);

@@ -79,6 +79,36 @@ export function skipToNext(flow: UfcFlow, ids: readonly string[]): UfcFlow {
   return next === null ? flow : select(flow, next);
 }
 
+/** サーバの ask 台帳から来た印(項目idごと)。画面はこれを写すだけで、自分では持たない。 */
+export interface UfcMark {
+  waiting: boolean;
+  unread: boolean;
+}
+
+export type UfcMarks = Readonly<Record<string, UfcMark>>;
+
+/**
+ * 台帳の印を流れに重ねる(2026-11-05 ユーザー決定: 返事待ち・未読はサーバの ask 台帳が正)。
+ * - 台帳に載っている項目は台帳の値を使う(再読み込み・絞り込み切替でも消えない)。
+ * - 台帳に載っていない項目(送った直後で一覧を取り直す前)は、画面側の印をそのまま残す。
+ * - 見ているカードには未読の印を付けない(すでに見えている)。
+ */
+export function applyMarks(flow: UfcFlow, ids: readonly string[], marks: UfcMarks): UfcFlow {
+  const waiting = ids.filter((id) => (id in marks ? marks[id].waiting : flow.waiting.includes(id)));
+  const unread = ids.filter(
+    (id) => id !== flow.current && (id in marks ? marks[id].unread : flow.unread.includes(id)),
+  );
+  if (
+    waiting.length === flow.waiting.length &&
+    unread.length === flow.unread.length &&
+    waiting.every((id, i) => flow.waiting[i] === id) &&
+    unread.every((id, i) => flow.unread[i] === id)
+  ) {
+    return flow;
+  }
+  return { ...flow, waiting, unread };
+}
+
 /** 一覧が変わった(OK で消えた・新着)。消えたカードの印を落とし、見ているカードが消えたら次へ。 */
 export function reconcile(
   flow: UfcFlow,

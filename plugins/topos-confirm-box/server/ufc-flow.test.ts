@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   afterReply,
   afterSent,
+  applyMarks,
   nextOpen,
   reconcile,
   select,
@@ -63,4 +64,32 @@ test("OK で消えたら直後の未回答カードへ。返事待ちの印は�
   assert.deepEqual(r, { current: "a", waiting: ["c"], unread: [] });
   assert.deepEqual(reconcile(f, ids, ids), f);
   assert.equal(reconcile(f, ids, []).current, null);
+});
+
+test("台帳の印: 返事待ち・未読はサーバの ask 台帳が正(再読み込みしても残る)", () => {
+  // 画面のメモリは空(再読み込み直後)でも、台帳に返事待ちがあるカードは返事待ちで出る。
+  const f = applyMarks({ current: "b", waiting: [], unread: [] }, ids, {
+    a: { waiting: true, unread: false },
+    b: { waiting: false, unread: false },
+  });
+  assert.deepEqual(f, { current: "b", waiting: ["a"], unread: [] });
+  assert.equal(ufcCounts(ids, f).waiting, 1);
+});
+
+test("台帳の印: 台帳が返事待ちを解いたら、画面のメモリの印も消える", () => {
+  const f = applyMarks({ current: "b", waiting: ["a"], unread: [] }, ids, {
+    a: { waiting: false, unread: true },
+  });
+  assert.deepEqual(f, { current: "b", waiting: [], unread: ["a"] });
+  assert.equal(ufcStatus(f, "a"), "unread");
+});
+
+test("台帳の印: 見ているカードには未読を付けない。台帳に無い項目は画面の印を残す", () => {
+  const f = applyMarks({ current: "a", waiting: ["c"], unread: [] }, ids, {
+    a: { waiting: false, unread: true },
+  });
+  assert.deepEqual(f, { current: "a", waiting: ["c"], unread: [] });
+  // 一覧から消えた id は落とす
+  const g = applyMarks({ current: "a", waiting: ["z"], unread: [] }, ids, {});
+  assert.deepEqual(g, { current: "a", waiting: [], unread: [] });
 });
