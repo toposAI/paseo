@@ -78,6 +78,7 @@ import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.j
 import { appendDecision, readConfirmBox, resolveConfirmBoxDir } from "./server/box.js";
 import {
   VAULT_KEY_PREFIX,
+  answerClaimingNote,
   answerVaultDecision,
   applyVaultSource,
   bundleNotifications,
@@ -214,6 +215,7 @@ import {
   questionResponse,
 } from "./server/permits.js";
 import type { PermitAgentLike } from "./server/permits.js";
+import { isUiFinalCheck } from "./shared/ui-final-check.js";
 import {
   answerCard,
   holdCard,
@@ -840,6 +842,20 @@ export default function contribute(server: PluginServerContext) {
           reject,
         });
         noteNote = `・ノート更新 ${file.split("/").pop()}`;
+      } else if (!reject) {
+        // 箱側の UFC 行で答えたときは、claim しているノートも閉じる(open のまま残さない)
+        const boxItem = readConfirmBox(resolveConfirmBoxDir()).items.find(
+          (i) => i.key === input.key,
+        );
+        const label = boxItem?.options.find((o) => o.id === input.chosen)?.label ?? null;
+        const file = answerClaimingNote(
+          input.key,
+          !!boxItem && boxItem.kind === "box" && isUiFinalCheck(boxItem),
+          input.chosen,
+          label,
+          input.reason,
+        );
+        if (file) noteNote = `・ノート更新 ${file.split("/").pop()}`;
       }
       try {
         appendDecision(resolveConfirmBoxDir(), {

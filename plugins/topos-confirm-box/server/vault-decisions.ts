@@ -562,6 +562,26 @@ export function answerVaultDecision(
   return file;
 }
 
+/**
+ * 箱側の「UIの最終チェック」行への回答で、同じ判断を claim している(legacy_keys)ノートも answered にする。
+ * UFC 行は箱側の行のまま答えるので、これが無いとノートが open のまま残る。
+ * ノートが無い(claim していない)ときは null。`isUfc` は呼び出し側が箱側の行から判定する。
+ */
+export function answerClaimingNote(
+  boxKey: string,
+  isUfc: boolean,
+  chosenId: string | null,
+  chosenLabel: string | null,
+  reason: string,
+  now: Date = new Date(),
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  if (!isUfc || boxKey.startsWith(VAULT_KEY_PREFIX)) return null;
+  const noteKey = readVaultDecisions(env).claimedBy[boxKey];
+  if (!noteKey) return null;
+  return answerVaultDecision({ key: noteKey, chosenId, chosenLabel, reason }, now, env);
+}
+
 // ---------------------------------------------------------------- 通知の束ね
 
 /**

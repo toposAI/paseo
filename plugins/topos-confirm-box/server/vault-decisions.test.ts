@@ -7,6 +7,7 @@ import type { ConfirmBoxItem } from "../shared/contract.js";
 import { isNotificationItem } from "../shared/contract.js";
 import { foldBoxEvents } from "./box.js";
 import {
+  answerClaimingNote,
   answerVaultDecision,
   applyVaultSource,
   bundleNotifications,
@@ -223,6 +224,22 @@ test("UFC 行はノートが claim しても箱側を残し、ノート由来項
     f.items.map((i) => i.id),
     ["u", "n"],
   );
+});
+
+test("UFC 行への回答は claim しているノートも answered にする。UFC でなければ触らない", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(
+    path.join(dir, "j-ufc.md"),
+    NOTE("j-ufc", "open").replace("legacy_keys: []", "legacy_keys: [ufc-1]"),
+  );
+  const env = { TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir };
+  assert.equal(answerClaimingNote("ufc-1", false, "a", "OK", "", new Date(), env), null);
+  assert.equal(answerClaimingNote("vault:j-ufc", true, "a", "OK", "", new Date(), env), null);
+  assert.equal(answerClaimingNote("none", true, "a", "OK", "", new Date(), env), null);
+  assert.match(fs.readFileSync(path.join(dir, "j-ufc.md"), "utf8"), /^state: open$/m);
+  const file = answerClaimingNote("ufc-1", true, "a", "OK", "", new Date(), env);
+  assert.equal(path.basename(file ?? ""), "j-ufc.md");
+  assert.match(fs.readFileSync(path.join(dir, "j-ufc.md"), "utf8"), /^state: answered$/m);
 });
 
 test("hide イベントで隠れ、unhide で戻る", () => {
