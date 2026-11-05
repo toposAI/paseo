@@ -31,6 +31,7 @@ import {
   cardChatAskRpc,
   cardChatCancelRpc,
   cardChatSayRpc,
+  cardChatSeenRpc,
   reportsAckAllRpc,
   reportsCommentRpc,
   reportsImageRpc,
@@ -202,7 +203,9 @@ import {
   askFromPane,
   boxRows,
   cancelFromPane,
+  cardChatMarks,
   cardExists,
+  markSeen,
   panePending,
   readCardChat,
   sayToCard,
@@ -402,11 +405,31 @@ export default function contribute(server: PluginServerContext) {
       count: permitItems.length,
     };
 
+    const all = [...items, ...permitItems].sort(compareConfirmBoxItems);
+    // 返事待ち・未読の印は ask 台帳から作る(画面のメモリに持たない。再読み込み・絞り込み切替で消えない)。
+    const now = Date.now();
+    // 台帳が読めない項目は印を載せない(一覧そのものは返す)。印の計算で一覧を落とさない。
+    const boxRowsForMarks = boxRows(dir);
+    const ufcMarks: Record<string, ReturnType<typeof cardChatMarks>> = {};
+    for (const item of all) {
+      if (item.kind !== "box" || !isUiFinalCheck(item)) continue;
+      try {
+        ufcMarks[item.id] = cardChatMarks(
+          dir,
+          { id: item.id, key: item.key },
+          now,
+          boxRowsForMarks,
+        );
+      } catch {
+        // 印なしで続ける(applyMarks は載っていない id を画面側の値のまま残す)
+      }
+    }
     return {
-      items: [...items, ...permitItems].sort(compareConfirmBoxItems),
+      items: all,
       sources: [...sources, permitSource],
       dir: readDir,
-      generatedAt: Date.now(),
+      generatedAt: now,
+      ufcMarks,
     };
   }
 
@@ -1759,6 +1782,16 @@ export default function contribute(server: PluginServerContext) {
       return sayToCard(resolveConfirmBoxDir(), { id: input.id, key: input.key }, input.text);
     } catch (error) {
       return { ok: false, message: sendErrorNotice(error) };
+    }
+  });
+
+  // 返事を画面で見た印。一覧の未読(💬 返事が届きました)が次の取得から消える。
+  server.handle(cardChatSeenRpc, async (input) => {
+    try {
+      return { ok: markSeen(resolveConfirmBoxDir(), { id: input.id, key: input.key }) };
+    } catch {
+      // 書けなくても印が残るだけ(次の取得でまた未読として出る)。送信は止めない。
+      return { ok: false };
     }
   });
 

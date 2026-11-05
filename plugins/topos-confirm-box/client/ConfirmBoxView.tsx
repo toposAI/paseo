@@ -28,6 +28,7 @@ import {
   confirmBoxDecideRpc,
   confirmBoxListRpc,
   confirmBoxPermitRpc,
+  cardChatSeenRpc,
   countOpen,
   judgmentTabRows,
   rejectComment,
@@ -502,12 +503,23 @@ export function ConfirmBoxView({
   );
 
   // 「UIの最終チェック」を順に片付ける状態(見ているカード・返事待ち・未読の印)。
+  // **一覧そのもの**(ufcAllIds)は絞り込みで隠れても消さずに flow へ渡す。絞り込み後の一覧だけを渡すと、
+  // 隠れた瞬間に reconcile が「消えた」と見なして見ているカードが別へ跳ぶ(2026-11-05 出口レビュー2巡目 指摘6)。
+  // 一方で「次へ」と件数行は**画面に出ているカード**(ufcIds)で絞る: 全件で作ると、絞り込みで隠れた
+  // カードを current に選べてしまい、押しても何も開かない(1巡目 指摘5)。
+  const ufcAllIds = useMemo(
+    () =>
+      (data?.items ?? [])
+        .filter((v) => isUiFinalCheck(v) && v.kind === "box" && v.state !== "approved")
+        .map((v) => v.id),
+    [data],
+  );
   const ufcItems = useMemo(
     () => visible.filter((v) => isUiFinalCheck(v) && v.kind === "box" && v.state !== "approved"),
     [visible],
   );
   const ufcIds = useMemo(() => ufcItems.map((v) => v.id), [ufcItems]);
-  const ufc = useUfcFlow(ufcIds);
+  const ufc = useUfcFlow(ufcAllIds, data?.ufcMarks ?? {}, ufcIds);
   const ufcUnread = useMemo(
     () =>
       ufcItems
@@ -516,6 +528,28 @@ export function ConfirmBoxView({
     [ufcItems, ufc.flow.unread],
   );
   const ufcNextExists = nextOpen(ufcIds, ufc.flow.current, ufc.flow.waiting) !== null;
+  // 返事を読んだ(=そのカードの会話を開いた)ときだけ「見た」と台帳へ書く。
+  // 画面に並んでいるだけでは既読にしない: 再読み込み・絞り込み切替で印が消えてしまうため(2026-11-05)。
+  const seenRpc = useRpc(cardChatSeenRpc);
+  const markSeen = useCallback(
+    (id: string) => {
+      const target = ufcItems.find((v) => v.id === id);
+      if (!target) return;
+      void seenRpc({ id: target.id, key: target.key ?? null }).catch(() => {
+        // 書けなくても印が残るだけ(次に開いたときもう一度送る)。
+      });
+    },
+    [ufcItems, seenRpc],
+  );
+  // 件数行の「💬 返事が届きました」から跳んだときも、その場で読んだものとして扱う。
+  const chooseUfc = ufc.choose;
+  const jumpToUfc = useCallback(
+    (id: string) => {
+      chooseUfc(id);
+      markSeen(id);
+    },
+    [chooseUfc, markSeen],
+  );
 
   const chip = (label: string, on: boolean, press: () => void) => (
     <Pressable key={label} accessibilityRole="button" style={on ? s.btnRec : s.btn} onPress={press}>
@@ -624,7 +658,7 @@ export function ConfirmBoxView({
           counts={ufc.counts}
           everHad={ufc.everHad}
           unreadItems={ufcUnread}
-          onSelect={ufc.choose}
+          onSelect={jumpToUfc}
         />
         <View style={listCols > 1 ? s.grid : s.listBox} onLayout={onListLayout}>
           {visible.map((item) => (
@@ -647,6 +681,7 @@ export function ConfirmBoxView({
                   onSent={ufc.sent}
                   onReply={ufc.replied}
                   onSelect={ufc.choose}
+                  onSeen={markSeen}
                   onSkip={ufc.skip}
                 />
               ) : (

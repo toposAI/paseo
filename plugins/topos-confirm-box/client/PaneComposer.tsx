@@ -132,8 +132,10 @@ export function PaneComposer({
   }, [colors]);
   const inputStyle = useMemo(() => {
     const base = narrow ? [st.input, { flexBasis: "100%" as unknown as number }] : [st.input];
+    // 送れない理由は入力欄の案内文として出す。長い理由(「総司令塔も閉じています(送信できません)」)は
+    // 狭い幅で2行に折り返すので、1行分の高さのままだと2行目が切れる(2026-11-05 UI点検 iPhone幅)。
     return disabledReason
-      ? [...base, st.inputOff, { height: grownHeight }]
+      ? [...base, st.inputOff, { height: grownHeight, minHeight: 60 }]
       : [...base, { height: grownHeight }];
   }, [disabledReason, grownHeight, narrow, st.input, st.inputOff]);
   const inputEl = (

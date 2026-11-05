@@ -178,6 +178,21 @@ export const confirmBoxListRpc = defineRpc({
     /** 読み出し先(画面に出す。どこを見ているか分かるようにするため)。 */
     dir: z.string(),
     generatedAt: z.number(),
+    /**
+     * 「UIの最終チェック」の返事待ち・未読の印(項目id → 印)。**サーバの ask 台帳から毎回作る**
+     * (画面のメモリに持たない。2026-11-05 ユーザー決定)。台帳を読めない項目は載らない。
+     */
+    ufcMarks: z
+      .record(
+        z.string(),
+        z.object({
+          waiting: z.boolean(),
+          unread: z.boolean(),
+          replies: z.number().int(),
+          lastReplyAt: z.number().nullable(),
+        }),
+      )
+      .default({}),
   }),
 });
 export type ConfirmBoxListOutput = z.infer<typeof confirmBoxListRpc.output>;
@@ -579,6 +594,13 @@ export const cardChatAskRpc = defineRpc({
 export const cardChatCancelRpc = defineRpc({
   name: "topos.confirmbox.cardchat.cancel",
   input: z.object({ ...cardChatTarget, replyId: z.string() }),
+  output: z.object({ ok: z.boolean() }),
+});
+
+/** カードの返事を画面で見た印。未読(「💬 返事が届きました」)を消す。 */
+export const cardChatSeenRpc = defineRpc({
+  name: "topos.confirmbox.cardchat.seen",
+  input: z.object({ ...cardChatTarget }),
   output: z.object({ ok: z.boolean() }),
 });
 

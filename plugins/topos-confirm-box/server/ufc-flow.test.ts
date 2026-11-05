@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   afterReply,
   afterSent,
+  applyMarks,
   nextOpen,
   reconcile,
   select,
@@ -63,4 +64,52 @@ test("OK で消えたら直後の未回答カードへ。返事待ちの印は�
   assert.deepEqual(r, { current: "a", waiting: ["c"], unread: [] });
   assert.deepEqual(reconcile(f, ids, ids), f);
   assert.equal(reconcile(f, ids, []).current, null);
+});
+
+test("台帳の印: 返事待ち・未読はサーバの ask 台帳が正(再読み込みしても残る)", () => {
+  // 画面のメモリは空(再読み込み直後)でも、台帳に返事待ちがあるカードは返事待ちで出る。
+  const f = applyMarks({ current: "b", waiting: [], unread: [] }, ids, {
+    a: { waiting: true, unread: false },
+    b: { waiting: false, unread: false },
+  });
+  assert.deepEqual(f, { current: "b", waiting: ["a"], unread: [] });
+  assert.equal(ufcCounts(ids, f).waiting, 1);
+});
+
+test("台帳の印: 台帳が返事待ちを解いたら、画面のメモリの印も消える", () => {
+  const f = applyMarks({ current: "b", waiting: ["a"], unread: [] }, ids, {
+    a: { waiting: false, unread: true },
+  });
+  assert.deepEqual(f, { current: "b", waiting: [], unread: ["a"] });
+  assert.equal(ufcStatus(f, "a"), "unread");
+});
+
+test("台帳の印: 見ているカードの未読も台帳どおり残す(既読は開いた時に台帳へ書く)", () => {
+  // 再読み込み直後は先頭の未回答カードが current になる。ここで印を落とすと、
+  // 再読み込みのたびに「返事が届きました」が消えてしまう(2026-11-05)。
+  const f = applyMarks({ current: "a", waiting: ["c"], unread: [] }, ids, {
+    a: { waiting: false, unread: true },
+  });
+  assert.deepEqual(f, { current: "a", waiting: ["c"], unread: ["a"] });
+  // 一覧から消えた id は落とす
+  const g = applyMarks({ current: "a", waiting: ["z"], unread: [] }, ids, {});
+  assert.deepEqual(g, { current: "a", waiting: [], unread: [] });
+});
+
+test("絞り込み: 隠れているカードが current でも、全件を渡す reconcile は current を動かさない", () => {
+  // 画面は全件(ids)で flow を照合し、「次へ」と件数だけを画面に出ている一覧(candidates)で絞る。
+  // 照合まで絞ると、隠れた瞬間に「消えた」と見なされて current が別のカードへ跳ぶ
+  // (2026-11-05 出口レビュー2巡目 指摘6)。
+  const f = reconcile({ current: "b", waiting: ["c"], unread: [] }, ids, ids);
+  assert.equal(f.current, "b");
+  assert.deepEqual(f.waiting, ["c"]);
+});
+
+test("絞り込み: 「次へ」と件数は画面に出ているカードだけで作る(隠れたカードへ跳ばない)", () => {
+  const visible = ["b", "c"]; // a は絞り込みで隠れている
+  const f: UfcFlow = { current: "a", waiting: [], unread: [] };
+  assert.equal(skipToNext(f, visible).current, "b");
+  assert.deepEqual(ufcCounts(visible, f), { remaining: 2, waiting: 0, unread: 0 });
+  // 全件で数えると 3 件になり、画面の枚数と食い違う
+  assert.deepEqual(ufcCounts(ids, f), { remaining: 3, waiting: 0, unread: 0 });
 });

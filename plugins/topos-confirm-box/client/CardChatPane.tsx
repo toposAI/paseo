@@ -278,6 +278,26 @@ function ImageChip({
   );
 }
 
+/** 入力欄の案内。送れない理由があるときは「送る」と言わない(注記と矛盾しないように)。 */
+function composerPlaceholder(reason: string | null, fallback: boolean): string {
+  if (reason) return "送信できません";
+  return fallback ? "総司令塔へ送る" : "投函元スレへ送る";
+}
+
+/** 入力欄の下の案内。送れない理由があるときは「送ります」と言わない(上の理由表示と矛盾しないように)。 */
+function composerHint(
+  reason: string | null,
+  fallback: boolean,
+  answerLabel: string,
+  len: number,
+): string {
+  if (reason) return `${len}/${TEXT_MAX}字`;
+  if (fallback) {
+    return `この欄に答えるスレ: 総司令塔 · ${COORDINATOR_FALLBACK_NOTICE}(${len}/${TEXT_MAX}字)`;
+  }
+  return `この欄に答えるスレ: ${answerLabel} · ${len}/${TEXT_MAX}字(この画面の外のスレにも同じ発言が残ります)`;
+}
+
 // 既存の指摘(complexity 57)。ペインの分割は今回の変更(状態の読み取り)と無関係なので触らない。
 // oxlint-disable-next-line eslint/complexity
 export function CardChatPane({
@@ -358,6 +378,8 @@ export function CardChatPane({
   const [topicView, setTopicView] = useState(true);
   const [topicMsgs, setTopicMsgs] = useState<TopicMessage[]>([]);
   const [topicPending, setTopicPending] = useState<TopicPending[]>([]);
+  // 話題の履歴を1回読めたか。読む前の空表示を「返事なし」の基準にしない(誤判定の防止)。
+  const [topicReady, setTopicReady] = useState(false);
   const askRpc = useRpc(cardChatAskRpc);
   const cancelRpc = useRpc(cardChatCancelRpc);
   const listRpc = useRpc(cardChatListRpc);
@@ -617,6 +639,7 @@ export function CardChatPane({
       if (gen !== topicGen.current) return;
       setTopicMsgs(res.messages);
       setTopicPending(res.pending ?? []);
+      setTopicReady(true);
     } catch {
       // 読めなかった回は前の表示を保つ。
     }
@@ -625,6 +648,7 @@ export function CardChatPane({
     topicGen.current += 1;
     setTopicMsgs([]);
     setTopicPending([]);
+    setTopicReady(false);
     if (!topic) return undefined;
     void refreshTopic();
     const timer = setInterval(() => void refreshTopic(), TOPIC_POLL_MS);
@@ -868,12 +892,28 @@ export function CardChatPane({
   const sendPress = useCallback(() => void send(), [send]);
   if (sendRef) sendRef.current = send;
   // 送った後に相手の返事が増えたら知らせる(履歴の初回読み込みでは鳴らさない)。
-  const replyCount = (topic ? topicMsgs : lines).filter((l) => l.role !== "user").length;
-  const seenReplies = useRef(replyCount);
+  // 受領(ack)は返事ではないので数えない(以前は非user行をすべて数え、ackで未読の印が付いていた)。
+  // 履歴を読む前の空表示を基準にすると、読み込みで増えた分を「届いた」と誤判定するので、
+  // 読み込み後の最初の描画で基準を取り直す(5b/7 の誤判定)。
+  const historyLoaded = topic ? topicReady : historyReady;
+  const replyCount = (topic ? topicMsgs : lines).filter(
+    (l) => l.role === "reply" && l.by !== "ack",
+  ).length;
+  const seenReplies = useRef(0);
+  const repliesBaselined = useRef(false);
   useEffect(() => {
+    if (!historyLoaded) {
+      repliesBaselined.current = false;
+      return;
+    }
+    if (!repliesBaselined.current) {
+      repliesBaselined.current = true;
+      seenReplies.current = replyCount;
+      return;
+    }
     if (replyCount > seenReplies.current && sentOnce.current) onReply?.();
     seenReplies.current = replyCount;
-  }, [replyCount, onReply]);
+  }, [replyCount, historyLoaded, onReply]);
   // Enter で送信(PC幅のWebだけ。IME変換確定・Shift+Enter・iPhone は送らず改行のまま)。
   const onKeyPress = useCallback(
     (e: {
@@ -1233,7 +1273,7 @@ export function CardChatPane({
       {hub && item ? (
         <View style={st.modeRow}>
           <Text style={st.modeText}>
-            {topic ? "表示: この話題だけ(say された返事のみ)" : "表示: スレ全体(ライブ)"}
+            {topic ? "表示: この話題の返事だけ" : "表示: スレ全体(ライブ)"}
           </Text>
           <Pressable accessibilityRole="button" style={st.modeBtn} onPress={toggleTopicView}>
             <Text style={st.modeBtnText}>{topic ? "スレ全体を見る" : "この話題だけにする"}</Text>
@@ -1259,7 +1299,7 @@ export function CardChatPane({
         onKeyPress={onKeyPress}
         tools={tools}
         disabledReason={reason}
-        placeholder={fallback ? "総司令塔へ送る" : "投函元スレへ送る"}
+        placeholder={composerPlaceholder(reason, fallback)}
         maxLength={TEXT_MAX}
         sendable={sendable}
         onSend={sendPress}
@@ -1267,11 +1307,7 @@ export function CardChatPane({
         testID="pane-composer"
       />
       <Text style={st.hint}>
-        {fallback
-          ? `この欄に答えるスレ: 総司令塔 · ${COORDINATOR_FALLBACK_NOTICE}(${text.length}/${TEXT_MAX}字)`
-          : `この欄に答えるスレ: ${
-              item?.answerLabel ?? "投函元のスレ"
-            } · ${text.length}/${TEXT_MAX}字(この画面の外のスレにも同じ発言が残ります)`}
+        {composerHint(reason, fallback, item?.answerLabel ?? "投函元のスレ", text.length)}
       </Text>
     </View>
   );
