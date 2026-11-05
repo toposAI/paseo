@@ -195,8 +195,8 @@ export function PluginSurfaceScreen() {
     () =>
       surface
         ? resolvePluginScreenTitle(surface, sidebarItem, params)
-        : (sidebarItem?.title ?? (pluginId || "Plugin")),
-    [params, pluginId, sidebarItem, surface],
+        : (sidebarItem?.title ?? "プラグイン"),
+    [params, sidebarItem, surface],
   );
   const Icon = sidebarItem ? resolvePluginIcon(sidebarItem.icon) : null;
   const close = useCallback(() => {
