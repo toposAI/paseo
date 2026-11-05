@@ -9,6 +9,7 @@
  * **読み取りはファイル直読み**。既存のサーバー側確認箱(`/api/confirm-box/*`)は通さない
  * (HTTPのポートと認証が要るうえ、同じディレクトリを別経路で読む意味が無い)。
  */
+import { sendErrorNotice } from "./shared/send-error.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1003,7 +1004,7 @@ export default function contribute(server: PluginServerContext) {
     try {
       return sayToLedger(resolveConfirmBoxDir(), input.text);
     } catch (error) {
-      return { ok: false, message: `送れません: ${(error as Error).message}` };
+      return { ok: false, message: sendErrorNotice(error) };
     }
   });
 
@@ -1677,7 +1678,7 @@ export default function contribute(server: PluginServerContext) {
         input.target,
       );
     } catch (error) {
-      return { ok: false, message: `送れません: ${(error as Error).message}` };
+      return { ok: false, message: sendErrorNotice(error) };
     }
   });
 
@@ -1749,7 +1750,7 @@ export default function contribute(server: PluginServerContext) {
     try {
       return commentOnReport(resolveConfirmBoxDir(), input.id, input.text);
     } catch (error) {
-      return { ok: false, message: `送れません: ${(error as Error).message}` };
+      return { ok: false, message: sendErrorNotice(error) };
     }
   });
 
@@ -1757,7 +1758,7 @@ export default function contribute(server: PluginServerContext) {
     try {
       return sayToCard(resolveConfirmBoxDir(), { id: input.id, key: input.key }, input.text);
     } catch (error) {
-      return { ok: false, message: `送れません: ${(error as Error).message}` };
+      return { ok: false, message: sendErrorNotice(error) };
     }
   });
 

@@ -5,6 +5,7 @@
  * Paseo本体の composer はプラグインAPIに公開されていないため、同じ操作感の簡易入力欄を自前で持つ。
  * 送信先は安い常駐応答役(Sonnet 5.5 low)。判断の要る話はそのスレが裏方1へ回す。
  */
+import { sendErrorNotice } from "../shared/send-error.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { getPaseoClient, useHosts, useRpc } from "@getpaseo/plugin/client";
@@ -166,7 +167,7 @@ export function ChatPanel({
       setNotice("");
       setSent(true);
     } catch (e) {
-      setNotice(`送れません: ${e instanceof Error ? e.message : String(e)}`);
+      setNotice(sendErrorNotice(e));
     }
   }, [text, agentId, serverId, context]);
 

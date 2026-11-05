@@ -32,6 +32,7 @@
  *   (判定はペインに今開いている相手1本だけなので、`server/thread-liveness.ts` のように全件を辿らない)。
  * 引けなかったときは**印を付けない**(不明を「閉じています」と言い換えない)。
  */
+import { sendErrorNotice } from "../shared/send-error.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -824,7 +825,7 @@ export function CardChatPane({
         ok = true;
         sentOnce.current = true;
       } catch (e) {
-        setNotice(`送れません: ${e instanceof Error ? e.message : String(e)}`);
+        setNotice(sendErrorNotice(e));
         // 入力を失わない(書き直しや再添付を強いない)。
         if (own) {
           setText((cur) => (cur ? cur : t));
