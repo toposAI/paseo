@@ -1698,8 +1698,14 @@ const PENDING_RETRY_WAIT_MS = 5_000;
  * 既定にするが、その選択は端末側にあり插件からは読めない。読めるようになるまでは決まった場所
  * (`~/repos/_coordinator-spawned`、無ければホーム)に置く。`TOPOS_CONCEPT_THREAD_CWD` で差し替え可。
  */
-/** 箱側の UFC 行への回答で、claim しているノートも閉じる。ノートを閉じたらそのファイルのパス、なければ null。 */
-function answerUfcClaimingNote(key: string, chosen: string | null, reason: string): string | null {
+/** 箱側の UFC 行への回答で、claim しているノートも閉じる。閉じたら応答に添える文言、閉じなければ ""。 */
+function answerUfcClaimingNote(
+  key: string,
+  chosen: string | null,
+  reason: string,
+  reject: boolean,
+): string {
+  if (reject) return "";
   const boxItem = readConfirmBox(resolveConfirmBoxDir()).items.find((i) => i.key === key);
   const label = boxItem?.options.find((o) => o.id === chosen)?.label ?? null;
   const isUfc = !!boxItem && boxItem.kind === "box" && isUiFinalCheck(boxItem);
