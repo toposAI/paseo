@@ -503,16 +503,23 @@ export function ConfirmBoxView({
   );
 
   // 「UIの最終チェック」を順に片付ける状態(見ているカード・返事待ち・未読の印)。
-  // 並び・件数・「次へ」は**画面に出ているカード**(visible)だけで作る。全件から作ると、
-  // 絞り込みで隠れたカードを current に選べてしまい、押しても何も開かない(2026-11-05 出口レビュー指摘5)。
-  // 絞り込みで隠れても印が消えないのは、印の正がサーバの ask 台帳(`ufcMarks`)側にあるため
-  // (戻したときに applyMarks が台帳から載せ直す)。
+  // **一覧そのもの**(ufcAllIds)は絞り込みで隠れても消さずに flow へ渡す。絞り込み後の一覧だけを渡すと、
+  // 隠れた瞬間に reconcile が「消えた」と見なして見ているカードが別へ跳ぶ(2026-11-05 出口レビュー2巡目 指摘6)。
+  // 一方で「次へ」と件数行は**画面に出ているカード**(ufcIds)で絞る: 全件で作ると、絞り込みで隠れた
+  // カードを current に選べてしまい、押しても何も開かない(1巡目 指摘5)。
+  const ufcAllIds = useMemo(
+    () =>
+      (data?.items ?? [])
+        .filter((v) => isUiFinalCheck(v) && v.kind === "box" && v.state !== "approved")
+        .map((v) => v.id),
+    [data],
+  );
   const ufcItems = useMemo(
     () => visible.filter((v) => isUiFinalCheck(v) && v.kind === "box" && v.state !== "approved"),
     [visible],
   );
   const ufcIds = useMemo(() => ufcItems.map((v) => v.id), [ufcItems]);
-  const ufc = useUfcFlow(ufcIds, data?.ufcMarks ?? {});
+  const ufc = useUfcFlow(ufcAllIds, data?.ufcMarks ?? {}, ufcIds);
   const ufcUnread = useMemo(
     () =>
       ufcItems

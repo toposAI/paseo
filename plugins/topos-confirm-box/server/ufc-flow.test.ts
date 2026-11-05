@@ -95,3 +95,21 @@ test("台帳の印: 見ているカードの未読も台帳どおり残す(既�
   const g = applyMarks({ current: "a", waiting: ["z"], unread: [] }, ids, {});
   assert.deepEqual(g, { current: "a", waiting: [], unread: [] });
 });
+
+test("絞り込み: 隠れているカードが current でも、全件を渡す reconcile は current を動かさない", () => {
+  // 画面は全件(ids)で flow を照合し、「次へ」と件数だけを画面に出ている一覧(candidates)で絞る。
+  // 照合まで絞ると、隠れた瞬間に「消えた」と見なされて current が別のカードへ跳ぶ
+  // (2026-11-05 出口レビュー2巡目 指摘6)。
+  const f = reconcile({ current: "b", waiting: ["c"], unread: [] }, ids, ids);
+  assert.equal(f.current, "b");
+  assert.deepEqual(f.waiting, ["c"]);
+});
+
+test("絞り込み: 「次へ」と件数は画面に出ているカードだけで作る(隠れたカードへ跳ばない)", () => {
+  const visible = ["b", "c"]; // a は絞り込みで隠れている
+  const f: UfcFlow = { current: "a", waiting: [], unread: [] };
+  assert.equal(skipToNext(f, visible).current, "b");
+  assert.deepEqual(ufcCounts(visible, f), { remaining: 2, waiting: 0, unread: 0 });
+  // 全件で数えると 3 件になり、画面の枚数と食い違う
+  assert.deepEqual(ufcCounts(ids, f), { remaining: 3, waiting: 0, unread: 0 });
+});

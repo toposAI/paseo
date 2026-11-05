@@ -16,16 +16,26 @@ import {
 import type { UfcFlow, UfcMarks } from "../shared/ufc-flow.js";
 
 /**
- * @param ids 一覧に出す UFC カード(絞り込みで隠れても消さない=呼び出し側が全件を渡す)
+ * @param ids 一覧に出す UFC カード(絞り込みで隠れても消さない=呼び出し側が全件を渡す)。
+ *   ここを絞り込み後の一覧にすると、隠れた瞬間に `reconcile` が「消えた」と見なして
+ *   見ているカードが別へ跳ぶ(2026-11-05 出口レビュー2巡目 指摘6)。
  * @param marks サーバの ask 台帳から来た印(返事待ち・未読)。取り直すたびに上書きする。
+ * @param candidates 実際に押せる/数える対象(画面に出ているカード)。既定は ids。
+ *   「次へ」と件数行だけをこちらで絞る(隠れたカードへは跳ばない)。
  */
-export function useUfcFlow(ids: readonly string[], marks: UfcMarks = {}) {
+export function useUfcFlow(
+  ids: readonly string[],
+  marks: UfcMarks = {},
+  candidates: readonly string[] = ids,
+) {
   const [flow, setFlow] = useState<UfcFlow>(UFC_FLOW_EMPTY);
   // 一度でも見たカードは、離れても会話(下書き・返事)を保つため入力欄を載せたままにする。
   const [visited, setVisited] = useState<readonly string[]>([]);
   const [everHad, setEverHad] = useState(false);
   const idsRef = useRef(ids);
   idsRef.current = ids;
+  const candRef = useRef(candidates);
+  candRef.current = candidates;
   const marksRef = useRef(marks);
   marksRef.current = marks;
   const prevIds = useRef<readonly string[]>([]);
@@ -50,10 +60,10 @@ export function useUfcFlow(ids: readonly string[], marks: UfcMarks = {}) {
     if (current) setVisited((v) => (v.includes(current) ? v : [...v, current]));
   }, [current]);
 
-  const sent = useCallback((id: string) => setFlow((f) => afterSent(f, idsRef.current, id)), []);
+  const sent = useCallback((id: string) => setFlow((f) => afterSent(f, candRef.current, id)), []);
   const replied = useCallback((id: string) => setFlow((f) => afterReply(f, id)), []);
   const choose = useCallback((id: string) => setFlow((f) => select(f, id)), []);
-  const skip = useCallback(() => setFlow((f) => skipToNext(f, idsRef.current)), []);
-  const counts = useMemo(() => ufcCounts(ids, flow), [ids, flow]);
+  const skip = useCallback(() => setFlow((f) => skipToNext(f, candRef.current)), []);
+  const counts = useMemo(() => ufcCounts(candidates, flow), [candidates, flow]);
   return { flow, visited, everHad, counts, sent, replied, choose, skip };
 }
