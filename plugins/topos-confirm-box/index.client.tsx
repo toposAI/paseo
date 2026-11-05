@@ -343,8 +343,8 @@ function useOpenAgent(
 }
 
 /** 確認箱の `?tab=`。不正な値はバグ報告に倒す(下部バーから開いたときの既定)。 */
-function boxInitialTab(param: string | undefined): "bugs" | "notify" | "priority" {
-  return param === "notify" || param === "priority" ? param : "bugs";
+function boxInitialTab(param: string | undefined): "bugs" | "notify" | "reports" | "priority" {
+  return param === "notify" || param === "reports" || param === "priority" ? param : "bugs";
 }
 
 function Screen({ theme, navigation, layout, params }: PluginScreenProps) {

@@ -11,10 +11,10 @@ import { useCallback, useMemo } from "react";
 import type { ComponentType } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
-import { BellIcon, BugIcon, InboxIcon, ListIcon } from "./Icons.js";
+import { BellIcon, BugIcon, InboxIcon, ListIcon, ReportIcon } from "./Icons.js";
 import { ReloadButton } from "./ReloadButton.js";
 
-export type HeaderTabId = "items" | "bugs" | "notify" | "priority";
+export type HeaderTabId = "items" | "bugs" | "notify" | "reports" | "priority";
 
 /** 並びは下部バーと同じ順(ユーザー判断 → バグ報告)の後ろに 通知・優先順位。 */
 export const HEADER_TABS: {
@@ -25,6 +25,7 @@ export const HEADER_TABS: {
   { id: "items", label: "ユーザー判断", Icon: InboxIcon },
   { id: "bugs", label: "バグ報告", Icon: BugIcon },
   { id: "notify", label: "通知", Icon: BellIcon },
+  { id: "reports", label: "報告", Icon: ReportIcon },
   { id: "priority", label: "優先順位", Icon: ListIcon },
 ];
 

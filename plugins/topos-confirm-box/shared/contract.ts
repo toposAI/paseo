@@ -245,6 +245,8 @@ export const confirmBoxCountRpc = defineRpc({
     notifications: z.number().int().default(0),
     /** バグ報告タブの未対応(status=new)。 */
     bugs: z.number().int().default(0),
+    /** 報告タブの未読(最新の版をまだ開いていない報告書)。 */
+    reports: z.number().int().default(0),
     generatedAt: z.number(),
   }),
 });
@@ -296,6 +298,54 @@ export type ConfirmBoxAckOutput = z.infer<typeof confirmBoxAckRpc.output>;
 export const confirmBoxAckAllRpc = defineRpc({
   name: "topos.confirmbox.ackall",
   input: z.object({}),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
+
+// ---------------------------------------------------------------- RPC: 報告タブ
+
+/** 報告タブの1行。`agentId` が空 = 報告元不明(コメント欄を出さない)。 */
+export const ReportRowSchema = z.object({
+  id: z.string(),
+  ts: z.number(),
+  title: z.string(),
+  path: z.string(),
+  url: z.string(),
+  agentId: z.string(),
+  agentName: z.string(),
+  unread: z.boolean(),
+});
+export type ReportRowView = z.infer<typeof ReportRowSchema>;
+
+export const reportsListRpc = defineRpc({
+  name: "topos.confirmbox.reports.list",
+  input: z.object({}),
+  output: z.object({ reports: z.array(ReportRowSchema), unread: z.number().int() }),
+});
+
+/** 報告書を開く = 本文を返して**既読にする**(開いたら既読。更新されたら次の版でまた未読に戻る)。 */
+export const reportsOpenRpc = defineRpc({
+  name: "topos.confirmbox.reports.open",
+  input: z.object({ id: z.string() }),
+  output: z.object({ ok: z.boolean(), message: z.string(), markdown: z.string() }),
+});
+
+export const reportsAckAllRpc = defineRpc({
+  name: "topos.confirmbox.reports.ackall",
+  input: z.object({}),
+  output: z.object({ ok: z.boolean(), message: z.string() }),
+});
+
+/** 本文中の画像(許可範囲のみ)を data URI で返す。Mac Studio 以外のクライアントでも読めるように。 */
+export const reportsImageRpc = defineRpc({
+  name: "topos.confirmbox.reports.image",
+  input: z.object({ path: z.string() }),
+  output: z.object({ ok: z.boolean(), dataUri: z.string() }),
+});
+
+/** 報告元スレへのコメント。返事は `cardChatListRpc`(id=`report:<id>`)で読む。 */
+export const reportsCommentRpc = defineRpc({
+  name: "topos.confirmbox.reports.comment",
+  input: z.object({ id: z.string(), text: z.string() }),
   output: z.object({ ok: z.boolean(), message: z.string() }),
 });
 

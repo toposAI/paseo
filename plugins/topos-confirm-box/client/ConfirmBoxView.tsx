@@ -53,8 +53,9 @@ import {
   type HeaderToggle,
   type ToggleInfo,
 } from "./HeaderIconBar.js";
+import { ReportsView } from "./ReportsView.js";
 import { NotificationsView } from "./NotificationsView.js";
-import { BellIcon, BugIcon, InboxIcon, ListIcon } from "./Icons.js";
+import { BellIcon, BugIcon, InboxIcon, ListIcon, ReportIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import { CardChatPane } from "./CardChatPane.js";
 import { openThreadInPane } from "./open-pane-thread.js";
@@ -77,6 +78,7 @@ import type {
 
 const REFRESH_MS = 30_000;
 
+// oxlint-disable-next-line eslint/complexity
 export function ConfirmBoxView({
   theme,
   openAgent,
@@ -95,7 +97,7 @@ export function ConfirmBoxView({
   /** 渡されたら最上部に5画面のアイコン列+更新ボタンを出す(全画面のとき。ポップオーバーは渡さない)。 */
   openScreen?: (input: { screenId: string; params?: Record<string, string> }) => void;
   /** 確認箱そのもの(`box`)を開いたときの最初のタブ。 */
-  initialTab?: "bugs" | "notify" | "priority";
+  initialTab?: "bugs" | "notify" | "reports" | "priority";
   /** ホストの `layout`。省略時(ポップオーバー)は幅・高さだけで判定する。 */
   layout?: PluginHostProps["layout"];
   /**
@@ -564,6 +566,8 @@ export function ConfirmBoxView({
     );
   } else if (shownTab === "notify") {
     content = <NotificationsView theme={theme} />;
+  } else if (shownTab === "reports") {
+    content = <ReportsView theme={theme} />;
   } else {
     content = (
       <>
@@ -794,7 +798,7 @@ function HeaderSlot({ show, ...props }: { show: boolean } & ComponentProps<typeo
   return show ? <HeaderIconBar {...props} /> : null;
 }
 
-type TabId = "items" | "bugs" | "notify" | "priority";
+type TabId = "items" | "bugs" | "notify" | "reports" | "priority";
 
 /**
  * 出すタブの並びと現在のタブ。
@@ -804,7 +808,7 @@ type TabId = "items" | "bugs" | "notify" | "priority";
  */
 function useBoxTabs(
   mode: BoxTabMode,
-  initialTab: "items" | "bugs" | "notify" | "priority" = "bugs",
+  initialTab: "items" | "bugs" | "notify" | "reports" | "priority" = "bugs",
   onOpenPriority?: () => void,
 ): {
   shownTab: TabId;
@@ -879,6 +883,7 @@ const TABS: { id: TabId; label: string; Icon: typeof InboxIcon }[] = [
   { id: "items", label: "判断待ち", Icon: InboxIcon },
   { id: "bugs", label: "Toposバグ報告", Icon: BugIcon },
   { id: "notify", label: "通知", Icon: BellIcon },
+  { id: "reports", label: "報告", Icon: ReportIcon },
   { id: "priority", label: "優先順位", Icon: ListIcon },
 ];
 
@@ -896,6 +901,7 @@ function useBadgeCounts(): Partial<Record<TabId, number>> {
             items: r.open,
             bugs: r.bugs,
             notify: r.notifications,
+            reports: r.reports,
           });
         }
       } catch {
