@@ -761,8 +761,13 @@ export function CardChatPane({
   const lastLine = lines.at(-1);
   const lastKey = lastLine ? `${lastLine.id}:${lastLine.text.length}` : "";
   useEffect(() => {
+    // 画像・折り返しで高さが後から伸びても最下部が入力欄に隠れないよう、遅れてもう一度末尾へ寄せる。
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
-    return () => clearTimeout(timer);
+    const settle = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 350);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(settle);
+    };
   }, [lastKey]);
 
   // oxlint-disable-next-line eslint/complexity
@@ -1031,7 +1036,7 @@ export function CardChatPane({
       },
       scroll: { flex: 1 },
       scrollEmbedded: { maxHeight: 300 },
-      scrollBody: { padding: 12, gap: 10 },
+      scrollBody: { padding: 12, paddingBottom: 24, gap: 10 },
       context: {
         backgroundColor: colors.surface1,
         borderColor: colors.border,
