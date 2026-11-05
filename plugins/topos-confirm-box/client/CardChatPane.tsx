@@ -278,6 +278,12 @@ function ImageChip({
   );
 }
 
+/** 入力欄の案内。送れない理由があるときは「送る」と言わない(注記と矛盾しないように)。 */
+function composerPlaceholder(reason: string | null, fallback: boolean): string {
+  if (reason) return "送信できません";
+  return fallback ? "総司令塔へ送る" : "投函元スレへ送る";
+}
+
 // 既存の指摘(complexity 57)。ペインの分割は今回の変更(状態の読み取り)と無関係なので触らない。
 // oxlint-disable-next-line eslint/complexity
 export function CardChatPane({
@@ -1253,7 +1259,7 @@ export function CardChatPane({
       {hub && item ? (
         <View style={st.modeRow}>
           <Text style={st.modeText}>
-            {topic ? "表示: この話題だけ(say された返事のみ)" : "表示: スレ全体(ライブ)"}
+            {topic ? "表示: この話題の返事だけ" : "表示: スレ全体(ライブ)"}
           </Text>
           <Pressable accessibilityRole="button" style={st.modeBtn} onPress={toggleTopicView}>
             <Text style={st.modeBtnText}>{topic ? "スレ全体を見る" : "この話題だけにする"}</Text>
@@ -1279,7 +1285,7 @@ export function CardChatPane({
         onKeyPress={onKeyPress}
         tools={tools}
         disabledReason={reason}
-        placeholder={fallback ? "総司令塔へ送る" : "投函元スレへ送る"}
+        placeholder={composerPlaceholder(reason, fallback)}
         maxLength={TEXT_MAX}
         sendable={sendable}
         onSend={sendPress}
