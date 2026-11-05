@@ -186,6 +186,8 @@ export function ConfirmBoxView({
   const listCols = listColumns(listWidth, wide);
   const cellWidth = listCellWidth(listWidth, listCols);
   // lint(jsx-no-new-object-as-prop)対策: 1枚ぶんの幅は幅が変わったときだけ作り直す。
+  // 「UIの最終チェック」は入力欄を含むので、複数列でも1行を使い切る(幅133pxでは長文が読めない)。
+  const ufcCellStyle = useMemo(() => ({ width: "100%" as const }), []);
   const cellStyle = useMemo(
     () => (cellWidth === undefined ? undefined : { width: cellWidth }),
     [cellWidth],
@@ -622,7 +624,7 @@ export function ConfirmBoxView({
         />
         <View style={listCols > 1 ? s.grid : s.listBox} onLayout={onListLayout}>
           {visible.map((item) => (
-            <View key={item.id} style={cellStyle}>
+            <View key={item.id} style={isUiFinalCheck(item) ? ufcCellStyle : cellStyle}>
               {isUiFinalCheck(item) && item.kind === "box" ? (
                 <UiFinalCheckCard
                   item={item}
