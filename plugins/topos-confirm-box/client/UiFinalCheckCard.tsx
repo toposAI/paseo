@@ -124,7 +124,7 @@ function ImageViewer({
             onChangeText={setText}
             tools={tools}
             disabledReason={send ? null : "この画面では送れません"}
-            placeholder={`${label}へのコメントを書く`}
+            placeholder="この画像へのコメント"
             maxLength={COMMENT_MAX}
             sendable={text.trim().length > 0 && send !== null}
             onSend={submitPress}
