@@ -11,7 +11,6 @@ import {
   doneButtonText,
   emptyText,
   filterByMode,
-  freshnessNote,
   joinTitleWords,
   keepLastOnFailure,
   noticeLines,
@@ -88,20 +87,6 @@ test("PC幅の見出しは帯と重ならないよう未登録だけを出す", 
   assert.equal(summarizeExtras(null), null);
   assert.equal(summarizeExtras(out(5)), null);
   assert.equal(summarizeExtras(out(5, 2, 1)), "未登録 1");
-});
-
-test("台帳の更新が止まったときだけ知らせる(新しいうちは何も出さない)", () => {
-  const t = new Date(2026, 9, 30, 10, 5).getTime();
-  const ledger = t - 60_000;
-  const data = { ...out(1), generatedAt: t, ledgerUpdatedAt: ledger };
-  assert.equal(freshnessNote(data, t), null);
-  // 15分の手前までは何も出さず、ちょうど15分から知らせる
-  assert.equal(freshnessNote(data, ledger + STALE_AFTER_MS - 1), null);
-  assert.equal(freshnessNote(data, ledger + STALE_AFTER_MS), "台帳が 10:04 から更新されていません");
-  assert.equal(
-    freshnessNote({ ...data, ledgerUpdatedAt: 0 }, t),
-    "台帳の更新時刻がまだありません(状態が古いかもしれません)",
-  );
 });
 
 test("PC幅は右カラム、狭い画面は主ペイン(全画面)", () => {

@@ -104,18 +104,6 @@ function clock(ms: number): string {
 }
 
 /**
- * 台帳の更新が止まっていないか。止まると古い「作業中」がそのまま正常に見えるので、要るときだけ出す。
- * 読み出し時刻と台帳の更新時刻を常に並べると開発者向けの表示に見えるため(2026-11-07 指摘)、
- * 台帳が15分以上動いていないとき・更新時刻が無いときだけ、平易な文で返す。正常なら null。
- */
-export function freshnessNote(data: WindowBInstructionsOutput | null, now: number): string | null {
-  if (!data) return null;
-  if (data.ledgerUpdatedAt <= 0) return "台帳の更新時刻がまだありません(状態が古いかもしれません)";
-  if (now - data.ledgerUpdatedAt < STALE_AFTER_MS) return null;
-  return `台帳が ${clock(data.ledgerUpdatedAt)} から更新されていません`;
-}
-
-/**
  * 一覧を開く場所。PC幅は右カラム、iPhone幅は主ペイン(全画面。戻るで閉じる)。
  */
 export function paneLocation(width: number): "right" | "workspace" {

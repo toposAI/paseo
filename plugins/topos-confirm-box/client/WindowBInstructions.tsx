@@ -29,7 +29,6 @@ import {
   doneButtonText,
   emptyText,
   type ListMode,
-  freshnessNote,
   keepLastOnFailure,
   NOTICE_MAX_LINES,
   noticeLines,
@@ -296,8 +295,6 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
   // 一覧の読み出し時刻(`generatedAt`)から15分たっていたら、一覧の一番上に目立つ色で出す。時計は1分ごとに
   // 進めて見直す(引けている間は普通は出ない)。
   const stale = data ? staleNotice(data, now) : null;
-  // 台帳の更新が止まったときだけ出す(正常時は何も出さない)。
-  const freshness = freshnessNote(data, now);
   // PC幅は会話の上の帯が「指示 N件・赤N」を出しているので、件数はここで繰り返さない。
   const headCount = headCountText(data, wide);
   const truncated = data ? truncationNote(data) : null;
@@ -336,7 +333,6 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
           {wide ? null : <Text style={s.headTitle}>{WINDOWB_PANEL_TITLE}</Text>}
           {headCount ? <Text style={s.muted}>{headCount}</Text> : null}
         </View>
-        {freshness ? <Text style={s.notice}>{freshness}</Text> : null}
         {data && data.warns > 0 ? (
           <Text style={s.muted}>
             橙=受信箱には届いているが、依頼台帳に載っていないか、判断が確認箱に投函されていない(状態を引けない)
