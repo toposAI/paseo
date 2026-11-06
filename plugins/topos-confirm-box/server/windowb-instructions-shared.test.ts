@@ -11,7 +11,7 @@ import {
   doneButtonText,
   emptyText,
   filterByMode,
-  freshnessText,
+  joinTitleWords,
   keepLastOnFailure,
   noticeLines,
   paneLocation,
@@ -23,6 +23,7 @@ import {
   type InstructionRoute,
   staleNotice,
   summarize,
+  summarizeExtras,
   truncationNote,
 } from "../shared/windowb-instructions.js";
 
@@ -82,14 +83,10 @@ test("上限で切ったときは何件出しているかを言う(切ったと�
   );
 });
 
-test("いつ時点の一覧かを出す(台帳の更新時刻はミリ秒。0 は「更新時刻なし」)", () => {
-  const t = new Date(2026, 9, 30, 10, 5).getTime();
-  const data = { ...out(1), generatedAt: t, ledgerUpdatedAt: t - 60_000 };
-  assert.equal(freshnessText(data), "読み出し 10:05 / 台帳 10:04");
-  assert.equal(
-    freshnessText({ ...data, ledgerUpdatedAt: 0 }),
-    "読み出し 10:05 / 台帳の更新時刻なし",
-  );
+test("PC幅の見出しは帯と重ならないよう未登録だけを出す", () => {
+  assert.equal(summarizeExtras(null), null);
+  assert.equal(summarizeExtras(out(5)), null);
+  assert.equal(summarizeExtras(out(5, 2, 1)), "未登録 1");
 });
 
 test("PC幅は右カラム、狭い画面は主ペイン(全画面)", () => {
@@ -196,6 +193,16 @@ test("visibleRoutes: 閉じている間は3項目まで、開くと全部。古�
   assert.equal(visibleRoutes(rs, true).shown.length, 5);
   assert.equal(visibleRoutes(rs.slice(0, 3), false).hidden, 0);
   assert.deepEqual(visibleRoutes(undefined, false), { shown: [], hidden: 0 });
+});
+
+test("題は語の途中で折れないよう語の中の字を繋ぐ", () => {
+  const raw = "完了ボタン/却下のコメント必須をやめる";
+  const joined = joinTitleWords(raw);
+  assert.equal(joined.split("\u2060").join(""), raw);
+  assert.ok(joined.includes("ボ\u2060タ\u2060ン"), joined);
+  assert.ok(!joined.includes("\u2060/") && !joined.includes("/\u2060"), joined);
+  // 英数字の語は繋がない(URL などが折れなくなるのを避ける)
+  assert.equal(joinTitleWords("https://example.com/a"), "https://example.com/a");
 });
 
 test("rowTitle: 要約があればそれ、無ければ全文の1行目", () => {
