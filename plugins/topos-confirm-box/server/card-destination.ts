@@ -110,6 +110,60 @@ function labelFor(id: string, title: string | null, domains: DomainCoordinators)
   return name || "名前のないスレ";
 }
 
+/** Topos製品のカードを Topos司令塔へ回す宛先(登録簿の題名から引く。引けなければ null)。 */
+function toposDestination(
+  registry: readonly RegistryEntry[],
+  domains: DomainCoordinators,
+): CardDestination | null {
+  const topos = commanderByTitle(registry, TOPOS_COMMANDER_TITLE);
+  if (!topos) return null;
+  return {
+    id: topos,
+    label: labelFor(topos, TOPOS_COMMANDER_TITLE, domains),
+    reason: "domain",
+    registered: false,
+  };
+}
+
+/** 投函元が登録簿に居ないとき(司令塔本人か、記録がまだ無い)の宛先。 */
+function routeWithoutPoster(
+  threads: readonly string[],
+  hint: string,
+  registry: readonly RegistryEntry[],
+  domains: DomainCoordinators,
+  generalId: string | null,
+): CardDestination {
+  const alive = (id: string): boolean => {
+    const r = registry.find((e) => e.agentId === id);
+    return !r || !r.archived;
+  };
+  const self = threads
+    .flatMap((t) => Object.values(domains).filter((c) => matchId(t, c)))
+    .find((c) => alive(c));
+  if (self) {
+    // 登録簿にまだ載っていない総司令塔が投函した Topos製品のカードも、本人ではなく Topos司令塔へ
+    // (登録簿に行がある場合は poster 側で同じ判定をしている。2026-11-06 出口レビュー3巡目 指摘1)
+    if (generalId && self === generalId && isToposHint(hint)) {
+      const topos = toposDestination(registry, domains);
+      if (topos) return topos;
+    }
+    return { id: self, label: labelFor(self, null, domains), reason: "self", registered: false };
+  }
+  // 投函元が分からない/登録簿に居ない。Topos製品のカード(家族報告など)だけは、登録簿の
+  // 題名からTopos司令塔を引いて届ける(2026-11-06 ユーザー再指摘)。それ以外は従来どおり
+  // 別のスレへ流さない(fail-closed)。
+  if (isToposHint(hint)) {
+    const topos = toposDestination(registry, domains);
+    if (topos) return topos;
+  }
+  return {
+    id: null,
+    label: threads.length ? "投函元不明(登録簿にありません)" : "投函元不明",
+    reason: "unresolved",
+    registered: false,
+  };
+}
+
 /**
  * @param threads ノート frontmatter の `threads:`(短ID可)
  * @param hint 領域推定に使う文字列(ノート id・題名・legacy key をつないだもの)
@@ -140,6 +194,8 @@ export function resolveCardDestination(
     return id && alive(id) ? id : null;
   };
 
+  const toposRedirect = (): CardDestination | null => toposDestination(registry, domains);
+
   if (poster) {
     // 2026-11-06: 答えるのは投函元本人(子司令塔)。登録簿の親(窓口など)へは流さない。
     // 閉じているだけのスレは送れば再開する。アーカイブ済みのときだけ次点(親→領域→総司令塔)へ。
@@ -148,15 +204,8 @@ export function resolveCardDestination(
       // 「総司令塔じゃなくて、Topos司令塔と話せるように」)。投函元が子スレ・子司令塔のときは
       // 文脈を持つ本人を優先する(従来どおり)。
       if (generalId && poster.agentId === generalId && isToposHint(hint)) {
-        const topos = commanderByTitle(registry, TOPOS_COMMANDER_TITLE);
-        if (topos) {
-          return {
-            id: topos,
-            label: labelFor(topos, TOPOS_COMMANDER_TITLE, domains),
-            reason: "domain",
-            registered: false,
-          };
-        }
+        const topos = toposRedirect();
+        if (topos) return topos;
       }
       return {
         id: poster.agentId,
@@ -182,33 +231,7 @@ export function resolveCardDestination(
       return { id: d, label: labelFor(d, null, domains), reason: "domain", registered: true };
     }
   } else {
-    // 司令塔自身が投函した(threads に司令塔のID)なら、その司令塔が答える
-    const self = threads
-      .flatMap((t) => Object.values(domains).filter((c) => matchId(t, c)))
-      .find((c) => alive(c));
-    if (self) {
-      return { id: self, label: labelFor(self, null, domains), reason: "self", registered: false };
-    }
-    // 投函元が分からない/登録簿に居ない。Topos製品のカード(家族報告など)だけは、登録簿の
-    // 題名からTopos司令塔を引いて届ける(2026-11-06 ユーザー再指摘)。それ以外は従来どおり
-    // 別のスレへ流さない(fail-closed)。
-    if (isToposHint(hint)) {
-      const topos = commanderByTitle(registry, TOPOS_COMMANDER_TITLE);
-      if (topos) {
-        return {
-          id: topos,
-          label: labelFor(topos, TOPOS_COMMANDER_TITLE, domains),
-          reason: "domain",
-          registered: false,
-        };
-      }
-    }
-    return {
-      id: null,
-      label: threads.length ? "投函元不明(登録簿にありません)" : "投函元不明",
-      reason: "unresolved",
-      registered: false,
-    };
+    return routeWithoutPoster(threads, hint, registry, domains, generalId);
   }
   if (generalId) {
     return {

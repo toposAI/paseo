@@ -136,6 +136,22 @@ test("投函元が子スレのToposカードは本人のまま(文脈を持つ�
   assert.equal(d.reason, "self");
 });
 
+test("登録簿に無い総司令塔が投函したToposカードもTopos司令塔へ", () => {
+  // child_threads.json に総司令塔の行がまだ無い(起こした直後など)場合。threads は
+  // domainCoordinators.general(=backoffice の正本)で照合する。
+  const c = ctx(toposRegistry);
+  const d = resolveCardDestination([GENERAL], "j-fb-x 家族報告", c);
+  assert.equal(d.id, TOPOS);
+  assert.equal(d.reason, "domain");
+});
+
+test("登録簿に無い総司令塔でもTopos以外のカードは本人", () => {
+  const c = ctx(toposRegistry);
+  const d = resolveCardDestination([GENERAL], "j-20261025-f80-x", c);
+  assert.equal(d.id, GENERAL);
+  assert.equal(d.reason, "self");
+});
+
 test("「ToposAI」はTopos製品の合図にしない(部分一致の誤爆を避ける)", () => {
   const c = ctx(toposRegistry);
   for (const hint of ["j-x ToposAIのデーモン", "j-x topos_ai の設定", "j-x TOPOS-AI"]) {

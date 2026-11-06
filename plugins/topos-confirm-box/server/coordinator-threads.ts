@@ -113,6 +113,14 @@ export function readDomainCoordinators(
       continue;
     }
   }
+  // `domains/general/coordinator_id` は旧IDのまま残ることがある(2026-11-06 実測: 1800e2f7 のまま)。
+  // 総司令塔の実行時の正本は `backoffice/coordinator_id`(返信ワーカーの `total_commander_id()` と同じ)。
+  // ここで general を上書きしないと、画面側の「投函元が総司令塔なら Topos司令塔へ」が発火しない
+  // (2026-11-06 出口レビュー3巡目 指摘1)。
+  const backoffice = readCoordinatorIdFile(
+    path.join(path.dirname(stateDir), "backoffice", "coordinator_id"),
+  );
+  if (backoffice) out.general = backoffice;
   return out;
 }
 
