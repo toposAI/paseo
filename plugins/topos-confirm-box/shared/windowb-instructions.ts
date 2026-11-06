@@ -41,6 +41,32 @@ export function summarize(data: WindowBInstructionsOutput | null): string {
   return parts.join(" / ");
 }
 
+/**
+ * PC幅のパネルの見出しに出す追加の件数。PC幅は会話の上の帯(`bandText`)が「指示 N件・赤N」を
+ * 出しているので、同じ件数をパネルの見出しでも繰り返さない(2026-11-07 指摘「同じ146件が3か所」)。
+ * 帯に無い「未登録」だけを返し、無ければ null。
+ */
+export function summarizeExtras(data: WindowBInstructionsOutput | null): string | null {
+  if (!data || data.warns <= 0) return null;
+  return `未登録 ${data.warns}`;
+}
+
+/** 見出しに出す件数。PC幅は帯と重ならないよう「未登録」だけ、狭い幅は件数と赤を出す。 */
+export function headCountText(
+  data: WindowBInstructionsOutput | null,
+  wide: boolean,
+): string | null {
+  return wide ? summarizeExtras(data) : summarize(data);
+}
+
+/** 見せ方に合わせた一覧の行(取得前は空)。 */
+export function visibleRows(
+  data: WindowBInstructionsOutput | null,
+  mode: ListMode,
+): WindowBInstruction[] {
+  return data ? filterByMode(rowOrder(data.items), mode) : [];
+}
+
 /** 一覧の並び。赤 → 判断待ち → 未登録 → その他 → 完了。同じ群の中は Python の並びのまま(安定ソート)。 */
 export function rowOrder<T extends { alert: string | null; warn: string | null; kind: string }>(
   rows: readonly T[],
@@ -78,14 +104,15 @@ function clock(ms: number): string {
 }
 
 /**
- * 「いつ時点の一覧か」。台帳の更新が止まると古い「作業中」がそのまま正常に見えるので、
- * 読み出した時刻と台帳の更新時刻を両方出す(台帳の更新時刻はミリ秒・0 は「まだ無い」)。
+ * 台帳の更新が止まっていないか。止まると古い「作業中」がそのまま正常に見えるので、要るときだけ出す。
+ * 読み出し時刻と台帳の更新時刻を常に並べると開発者向けの表示に見えるため(2026-11-07 指摘)、
+ * 台帳が15分以上動いていないとき・更新時刻が無いときだけ、平易な文で返す。正常なら null。
  */
-export function freshnessText(data: WindowBInstructionsOutput): string {
-  const at = `読み出し ${clock(data.generatedAt)}`;
-  return data.ledgerUpdatedAt > 0
-    ? `${at} / 台帳 ${clock(data.ledgerUpdatedAt)}`
-    : `${at} / 台帳の更新時刻なし`;
+export function freshnessNote(data: WindowBInstructionsOutput | null, now: number): string | null {
+  if (!data) return null;
+  if (data.ledgerUpdatedAt <= 0) return "台帳の更新時刻がまだありません(状態が古いかもしれません)";
+  if (now - data.ledgerUpdatedAt < STALE_AFTER_MS) return null;
+  return `台帳が ${clock(data.ledgerUpdatedAt)} から更新されていません`;
 }
 
 /**

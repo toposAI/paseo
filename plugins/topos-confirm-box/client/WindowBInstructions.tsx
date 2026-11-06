@@ -28,19 +28,18 @@ import {
 import {
   doneButtonText,
   emptyText,
-  filterByMode,
   type ListMode,
-  freshnessText,
+  freshnessNote,
   keepLastOnFailure,
   NOTICE_MAX_LINES,
   noticeLines,
   paneLocation,
   plainAssignee,
-  rowOrder,
   routeText,
   rowTitle,
   visibleRoutes,
-  summarize,
+  visibleRows,
+  headCountText,
   staleNotice,
   truncationNote,
   WIDE_MIN_WIDTH,
@@ -169,7 +168,15 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
       // 折り返しの最後の行に1〜2文字だけ残る(「…必須をやめ／る」)と読みにくいので、
       // Web では行の長さをならす(CSS の text-wrap: balance)。RN の型に無いので Web だけに足す。
       title: Platform.select({
-        web: { color: c.foreground, fontSize: 14, textWrap: "balance" as const },
+        web: {
+          color: c.foreground,
+          fontSize: 14,
+          // text-wrap: balance は行の長さをならすが、日本語は語の間に空白が無いので「ボタ/ン」の
+          // ように語の途中で割れる(2026-11-07 指摘)。Chrome の auto-phrase は語句の区切りでだけ折る。
+          textWrap: "balance" as const,
+          wordBreak: "auto-phrase" as const,
+          lineBreak: "strict" as const,
+        },
         default: { color: c.foreground, fontSize: 14 },
       }),
       meta: { color: c.foregroundMuted, fontSize: 12 },
@@ -246,7 +253,7 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
   }, []);
   // 既定は完了を隠す。「完了だけ」ボタンで直近3日の完了だけを見せる(2026-10-30 ユーザー指示)
   const [mode, setMode] = useState<ListMode>("active");
-  const rows = useMemo(() => (data ? filterByMode(rowOrder(data.items), mode) : []), [data, mode]);
+  const rows = useMemo(() => visibleRows(data, mode), [data, mode]);
   const toggleMode = useCallback(() => setMode((m) => (m === "done" ? "active" : "done")), []);
   const doneCount = data ? data.items.filter((i) => i.kind === WINDOW_B_KIND.done).length : 0;
   const c = theme.colors;
@@ -288,6 +295,10 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
   // 一覧の読み出し時刻(`generatedAt`)から15分たっていたら、一覧の一番上に目立つ色で出す。時計は1分ごとに
   // 進めて見直す(引けている間は普通は出ない)。
   const stale = data ? staleNotice(data, now) : null;
+  // 台帳の更新が止まったときだけ出す(正常時は何も出さない)。
+  const freshness = freshnessNote(data, now);
+  // PC幅は会話の上の帯が「指示 N件・赤N」を出しているので、件数はここで繰り返さない。
+  const headCount = headCountText(data, wide);
   const truncated = data ? truncationNote(data) : null;
   let notice: React.ReactElement | null = null;
   if (error) {
@@ -322,9 +333,9 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
           {/* PC幅はパネルの見出し(タブ)が「指示一覧」を出しているので、本文では繰り返さない。
               狭い画面は全画面で開くので、タブが無く、ここに題が要る。 */}
           {wide ? null : <Text style={s.headTitle}>{WINDOWB_PANEL_TITLE}</Text>}
-          <Text style={s.muted}>{summarize(data)}</Text>
+          {headCount ? <Text style={s.muted}>{headCount}</Text> : null}
         </View>
-        {data ? <Text style={s.muted}>{freshnessText(data)}</Text> : null}
+        {freshness ? <Text style={s.notice}>{freshness}</Text> : null}
         {data && data.warns > 0 ? (
           <Text style={s.muted}>
             橙=受信箱には届いているが、依頼台帳に載っていないか、判断が確認箱に投函されていない(状態を引けない)
