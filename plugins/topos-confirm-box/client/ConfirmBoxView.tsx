@@ -264,14 +264,16 @@ export function ConfirmBoxView({
         gap: touch ? 8 : 6,
       },
       plainBlock: { gap: 6 },
-      // 添付画像は1行に並べ、入りきらない分は横スクロール(1枚96px)。カードの gap を崩さないよう1つの View にまとめる。
+      // 添付画像は1枚ずつ縦に大きく出す(2026-11-06 ユーザー指示「UI確認は1画像1カード」)。
+      // 96px の小さなサムネイルでは、暗い画面のスクショが黒い四角に見えて中身が分からない、という指摘への対応。
       imageRow: {
-        flexDirection: "row" as const,
-        gap: 6,
+        flexDirection: "column" as const,
+        gap: 8,
       },
+      imageItem: { gap: 4 },
       imageThumb: {
-        width: 96,
-        height: 96,
+        width: "100%" as const,
+        height: 320,
         borderRadius: 8,
       },
       plainSymbol: { color: c.accent, fontWeight: "700" as const },
@@ -1405,7 +1407,8 @@ function ImageThumb({
   const press = useCallback(() => onZoom(index), [onZoom, index]);
   return (
     <Pressable accessibilityRole="button" accessibilityLabel="添付画像を拡大" onPress={press}>
-      <Image accessibilityLabel="添付画像" source={source} style={style} resizeMode="cover" />
+      {/* 縦長のスクショを潰さない(枠に収める)。2026-11-06 実測で fill になり縦2.2倍に伸びていた */}
+      <Image accessibilityLabel="添付画像" source={source} style={style} resizeMode="contain" />
     </Pressable>
   );
 }
@@ -1498,13 +1501,12 @@ function ItemCard({
         {imageSources.length > 0 ? (
           <View style={styles.imageRow}>
             {imageSources.map((source, i) => (
-              <ImageThumb
-                key={source.uri}
-                source={source}
-                index={i}
-                style={styles.imageThumb}
-                onZoom={setZoom}
-              />
+              <View key={source.uri} style={styles.imageItem}>
+                <ImageThumb source={source} index={i} style={styles.imageThumb} onZoom={setZoom} />
+                {item.imageCaptions?.[i] ? (
+                  <Text style={styles.muted}>{item.imageCaptions[i]}</Text>
+                ) : null}
+              </View>
             ))}
           </View>
         ) : null}

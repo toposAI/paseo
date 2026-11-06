@@ -119,7 +119,7 @@ function applyItem(items: Map<string, ConfirmBoxItem>, e: Record<string, unknown
     threadId: str(e.thread_id).trim() || null,
     stoppedCount: normalizeStoppedCount(e.stopped_count),
     ...reporterField(e.reporter),
-    ...imagesField(e.images),
+    ...imagesField(e.images, e.image_captions),
     options,
     recommended: normalizeRecommended(e.recommended, options),
     state: "new",
@@ -231,6 +231,8 @@ function reporterField(value: unknown): { reporter?: string } {
 const MAX_ITEM_IMAGES = 4;
 const MAX_ITEM_IMAGE_BYTES = 2 * 1024 * 1024;
 const ITEM_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+/** 画像の1行キャプションの上限(画面の1行に収まる長さ)。 */
+const CAPTION_MAX = 120;
 // data URI にそのまま差し込むので、base64 以外の文字(空白・記号)や長さの狂ったものは受け付けない。
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
@@ -242,8 +244,22 @@ function decodedBase64Bytes(data: string): number {
   return (data.length / 4) * 3 - padding;
 }
 
+/** 画像の1行キャプション。文字列だけ拾い、画像の枚数に合わせて切る(足りない分は画面側で補う)。 */
+function captionsField(value: unknown, count: number): Pick<ConfirmBoxItem, "imageCaptions"> {
+  if (!Array.isArray(value) || count <= 0) return {};
+  const captions = value
+    .filter((c): c is string => typeof c === "string")
+    .map((c) => c.trim().slice(0, CAPTION_MAX))
+    .filter((c) => c.length > 0)
+    .slice(0, count);
+  return captions.length > 0 ? { imageCaptions: captions } : {};
+}
+
 /** Keeps at most 4 well-formed images; anything else is dropped rather than failing the item. */
-function imagesField(value: unknown): Pick<ConfirmBoxItem, "images"> {
+function imagesField(
+  value: unknown,
+  captions?: unknown,
+): Pick<ConfirmBoxItem, "images" | "imageCaptions"> {
   if (!Array.isArray(value)) return {};
   const images: Array<{ data: string; mimeType: (typeof ITEM_IMAGE_MIME_TYPES)[number] }> = [];
   for (const entry of value) {
@@ -256,7 +272,7 @@ function imagesField(value: unknown): Pick<ConfirmBoxItem, "images"> {
     if (decodedBase64Bytes(data) > MAX_ITEM_IMAGE_BYTES) continue;
     images.push({ data, mimeType: mimeType as (typeof ITEM_IMAGE_MIME_TYPES)[number] });
   }
-  return images.length > 0 ? { images } : {};
+  return images.length > 0 ? { images, ...captionsField(captions, images.length) } : {};
 }
 
 export interface PendingParseResult {
@@ -309,7 +325,7 @@ export function parsePendingRecords(
       threadId: str(r.thread_id).trim() || null,
       stoppedCount: normalizeStoppedCount(r.stopped_count),
       ...reporterField(r.reporter),
-      ...imagesField(r.images),
+      ...imagesField(r.images, r.image_captions),
       options,
       recommended: normalizeRecommended(r.recommended, options),
       state: "new",
