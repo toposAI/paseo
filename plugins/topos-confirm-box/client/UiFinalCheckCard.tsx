@@ -9,9 +9,9 @@
  * 見ているカードの切り替え・件数は `useUfcFlow` / `shared/ufc-flow.ts`。
  */
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Image, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { Image, Modal, Pressable, Text, View } from "react-native";
 import type { ConfirmBoxItem } from "../shared/contract.js";
-import { splitShots, shotLabel, UFC_OK_ID } from "../shared/ui-final-check.js";
+import { shotLabel, UFC_OK_ID } from "../shared/ui-final-check.js";
 import { ufcStatus } from "../shared/ufc-flow.js";
 import type { UfcCounts, UfcFlow, UfcStatus } from "../shared/ufc-flow.js";
 import { CardChatPane } from "./CardChatPane.js";
@@ -22,8 +22,10 @@ import { usePaneInputTools } from "./usePaneInputTools.js";
 type Styles = Record<string, object>;
 
 const FIX_PREFIX = "【直してほしい】";
-const PC_BOX = { width: 176, height: 110 };
-const PHONE_BOX = { width: 60, height: 110 };
+/** カード内の画像。1画像=1カードなので、カード幅いっぱいに大きく出す(タップで拡大)。 */
+const SHOT_BOX = { width: "100%" as const, height: 320, borderRadius: 8 };
+const shotRow = { gap: 10 };
+const shotItem = { gap: 4 };
 const COMMENT_MAX = 4000;
 const row = { flexDirection: "row" as const, gap: 8, alignItems: "flex-end" as const };
 const rowWrap = { ...row, flexWrap: "wrap" as const, alignItems: "center" as const };
@@ -39,23 +41,26 @@ export function imageCommentText(label: string, text: string): string {
   return `【${label}へのコメント】${text.trim()}`;
 }
 
+/** カードに出す画像の1行キャプション。投函側の imageCaptions を優先し、無ければ従来の当て推量。 */
+function shotCaption(item: { imageCaptions?: string[] }, index: number): string {
+  return item.imageCaptions?.[index] ?? shotLabel(index, index >= 2);
+}
+
 function Thumb({
   source,
   index,
+  label,
   onZoom,
 }: {
   source: { uri: string };
   index: number;
+  label: string;
   onZoom: (index: number) => void;
 }) {
   const press = useCallback(() => onZoom(index), [onZoom, index]);
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${shotLabel(index, false)}を拡大`}
-      onPress={press}
-    >
-      <Image source={source} style={index === 0 ? PC_BOX : PHONE_BOX} resizeMode="contain" />
+    <Pressable accessibilityRole="button" accessibilityLabel={`${label}を拡大`} onPress={press}>
+      <Image source={source} style={SHOT_BOX} resizeMode="contain" />
     </Pressable>
   );
 }
@@ -205,10 +210,10 @@ export function UiFinalCheckCard({
   const [focusN, setFocusN] = useState(0);
   const okRef = useRef(false);
   const sendRef = useRef<((text: string) => Promise<boolean>) | null>(null);
-  const shots = useMemo(() => splitShots(item.images), [item.images]);
+  // 1画像=1カード(2026-11-06 ユーザー指示)。完成版/変更前で絞らず、そのカードの画像を全部出す。
   const sources = useMemo(
-    () => shots.finals.map((i) => ({ uri: `data:${i.mimeType};base64,${i.data}` })),
-    [shots],
+    () => (item.images ?? []).map((i) => ({ uri: `data:${i.mimeType};base64,${i.data}` })),
+    [item.images],
   );
   const ok = useCallback(() => {
     if (okRef.current) return;
@@ -334,11 +339,14 @@ export function UiFinalCheckCard({
               </View>
               <Text style={styles.subject}>{item.subject}</Text>
             </Pressable>
-            <ScrollView horizontal contentContainerStyle={row}>
+            <View style={shotRow}>
               {sources.map((source, i) => (
-                <Thumb key={shotLabel(i, false)} source={source} index={i} onZoom={setZoom} />
+                <View key={source.uri} style={shotItem}>
+                  <Thumb source={source} index={i} label={shotCaption(item, i)} onZoom={setZoom} />
+                  <Text style={styles.muted}>{shotCaption(item, i)}</Text>
+                </View>
               ))}
-            </ScrollView>
+            </View>
             {fixes.length > 0 ? (
               <View style={bullets}>
                 <Text style={styles.muted}>直した点</Text>
@@ -389,7 +397,7 @@ export function UiFinalCheckCard({
       {collapsed ? null : (
         <ImageViewer
           source={zoomSource}
-          label={zoom === null ? "" : shotLabel(zoom, false)}
+          label={zoom === null ? "" : shotCaption(item, zoom)}
           colors={colors}
           send={approved ? null : sendImageComment}
           onClose={closeZoom}

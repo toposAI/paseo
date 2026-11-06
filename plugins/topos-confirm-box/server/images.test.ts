@@ -31,6 +31,35 @@ test("画像2枚つきの項目はそのまま残る", () => {
   ]);
 });
 
+test("画像の1行キャプションは images と同じ順で項目に残る(2026-11-06「1画像1カード」の見出し)", () => {
+  const items = foldBoxEvents([
+    {
+      t: "item",
+      id: "box:cap",
+      ts: 1,
+      images: [image(PNG), image(PNG)],
+      image_captions: ["完成版 PC: 資料の一覧", "完成版 iPhone: 資料の一覧"],
+    },
+  ]);
+  assert.deepEqual(items.get("box:cap")?.imageCaptions, [
+    "完成版 PC: 資料の一覧",
+    "完成版 iPhone: 資料の一覧",
+  ]);
+});
+
+test("キャプションは画像の枚数までに切り、文字列以外は捨てる", () => {
+  const items = foldBoxEvents([
+    {
+      t: "item",
+      id: "box:cap2",
+      ts: 1,
+      images: [image(PNG)],
+      image_captions: ["1枚目", "2枚目", 3],
+    },
+  ]);
+  assert.deepEqual(items.get("box:cap2")?.imageCaptions, ["1枚目"]);
+});
+
 test("5枚以上あっても4枚で頭打ちにする", () => {
   const six = Array.from({ length: 6 }, (_, i) =>
     image(`QUJD${["AAAA", "BBBB", "CCCC", "DDDD", "EEEE", "FFFF"][i]}`),
