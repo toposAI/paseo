@@ -12,8 +12,8 @@ import {
   type WindowBInstructionsOutput,
 } from "./contract.js";
 
-/** 窓口BのスレID。ここを見て「窓口Bの画面か」を決め、窓口Bの画面でだけ指示一覧を自動で出す。 */
-export const WINDOW_B_AGENT_ID = "29f7ab97-3c33-407e-8a2b-c5284dd38f99";
+/** 窓口(旧窓口B。2026-11-05 の入れ替えで B.id が変わった)のスレID。ここを見て「窓口Bの画面か」を決め、窓口Bの画面でだけ指示一覧を自動で出す。 */
+export const WINDOW_B_AGENT_ID = "c153ffd0-7509-4e21-adb2-86ef22f10c82";
 
 /** PC幅の下限(ホストの compact 境界と同じ720px)。 */
 export const WIDE_MIN_WIDTH = 720;

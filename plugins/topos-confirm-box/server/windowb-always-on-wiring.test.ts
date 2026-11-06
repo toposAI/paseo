@@ -32,7 +32,7 @@ test("窓口Bのスレを開いたら自動で出す指定と、右カラムに�
   assert.match(body, /edgeSwipe: true/, "狭い画面の右端スワイプで開く");
   assert.match(body, /band: \{ whenAgentIds: \[WINDOW_B_AGENT_ID\], Component: WindowBBand \}/);
   // スレID は台帳と同じ定数(窓口B の固定ID)。別名で書き直さない。
-  assert.match(sharedSource, /WINDOW_B_AGENT_ID = "29f7ab97-3c33-407e-8a2b-c5284dd38f99"/);
+  assert.match(sharedSource, /WINDOW_B_AGENT_ID = "c153ffd0-7509-4e21-adb2-86ef22f10c82"/);
 });
 
 test("iPhone の入口(「指示」ボタン)は残っていて、窓口Bのワークスペースにだけ出る", () => {
