@@ -263,6 +263,26 @@ export function withSayInstruction(
   );
 }
 
+/**
+ * 画像への直接コメントの印(UI確認カードの画像ビューアが送る文の先頭)。
+ * 付いている文は**返事を求めない**ので、say の指示を付けず、催促の対象からも外す
+ * (2026-11-06 ユーザー指示「返事書かなくていい。画像に直接コメントしたら、そのまま完了にして」)。
+ */
+const IMAGE_COMMENT_RE = /【[^】\n]{1,60}へのコメント】/;
+
+/** 画像への直接コメントか(先頭の `【<画像名>へのコメント】` で見分ける)。 */
+export function isImageComment(text: string): boolean {
+  return IMAGE_COMMENT_RE.test(text.trim());
+}
+
+/** 画像への直接コメントを上位スレへ送る文に、返事が要らないことを明記する(say コマンドは付けない)。 */
+export function withNoReplyInstruction(text: string): string {
+  return (
+    `${text}\n\n` +
+    `【返事不要】これは画像への直接コメントです。返事は書かず、指摘された直しだけを進めてください。`
+  );
+}
+
 /** 返事待ちの目印。3分以内=「返事待ち」、超過=「返事待ち(sayなし)」。 */
 export function pendingLabel(state: "waiting" | "overdue", nudges: number): string {
   if (state === "waiting") return "返事待ち";

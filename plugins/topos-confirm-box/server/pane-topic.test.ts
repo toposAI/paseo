@@ -6,8 +6,10 @@ import path from "node:path";
 import test from "node:test";
 import {
   isHubTarget,
+  isImageComment,
   pendingLabel,
   shouldSubmitOnEnter,
+  withNoReplyInstruction,
   withSayInstruction,
 } from "../shared/card-pane.js";
 import { askFromPane, cancelFromPane, panePending, readCardChat } from "./cardchat.js";
@@ -105,4 +107,19 @@ test("askFromPane は空文字・宛先なしを拒否", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-pane-"));
   assert.equal(askFromPane(dir, { id: "i1" }, "  ", "a").ok, false);
   assert.equal(askFromPane(dir, { id: "i1" }, "x", " ").ok, false);
+});
+
+test("画像への直接コメント: 返事待ちに出ず、転送文には返事不要とだけ書く(2026-11-06)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-pane-"));
+  const t0 = Date.now();
+  // ペインは「【直してほしい】」を前置きしてから台帳へ書く(実際の送信と同じ形)。
+  const text = "【直してほしい】【完成版へのコメント】ここを直して";
+  assert.equal(isImageComment(text), true);
+  assert.equal(isImageComment("【直してほしい】普通の指摘"), false);
+  askFromPane(dir, { id: "i1" }, text, "a", t0);
+  // 催促の元・返事待ちの目印にしない(3分超でも overdue にならない)。
+  assert.equal(panePending(dir, { id: "i1" }, t0 + 200_000).length, 0);
+  const out = withNoReplyInstruction("本文");
+  assert.match(out, /^本文\n\n【返事不要】/);
+  assert.doesNotMatch(out, /confirm_box_reply\.py say/);
 });

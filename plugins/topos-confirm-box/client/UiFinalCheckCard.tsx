@@ -98,11 +98,14 @@ function ImageViewer({
     if (ok) {
       setText("");
       setNotice("");
+      // 画像に直接コメントしたら、そのまま完了にしてカードを閉じる(2026-11-06 ユーザー指示)。
+      // 閉じ方は「完了」ボタンと同じ経路(onDone → 台帳)。返事は求めない(送信側で「返事不要」を明記)。
+      onDone?.();
       onClose();
     } else {
       setNotice("送れませんでした(投函元スレに届いていません)");
     }
-  }, [text, send, label, onClose]);
+  }, [text, send, label, onClose, onDone]);
   const submitPress = useCallback(() => void submit(), [submit]);
   const st = useMemo(
     () => ({

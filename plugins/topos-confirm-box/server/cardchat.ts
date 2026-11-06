@@ -23,6 +23,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { isImageComment } from "../shared/card-pane.js";
 
 const EVENTS_FILE = /^events-\d{6}\.jsonl$/;
 /** 旧形式(読み取りのみ・互換のため残す。新規の書き込みはしない)。 */
@@ -251,6 +252,8 @@ export function panePending(
   const out: PanePending[] = [];
   for (const r of rows) {
     if (r.t !== "chat" || r.source !== "pane" || !mine(r) || typeof r.ts !== "number") continue;
+    // 画像への直接コメントは返事を求めない(2026-11-06 ユーザー指示)。催促・返事待ちの対象外。
+    if (isImageComment(field(r, "question"))) continue;
     const re = field(r, "client_message_id");
     if (!re || answered.has(re) || cancelled.has(re) || r.ts < now - PANE_MAX_AGE_MS) continue;
     out.push({

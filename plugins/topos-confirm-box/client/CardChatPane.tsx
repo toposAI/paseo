@@ -58,12 +58,14 @@ import type { ConfirmBoxItem } from "../shared/contract.js";
 import {
   COORDINATOR_FALLBACK_NOTICE,
   coordinatorCandidates,
+  isImageComment,
   pendingLabel,
   pickCoordinatorTarget,
   shouldFallbackToCoordinator,
   shouldSubmitOnEnter,
   threadUnavailableReason,
   withCardHeader,
+  withNoReplyInstruction,
   withSayInstruction,
 } from "../shared/card-pane.js";
 import type { ThreadAccess } from "../shared/child-threads.js";
@@ -799,6 +801,8 @@ export function CardChatPane({
       const own = override === undefined;
       const t = (own ? text : override).trim();
       if (reason || !t || !sendAgentId || !serverId || sendingRef.current) return false;
+      // 画像への直接コメント(UI確認カードの画像ビューア)は返事を求めない (2026-11-06 ユーザー指示)。
+      const imageComment = isImageComment(t);
       sendingRef.current = true;
       setSending(true);
       // 外から渡された文(画像コメント)は、書きかけの下書きと添付に触らない。
@@ -825,10 +829,13 @@ export function CardChatPane({
           });
           if (!asked.ok || !asked.replyId) throw new Error(asked.message);
           askedId = asked.replyId;
-          outgoing = withSayInstruction(outgoing, {
-            replyId: asked.replyId,
-            cardId: item.id,
-          });
+          // 画像への直接コメントは、返事を書かず直しを進めるだけだと転送文に明記する(say は付けない)。
+          outgoing = imageComment
+            ? withNoReplyInstruction(outgoing)
+            : withSayInstruction(outgoing, {
+                replyId: asked.replyId,
+                cardId: item.id,
+              });
         }
         const opts = sentImages.length
           ? {
@@ -845,6 +852,16 @@ export function CardChatPane({
         setNotice("");
         ok = true;
         sentOnce.current = true;
+        if (imageComment && askedId && item) {
+          // 画像への直接コメントは返事を求めない。催促・「返事待ち」の対象から外す
+          // (2026-11-06 ユーザー指示。カードを閉じるのは呼び出し側=同じ完了の経路)。
+          try {
+            await cancelRpc({ id: item.id, key: item.key, replyId: askedId });
+            if (topic) void refreshTopic();
+          } catch {
+            // 取り消せなくても催促が1回飛ぶだけで、返事は不要と転送文に書いてある(受容)。
+          }
+        }
       } catch (e) {
         setNotice(sendErrorNotice(e));
         // 入力を失わない(書き直しや再添付を強いない)。
