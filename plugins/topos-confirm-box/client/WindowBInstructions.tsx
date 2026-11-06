@@ -32,7 +32,9 @@ import {
   type ListMode,
   freshnessText,
   keepLastOnFailure,
+  noticeLines,
   paneLocation,
+  plainAssignee,
   rowOrder,
   routeText,
   rowTitle,
@@ -40,6 +42,7 @@ import {
   summarize,
   staleNotice,
   truncationNote,
+  WIDE_MIN_WIDTH,
 } from "../shared/windowb-instructions.js";
 
 export const WINDOWB_PANEL_ID = "window-b-instructions";
@@ -190,12 +193,10 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
           {item.alert ? ` ・ ${ALERT_SHORT[item.alert] ?? "要確認"}` : ""}
         </Text>
       </View>
-      <Text style={s.title} numberOfLines={open ? undefined : 1}>
-        {rowTitle(item)}
-      </Text>
+      <Text style={s.title}>{rowTitle(item)}</Text>
       {open ? (
         <Text style={s.meta}>
-          {item.assigneeText}
+          {plainAssignee(item.assigneeText)}
           {item.detail ? ` ・ ${item.detail}` : ""}
         </Text>
       ) : null}
@@ -231,6 +232,8 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
   const { data, error } = useInstructions();
   // 「古い表示」は時間で変わるので、1分ごとに時計を進めて見直す(引けている間は普通は出ない)。
   const [now, setNow] = useState(() => Date.now());
+  // 右カラム(PC幅)か全画面(狭い幅)かで、見出しの重複を避ける。
+  const wide = Dimensions.get("window").width >= WIDE_MIN_WIDTH;
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(timer);
@@ -248,6 +251,7 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
       headRow: { flexDirection: "row" as const, justifyContent: "space-between" as const, gap: 8 },
       headTitle: { color: c.foreground, fontSize: 14, fontWeight: "700" as const },
       muted: { color: c.foregroundMuted, fontSize: 12 },
+      noticeBox: { gap: 1 },
       notice: { color: c.statusWarning, fontSize: 12 },
       error: { color: c.statusDanger, fontSize: 12 },
       stale: {
@@ -286,7 +290,16 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
       </Text>
     );
   } else if (data && data.notices.length > 0) {
-    notice = <Text style={s.notice}>{data.notices.join(" / ")}</Text>;
+    // 技術的な説明をそのまま並べると一覧の頭が埋まるので、短い行(最大2行)に直して出す。
+    notice = (
+      <View style={s.noticeBox} testID="windowb-notices">
+        {noticeLines(data.notices).map((line) => (
+          <Text key={line} style={s.notice}>
+            {line}
+          </Text>
+        ))}
+      </View>
+    );
   }
   const truncated = data ? truncationNote(data) : null;
   const truncate = truncated ? <Text style={s.muted}>{truncated}</Text> : null;
@@ -299,7 +312,9 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
       ) : null}
       <View style={s.head}>
         <View style={s.headRow}>
-          <Text style={s.headTitle}>指示一覧</Text>
+          {/* PC幅はパネルの見出し(タブ)が「指示一覧」を出しているので、本文では繰り返さない。
+              狭い画面は全画面で開くので、タブが無く、ここに題が要る。 */}
+          {wide ? null : <Text style={s.headTitle}>{WINDOWB_PANEL_TITLE}</Text>}
           <Text style={s.muted}>{summarize(data)}</Text>
         </View>
         {data ? <Text style={s.muted}>{freshnessText(data)}</Text> : null}

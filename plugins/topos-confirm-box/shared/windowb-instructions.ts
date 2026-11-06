@@ -170,13 +170,78 @@ export function visibleRoutes(
   return { shown: all.slice(0, ROUTES_COLLAPSED), hidden: all.length - ROUTES_COLLAPSED };
 }
 
-/** 閉じたカードのタイトル。要約(title)が空なら全文の1行目(画面側で1行に切る)。逐語でない要約は作らない。 */
+/** 閉じたカードのタイトル。要約(title)が空なら全文の1行目。逐語でない要約は作らない。 */
 export function rowTitle(item: { title: string; text: string }): string {
-  if (item.title.trim() !== "") return item.title;
-  return (
+  if (item.title.trim() !== "") return plainTitle(item.title);
+  const firstLine =
     item.text
       .split("\n")
       .find((l) => l.trim() !== "")
-      ?.trim() ?? ""
-  );
+      ?.trim() ?? "";
+  return plainTitle(firstLine);
+}
+
+/** 先頭に付いた台帳の整理番号(半角英数の4桁前後。例 `140c完了の確認`)。 */
+const LEADING_CARD_ID = /^[0-9a-f]{3,8}(?=[^\s0-9a-f])/i;
+
+/** 末尾の括弧つき番号(例 `完了の確認(#261)`)。 */
+const TRAILING_NUMBER = /[（(]#?\d+[)）]\s*$/;
+
+/** 題が「(リンク)」だけの行。中身がリンクだけの依頼で、題として読めない。 */
+const LINK_ONLY = /^[（(]?\s*(リンク|link)\s*[)）]?$/i;
+
+/**
+ * 一覧に出す題を平易にする(2026-11-06 ユーザー指摘「内部ID風の語が出ている。平易な語へ」)。
+ * 台帳の整理番号(`140c` など)と末尾の番号(`(#261)`)は画面では意味が読めないので落とす。
+ * 落とした結果が空になるなら元の題をそのまま返す(題を消さない)。
+ */
+export function plainTitle(raw: string): string {
+  const s = raw.trim();
+  if (LINK_ONLY.test(s)) return "リンクの依頼";
+  const cut = s.replace(LEADING_CARD_ID, "").replace(TRAILING_NUMBER, "").trim();
+  return cut !== "" ? cut : s;
+}
+
+/** 担当の列に出す語。中身が英数のIDだけなら、そのまま出さず「担当のスレ」と言い換える。 */
+export function plainAssignee(raw: string): string {
+  const s = raw.trim();
+  if (s === "") return "担当未定";
+  return /^[0-9a-f]{6,}$/i.test(s) ? "担当のスレ" : s;
+}
+
+/** 一覧の上に出す注意書きの最大行数(2026-11-06 指摘「PC3行/iPhone4行ある。短く」)。 */
+export const NOTICE_MAX_LINES = 2;
+
+/** 注意書き(技術的な説明)を、画面で読める短い平易な行に直す規則。当たらなければ原文のまま。 */
+const NOTICE_SHORT: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
+  [/同じ鍵の依頼が\s*(\d+)\s*件/, (m) => `同じ依頼${m[1]}件は1つにまとめて表示`],
+  [
+    /日付の無い依頼\s*(\d+)\s*件.*日付を決められない/,
+    (m) => `日付の分からない依頼${m[1]}件は非表示`,
+  ],
+  [
+    /日付の無い依頼\s*(\d+)\s*件.*日付の印から/,
+    (m) => `日付の分からない依頼${m[1]}件は前後の印から補完`,
+  ],
+];
+
+/**
+ * 注意書きを最大 `NOTICE_MAX_LINES` 行に収める。溢れた分は最後の行に「ほかN件」と添える
+ * (行を増やすと一覧の頭が埋まって、肝心の指示が見えなくなる)。
+ */
+export function noticeLines(notices: readonly string[]): string[] {
+  const lines = notices
+    .map((n) => {
+      for (const [re, short] of NOTICE_SHORT) {
+        const m = n.match(re);
+        if (m) return short(m);
+      }
+      return n.trim();
+    })
+    .filter((l) => l !== "");
+  if (lines.length <= NOTICE_MAX_LINES) return lines;
+  const shown = lines.slice(0, NOTICE_MAX_LINES);
+  const rest = lines.length - NOTICE_MAX_LINES;
+  shown[NOTICE_MAX_LINES - 1] = `${shown[NOTICE_MAX_LINES - 1]} ほか${rest}件`;
+  return shown;
 }

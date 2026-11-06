@@ -13,7 +13,9 @@ import {
   filterByMode,
   freshnessText,
   keepLastOnFailure,
+  noticeLines,
   paneLocation,
+  plainAssignee,
   rowOrder,
   routeText,
   visibleRoutes,
@@ -199,4 +201,35 @@ test("visibleRoutes: 閉じている間は3項目まで、開くと全部。古�
 test("rowTitle: 要約があればそれ、無ければ全文の1行目", () => {
   assert.equal(rowTitle({ title: "要約", text: "全文\n2行目" }), "要約");
   assert.equal(rowTitle({ title: " ", text: "\n全文1行目\n2行目" }), "全文1行目");
+});
+
+test("rowTitle: 内部ID風の整理番号と末尾の番号を落として平易にする", () => {
+  assert.equal(rowTitle({ title: "140c完了の確認(#261)", text: "x" }), "完了の確認");
+  assert.equal(
+    rowTitle({ title: "5067返答:①の再デプロイを総司令塔へ", text: "x" }),
+    "返答:①の再デプロイを総司令塔へ",
+  );
+  // 落とすと空になる題は消さない(意味のある語は残す)
+  assert.equal(rowTitle({ title: "abc", text: "x" }), "abc");
+  // リンクだけの題は、題として読める語に言い換える
+  assert.equal(rowTitle({ title: "(リンク)", text: "https://example.com" }), "リンクの依頼");
+});
+
+test("plainAssignee: 英数のIDだけの担当は「担当のスレ」と言い換える", () => {
+  assert.equal(plainAssignee("7ace1dd7"), "担当のスレ");
+  assert.equal(plainAssignee("雑務係"), "雑務係");
+  assert.equal(plainAssignee("  "), "担当未定");
+});
+
+test("noticeLines: 技術的な注意書きを短い行(最大2行)に直す", () => {
+  const lines = noticeLines([
+    "同じ鍵の依頼が 35件あり、1件にまとめて出しています",
+    "日付の無い依頼 1件は日付を決められないので出していません",
+    "日付の無い依頼 1件は下(後)の日付の印から日付を決めています",
+  ]);
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0], "同じ依頼35件は1つにまとめて表示");
+  assert.equal(lines[1], "日付の分からない依頼1件は非表示 ほか1件");
+  // 知らない文言は消さずにそのまま出す(黙って落とさない)
+  assert.deepEqual(noticeLines(["知らない注意"]), ["知らない注意"]);
 });
