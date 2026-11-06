@@ -106,8 +106,10 @@ export function shouldFallbackToCoordinator(opts: {
   hasCard: boolean;
   agentId: string | null;
   closedText: string | null;
+  /** サーバが「投函元不明」と判定したカード。別のスレへ流さず送信不可にする(fail-closed)。 */
+  originUnknown?: boolean;
 }): boolean {
-  if (!opts.hasCard) return false;
+  if (!opts.hasCard || opts.originUnknown) return false;
   return !opts.agentId || opts.closedText !== null;
 }
 

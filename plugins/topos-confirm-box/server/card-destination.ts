@@ -103,20 +103,22 @@ export function resolveCardDestination(
   };
 
   if (poster) {
+    // 2026-11-06: 答えるのは投函元本人(子司令塔)。登録簿の親(窓口など)へは流さない。
+    // 閉じているだけのスレは送れば再開する。アーカイブ済みのときだけ次点(親→領域→総司令塔)へ。
+    if (!poster.archived) {
+      return {
+        id: poster.agentId,
+        label: labelFor(poster.agentId, poster.title, domains),
+        reason: "self",
+        registered: true,
+      };
+    }
     const upper = poster.parentAgentId;
     if (upper && alive(upper)) {
       return {
         id: upper,
         label: labelFor(upper, title(upper, poster.parentTitle), domains),
         reason: "parent",
-        registered: true,
-      };
-    }
-    if (!upper && !poster.archived) {
-      return {
-        id: poster.agentId,
-        label: labelFor(poster.agentId, poster.title, domains),
-        reason: "self",
         registered: true,
       };
     }
@@ -135,26 +137,10 @@ export function resolveCardDestination(
     if (self) {
       return { id: self, label: labelFor(self, null, domains), reason: "self", registered: false };
     }
-    const d = domainPick(inferDomain(hint));
-    if (d) {
-      return {
-        id: d,
-        label: `未登録の投函元 → ${labelFor(d, null, domains)}`,
-        reason: "domain",
-        registered: false,
-      };
-    }
-    if (generalId) {
-      return {
-        id: generalId,
-        label: `未登録の投函元 → ${labelFor(generalId, null, domains)}`,
-        reason: "general",
-        registered: false,
-      };
-    }
+    // 投函元が分からない/登録簿に居ない: 別のスレへ流さない(fail-closed)。
     return {
       id: null,
-      label: "未登録の投函元(答えるスレを決められません)",
+      label: threads.length ? "投函元不明(登録簿にありません)" : "投函元不明",
       reason: "unresolved",
       registered: false,
     };

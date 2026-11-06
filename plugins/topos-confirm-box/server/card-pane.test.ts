@@ -81,6 +81,11 @@ test("総司令塔への振り替え: カードで参照無し/閉じている�
   assert.equal(f({ hasCard: true, agentId: null, closedText: null }), true);
   assert.equal(f({ hasCard: true, agentId: "a1", closedText: "投函元が閉じています" }), true);
   assert.equal(f({ hasCard: true, agentId: "a1", closedText: null }), false);
+  assert.equal(
+    f({ hasCard: true, agentId: null, closedText: null, originUnknown: true }),
+    false,
+    "投函元不明は別のスレへ流さない",
+  );
   assert.equal(f({ hasCard: false, agentId: "a1", closedText: "担当スレが閉じています" }), false);
   assert.equal(f({ hasCard: false, agentId: null, closedText: null }), false);
 });

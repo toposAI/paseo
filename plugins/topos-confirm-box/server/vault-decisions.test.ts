@@ -533,20 +533,19 @@ const ROUTING = {
   },
 };
 
-test("チャット宛先: 登録簿の親スレを threadRef にし、答えるスレの表示を付ける", () => {
+test("チャット宛先: 投函元本人を threadRef にし、答えるスレの表示を付ける(親へは流さない)", () => {
   const parsed = parseDecisionNote(WITH_THREADS(["e7fd88de"]), 1, ROUTING) as ConfirmBoxItem;
   assert.deepEqual(parsed.threadRef, {
     kind: "paseo_agent",
-    id: "afe8d176-d92c-4cb2-933b-8dfe790d3c20",
+    id: "e7fd88de-95e9-46a0-b716-b8a87ea936df",
   });
-  assert.equal(parsed.answerLabel, "F-80司令塔");
+  assert.equal(parsed.answerLabel, "f80-walltalk-check-design");
 });
 
 test("スレを開く宛先: threads の1本目(=投函元)を threadId に入れる(thread_ref=親 とは別)", () => {
   const parsed = parseDecisionNote(WITH_THREADS(["e7fd88de"]), 1, ROUTING) as ConfirmBoxItem;
   assert.equal(parsed.threadId, "e7fd88de");
-  // この欄に答えるスレ(親)は従来どおり。
-  assert.equal(parsed.threadRef?.id, "afe8d176-d92c-4cb2-933b-8dfe790d3c20");
+  assert.equal(parsed.threadRef?.id, "e7fd88de-95e9-46a0-b716-b8a87ea936df");
 });
 
 test("スレを開く宛先: 単一キー thread_id: があれば threads より優先する", () => {
@@ -563,10 +562,10 @@ test("スレを開く宛先: threads も thread_id も無い旧ノートは thre
   assert.equal(parsed.threadId, null);
 });
 
-test("チャット宛先: threads が無いノートは総司令塔(未登録と明示)", () => {
+test("チャット宛先: threads が無いノートは投函元不明(送信先なし)", () => {
   const parsed = parseDecisionNote(NOTE("j-t2", "open"), 1, ROUTING) as ConfirmBoxItem;
-  assert.equal(parsed.threadRef?.id, ROUTING.domainCoordinators.general);
-  assert.match(parsed.answerLabel ?? "", /未登録/);
+  assert.equal(parsed.threadRef, null);
+  assert.match(parsed.answerLabel ?? "", /^投函元不明/);
 });
 
 test("却下: superseded になりコメントが逐語で残り、rejected_at が付き、一覧から消える", () => {
