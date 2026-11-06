@@ -70,7 +70,7 @@ export function inferDomain(hint: string): string | null {
  * 話せるようにして」。投函元が登録簿に無い家族報告のカードは、これまで宛先なし=総司令塔へ
  * 振り替えられていた。題名・key がTopos製品を指すときだけ、登録簿の題名からTopos司令塔を引く。
  */
-const TOPOS_HINT_RE = /topos|家族版|家族報告|家族から/i;
+const TOPOS_HINT_RE = /(?<![A-Za-z])(?:topos(?![\s_-]?ai)|家族版|家族報告|家族から)/i;
 const TOPOS_COMMANDER_TITLE = "Topos司令塔";
 
 export function isToposHint(hint: string): boolean {
@@ -144,6 +144,20 @@ export function resolveCardDestination(
     // 2026-11-06: 答えるのは投函元本人(子司令塔)。登録簿の親(窓口など)へは流さない。
     // 閉じているだけのスレは送れば再開する。アーカイブ済みのときだけ次点(親→領域→総司令塔)へ。
     if (!poster.archived) {
+      // 投函元が総司令塔でも、Topos製品のカードは Topos司令塔と話す(2026-11-06 ユーザー逐語
+      // 「総司令塔じゃなくて、Topos司令塔と話せるように」)。投函元が子スレ・子司令塔のときは
+      // 文脈を持つ本人を優先する(従来どおり)。
+      if (generalId && poster.agentId === generalId && isToposHint(hint)) {
+        const topos = commanderByTitle(registry, TOPOS_COMMANDER_TITLE);
+        if (topos) {
+          return {
+            id: topos,
+            label: labelFor(topos, TOPOS_COMMANDER_TITLE, domains),
+            reason: "domain",
+            registered: false,
+          };
+        }
+      }
       return {
         id: poster.agentId,
         label: labelFor(poster.agentId, poster.title, domains),

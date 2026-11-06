@@ -113,3 +113,34 @@ test("投函元がアーカイブ済みの家族報告もTopos司令塔へ", () 
   const d = resolveCardDestination(["c1111111"], "j-fb-x 家族版Topos", c);
   assert.equal(d.id, TOPOS);
 });
+
+test("投函元が総司令塔本人のToposカードもTopos司令塔へ(ユーザー逐語)", () => {
+  const c = ctx([...toposRegistry, entry({ agentId: GENERAL, title: "総司令塔" })]);
+  const d = resolveCardDestination([GENERAL], "j-fb-x 家族報告", c);
+  assert.equal(d.id, TOPOS);
+  assert.equal(d.reason, "domain");
+  assert.equal(d.registered, false);
+});
+
+test("投函元が総司令塔本人でもTopos以外のカードは従来どおり本人", () => {
+  const c = ctx([...toposRegistry, entry({ agentId: GENERAL, title: "総司令塔" })]);
+  const d = resolveCardDestination([GENERAL], "j-20261025-f80-x", c);
+  assert.equal(d.id, GENERAL);
+  assert.equal(d.reason, "self");
+});
+
+test("投函元が子スレのToposカードは本人のまま(文脈を持つ本人を優先)", () => {
+  const c = ctx([...toposRegistry, entry({ agentId: CHILD, title: "家族報告の子スレ" })]);
+  const d = resolveCardDestination(["c1111111"], "j-fb-x 家族報告", c);
+  assert.equal(d.id, CHILD);
+  assert.equal(d.reason, "self");
+});
+
+test("「ToposAI」はTopos製品の合図にしない(部分一致の誤爆を避ける)", () => {
+  const c = ctx(toposRegistry);
+  for (const hint of ["j-x ToposAIのデーモン", "j-x topos_ai の設定", "j-x TOPOS-AI"]) {
+    const d = resolveCardDestination(["deadbeef"], hint, c);
+    assert.equal(d.id, null, hint);
+    assert.equal(d.reason, "unresolved", hint);
+  }
+});
