@@ -59,7 +59,30 @@ export function toggleZoomAt(
   return zoomAt(t, DOUBLE_TAP_SCALE, px, py, width, height);
 }
 
-/** ホイール1目盛り(deltaY)に対する倍率。 */
-export function wheelFactor(deltaY: number): number {
-  return Math.exp(-deltaY * 0.002);
+/** ホイール1目盛り(deltaY)に対する倍率。ctrlKey 付き(トラックパッドのピンチ)は delta が小さいので強めに効かせる。 */
+export function wheelFactor(deltaY: number, pinch = false): number {
+  return Math.exp(-deltaY * (pinch ? 0.01 : 0.002));
+}
+
+export interface WheelLike {
+  ctrlKey: boolean;
+  deltaX: number;
+  deltaY: number;
+}
+
+/**
+ * wheel を画像操作へ変換する。ctrlKey 付き(Mac トラックパッドの2本指ピンチ。ブラウザがこの形で送る)は拡大縮小、
+ * ctrlKey なし(2本指でなぞる)は拡大中だけ画像を動かす。等倍でのなぞりは何もしない(ページも動かさない)。
+ */
+export function applyWheel(
+  t: ZoomTransform,
+  e: WheelLike,
+  px: number,
+  py: number,
+  width: number,
+  height: number,
+): ZoomTransform {
+  if (e.ctrlKey) return zoomAt(t, t.scale * wheelFactor(e.deltaY, true), px, py, width, height);
+  if (t.scale <= MIN_SCALE) return t;
+  return clampTransform({ ...t, x: t.x - e.deltaX, y: t.y - e.deltaY }, width, height);
 }
