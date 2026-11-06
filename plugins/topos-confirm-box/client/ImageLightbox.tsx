@@ -1,6 +1,6 @@
 /**
  * 確認箱カードの添付画像を、画面いっぱい(縦横比を保ち、はみ出さない)で見る拡大表示。
- * 閉じる: ✕・背景を押す・Esc。複数枚は ‹ › と ←/→ キーで前後へ移る。
+ * 閉じる: ✕・画像まわりを押す・Esc(Modal の onRequestClose)。複数枚は ‹ › と ←/→ キーで前後へ移る。
  * iPhone のピンチ拡大は、Modal の中身が普通の div のままなので標準の振る舞いを妨げない(touch-action を触らない)。
  */
 import { useCallback, useEffect, useMemo } from "react";
@@ -32,17 +32,21 @@ export function ImageLightbox({
     if (index !== null) onChange(neighborIndex(index, count, 1));
   }, [index, count, onChange]);
 
-  // Esc で閉じる・←/→ で前後(Web のみ。Modal の onRequestClose は Esc で呼ばれない環境がある)。
+  // 枚数が減るなどで開いていた番号が無くなったら、状態も閉じる(後で枚数が戻っても勝手に開かない)。
   useEffect(() => {
-    if (Platform.OS !== "web" || current === null) return undefined;
+    if (index !== null && current === null) onClose();
+  }, [index, current, onClose]);
+
+  // ←/→ で前後(Web のみ)。Esc は react-native-web の Modal が keyup で onRequestClose を呼ぶのでここでは扱わない。
+  useEffect(() => {
+    if (Platform.OS !== "web" || current === null || count < 2) return undefined;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowLeft" && count > 1) prev();
-      else if (e.key === "ArrowRight" && count > 1) next();
+      if (e.key === "ArrowLeft") prev();
+      else if (e.key === "ArrowRight") next();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [current, count, onClose, prev, next]);
+  }, [current, count, prev, next]);
 
   const st = useMemo(
     () => ({
@@ -86,8 +90,13 @@ export function ImageLightbox({
               <Text style={st.nav}>‹</Text>
             </Pressable>
           ) : null}
-          {/* 背景(画像まわりの黒い所)を押すと閉じる。ピンチは click にならないので拡大操作では閉じない。 */}
-          <Pressable accessibilityLabel="背景を押して閉じる" style={st.backdrop} onPress={onClose}>
+          {/* 画像の上を含め、‹ › 以外の所を押すと閉じる。ピンチは click にならないので拡大操作では閉じない。 */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="画像を押して閉じる"
+            style={st.backdrop}
+            onPress={onClose}
+          >
             {current ? (
               <Image
                 accessibilityLabel="拡大した添付画像"

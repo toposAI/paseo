@@ -1390,7 +1390,7 @@ function RejectPanel({
   );
 }
 
-/** 添付画像のサムネイル。押すと原寸に近い拡大表示を開く。 */
+/** 添付画像のサムネイル。押すと画面に収まる大きさの拡大表示を開く。 */
 function ImageThumb({
   source,
   index,
