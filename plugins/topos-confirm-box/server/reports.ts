@@ -27,7 +27,7 @@ const IMAGE_MIME: Record<string, string> = {
   ".webp": "image/webp",
   ".gif": "image/gif",
 };
-const MAX_BYTES = 10 * 1024 * 1024;
+export const MAX_BYTES = 10 * 1024 * 1024;
 
 export interface ReportRow {
   id: string;

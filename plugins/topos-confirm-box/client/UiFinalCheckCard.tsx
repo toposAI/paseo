@@ -316,7 +316,7 @@ export function UiFinalCheckCard({
                     label={shotCaption(item, i)}
                     onZoom={setZoom}
                   />
-                  {captionToShow(item.imageCaptions?.[i], item.subject) ? (
+                  {captionToShow(shotCaption(item, i), item.subject) ? (
                     <Text style={styles.muted}>{shotCaption(item, i)}</Text>
                   ) : null}
                 </View>

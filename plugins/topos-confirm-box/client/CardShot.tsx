@@ -42,8 +42,8 @@ export function CardShot({
   const [ratio, setRatio] = useState<number | null>(null);
   const press = useCallback(() => onZoom(index), [onZoom, index]);
   const loaded = useCallback((e: NativeSyntheticEvent<ImageLoadEventData>) => {
-    const { width, height } = e.nativeEvent.source;
-    setRatio(shotRatio(width, height));
+    const loadedSource = e.nativeEvent?.source;
+    setRatio(shotRatio(loadedSource?.width ?? 0, loadedSource?.height ?? 0));
   }, []);
   const frame = useMemo(() => ({ ...FRAME, aspectRatio: ratio ?? SHOT_FALLBACK_RATIO }), [ratio]);
   const imgStyle = useMemo(

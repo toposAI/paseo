@@ -7,6 +7,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { MAX_BYTES } from "./reports.js";
 
 const IMAGE_MIME: Record<string, string> = {
   ".png": "image/png",
@@ -15,8 +16,7 @@ const IMAGE_MIME: Record<string, string> = {
   ".webp": "image/webp",
   ".gif": "image/gif",
 };
-/** `server/reports.ts` の MAX_BYTES と同じ。 */
-export const FEEDBACK_SCREENSHOT_MAX_BYTES = 10 * 1024 * 1024;
+export const FEEDBACK_SCREENSHOT_MAX_BYTES = MAX_BYTES;
 
 const NG = { ok: false, dataUri: "" } as const;
 

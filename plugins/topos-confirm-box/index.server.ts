@@ -82,6 +82,7 @@ import {
 } from "./server/shared-projects.js";
 import { feedbackReportsListRpc, countOpenReports } from "./shared/feedback.js";
 import { readFeedbackReports, resolveFeedbackDirs } from "./server/feedback.js";
+import { readItemImage } from "./server/item-images.js";
 import { readFeedbackScreenshot } from "./server/feedback-screenshot.js";
 import { loadProgressContext } from "./server/feedback-progress.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
@@ -453,9 +454,7 @@ export default function contribute(server: PluginServerContext) {
   });
 
   server.handle(confirmBoxImageRpc, async (input) => {
-    const { items } = readConfirmBox(resolveConfirmBoxDir());
-    const found = items.find((it) => it.id === input.id);
-    return { image: found?.images?.[input.index] ?? null };
+    return { image: readItemImage(resolveConfirmBoxDir(), input.id, input.index) };
   });
 
   // 変更の合図(合図ファイルの mtime。ms)。読めなければ 0=画面は定期取得のまま。
