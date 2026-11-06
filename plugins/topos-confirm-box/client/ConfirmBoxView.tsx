@@ -12,6 +12,7 @@ import type { LayoutChangeEvent } from "react-native";
 import { ImageLightbox } from "./ImageLightbox.js";
 import { CardShot, CardTitle } from "./CardShot.js";
 import { captionToShow } from "../shared/card-title.js";
+import { joinTitleWords } from "../shared/windowb-instructions.js";
 import { useItemImageSources } from "./use-item-images.js";
 import { useHosts, useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
@@ -299,13 +300,16 @@ export function ConfirmBoxView({
         marginLeft: "auto" as const,
         flexShrink: 0,
       },
-      footText: { color: c.accent, fontSize: 13 },
+      // 押す操作なので文字も読める大きさにする(2026-11-07 指摘「リンクの文字が小さい」)。
+      footText: { color: c.accent, fontSize: 14 },
       footRow: {
         flexDirection: "row" as const,
         flexWrap: "nowrap" as const,
         alignItems: "center" as const,
         justifyContent: "flex-start" as const,
         gap: 4,
+        // ボタンの左右の余白(6px)ぶん、文字が本文より内側に入る。本文の左端に揃える。
+        marginLeft: -6,
       },
       filterLine: {
         flexDirection: "row" as const,
@@ -1326,6 +1330,12 @@ function optionSymbol(option: ConfirmBoxItem["options"][number], index: number):
   return /^[a-z0-9]$/i.test(option.id) ? option.id : String(index + 1);
 }
 
+/** 選択肢の文に「(推奨)」を添える。すでに文言に「推奨」が入っているものは二重にしない。 */
+function withRecommended(label: string, rec: boolean): string {
+  // 「(推奨)」だけが次の行に落ちないよう、語の途中で折れない字で前の語に繋ぐ。
+  return rec && !label.includes("推奨") ? `${label}⁠(推奨)` : label;
+}
+
 function OptionButton({
   item,
   option,
@@ -1350,8 +1360,9 @@ function OptionButton({
       onPress={press}
     >
       <Text style={rec ? styles.btnRecText : styles.btnText}>
-        {symbol ?? option.label}
-        {!symbol && rec && !option.label.includes("推奨") ? "(推奨)" : ""}
+        {/* 語の途中で折らない(2026-11-07 指摘「(推／奨)」)。題と同じ joinTitleWords を使う。
+            「(推奨)」も語の途中で折れないよう、印を付けてから joinTitleWords に渡す。 */}
+        {symbol ?? joinTitleWords(withRecommended(option.label, rec))}
       </Text>
     </Pressable>
   );
@@ -1385,8 +1396,7 @@ function PlainOptions({
           <Text key={o.id} style={styles.text}>
             <Text style={styles.plainSymbol}>{optionSymbol(o, i)}</Text>
             {"  "}
-            {o.label}
-            {rec && !o.label.includes("推奨") ? "(推奨)" : ""}
+            {joinTitleWords(withRecommended(o.label, rec))}
           </Text>
         );
       })}
@@ -1554,7 +1564,8 @@ function ItemCard({
           <CardTitle subject={item.subject} style={styles.subject} />
           {open || questions.length > 0 ? null : (
             <Text style={styles.muted} numberOfLines={2}>
-              {item.summary}
+              {/* 本文も語の途中で折らない(2026-11-07 指摘「見えて／いる」)。 */}
+              {joinTitleWords(item.summary)}
             </Text>
           )}
         </Pressable>
@@ -1606,12 +1617,16 @@ function ItemCard({
         ) : (
           <PlainOptions item={item} styles={styles} onChoose={onChoose} />
         )}
-        {open && questions.length === 0 ? <Text style={styles.text}>{item.summary}</Text> : null}
-        {bgOpen && item.background ? <Text style={styles.text}>{item.background}</Text> : null}
+        {open && questions.length === 0 ? (
+          <Text style={styles.text}>{joinTitleWords(item.summary)}</Text>
+        ) : null}
+        {bgOpen && item.background ? (
+          <Text style={styles.text}>{joinTitleWords(item.background)}</Text>
+        ) : null}
         <View style={styles.footRow}>
           {item.background ? (
             <Pressable accessibilityRole="button" style={styles.footBtn} onPress={toggleBg}>
-              <Text style={styles.footText}>{bgOpen ? "▼背景" : "▶背景"}</Text>
+              <Text style={styles.footText}>{bgOpen ? "▼ 背景" : "▶ 背景"}</Text>
             </Pressable>
           ) : null}
           {/* 会話ボタンは1つだけ(2026-10-23 ユーザー指示)。押すと投函元スレの会話を右ペイン(狭い幅は全画面)で開く。
@@ -1622,7 +1637,8 @@ function ItemCard({
             style={styles.footBtn}
             onPress={openPane}
           >
-            <Text style={styles.footText}>{paneOpen ? "▼会話" : "💬 会話"}</Text>
+            {/* 絵文字(💬)は色を揃えられず灰色に見え、行の高さもずれる。背景と同じ ▶/▼ に揃える。 */}
+            <Text style={styles.footText}>{paneOpen ? "▼ 会話" : "▶ 会話"}</Text>
           </Pressable>
           {item.key ? (
             <Pressable

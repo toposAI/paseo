@@ -82,6 +82,11 @@ test("上限で切ったときは何件出しているかを言う(切ったと�
     truncationNote({ ...out(60), items: Array.from({ length: 40 }, () => ({})) as never }),
     "全60件中 上位40件を表示",
   );
+  // PC幅は帯が「指示 60件」を出すので、注記では件数を繰り返さない(2026-11-07 指摘「157件が2か所」)
+  assert.equal(
+    truncationNote({ ...out(60), items: Array.from({ length: 40 }, () => ({})) as never }, true),
+    "上位40件を表示",
+  );
 });
 
 test("狭い幅で上限まで出しているときは、見出しで件数を繰り返さない(全N件中…と二重になる)", () => {
@@ -221,6 +226,22 @@ test("題は語の途中で折れないよう語の中の字を繋ぐ", () => {
   assert.ok(!joined.includes("\u2060/") && !joined.includes("/\u2060"), joined);
   // 英数字の語は繋がない(URL などが折れなくなるのを避ける)
   assert.equal(joinTitleWords("https://example.com/a"), "https://example.com/a");
+});
+
+test("英数字の直後の助詞・漢字語も離さない(行頭が「の」になるのを防ぐ)", () => {
+  // 2026-11-07 指摘「Chromeの23GB / の中身」「夜間の2 / 誤りゲート」
+  assert.ok(joinTitleWords("Chromeの23GBの中身").includes("23GB⁠の"));
+  assert.ok(joinTitleWords("夜間の2誤りゲート").includes("2⁠誤⁠り"));
+  // 空白を挟む英数字は別の語として扱う(「A-6 夜間」は繋がない)
+  const spaced = joinTitleWords("A-6 夜間の確認");
+  assert.ok(!spaced.includes("A-6⁠"), spaced);
+});
+
+test("助詞・閉じ括弧は行頭に置かない(「/ に」「/ ）」を防ぐ)", () => {
+  // 「「自分が答える側」/ に見える」の折れを防ぐ
+  assert.ok(joinTitleWords("「自分が答える側」に見える").includes("」⁠に"));
+  // 開き括弧は行末に残さない
+  assert.ok(joinTitleWords("確かめる(ほか消してよい候補)").includes("(⁠ほ"));
 });
 
 test("rowTitle: 要約があればそれ、無ければ全文の1行目", () => {

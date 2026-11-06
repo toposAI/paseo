@@ -107,7 +107,9 @@ function SidebarMenuToggleButton({
       accessibilityLabel={isOpen ? t("shell.menu.close") : t("shell.menu.open")}
       accessibilityState={accessibilityState}
     >
-      <ToposThreadCounts />
+      {/* PC幅はサイドバーに同じ件数が出ていて、アイコンの角に札を置く余白が無い(線に重なる)。
+          iPhone幅(サイドバーが閉じている)だけ、アイコンの右下に出す。 */}
+      {isMobile ? <ToposThreadCounts /> : null}
       {isMobile ? (
         <MobileMenuIcon
           color={
@@ -208,12 +210,13 @@ const styles = StyleSheet.create((theme) => ({
   mobileMenuLineShort: {
     width: MOBILE_MENU_LINE_SHORT_WIDTH,
   },
-  // 件数の札はアイコンの右上へ出す(2026-11-07 指摘「要対応28がメニューアイコンに重なる」)。
-  // アイコンの線の上に重ねると、三本線が読めなくなる。
+  // 件数の札はアイコンの右下へ出す(2026-11-07 指摘「要対応28がメニューアイコンに重なる」)。
+  // 上へ出すとPC幅のヘッダでは画面上端に切れて数字が読めない(2026-11-07 再指摘)。
+  // アイコンの線は左上寄りなので、右下の角なら三本線を覆わない。
   countsRow: {
     position: "absolute",
     right: -4,
-    top: -4,
+    bottom: -4,
     flexDirection: "row",
     gap: 2,
   },
