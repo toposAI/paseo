@@ -11,6 +11,7 @@ import {
   answerVaultDecision,
   applyVaultSource,
   bundleNotifications,
+  keepsBoxRow,
   LEGACY_CUTOVER_MS,
   parseDecisionNote,
   parseOptions,
@@ -224,6 +225,86 @@ test("UFC 行はノートが claim しても箱側を残し、ノート由来項
     f.items.map((i) => i.id),
     ["u", "n"],
   );
+});
+
+test("画像つきの判断行はノートが claim しても箱側を残し、ノート由来の項目を除く(画像が落ちない)", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(
+    path.join(dir, "j-img.md"),
+    NOTE("j-img", "open").replace("legacy_keys: []", "legacy_keys: [img-1]"),
+  );
+  const read = readVaultDecisions({ TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir });
+  assert.equal(read.items.length, 1);
+  const img = item({
+    id: "i",
+    judgment: true,
+    key: "img-1",
+    images: [{ data: "QUJD", mimeType: "image/png" }],
+  });
+  const r = applyVaultSource([img], read.items, false, read.claimedKeys, read.claimedBy);
+  // 箱側の行(画像つき)が残り、ノート由来のカードは出ない=二重表示にならない
+  assert.deepEqual(
+    r.items.map((i) => i.id),
+    ["i"],
+  );
+  assert.equal(r.items[0].images?.length, 1);
+  assert.deepEqual(r.hidden, []);
+});
+
+test("画像なしの判断行は従来どおりノート由来に置き換わる(退行なし)", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(
+    path.join(dir, "j-img.md"),
+    NOTE("j-img", "open").replace("legacy_keys: []", "legacy_keys: [img-1]"),
+  );
+  const read = readVaultDecisions({ TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir });
+  const plain = item({ id: "p", judgment: true, key: "img-1" });
+  const r = applyVaultSource([plain], read.items, false, read.claimedKeys, read.claimedBy);
+  assert.deepEqual(
+    r.items.map((i) => i.id),
+    read.items.map((i) => i.id),
+  );
+  assert.deepEqual(
+    r.hidden.map((i) => i.id),
+    ["p"],
+  );
+});
+
+test("画像つきの箱側の行で答えるとノートも閉じる(keepsBoxRow の判定で呼ぶ)", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(
+    path.join(dir, "j-img.md"),
+    NOTE("j-img", "open").replace("legacy_keys: []", "legacy_keys: [img-1]"),
+  );
+  const env = { TOPOS_CONFIRM_BOX_DECISION_NOTE_DIR: dir };
+  const img = item({
+    id: "i",
+    judgment: true,
+    key: "img-1",
+    images: [{ data: "QUJD", mimeType: "image/png" }],
+  });
+  const file = answerClaimingNote("img-1", keepsBoxRow(img), "a", "維持", "", new Date(), env);
+  assert.equal(path.basename(file ?? ""), "j-img.md");
+  assert.match(fs.readFileSync(path.join(dir, "j-img.md"), "utf8"), /^state: answered$/m);
+});
+
+test("keepsBoxRow: 画像つきの行と UFC 行は残し、どちらでもない行は残さない", () => {
+  assert.equal(keepsBoxRow(item({ images: [{ data: "QUJD", mimeType: "image/png" }] })), true);
+  assert.equal(
+    keepsBoxRow(
+      item({
+        group: "ui-final-check",
+        subject: "UIの最終チェック: 画面",
+        options: [
+          { id: "a", label: "OK" },
+          { id: "b", label: "直す" },
+        ],
+      }),
+    ),
+    true,
+  );
+  assert.equal(keepsBoxRow(item({ images: [] })), false);
+  assert.equal(keepsBoxRow(item({})), false);
 });
 
 test("answered のノートが claim する UFC 行は復活させず従来どおり隠す", () => {

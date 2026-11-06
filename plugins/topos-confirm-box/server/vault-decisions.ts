@@ -400,6 +400,20 @@ export function isHiddenLegacyJudgment(item: ConfirmBoxItem): boolean {
   return item.judgment === true || isLegacyOptionItem(item);
 }
 
+/**
+ * ノートが claim していても箱側の行を残すか。ノート由来のカードは画像を持てないので、
+ * 画像つきの行(UI確認のスクショ等)はノートに置き換えず箱側のまま出す。UFC 行も同じ理由で残す。
+ * 「箱側の行で答えたときにノートも閉じる」判定(`answerClaimingNote`)も同じ条件を使う。
+ */
+export function keepsBoxRow(item: {
+  subject: string;
+  group: string | null;
+  options: readonly { id: string }[];
+  images?: readonly unknown[];
+}): boolean {
+  return isUiFinalCheck(item) || (item.images?.length ?? 0) > 0;
+}
+
 /** Vault を読めなかった(`vaultFailed`)ときは旧行を隠さない(空表示にしない)。 */
 export function applyVaultSource(
   boxItems: readonly ConfirmBoxItem[],
@@ -411,7 +425,8 @@ export function applyVaultSource(
   const hidden: ConfirmBoxItem[] = [];
   const kept: ConfirmBoxItem[] = [];
   const claimed = new Set(claimedKeys);
-  // 「UIの最終チェック」は画像つきの箱側の行でしか描けないので、ノートがあっても箱側を残し、ノート由来の項目を除く
+  // 「UIの最終チェック」と画像つきの行は箱側でしか描けない(ノート由来のカードは画像を持たない)ので、
+  // ノートがあっても箱側を残し、同じ判断のノート由来の項目を除く
   const dropVaultKeys = new Set<string>();
   for (const item of boxItems) {
     // Vault にノートがある(legacy_keys)判断は箱側の行を出さない。permit は対象外
@@ -419,7 +434,7 @@ export function applyVaultSource(
       item.kind !== "permit" && item.judgment === true && !!item.key && claimed.has(item.key);
     // ノートがまだ open/waiting(claimedBy にある)ときだけ残す。answered のノートの箱行は従来どおり隠す
     const noteKey = claimedBy[item.key ?? ""];
-    if (!vaultFailed && claimedByNote && noteKey && item.kind === "box" && isUiFinalCheck(item)) {
+    if (!vaultFailed && claimedByNote && noteKey && item.kind === "box" && keepsBoxRow(item)) {
       kept.push(item);
       dropVaultKeys.add(noteKey);
     } else if (!vaultFailed && (claimedByNote || isHiddenLegacyJudgment(item))) hidden.push(item);
@@ -564,20 +579,20 @@ export function answerVaultDecision(
 }
 
 /**
- * 箱側の「UIの最終チェック」行への回答で、同じ判断を claim している(legacy_keys)ノートも answered にする。
- * UFC 行は箱側の行のまま答えるので、これが無いとノートが open のまま残る。
- * ノートが無い(claim していない)ときは null。`isUfc` は呼び出し側が箱側の行から判定する。
+ * 箱側の行(「UIの最終チェック」行・画像つきの行)への回答で、同じ判断を claim している(legacy_keys)ノートも
+ * answered にする。これらの行はノートに置き換えず箱側のまま答えるので、これが無いとノートが open のまま残る。
+ * ノートが無い(claim していない)ときは null。`keepBoxRow` は呼び出し側が `keepsBoxRow(行)` で判定する。
  */
 export function answerClaimingNote(
   boxKey: string,
-  isUfc: boolean,
+  keepBoxRow: boolean,
   chosenId: string | null,
   chosenLabel: string | null,
   reason: string,
   now: Date = new Date(),
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
-  if (!isUfc || boxKey.startsWith(VAULT_KEY_PREFIX)) return null;
+  if (!keepBoxRow || boxKey.startsWith(VAULT_KEY_PREFIX)) return null;
   const noteKey = readVaultDecisions(env).claimedBy[boxKey];
   if (!noteKey) return null;
   return answerVaultDecision({ key: noteKey, chosenId, chosenLabel, reason }, now, env);

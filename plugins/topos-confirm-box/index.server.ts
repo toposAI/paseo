@@ -99,6 +99,7 @@ import {
   answerVaultDecision,
   applyVaultSource,
   bundleNotifications,
+  keepsBoxRow,
   readVaultDecisions,
   vaultSourceEnabled,
 } from "./server/vault-decisions.js";
@@ -884,8 +885,8 @@ export default function contribute(server: PluginServerContext) {
         });
         noteNote = `・ノート更新 ${file.split("/").pop()}`;
       } else {
-        // 箱側の UFC 行で答えたときは、claim しているノートも閉じる(open のまま残さない)
-        noteNote = answerUfcClaimingNote(input.key, input.chosen, input.reason, reject);
+        // 箱側の行(画像つき・UFC)で答えたときは、claim しているノートも閉じる(open のまま残さない)
+        noteNote = answerClaimingNoteForBoxRow(input.key, input.chosen, input.reason, reject);
       }
       try {
         appendDecision(resolveConfirmBoxDir(), {
@@ -1817,8 +1818,8 @@ const PENDING_RETRY_WAIT_MS = 5_000;
  * 既定にするが、その選択は端末側にあり插件からは読めない。読めるようになるまでは決まった場所
  * (`~/repos/_coordinator-spawned`、無ければホーム)に置く。`TOPOS_CONCEPT_THREAD_CWD` で差し替え可。
  */
-/** 箱側の UFC 行への回答で、claim しているノートも閉じる。閉じたら応答に添える文言、閉じなければ ""。 */
-function answerUfcClaimingNote(
+/** 箱側の行(画像つき・UFC)への回答で、claim しているノートも閉じる。閉じたら応答に添える文言、閉じなければ ""。 */
+function answerClaimingNoteForBoxRow(
   key: string,
   chosen: string | null,
   reason: string,
@@ -1829,8 +1830,8 @@ function answerUfcClaimingNote(
   try {
     const boxItem = readConfirmBox(resolveConfirmBoxDir()).items.find((i) => i.key === key);
     const label = boxItem?.options.find((o) => o.id === chosen)?.label ?? null;
-    const isUfc = !!boxItem && boxItem.kind === "box" && isUiFinalCheck(boxItem);
-    const file = answerClaimingNote(key, isUfc, chosen, label, reason);
+    const keepBoxRow = !!boxItem && boxItem.kind === "box" && keepsBoxRow(boxItem);
+    const file = answerClaimingNote(key, keepBoxRow, chosen, label, reason);
     return file ? `・ノート更新 ${file.split("/").pop()}` : "";
   } catch {
     return "・ノートは閉じられませんでした(箱側の回答は記録します)";
