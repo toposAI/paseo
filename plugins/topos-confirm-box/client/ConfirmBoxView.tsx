@@ -17,6 +17,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import type { LayoutChangeEvent } from "react-native";
+import { ImageLightbox } from "./ImageLightbox.js";
 import { useHosts, useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import {
@@ -1389,6 +1390,26 @@ function RejectPanel({
   );
 }
 
+/** 添付画像のサムネイル。押すと画面に収まる大きさの拡大表示を開く。 */
+function ImageThumb({
+  source,
+  index,
+  style,
+  onZoom,
+}: {
+  source: { uri: string };
+  index: number;
+  style: object;
+  onZoom: (index: number) => void;
+}) {
+  const press = useCallback(() => onZoom(index), [onZoom, index]);
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel="添付画像を拡大" onPress={press}>
+      <Image accessibilityLabel="添付画像" source={source} style={style} resizeMode="cover" />
+    </Pressable>
+  );
+}
+
 function ItemCard({
   item,
   styles,
@@ -1419,6 +1440,8 @@ function ItemCard({
   onOpenPane: (item: ConfirmBoxItem) => void;
 }) {
   const [bgOpen, setBgOpen] = useState(false);
+  const [zoom, setZoom] = useState<number | null>(null);
+  const closeZoom = useCallback(() => setZoom(null), []);
   const [rejecting, setRejecting] = useState(false);
   const startReject = useCallback(() => setRejecting(true), []);
   const cancelReject = useCallback(() => setRejecting(false), []);
@@ -1474,17 +1497,18 @@ function ItemCard({
         </Pressable>
         {imageSources.length > 0 ? (
           <View style={styles.imageRow}>
-            {imageSources.map((source) => (
-              <Image
+            {imageSources.map((source, i) => (
+              <ImageThumb
                 key={source.uri}
-                accessibilityLabel="添付画像"
                 source={source}
+                index={i}
                 style={styles.imageThumb}
-                resizeMode="cover"
+                onZoom={setZoom}
               />
             ))}
           </View>
         ) : null}
+        <ImageLightbox sources={imageSources} index={zoom} onChange={setZoom} onClose={closeZoom} />
         {questions.length > 0 ? (
           <QuestionAnswer
             questions={questions}
