@@ -16,7 +16,7 @@
  * 置き場所を決め直す。一覧の読み出しが15分より前に止まっていれば、上部に「古い表示(時刻)」を赤で出す。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Dimensions, Pressable, ScrollView, Text, View } from "react-native";
+import { Dimensions, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import {
@@ -32,6 +32,7 @@ import {
   type ListMode,
   freshnessText,
   keepLastOnFailure,
+  NOTICE_MAX_LINES,
   noticeLines,
   paneLocation,
   plainAssignee,
@@ -165,7 +166,12 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
       head: { flexDirection: "row" as const, justifyContent: "space-between" as const, gap: 8 },
       time: { color: c.foregroundMuted, fontSize: 12 },
       kind: { color: accent, fontSize: 12, fontWeight: "700" as const },
-      title: { color: c.foreground, fontSize: 14 },
+      // 折り返しの最後の行に1〜2文字だけ残る(「…必須をやめ／る」)と読みにくいので、
+      // Web では行の長さをならす(CSS の text-wrap: balance)。RN の型に無いので Web だけに足す。
+      title: Platform.select({
+        web: { color: c.foreground, fontSize: 14, textWrap: "balance" as const },
+        default: { color: c.foreground, fontSize: 14 },
+      }),
       meta: { color: c.foregroundMuted, fontSize: 12 },
       alert: { color: c.statusDanger, fontSize: 12, fontWeight: "600" as const },
       verbatim: {
@@ -282,6 +288,7 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
   // 一覧の読み出し時刻(`generatedAt`)から15分たっていたら、一覧の一番上に目立つ色で出す。時計は1分ごとに
   // 進めて見直す(引けている間は普通は出ない)。
   const stale = data ? staleNotice(data, now) : null;
+  const truncated = data ? truncationNote(data) : null;
   let notice: React.ReactElement | null = null;
   if (error) {
     notice = (
@@ -290,10 +297,11 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
       </Text>
     );
   } else if (data && data.notices.length > 0) {
-    // 技術的な説明をそのまま並べると一覧の頭が埋まるので、短い行(最大2行)に直して出す。
+    // 技術的な説明をそのまま並べると一覧の頭が埋まるので、短い行に直して出す。
+    // 切り詰めの注記(灰色1行)と合わせて注意書き全体が2行に収まるよう、残り行数を渡す。
     notice = (
       <View style={s.noticeBox} testID="windowb-notices">
-        {noticeLines(data.notices).map((line) => (
+        {noticeLines(data.notices, truncated ? 1 : NOTICE_MAX_LINES).map((line) => (
           <Text key={line} style={s.notice}>
             {line}
           </Text>
@@ -301,7 +309,6 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
       </View>
     );
   }
-  const truncated = data ? truncationNote(data) : null;
   const truncate = truncated ? <Text style={s.muted}>{truncated}</Text> : null;
   return (
     <View style={s.root} testID="windowb-instructions">

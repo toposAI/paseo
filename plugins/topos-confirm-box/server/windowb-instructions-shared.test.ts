@@ -78,7 +78,7 @@ test("上限で切ったときは何件出しているかを言う(切ったと�
   assert.equal(truncationNote({ ...out(3), items: [{}, {}, {}] as never }), null);
   assert.equal(
     truncationNote({ ...out(60), items: Array.from({ length: 40 }, () => ({})) as never }),
-    "表示は上位40件(全60件。赤と届いたか不明・返事なしは先に出しています)",
+    "全60件中 上位40件を表示",
   );
 });
 
@@ -232,4 +232,15 @@ test("noticeLines: 技術的な注意書きを短い行(最大2行)に直す", (
   assert.equal(lines[1], "日付の分からない依頼1件は非表示 ほか1件");
   // 知らない文言は消さずにそのまま出す(黙って落とさない)
   assert.deepEqual(noticeLines(["知らない注意"]), ["知らない注意"]);
+});
+
+test("noticeLines: 切り詰めの注記と合わせて2行に収めるときは残り行数を渡す", () => {
+  const notices = [
+    "同じ鍵の依頼が 35件あり、1件にまとめて出しています",
+    "日付の無い依頼 1件は日付を決められないので出していません",
+    "日付の無い依頼 1件は下(後)の日付の印から日付を決めています",
+  ];
+  assert.deepEqual(noticeLines(notices, 1), ["同じ依頼35件は1つにまとめて表示 ほか2件"]);
+  // 0 以下でも行は消さない(1行は必ず出す)
+  assert.deepEqual(noticeLines(["知らない注意"], 0), ["知らない注意"]);
 });

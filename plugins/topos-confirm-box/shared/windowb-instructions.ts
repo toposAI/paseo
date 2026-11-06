@@ -62,10 +62,14 @@ function rank(row: { alert: string | null; warn: string | null; kind: string }):
   return 4;
 }
 
-/** 一覧のうち何件を出しているか。上限で切ったと分からないと「出ている範囲で赤が無い」と読み違える。 */
+/**
+ * 一覧のうち何件を出しているか。上限で切ったと分からないと「出ている範囲で赤が無い」と読み違える。
+ * 注意書き全体を最大2行に収めるため、長い説明は添えず1行に収まる長さにする(並び順の説明は
+ * 見出しの要約「赤 N / 未登録 M」と、赤が先頭に来ること自体で足りる)。
+ */
 export function truncationNote(data: WindowBInstructionsOutput): string | null {
   if (data.total <= data.items.length) return null;
-  return `表示は上位${data.items.length}件(全${data.total}件。赤と届いたか不明・返事なしは先に出しています)`;
+  return `全${data.total}件中 上位${data.items.length}件を表示`;
 }
 
 function clock(ms: number): string {
@@ -226,10 +230,16 @@ const NOTICE_SHORT: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
 ];
 
 /**
- * 注意書きを最大 `NOTICE_MAX_LINES` 行に収める。溢れた分は最後の行に「ほかN件」と添える
+ * 注意書きを最大 `maxLines` 行に収める。溢れた分は最後の行に「ほかN件」と添える
  * (行を増やすと一覧の頭が埋まって、肝心の指示が見えなくなる)。
+ *
+ * `maxLines` を渡せるのは、切り詰めの注記(「全177件中 上位100件を表示」)と合わせて
+ * 注意書き全体を2行に収めるため。呼び出し側が残りの行数を渡す。
  */
-export function noticeLines(notices: readonly string[]): string[] {
+export function noticeLines(
+  notices: readonly string[],
+  maxLines: number = NOTICE_MAX_LINES,
+): string[] {
   const lines = notices
     .map((n) => {
       for (const [re, short] of NOTICE_SHORT) {
@@ -239,9 +249,10 @@ export function noticeLines(notices: readonly string[]): string[] {
       return n.trim();
     })
     .filter((l) => l !== "");
-  if (lines.length <= NOTICE_MAX_LINES) return lines;
-  const shown = lines.slice(0, NOTICE_MAX_LINES);
-  const rest = lines.length - NOTICE_MAX_LINES;
-  shown[NOTICE_MAX_LINES - 1] = `${shown[NOTICE_MAX_LINES - 1]} ほか${rest}件`;
+  const limit = Math.max(1, maxLines);
+  if (lines.length <= limit) return lines;
+  const shown = lines.slice(0, limit);
+  const rest = lines.length - limit;
+  shown[limit - 1] = `${shown[limit - 1]} ほか${rest}件`;
   return shown;
 }
