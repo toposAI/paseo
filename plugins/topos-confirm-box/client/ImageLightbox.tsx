@@ -1,11 +1,13 @@
 /**
  * 確認箱カードの添付画像を、画面いっぱい(縦横比を保ち、はみ出さない)で見る拡大表示。
- * 閉じる: ✕・画像まわりを押す・Esc(Modal の onRequestClose)。複数枚は ‹ › と ←/→ キーで前後へ移る。
- * iPhone のピンチ拡大は、Modal の中身が普通の div のままなので標準の振る舞いを妨げない(touch-action を触らない)。
+ * 閉じる: ✕・Esc(Modal の onRequestClose)。複数枚は ‹ › と ←/→ キーで前後へ移る。
+ * 画像は ZoomableImage で出す: ピンチ・ダブルタップ・ホイールで拡大し、ドラッグで動かせる(元の解像度のまま)。
+ * 画像の上を押しても閉じない(拡大操作と取り合うため)。閉じるのは ✕・Esc。
  */
 import { useCallback, useEffect, useMemo } from "react";
-import { Image, Modal, Platform, Pressable, Text, View } from "react-native";
+import { Modal, Platform, Pressable, Text, View } from "react-native";
 import { neighborIndex } from "../shared/image-nav.js";
+import { ZoomableImage } from "./ZoomableImage.js";
 
 interface Source {
   uri: string;
@@ -69,7 +71,6 @@ export function ImageLightbox({
         paddingBottom: 16,
       },
       backdrop: { flex: 1, alignSelf: "stretch" as const },
-      img: { flex: 1, alignSelf: "stretch" as const },
       nav: { color: "#fff", fontSize: 32, paddingHorizontal: 10, paddingVertical: 24 },
     }),
     [],
@@ -90,22 +91,9 @@ export function ImageLightbox({
               <Text style={st.nav}>‹</Text>
             </Pressable>
           ) : null}
-          {/* 画像の上を含め、‹ › 以外の所を押すと閉じる。ピンチは click にならないので拡大操作では閉じない。 */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="画像を押して閉じる"
-            style={st.backdrop}
-            onPress={onClose}
-          >
-            {current ? (
-              <Image
-                accessibilityLabel="拡大した添付画像"
-                source={current}
-                style={st.img}
-                resizeMode="contain"
-              />
-            ) : null}
-          </Pressable>
+          <View style={st.backdrop}>
+            {current ? <ZoomableImage uri={current.uri} label="拡大した添付画像" /> : null}
+          </View>
           {count > 1 ? (
             <Pressable accessibilityRole="button" accessibilityLabel="次の画像" onPress={next}>
               <Text style={st.nav}>›</Text>

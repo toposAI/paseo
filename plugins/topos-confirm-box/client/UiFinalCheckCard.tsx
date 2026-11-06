@@ -18,6 +18,7 @@ import { CardChatPane } from "./CardChatPane.js";
 import type { PaneColors } from "./CardChatPane.js";
 import { PaneComposer } from "./PaneComposer.js";
 import { usePaneInputTools } from "./usePaneInputTools.js";
+import { ZoomableImage } from "./ZoomableImage.js";
 
 type Styles = Record<string, object>;
 
@@ -103,7 +104,6 @@ function ImageViewer({
       title: { color: "#fff", fontSize: 14, flex: 1 },
       close: { color: "#fff", fontSize: 22, paddingHorizontal: 8 },
       body: { flex: 1, padding: 12 },
-      img: { width: "100%" as const, flex: 1 },
       notice: { color: "#ffb4a8", fontSize: 12, padding: 8 },
       dock: { backgroundColor: colors.surface1, paddingBottom: 12 },
     }),
@@ -119,7 +119,7 @@ function ImageViewer({
           </Pressable>
         </View>
         <View style={st.body}>
-          {source ? <Image source={source} style={st.img} resizeMode="contain" /> : null}
+          {source ? <ZoomableImage uri={source.uri} label={label} /> : null}
         </View>
         {notice ? <Text style={st.notice}>{notice}</Text> : null}
         <View style={st.dock}>

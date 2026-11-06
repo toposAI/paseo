@@ -1,0 +1,31 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { clampTransform, IDENTITY, MAX_SCALE, toggleZoomAt, zoomAt } from "./image-zoom.js";
+
+test("等倍では移動できず中央に戻る", () => {
+  assert.deepEqual(clampTransform({ scale: 1, x: 50, y: -30 }, 400, 800), IDENTITY);
+});
+
+test("拡大率は上限と下限に収まる", () => {
+  assert.equal(clampTransform({ scale: 99, x: 0, y: 0 }, 400, 800).scale, MAX_SCALE);
+  assert.equal(clampTransform({ scale: 0.2, x: 0, y: 0 }, 400, 800).scale, 1);
+});
+
+test("拡大中は端に余白を出さない", () => {
+  const t = clampTransform({ scale: 2, x: 100, y: -9999 }, 400, 800);
+  assert.equal(t.x, 0);
+  assert.equal(t.y, -800);
+});
+
+test("zoomAt は指定した点を動かさない", () => {
+  const t = zoomAt(IDENTITY, 2, 300, 600, 400, 800);
+  // 画像上の点 (300,600) は画面の (300,600) のまま
+  assert.equal(300 * 2 + t.x, 300);
+  assert.equal(600 * 2 + t.y, 600);
+});
+
+test("ダブルタップで拡大し、もう一度で戻る", () => {
+  const zoomed = toggleZoomAt(IDENTITY, 200, 400, 400, 800);
+  assert.equal(zoomed.scale, 3);
+  assert.deepEqual(toggleZoomAt(zoomed, 200, 400, 400, 800), IDENTITY);
+});
