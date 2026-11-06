@@ -9,8 +9,8 @@ import { Image, Platform } from "react-native";
 import {
   clampTransform,
   IDENTITY,
-  applyWheel,
   toggleZoomAt,
+  wheelFactor,
   zoomAt,
   type ZoomTransform,
 } from "../shared/image-zoom.js";
@@ -96,37 +96,11 @@ function WebZoomableImage({ uri, label }: { uri: string; label: string }) {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const { w, h, left, top } = size();
-      apply(applyWheel(tf.current, e, e.clientX - left, e.clientY - top, w, h));
-    };
-    // Safari のトラックパッドのピンチは wheel でなく gesture イベントで届く(ページ拡大を止めて自前で拡大)。
-    let gestureBase: ZoomTransform | null = null;
-    const onGestureStart = (e: Event) => {
-      e.preventDefault();
-      gestureBase = tf.current;
-    };
-    const onGestureChange = (e: Event) => {
-      e.preventDefault();
-      const g = e as Event & { scale?: number; clientX?: number; clientY?: number };
-      if (!gestureBase || g.scale === undefined) return;
-      const { w, h, left, top } = size();
-      const px = (g.clientX ?? left + w / 2) - left;
-      const py = (g.clientY ?? top + h / 2) - top;
-      apply(zoomAt(gestureBase, gestureBase.scale * g.scale, px, py, w, h));
-    };
-    const onGestureEnd = (e: Event) => {
-      e.preventDefault();
-      gestureBase = null;
+      const target = tf.current.scale * wheelFactor(e.deltaY);
+      apply(zoomAt(tf.current, target, e.clientX - left, e.clientY - top, w, h));
     };
     frame.addEventListener("wheel", onWheel, { passive: false });
-    frame.addEventListener("gesturestart", onGestureStart);
-    frame.addEventListener("gesturechange", onGestureChange);
-    frame.addEventListener("gestureend", onGestureEnd);
-    return () => {
-      frame.removeEventListener("wheel", onWheel);
-      frame.removeEventListener("gesturestart", onGestureStart);
-      frame.removeEventListener("gesturechange", onGestureChange);
-      frame.removeEventListener("gestureend", onGestureEnd);
-    };
+    return () => frame.removeEventListener("wheel", onWheel);
   }, [apply, size]);
 
   const startPinch = useCallback(() => {
