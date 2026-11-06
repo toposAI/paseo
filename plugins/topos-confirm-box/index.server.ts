@@ -25,6 +25,7 @@ import {
   confirmBoxCountRpc,
   confirmBoxDecideRpc,
   confirmBoxListRpc,
+  confirmBoxImageRpc,
   confirmBoxPermitRpc,
   cardChatListRpc,
   coordinatorTargetRpc,
@@ -35,6 +36,7 @@ import {
   reportsAckAllRpc,
   reportsCommentRpc,
   reportsImageRpc,
+  feedbackScreenshotRpc,
   reportsListRpc,
   reportsOpenRpc,
   countUrgentUnreadNotifications,
@@ -79,7 +81,8 @@ import {
   postMessage,
 } from "./server/shared-projects.js";
 import { feedbackReportsListRpc, countOpenReports } from "./shared/feedback.js";
-import { readFeedbackReports } from "./server/feedback.js";
+import { readFeedbackReports, resolveFeedbackDirs } from "./server/feedback.js";
+import { readFeedbackScreenshot } from "./server/feedback-screenshot.js";
 import { loadProgressContext } from "./server/feedback-progress.js";
 import type { ConfirmBoxItem, ConfirmBoxSourceStatus } from "./shared/contract.js";
 import {
@@ -434,7 +437,26 @@ export default function contribute(server: PluginServerContext) {
     };
   }
 
-  server.handle(confirmBoxListRpc, async (_input, ctx) => collect(ctx));
+  server.handle(confirmBoxListRpc, async (_input, ctx) => {
+    const out = await collect(ctx);
+    // 画像の本体は載せない(枚数・種類だけ)。画面に出るカードの分だけ confirmBoxImageRpc で取る。
+    return {
+      ...out,
+      items: out.items.map((it) =>
+        it.images
+          ? Object.assign({}, it, {
+              images: it.images.map((im) => Object.assign({}, im, { data: "" })),
+            })
+          : it,
+      ),
+    };
+  });
+
+  server.handle(confirmBoxImageRpc, async (input) => {
+    const { items } = readConfirmBox(resolveConfirmBoxDir());
+    const found = items.find((it) => it.id === input.id);
+    return { image: found?.images?.[input.index] ?? null };
+  });
 
   // 変更の合図(合図ファイルの mtime。ms)。読めなければ 0=画面は定期取得のまま。
   server.handle(boxSignalRpc, async () => {
@@ -856,6 +878,10 @@ export default function contribute(server: PluginServerContext) {
     const { reports, sources } = readFeedbackReports(undefined, undefined, ctx);
     return { reports, sources, generatedAt: Date.now() };
   });
+
+  server.handle(feedbackScreenshotRpc, async (input) =>
+    readFeedbackScreenshot(input.name, resolveFeedbackDirs()),
+  );
 
   server.handle(confirmBoxDecideRpc, async (input) => {
     if (!input.key) return { ok: false, message: "key が空です" };

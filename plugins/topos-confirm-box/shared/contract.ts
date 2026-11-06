@@ -199,6 +199,23 @@ export const confirmBoxListRpc = defineRpc({
 });
 export type ConfirmBoxListOutput = z.infer<typeof confirmBoxListRpc.output>;
 
+/**
+ * 一覧には画像の本体(base64)を載せない(`images[i].data` は空文字。枚数と種類だけ)。
+ * 4.5MBのうち約84%が画像だったため(2026-11-06 実測)。画面に出るカードの分だけこのRPCで取る。
+ */
+export const confirmBoxImageRpc = defineRpc({
+  name: "topos.confirmbox.image",
+  input: z.object({ id: z.string(), index: z.number().int().min(0) }),
+  output: z.object({
+    image: z
+      .object({
+        data: z.string(),
+        mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+      })
+      .nullable(),
+  }),
+});
+
 // ---------------------------------------------------------------- RPC: 変更の合図(即時反映用)
 
 /** 箱の書き手(Python)が投函・取り下げ・再投函の直後に書く合図ファイルの最終更新時刻(ms)。
@@ -356,6 +373,13 @@ export const reportsAckAllRpc = defineRpc({
 export const reportsImageRpc = defineRpc({
   name: "topos.confirmbox.reports.image",
   input: z.object({ path: z.string() }),
+  output: z.object({ ok: z.boolean(), dataUri: z.string() }),
+});
+
+/** バグ報告のスクリーンショット(ファイル名のみ受け取り、サーバーが `_feedback/screenshots/` から読む)。 */
+export const feedbackScreenshotRpc = defineRpc({
+  name: "topos.confirmbox.feedback.screenshot",
+  input: z.object({ name: z.string() }),
   output: z.object({ ok: z.boolean(), dataUri: z.string() }),
 });
 

@@ -76,6 +76,8 @@ export const FeedbackReportSchema = z.object({
   /** 返信を報告者が見たか。 */
   replySeen: z.boolean(),
   hasScreenshot: z.boolean(),
+  /** スクリーンショットの**ファイル名のみ**(`_feedback/screenshots/<name>`)。無ければ省略。 */
+  screenshot: z.string().optional(),
   /** どのディレクトリの報告か(家族版/試用版の区別)。 */
   origin: z.string(),
   /** 進捗(台帳から導出)。古いサーバー応答には無いので optional。 */

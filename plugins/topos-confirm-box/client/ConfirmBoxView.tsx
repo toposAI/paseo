@@ -7,9 +7,12 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
-import { Image, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
+import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import type { LayoutChangeEvent } from "react-native";
 import { ImageLightbox } from "./ImageLightbox.js";
+import { CardShot, CardTitle } from "./CardShot.js";
+import { captionToShow } from "../shared/card-title.js";
+import { useItemImageSources } from "./use-item-images.js";
 import { useHosts, useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import {
@@ -1425,27 +1428,6 @@ function ClosingRow({
   );
 }
 
-/** 添付画像のサムネイル。押すと画面に収まる大きさの拡大表示を開く。 */
-function ImageThumb({
-  source,
-  index,
-  style,
-  onZoom,
-}: {
-  source: { uri: string };
-  index: number;
-  style: object;
-  onZoom: (index: number) => void;
-}) {
-  const press = useCallback(() => onZoom(index), [onZoom, index]);
-  return (
-    <Pressable accessibilityRole="button" accessibilityLabel="添付画像を拡大" onPress={press}>
-      {/* 縦長のスクショを潰さない(枠に収める)。2026-11-06 実測で fill になり縦2.2倍に伸びていた */}
-      <Image accessibilityLabel="添付画像" source={source} style={style} resizeMode="contain" />
-    </Pressable>
-  );
-}
-
 /** 拡大表示の間だけ置くコメント送信用の会話部品を、画面に出さないための入れ物。 */
 const HIDDEN_PANE = { display: "none" as const };
 
@@ -1538,13 +1520,7 @@ function ItemCard({
   );
   const created = useMemo(() => formatCreated(item.ts), [item.ts]);
   // 添付画像の data URI はデータが変わったときだけ作り直す(lint: jsx-no-new-object-as-prop)。
-  const imageSources = useMemo(
-    () =>
-      (item.images ?? []).map((image) => ({
-        uri: `data:${image.mimeType};base64,${image.data}`,
-      })),
-    [item.images],
-  );
+  const imageSources = useItemImageSources(item);
   const questions = item.questions ?? NO_QUESTIONS;
   return (
     // ペイン切替は件名の押下だけ。外枠を Pressable にすると、右ペインが開いている間 react-native-web が
@@ -1560,7 +1536,7 @@ function ItemCard({
             {item.state === "approved" ? " · 決定済み" : ""}
             {item.onHold ? ` · ${item.onHold}(窓口では出ません)` : ""}
           </Text>
-          <Text style={styles.subject}>{item.subject}</Text>
+          <CardTitle subject={item.subject} style={styles.subject} />
           {open || questions.length > 0 ? null : (
             <Text style={styles.muted} numberOfLines={2}>
               {item.summary}
@@ -1570,10 +1546,12 @@ function ItemCard({
         {imageSources.length > 0 ? (
           <View style={styles.imageRow}>
             {imageSources.map((source, i) => (
-              <View key={source.uri} style={styles.imageItem}>
-                <ImageThumb source={source} index={i} style={styles.imageThumb} onZoom={setZoom} />
-                {item.imageCaptions?.[i] ? (
-                  <Text style={styles.muted}>{item.imageCaptions[i]}</Text>
+              <View key={source.key} style={styles.imageItem}>
+                <CardShot source={source} index={i} label="添付画像" onZoom={setZoom} />
+                {captionToShow(item.imageCaptions?.[i], item.subject) ? (
+                  <Text style={styles.muted}>
+                    {captionToShow(item.imageCaptions?.[i], item.subject)}
+                  </Text>
                 ) : null}
               </View>
             ))}

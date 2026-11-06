@@ -131,6 +131,7 @@ export function normalizeReport(
     reply: replyText(o.reply),
     replySeen: o.reply_seen === true,
     hasScreenshot: str(o.screenshot).trim().length > 0,
+    screenshot: path.basename(str(o.screenshot).trim()) || undefined,
     origin,
   };
 }

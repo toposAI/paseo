@@ -9,7 +9,7 @@
  * 見ているカードの切り替え・件数は `useUfcFlow` / `shared/ufc-flow.ts`。
  */
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Image, Modal, Pressable, Text, View } from "react-native";
+import { Modal, Pressable, Text, View } from "react-native";
 import type { ConfirmBoxItem } from "../shared/contract.js";
 import { shotLabel, UFC_OK_ID } from "../shared/ui-final-check.js";
 import { ufcStatus } from "../shared/ufc-flow.js";
@@ -17,13 +17,15 @@ import type { UfcCounts, UfcFlow, UfcStatus } from "../shared/ufc-flow.js";
 import { CardChatPane } from "./CardChatPane.js";
 import type { PaneColors } from "./CardChatPane.js";
 import { ImageCommentDock } from "./ImageCommentDock.js";
+import { CardShot, CardTitle } from "./CardShot.js";
+import { captionToShow } from "../shared/card-title.js";
+import { useItemImageSources } from "./use-item-images.js";
 import { ZoomableImage } from "./ZoomableImage.js";
 
 type Styles = Record<string, object>;
 
 const FIX_PREFIX = "【直してほしい】";
 /** カード内の画像。1画像=1カードなので、カード幅いっぱいに大きく出す(タップで拡大)。 */
-const SHOT_BOX = { width: "100%" as const, height: 320, borderRadius: 8 };
 const shotRow = { gap: 10 };
 const shotItem = { gap: 4 };
 const row = { flexDirection: "row" as const, gap: 8, alignItems: "flex-end" as const };
@@ -46,23 +48,9 @@ function shotCaption(item: { imageCaptions?: string[] }, index: number): string 
   return item.imageCaptions?.[index] ?? shotLabel(index, index >= 2);
 }
 
-function Thumb({
-  source,
-  index,
-  label,
-  onZoom,
-}: {
-  source: { uri: string };
-  index: number;
-  label: string;
-  onZoom: (index: number) => void;
-}) {
-  const press = useCallback(() => onZoom(index), [onZoom, index]);
-  return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`${label}を拡大`} onPress={press}>
-      <Image source={source} style={SHOT_BOX} resizeMode="contain" />
-    </Pressable>
-  );
+/** 画像を出すのは開いているカードとOK済みのカードだけ(畳んだカードは取りに行かない)。 */
+function showsImages(currentId: string | null, item: { id: string; state: string }): boolean {
+  return currentId === item.id || item.state === "approved";
 }
 
 /** 画像ビューア: 大きく見て、この画像へのコメントを投函元へ送る(入力欄は他と同じ部品)。 */
@@ -194,10 +182,8 @@ export function UiFinalCheckCard({
   const okRef = useRef(false);
   const sendRef = useRef<((text: string) => Promise<boolean>) | null>(null);
   // 1画像=1カード(2026-11-06 ユーザー指示)。完成版/変更前で絞らず、そのカードの画像を全部出す。
-  const sources = useMemo(
-    () => (item.images ?? []).map((i) => ({ uri: `data:${i.mimeType};base64,${i.data}` })),
-    [item.images],
-  );
+  // 畳んだカードは画像を出さないので取りに行かない(開いたときに取る)。
+  const sources = useItemImageSources(item, showsImages(flow.current, item));
   const ok = useCallback(() => {
     if (okRef.current) return;
     okRef.current = true;
@@ -308,9 +294,7 @@ export function UiFinalCheckCard({
               <Text style={chip}>🖼 UIの最終チェック</Text>
               <Text style={stateChip}>{STATUS_TEXT[status]}</Text>
             </View>
-            <Text style={styles.subject} numberOfLines={1}>
-              {item.subject}
-            </Text>
+            <CardTitle subject={item.subject} style={styles.subject} numberOfLines={1} />
           </Pressable>
         ) : (
           <>
@@ -321,13 +305,20 @@ export function UiFinalCheckCard({
                 {/* 開いているカードでも、返事待ち・未読は消さずに出す(再読み込みで印が消えないため)。 */}
                 <CardStateMark approved={approved} status={status} style={stateChip} />
               </View>
-              <Text style={styles.subject}>{item.subject}</Text>
+              <CardTitle subject={item.subject} style={styles.subject} />
             </Pressable>
             <View style={shotRow}>
               {sources.map((source, i) => (
-                <View key={source.uri} style={shotItem}>
-                  <Thumb source={source} index={i} label={shotCaption(item, i)} onZoom={setZoom} />
-                  <Text style={styles.muted}>{shotCaption(item, i)}</Text>
+                <View key={source.key} style={shotItem}>
+                  <CardShot
+                    source={source}
+                    index={i}
+                    label={shotCaption(item, i)}
+                    onZoom={setZoom}
+                  />
+                  {captionToShow(item.imageCaptions?.[i], item.subject) ? (
+                    <Text style={styles.muted}>{shotCaption(item, i)}</Text>
+                  ) : null}
                 </View>
               ))}
             </View>
