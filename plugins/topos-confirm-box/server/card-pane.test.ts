@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import {
   cardIdFromSearch,
+  attemptDelivery,
   deliveryTargets,
   paneTargetFromSearch,
   searchWithCard,
@@ -172,4 +173,42 @@ test("配送: 投函元と総司令塔が同じなら二重に送らない", () 
 test("配送: 投函元も総司令塔も無ければ空(呼ぶ側はカードを閉じない)", () => {
   assert.deepEqual(deliveryTargets({ originId: null, coordinatorId: null }), []);
   assert.deepEqual(deliveryTargets({ originId: "  ", coordinatorId: "" }), []);
+});
+
+test("配送: 投函元へ届いたら総司令塔へは送らない", async () => {
+  const tried: string[] = [];
+  const targets = deliveryTargets({ originId: "o", coordinatorId: "c" });
+  const out = await attemptDelivery(targets, async (t) => {
+    tried.push(t.id);
+  });
+  assert.equal(out.delivered?.id, "o");
+  assert.deepEqual(tried, ["o"]);
+});
+
+test("配送: 投函元が閉じていて送れない→総司令塔へ届く", async () => {
+  const targets = deliveryTargets({ originId: "o", coordinatorId: "c" });
+  const out = await attemptDelivery(targets, async (t) => {
+    if (t.id === "o") throw new Error("archived");
+  });
+  assert.equal(out.delivered?.id, "c");
+  assert.equal(out.delivered?.via, "coordinator");
+  assert.equal(out.errors.length, 1);
+});
+
+test("配送: どこにも届かなければ delivered は null(カードは閉じない)", async () => {
+  const targets = deliveryTargets({ originId: "o", coordinatorId: "c" });
+  const out = await attemptDelivery(targets, async () => {
+    throw new Error("send failed");
+  });
+  assert.equal(out.delivered, null);
+  assert.equal(out.errors.length, 2);
+});
+
+test("配送: 候補が空なら試さずに null", async () => {
+  let calls = 0;
+  const out = await attemptDelivery([], async () => {
+    calls += 1;
+  });
+  assert.equal(out.delivered, null);
+  assert.equal(calls, 0);
 });

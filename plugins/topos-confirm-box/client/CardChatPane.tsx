@@ -59,6 +59,7 @@ import {
   COORDINATOR_FALLBACK_NOTICE,
   coordinatorCandidates,
   type DeliveryTarget,
+  attemptDelivery,
   deliveryTargets,
   isImageComment,
   pendingLabel,
@@ -843,9 +844,8 @@ export function CardChatPane({
               })),
             }
           : undefined;
-        let delivered: DeliveryTarget | null = null;
-        let lastError: unknown = null;
-        for (const target of targets) {
+        // 候補を順に試し、最初に届いた所で確定する(投函元でだめなら総司令塔)。
+        const outcome = await attemptDelivery(targets, async (target) => {
           const to = target.id;
           let askedHere: string | null = null;
           try {
@@ -858,7 +858,6 @@ export function CardChatPane({
                 text: tagged,
                 target: to,
               });
-              // oxlint-disable-next-line eslint/max-depth
               if (!asked.ok || !asked.replyId) throw new Error(asked.message);
               askedHere = asked.replyId;
               // 画像への直接コメントは、返事を書かず直しを進めるだけだと転送文に明記する(say は付けない)。
@@ -873,18 +872,17 @@ export function CardChatPane({
               outgoing = withNoReplyInstruction(outgoing);
             }
             await getPaseoClient(serverId).agents.ref(to).send(outgoing, opts);
-            delivered = target;
             askedId = askedHere;
-            break;
           } catch (e) {
-            lastError = e;
             // 届かなかった先の質問記録は取り消す(届いていない質問に催促が飛ばないように)。
             if (askedHere && item) {
               cancelRpc({ id: item.id, key: item.key, replyId: askedHere }).catch(() => {});
             }
+            throw e;
           }
-        }
-        if (!delivered) throw lastError ?? new Error("どこにも届きませんでした");
+        });
+        const delivered = outcome.delivered;
+        if (!delivered) throw outcome.errors.at(-1) ?? new Error("どこにも届きませんでした");
         if (topic) void refreshTopic();
         // 総司令塔の出力を購読するのは、実際に総司令塔へ送った時だけ。
         if (delivered.via === "coordinator" && delivered.id !== agentId) setCoordSent(true);

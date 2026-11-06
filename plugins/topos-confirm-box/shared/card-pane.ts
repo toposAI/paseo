@@ -161,6 +161,27 @@ export function pickCoordinatorTarget(
 
 // ---------------------------------------------------------------- 配送の解決順(投函元 → 復元 → 総司令塔)
 
+/**
+ * 候補を順に試し、**最初に成功した候補**を返す(全滅なら `delivered:null`)。
+ * 「投函元でだめなら総司令塔」を、送信そのもの(例外の有無)で判定するための共通ループ。
+ * 失敗した候補の後始末(質問記録の取り消しなど)は `attempt` の中で行う。
+ */
+export async function attemptDelivery<T>(
+  targets: readonly T[],
+  attempt: (target: T) => Promise<void>,
+): Promise<{ delivered: T | null; errors: unknown[] }> {
+  const errors: unknown[] = [];
+  for (const target of targets) {
+    try {
+      await attempt(target);
+      return { delivered: target, errors };
+    } catch (e) {
+      errors.push(e);
+    }
+  }
+  return { delivered: null, errors };
+}
+
 /** 送る候補の1つ。`via` は「投函元」か「引き取り先(総司令塔)」かの印。 */
 export interface DeliveryTarget {
   id: string;
