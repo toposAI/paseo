@@ -58,7 +58,6 @@ import type { ConfirmBoxItem } from "../shared/contract.js";
 import {
   COORDINATOR_FALLBACK_NOTICE,
   coordinatorCandidates,
-  isHubTarget,
   pendingLabel,
   pickCoordinatorTarget,
   shouldFallbackToCoordinator,
@@ -375,7 +374,6 @@ export function CardChatPane({
   // undefined = まだ引けていない(この間は履歴を引かない=ハブ宛なのに全体履歴が一瞬出るのを防ぐ)。
   const [hubIds, setHubIds] = useState<string[] | undefined>(undefined);
   // ハブ宛でも「スレ全体」(従来のライブ表示)へ切り替えられる。
-  const [topicView, setTopicView] = useState(true);
   const [topicMsgs, setTopicMsgs] = useState<TopicMessage[]>([]);
   const [topicPending, setTopicPending] = useState<TopicPending[]>([]);
   // 話題の履歴を1回読めたか。読む前の空表示を「返事なし」の基準にしない(誤判定の防止)。
@@ -413,14 +411,10 @@ export function CardChatPane({
     originUnknown,
   });
   const sendAgentId = fallback ? (coordId ?? null) : agentId;
-  const hub = isHubTarget({
-    fallback,
-    agentId: sendAgentId,
-    hubIds: hubIds ?? [],
-  });
   const hubPending = item !== null && hubIds === undefined && !fallback;
-  // 話題だけ表示: ハブ宛で、カードがあり、切替で「スレ全体」にされていない時。
-  const topic = hub && topicView && item !== null;
+  // カードの欄に出すのは、そのカードの欄でやりとりした発言と返事だけ(2026-11-06 ユーザー決定)。
+  // 宛先がハブかどうかに関わらず、投函元スレの会話全体は出さない。まだ話していないカードは空。
+  const topic = item !== null;
   // 開いた時点のスレの状態を1回読む。購読は接続直後に過去の書き込みを流すので、状態を見ないと
   // 送信もしていないのに「ツールを実行中…」が出る(2026-10-27 本番。`shared/pane-activity.ts`)。
   // 読み直し(リロード)で空になるのも防ぐ: 開いた時点で running なら、その後の書き込みで表示を戻す。
@@ -945,7 +939,6 @@ export function CardChatPane({
     },
     [compact, send],
   );
-  const toggleTopicView = useCallback(() => setTopicView((v) => !v), []);
 
   // --- 全画面スライド(狭い幅のみ) ---
   const { paneWidth, resizeHandlers } = usePaneResize(width);
@@ -1159,16 +1152,6 @@ export function CardChatPane({
         paddingHorizontal: 8,
         paddingVertical: 3,
       },
-      modeRow: {
-        flexDirection: "row" as const,
-        alignItems: "center" as const,
-        justifyContent: "space-between" as const,
-        paddingHorizontal: 12,
-        paddingVertical: 2,
-      },
-      modeText: { color: colors.foregroundMuted, fontSize: 11 },
-      modeBtn: { paddingVertical: 6, paddingHorizontal: 6 },
-      modeBtnText: { color: colors.accent, fontSize: 12 },
       pendingText: {
         color: colors.statusWarning,
         fontSize: 11,
@@ -1273,16 +1256,6 @@ export function CardChatPane({
       </ScrollView>
       {notice ? <Text style={st.notice}>{notice}</Text> : null}
       {tools.toolNotice ? <Text style={st.notice}>{tools.toolNotice}</Text> : null}
-      {hub && item ? (
-        <View style={st.modeRow}>
-          <Text style={st.modeText}>
-            {topic ? "表示: この話題の返事だけ" : "表示: スレ全体(ライブ)"}
-          </Text>
-          <Pressable accessibilityRole="button" style={st.modeBtn} onPress={toggleTopicView}>
-            <Text style={st.modeBtnText}>{topic ? "スレ全体を見る" : "この話題だけにする"}</Text>
-          </Pressable>
-        </View>
-      ) : null}
       {activityLabel ? (
         <Text style={st.activity} accessibilityLiveRegion="polite" testID="pane-activity">
           {PANE_ACTIVITY_LABEL[activityLabel]}

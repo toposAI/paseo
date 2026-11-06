@@ -133,6 +133,30 @@ describe("readCardChat", () => {
     assert.deepEqual(msgs, []);
   });
 
+  it("topic view: an unused card is empty; a used card shows only its own send and reply", () => {
+    sayToCard(dir, { id: "pending:used", key: "used" }, "このカードの質問");
+    sayToCard(dir, { id: "pending:neighbor", key: "neighbor" }, "隣のカードの質問");
+    const chat = lines().find((r) => r.t === "chat" && r.question === "このカードの質問") as Record<
+      string,
+      unknown
+    >;
+    appendRaw({
+      t: "reply",
+      id: "pending:used",
+      key: null,
+      ts: Date.now(),
+      re: chat.client_message_id,
+      by: "hub_thread",
+      text: "このカードへの返事",
+    });
+    assert.deepEqual(readCardChat(dir, { id: "pending:fresh", key: "fresh" }, { topic: true }), []);
+    const msgs = readCardChat(dir, { id: "pending:used", key: "used" }, { topic: true });
+    assert.deepEqual(
+      msgs.map((m) => m.text),
+      ["このカードの質問", "このカードへの返事"],
+    );
+  });
+
   it("ignores rows whose t is unknown (the box's forward-compat contract)", () => {
     sayToCard(dir, { id: "pending:k7", key: "k7" }, "q7");
     appendRaw({ t: "future-event", id: "pending:k7", ts: Date.now() });
