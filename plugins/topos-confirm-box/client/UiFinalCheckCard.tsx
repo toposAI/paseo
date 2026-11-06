@@ -72,14 +72,21 @@ function ImageViewer({
   label,
   colors,
   send,
+  onDone,
   onClose,
 }: {
   source: { uri: string } | null;
   label: string;
   colors: PaneColors;
   send: ((text: string) => Promise<boolean>) | null;
+  /** カードを完了にして閉じる(コメントを送った後でも、送らずにでも押せる)。無ければボタンを出さない。 */
+  onDone: (() => void) | null;
   onClose: () => void;
 }) {
+  const donePress = useCallback(() => {
+    onDone?.();
+    onClose();
+  }, [onDone, onClose]);
   const [text, setText] = useState("");
   const [notice, setNotice] = useState("");
   const appendDictated = useCallback((said: string) => setText((cur) => cur + said), []);
@@ -106,8 +113,18 @@ function ImageViewer({
       body: { flex: 1, padding: 12 },
       notice: { color: "#ffb4a8", fontSize: 12, padding: 8 },
       dock: { backgroundColor: colors.surface1, paddingBottom: 12 },
+      doneRow: { flexDirection: "row" as const, justifyContent: "flex-end" as const, padding: 8 },
+      done: {
+        backgroundColor: colors.accent,
+        borderRadius: 8,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        minHeight: 44,
+        justifyContent: "center" as const,
+      },
+      doneText: { color: colors.accentForeground, fontSize: 15, fontWeight: "600" as const },
     }),
-    [colors.surface1],
+    [colors.surface1, colors.accent, colors.accentForeground],
   );
   return (
     <Modal visible={source != null} transparent animationType="fade" onRequestClose={onClose}>
@@ -123,6 +140,18 @@ function ImageViewer({
         </View>
         {notice ? <Text style={st.notice}>{notice}</Text> : null}
         <View style={st.dock}>
+          {onDone && send ? (
+            <View style={st.doneRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="このカードを完了にして閉じる"
+                style={st.done}
+                onPress={donePress}
+              >
+                <Text style={st.doneText}>完了</Text>
+              </Pressable>
+            </View>
+          ) : null}
           <PaneComposer
             colors={colors}
             text={text}
@@ -177,6 +206,7 @@ export function UiFinalCheckCard({
   visited,
   nextExists,
   onChoose,
+  onDone,
   onToggle,
   onSent,
   onReply,
@@ -197,6 +227,8 @@ export function UiFinalCheckCard({
   visited: boolean;
   nextExists: boolean;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
+  /** 完了にして閉じる(数秒は元に戻せる)。コメントを送った後に閉じるための操作。 */
+  onDone: (item: ConfirmBoxItem) => void;
   onToggle: (id: string) => void;
   onSent: (id: string) => void;
   onReply: (id: string) => void;
@@ -231,6 +263,7 @@ export function UiFinalCheckCard({
     setFocusN((n) => n + 1);
   }, [onSeen, item.id]);
   const closeZoom = useCallback(() => setZoom(null), []);
+  const done = useCallback(() => onDone(item), [onDone, item]);
   const header = useCallback(() => onToggle(item.id), [onToggle, item.id]);
   const select = useCallback(() => {
     onSelect(item.id);
@@ -375,6 +408,14 @@ export function UiFinalCheckCard({
                   <Pressable accessibilityRole="button" style={styles.btn} onPress={focusInput}>
                     <Text style={styles.btnText}>💬 直してほしい</Text>
                   </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="このカードを完了にして閉じる"
+                    style={styles.btn}
+                    onPress={done}
+                  >
+                    <Text style={styles.btnText}>完了</Text>
+                  </Pressable>
                   {nextExists ? (
                     <Pressable accessibilityRole="button" style={styles.btn} onPress={onSkip}>
                       <Text style={styles.btnText}>次へ ›</Text>
@@ -400,6 +441,7 @@ export function UiFinalCheckCard({
           label={zoom === null ? "" : shotCaption(item, zoom)}
           colors={colors}
           send={approved ? null : sendImageComment}
+          onDone={done}
           onClose={closeZoom}
         />
       )}

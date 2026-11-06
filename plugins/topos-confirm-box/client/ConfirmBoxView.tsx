@@ -7,15 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
-import {
-  Image,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
-} from "react-native";
+import { Image, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import type { LayoutChangeEvent } from "react-native";
 import { ImageLightbox } from "./ImageLightbox.js";
 import { useHosts, useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
@@ -32,8 +24,13 @@ import {
   cardChatSeenRpc,
   countOpen,
   judgmentTabRows,
-  rejectComment,
 } from "../shared/contract.js";
+import {
+  DONE_REASON,
+  REJECT_NO_COMMENT_REASON,
+  createDeferredCloser,
+} from "../shared/deferred-close.js";
+import type { CloseKind, DeferredCloser } from "../shared/deferred-close.js";
 import {
   confirmBoxTabs,
   isWideLayout,
@@ -438,35 +435,58 @@ export function ConfirmBoxView({
     [decide, permit, depth, reload],
   );
 
-  /** 却下(コメント必須)。成功したら true を返し、カードは一覧から消える。 */
-  const reject = useCallback(
-    async (item: ConfirmBoxItem, comment: string): Promise<boolean> => {
-      const text = rejectComment(comment);
-      if (!text || !item.key) {
-        setNotice("却下にはコメントが必要です");
-        return false;
+  /**
+   * 完了/却下を台帳へ書く(コメントは要らない。理由文は決まった文)。猶予が切れたときに呼ばれる。
+   * 失敗したら通知に出し、カードは一覧に残る(猶予中は「元に戻す」行に置き換えているだけ)。
+   */
+  const commitClose = useCallback(
+    async (item: ConfirmBoxItem, kind: CloseKind): Promise<void> => {
+      if (!item.key) {
+        setNotice("この項目は閉じられません(key なし)");
+        return;
       }
       try {
         const r = await decide({
           key: item.key,
-          chosen: REJECT_CHOICE,
-          recommended: item.recommended,
+          chosen: kind === "reject" ? REJECT_CHOICE : null,
+          recommended: kind === "reject" ? null : item.recommended,
           depth,
-          reason: text,
+          reason: kind === "reject" ? REJECT_NO_COMMENT_REASON : DONE_REASON,
           source: "paseo-plugin",
         });
         setNotice(r.message);
-        if (!r.ok) return false;
       } catch (e) {
         setNotice(e instanceof Error ? e.message : String(e));
-        return false;
       }
       void reload();
       notifyBoxChanged();
-      return true;
     },
     [decide, depth, reload],
   );
+  const commitRef = useRef(commitClose);
+  commitRef.current = commitClose;
+  // 押してもすぐには書かず、数秒は「元に戻す」を出す(誤タップ対策)。画面を離れるときは待たずに書く。
+  const [closing, setClosing] = useState<string[]>([]);
+  const closingInfo = useRef(new Map<string, { subject: string; kind: CloseKind }>());
+  const closerRef = useRef<DeferredCloser<{ item: ConfirmBoxItem; kind: CloseKind }> | null>(null);
+  if (closerRef.current === null) {
+    closerRef.current = createDeferredCloser(
+      (_id, p) => void commitRef.current(p.item, p.kind),
+      () => setClosing(closerRef.current?.ids() ?? []),
+    );
+  }
+  const closer = closerRef.current;
+  useEffect(() => () => closer.flushAll(), [closer]);
+  const startClose = useCallback(
+    (item: ConfirmBoxItem, kind: CloseKind) => {
+      closingInfo.current.set(item.id, { subject: item.subject, kind });
+      closer.schedule(item.id, { item, kind });
+    },
+    [closer],
+  );
+  const undoClose = useCallback((id: string) => void closer.undo(id), [closer]);
+  const reject = useCallback((item: ConfirmBoxItem) => startClose(item, "reject"), [startClose]);
+  const complete = useCallback((item: ConfirmBoxItem) => startClose(item, "done"), [startClose]);
 
   /** 質問への回答。押された選択肢/自由記述を `answers` として送る。 */
   const answer = useCallback(
@@ -510,16 +530,30 @@ export function ConfirmBoxView({
   // 隠れた瞬間に reconcile が「消えた」と見なして見ているカードが別へ跳ぶ(2026-11-05 出口レビュー2巡目 指摘6)。
   // 一方で「次へ」と件数行は**画面に出ているカード**(ufcIds)で絞る: 全件で作ると、絞り込みで隠れた
   // カードを current に選べてしまい、押しても何も開かない(1巡目 指摘5)。
+  // 完了を押して「元に戻す」猶予中のカードは、もう片付いたものとして数えない(次のカードへ進める)。
   const ufcAllIds = useMemo(
     () =>
       (data?.items ?? [])
-        .filter((v) => isUiFinalCheck(v) && v.kind === "box" && v.state !== "approved")
+        .filter(
+          (v) =>
+            isUiFinalCheck(v) &&
+            v.kind === "box" &&
+            v.state !== "approved" &&
+            !closing.includes(v.id),
+        )
         .map((v) => v.id),
-    [data],
+    [data, closing],
   );
   const ufcItems = useMemo(
-    () => visible.filter((v) => isUiFinalCheck(v) && v.kind === "box" && v.state !== "approved"),
-    [visible],
+    () =>
+      visible.filter(
+        (v) =>
+          isUiFinalCheck(v) &&
+          v.kind === "box" &&
+          v.state !== "approved" &&
+          !closing.includes(v.id),
+      ),
+    [visible, closing],
   );
   const ufcIds = useMemo(() => ufcItems.map((v) => v.id), [ufcItems]);
   const ufc = useUfcFlow(ufcAllIds, data?.ufcMarks ?? {}, ufcIds);
@@ -664,47 +698,61 @@ export function ConfirmBoxView({
           onSelect={jumpToUfc}
         />
         <View style={listCols > 1 ? s.grid : s.listBox} onLayout={onListLayout}>
-          {visible.map((item) => (
-            <View key={item.id} style={isUiFinalCheck(item) ? ufcCellStyle : cellStyle}>
-              {isUiFinalCheck(item) && item.kind === "box" ? (
-                <UiFinalCheckCard
-                  item={item}
-                  styles={s}
-                  colors={c}
-                  compact={compact}
-                  width={UFC_PANE_WIDTH}
-                  agentId={threadAgentId(item)}
-                  flow={ufc.flow}
-                  index={ufcIds.indexOf(item.id)}
-                  total={ufcIds.length}
-                  visited={ufc.visited.includes(item.id)}
-                  nextExists={ufcNextExists}
-                  onChoose={choose}
-                  onToggle={toggle}
-                  onSent={ufc.sent}
-                  onReply={ufc.replied}
-                  onSelect={ufc.choose}
-                  onSeen={markSeen}
-                  onSkip={ufc.skip}
-                />
-              ) : (
-                <ItemCard
-                  item={item}
-                  styles={s}
-                  colors={c}
-                  open={openId === item.id}
-                  onToggle={toggle}
-                  onBackground={openBackground}
-                  onChoose={choose}
-                  onAnswer={answer}
-                  onReject={reject}
-                  paneOpen={paneCardId === item.id}
-                  anyPaneOpen={pane !== null}
-                  onOpenPane={openCard}
-                />
-              )}
-            </View>
-          ))}
+          {visible.map((item) => {
+            const isClosing = closing.includes(item.id);
+            const isUfc = isUiFinalCheck(item) && item.kind === "box";
+            return (
+              <View key={item.id} style={isUiFinalCheck(item) ? ufcCellStyle : cellStyle}>
+                {isClosing ? (
+                  <ClosingRow
+                    styles={s}
+                    id={item.id}
+                    info={closingInfo.current.get(item.id)}
+                    onUndo={undoClose}
+                  />
+                ) : null}
+                {!isClosing && isUfc ? (
+                  <UiFinalCheckCard
+                    item={item}
+                    styles={s}
+                    colors={c}
+                    compact={compact}
+                    width={UFC_PANE_WIDTH}
+                    agentId={threadAgentId(item)}
+                    flow={ufc.flow}
+                    index={ufcIds.indexOf(item.id)}
+                    total={ufcIds.length}
+                    visited={ufc.visited.includes(item.id)}
+                    nextExists={ufcNextExists}
+                    onChoose={choose}
+                    onDone={complete}
+                    onToggle={toggle}
+                    onSent={ufc.sent}
+                    onReply={ufc.replied}
+                    onSelect={ufc.choose}
+                    onSeen={markSeen}
+                    onSkip={ufc.skip}
+                  />
+                ) : null}
+                {!isClosing && !isUfc ? (
+                  <ItemCard
+                    item={item}
+                    styles={s}
+                    colors={c}
+                    open={openId === item.id}
+                    onToggle={toggle}
+                    onBackground={openBackground}
+                    onChoose={choose}
+                    onAnswer={answer}
+                    onReject={reject}
+                    paneOpen={paneCardId === item.id}
+                    anyPaneOpen={pane !== null}
+                    onOpenPane={openCard}
+                  />
+                ) : null}
+              </View>
+            );
+          })}
         </View>
       </>
     );
@@ -1338,54 +1386,35 @@ function PlainOptions({
 }
 
 /**
- * 却下パネル(押し間違い防止の確認ステップを兼ねる)。コメント必須: 空白だけでは送れない。
- * 送ると Vault の判断ノートが superseded になり、コメントが回答原文へ逐語で残り、投函元へ伝わる。
+ * 完了/却下を押した直後の置き換え行。数秒のあいだ「元に戻す」が効く(猶予が切れると台帳へ書かれて消える)。
+ * 却下にコメントは要らない(2026-11-06 ユーザー指示)。理由を書きたいときは 💬 会話で投函元へ伝える。
  */
-function RejectPanel({
-  item,
+function ClosingRow({
   styles,
-  onReject,
-  onCancel,
+  id,
+  info,
+  onUndo,
 }: {
-  item: ConfirmBoxItem;
   styles: Styles;
-  onReject: (item: ConfirmBoxItem, comment: string) => Promise<boolean>;
-  onCancel: () => void;
+  id: string;
+  info: { subject: string; kind: CloseKind } | undefined;
+  onUndo: (id: string) => void;
 }) {
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const ready = rejectComment(text) !== null && !busy;
-  const send = useCallback(async () => {
-    if (rejectComment(text) === null || busy) return;
-    setBusy(true);
-    await onReject(item, text);
-    // 失敗時は入力を残して再送できる。成功時はカードごと消えるが、再読込が遅れても「やめる」で閉じられるよう常に戻す
-    setBusy(false);
-  }, [text, busy, onReject, item]);
-  const sendPress = useCallback(() => void send(), [send]);
-  const inputStyle = useMemo(() => styles.rejectInput, [styles.rejectInput]);
+  const undo = useCallback(() => onUndo(id), [onUndo, id]);
+  const what = info?.kind === "reject" ? "却下" : "完了";
   return (
     <View style={styles.rejectBox}>
-      <Text style={styles.text}>この判断を却下します。理由(コメント)を書いてください。</Text>
-      <TextInput
-        value={text}
-        onChangeText={setText}
-        placeholder="例: もう解決済み / 前提が違う"
-        multiline
-        autoFocus
-        style={inputStyle}
-      />
+      <Text style={styles.text} numberOfLines={2}>
+        {what}にしました: {info?.subject ?? ""}
+      </Text>
       <View style={styles.row}>
         <Pressable
           accessibilityRole="button"
-          disabled={!ready}
-          style={ready ? styles.btnRec : styles.btn}
-          onPress={sendPress}
+          accessibilityLabel={`${what}を元に戻す`}
+          style={styles.btnRec}
+          onPress={undo}
         >
-          <Text style={ready ? styles.btnRecText : styles.btnText}>却下を送る</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" disabled={busy} style={styles.btn} onPress={onCancel}>
-          <Text style={styles.btnText}>やめる</Text>
+          <Text style={styles.btnRecText}>元に戻す</Text>
         </Pressable>
       </View>
     </View>
@@ -1435,7 +1464,7 @@ function ItemCard({
   onBackground: () => void;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
   onAnswer: (item: ConfirmBoxItem, answers: Record<string, string>) => Promise<void>;
-  onReject: (item: ConfirmBoxItem, comment: string) => Promise<boolean>;
+  onReject: (item: ConfirmBoxItem) => void;
   /** このカードの会話ペインが開いているか(枠の強調と 💬 ボタンの表示に使う)。 */
   paneOpen: boolean;
   /** 右ペインが(どの相手でも)開いているか。開いている間だけ、件名の押下でペインの相手を切り替える。 */
@@ -1445,9 +1474,7 @@ function ItemCard({
   const [bgOpen, setBgOpen] = useState(false);
   const [zoom, setZoom] = useState<number | null>(null);
   const closeZoom = useCallback(() => setZoom(null), []);
-  const [rejecting, setRejecting] = useState(false);
-  const startReject = useCallback(() => setRejecting(true), []);
-  const cancelReject = useCallback(() => setRejecting(false), []);
+  const reject = useCallback(() => onReject(item), [onReject, item]);
   const toggleBg = useCallback(() => {
     setBgOpen((v) => {
       if (!v) onBackground();
@@ -1522,9 +1549,6 @@ function ItemCard({
         ) : (
           <PlainOptions item={item} styles={styles} onChoose={onChoose} />
         )}
-        {rejecting ? (
-          <RejectPanel item={item} styles={styles} onReject={onReject} onCancel={cancelReject} />
-        ) : null}
         {open && questions.length === 0 ? <Text style={styles.text}>{item.summary}</Text> : null}
         {bgOpen && item.background ? <Text style={styles.text}>{item.background}</Text> : null}
         <View style={styles.footRow}>
@@ -1543,12 +1567,12 @@ function ItemCard({
           >
             <Text style={styles.footText}>{paneOpen ? "▼会話" : "💬 会話"}</Text>
           </Pressable>
-          {canRejectItem(item) && !rejecting ? (
+          {canRejectItem(item) ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="この判断を却下する(コメント必須)"
+              accessibilityLabel="この判断を却下する(コメント不要・数秒は元に戻せる)"
               style={styles.footBtn}
-              onPress={startReject}
+              onPress={reject}
             >
               <Text style={styles.footText}>✕ 却下</Text>
             </Pressable>
