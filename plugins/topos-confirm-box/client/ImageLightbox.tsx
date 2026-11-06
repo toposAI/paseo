@@ -1,13 +1,14 @@
 /**
  * 確認箱カードの添付画像を、画面いっぱい(縦横比を保ち、はみ出さない)で見る拡大表示。
- * 閉じる: ✕・Esc(Modal の onRequestClose)。複数枚は ‹ › と ←/→ キーで前後へ移る。
- * 画像は ZoomableImage で出す: ピンチ・ダブルタップ・ホイールで拡大し、ドラッグで動かせる(元の解像度のまま)。
- * 画像の上を押しても閉じない(拡大操作と取り合うため)。閉じるのは ✕・Esc。
+ * 閉じる: ✕・Esc(PC は画像を押しても。Modal の onRequestClose)。複数枚は ‹ › と ←/→ キーで前後へ移る。
+ * 指で操作する端末(iPhone)は ZoomableImage: ピンチ・ダブルタップで拡大し、ドラッグで動かせる(元の解像度のまま)。
+ *   画像の上を押しても閉じない(拡大操作と取り合うため)。閉じるのは ✕・Esc。
+ * PC は従来どおり(画像を押すと閉じる。拡大はブラウザ標準のトラックパッド)。
  */
 import { useCallback, useEffect, useMemo } from "react";
-import { Modal, Platform, Pressable, Text, View } from "react-native";
+import { Image, Modal, Platform, Pressable, Text, View } from "react-native";
 import { neighborIndex } from "../shared/image-nav.js";
-import { ZoomableImage } from "./ZoomableImage.js";
+import { isTouchDevice, ZoomableImage } from "./ZoomableImage.js";
 
 interface Source {
   uri: string;
@@ -25,6 +26,7 @@ export function ImageLightbox({
   onChange: (index: number) => void;
   onClose: () => void;
 }) {
+  const touch = isTouchDevice();
   const count = sources.length;
   const current = index === null ? null : (sources[index] ?? null);
   const prev = useCallback(() => {
@@ -71,6 +73,7 @@ export function ImageLightbox({
         paddingBottom: 16,
       },
       backdrop: { flex: 1, alignSelf: "stretch" as const },
+      img: { flex: 1, alignSelf: "stretch" as const },
       nav: { color: "#fff", fontSize: 32, paddingHorizontal: 10, paddingVertical: 24 },
     }),
     [],
@@ -91,9 +94,28 @@ export function ImageLightbox({
               <Text style={st.nav}>‹</Text>
             </Pressable>
           ) : null}
-          <View style={st.backdrop}>
-            {current ? <ZoomableImage uri={current.uri} label="拡大した添付画像" /> : null}
-          </View>
+          {touch ? (
+            <View style={st.backdrop}>
+              {current ? <ZoomableImage uri={current.uri} label="拡大した添付画像" /> : null}
+            </View>
+          ) : (
+            /* PC は従来どおり: 画像の上を含め、‹ › 以外の所を押すと閉じる。拡大はブラウザ標準(トラックパッド)。 */
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="画像を押して閉じる"
+              style={st.backdrop}
+              onPress={onClose}
+            >
+              {current ? (
+                <Image
+                  accessibilityLabel="拡大した添付画像"
+                  source={current}
+                  style={st.img}
+                  resizeMode="contain"
+                />
+              ) : null}
+            </Pressable>
+          )}
           {count > 1 ? (
             <Pressable accessibilityRole="button" accessibilityLabel="次の画像" onPress={next}>
               <Text style={st.nav}>›</Text>

@@ -1,8 +1,8 @@
 /**
- * 全画面で見る画像の拡大部品(Web)。ピンチ・ダブルタップ・ホイール・ドラッグで拡大して動かせる。
+ * 全画面で見る画像の拡大部品(Web)。ピンチ・ダブルタップ・ドラッグで拡大して動かせる。
  * 元の解像度の画像(data URI)を <img> のまま出し、transform で拡大する(縮小版に差し替えない)。
  * touch-action:none でブラウザ標準のページ拡大・スクロールとの取り合いを避け、操作はすべてここで受ける。
- * ネイティブ(Web 以外)は拡大せず、従来どおり画面に収めて出す。
+ * 指で操作する端末だけ有効。PC・ネイティブは従来どおり画面に収めて出す(PC の拡大はブラウザ標準のまま変えない)。
  */
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { Image, Platform } from "react-native";
@@ -10,7 +10,6 @@ import {
   clampTransform,
   IDENTITY,
   toggleZoomAt,
-  wheelFactor,
   zoomAt,
   type ZoomTransform,
 } from "../shared/image-zoom.js";
@@ -49,9 +48,18 @@ interface Pt {
   y: number;
 }
 
+/** 指で操作する端末(iPhone 等)か。PC(マウス・トラックパッド)は従来どおりブラウザ標準の拡大に任せる。 */
+export function isTouchDevice(): boolean {
+  return (
+    Platform.OS === "web" &&
+    typeof window !== "undefined" &&
+    window.matchMedia("(pointer: coarse)").matches
+  );
+}
+
 export function ZoomableImage({ uri, label }: { uri: string; label: string }) {
   const source = useMemo(() => ({ uri }), [uri]);
-  if (Platform.OS !== "web") {
+  if (!isTouchDevice()) {
     return (
       <Image accessibilityLabel={label} source={source} style={NATIVE_STYLE} resizeMode="contain" />
     );
@@ -88,20 +96,6 @@ function WebZoomableImage({ uri, label }: { uri: string; label: string }) {
     pinch.current = null;
     lastTap.current = null;
   }, [uri, apply]);
-
-  // wheel は preventDefault したいので passive:false で自前に付ける(React の onWheel は passive)。
-  useEffect(() => {
-    const frame = frameRef.current;
-    if (!frame) return undefined;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const { w, h, left, top } = size();
-      const target = tf.current.scale * wheelFactor(e.deltaY);
-      apply(zoomAt(tf.current, target, e.clientX - left, e.clientY - top, w, h));
-    };
-    frame.addEventListener("wheel", onWheel, { passive: false });
-    return () => frame.removeEventListener("wheel", onWheel);
-  }, [apply, size]);
 
   const startPinch = useCallback(() => {
     const [a, b] = [...pointers.current.values()];
