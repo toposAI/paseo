@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   IMAGE_COMMENT_TAG,
+  imageCommentText,
   isHubTarget,
   isImageComment,
   pendingLabel,
@@ -119,6 +120,12 @@ test("画像への直接コメント: 返事待ちに出ず、転送文には返
   assert.equal(isImageComment("【直してほしい】普通の指摘"), false);
   // 画像名が長い・記号を含む場合でも、固定の目印で見分けるので取りこぼさない。
   assert.equal(isImageComment(`${IMAGE_COMMENT_TAG}【${"あ".repeat(100)}へのコメント】x`), true);
+  // 文の組み立ても1か所(画面ごとにぶれない)。前後の空白は落とし、先頭に固定の目印を置く。
+  assert.equal(
+    imageCommentText("完成版", " ここを直して "),
+    `${IMAGE_COMMENT_TAG}【完成版へのコメント】ここを直して`,
+  );
+  assert.equal(isImageComment(imageCommentText("完成版", "ここを直して")), true);
   askFromPane(dir, { id: "i1" }, text, "a", t0);
   // 催促の元・返事待ちの目印にしない(3分超でも overdue にならない)。
   assert.equal(panePending(dir, { id: "i1" }, t0 + 200_000).length, 0);

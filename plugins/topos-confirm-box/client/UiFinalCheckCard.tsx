@@ -11,14 +11,12 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Image, Modal, Pressable, Text, View } from "react-native";
 import type { ConfirmBoxItem } from "../shared/contract.js";
-import { IMAGE_COMMENT_TAG } from "../shared/card-pane.js";
 import { shotLabel, UFC_OK_ID } from "../shared/ui-final-check.js";
 import { ufcStatus } from "../shared/ufc-flow.js";
 import type { UfcCounts, UfcFlow, UfcStatus } from "../shared/ufc-flow.js";
 import { CardChatPane } from "./CardChatPane.js";
 import type { PaneColors } from "./CardChatPane.js";
-import { PaneComposer } from "./PaneComposer.js";
-import { usePaneInputTools } from "./usePaneInputTools.js";
+import { ImageCommentDock } from "./ImageCommentDock.js";
 import { ZoomableImage } from "./ZoomableImage.js";
 
 type Styles = Record<string, object>;
@@ -28,7 +26,6 @@ const FIX_PREFIX = "【直してほしい】";
 const SHOT_BOX = { width: "100%" as const, height: 320, borderRadius: 8 };
 const shotRow = { gap: 10 };
 const shotItem = { gap: 4 };
-const COMMENT_MAX = 4000;
 const row = { flexDirection: "row" as const, gap: 8, alignItems: "flex-end" as const };
 const rowWrap = { ...row, flexWrap: "wrap" as const, alignItems: "center" as const };
 const bullets = { gap: 2 };
@@ -39,13 +36,10 @@ function noop() {
 }
 
 /**
- * 画像ごとのコメントに付ける印(どの画像へのコメントかを投函元に伝える)。
- * 先頭の固定の目印(`IMAGE_COMMENT_TAG`)で、画像名の長さや記号に関係なく
- * 「返事不要の画像コメント」と機械が見分けられる(2026-11-06 出口レビュー指摘1)。
+ * 画像ごとのコメント文(定義は `shared/card-pane.ts`)。画面ごとに書き方がぶれないよう共通化した。
+ * 先頭の固定の目印で、画像名の長さや記号に関係なく「返事不要の画像コメント」と機械が見分けられる。
  */
-export function imageCommentText(label: string, text: string): string {
-  return `${IMAGE_COMMENT_TAG}【${label}へのコメント】${text.trim()}`;
-}
+export { imageCommentText } from "../shared/card-pane.js";
 
 /** カードに出す画像の1行キャプション。投函側の imageCaptions を優先し、無ければ従来の当て推量。 */
 function shotCaption(item: { imageCaptions?: string[] }, index: number): string {
@@ -92,35 +86,6 @@ function ImageViewer({
     onDone?.();
     onClose();
   }, [onDone, onClose]);
-  const [text, setText] = useState("");
-  const [notice, setNotice] = useState("");
-  // 送信中は押し直しを黙って無視する(2026-11-06 出口レビュー指摘4)。送信側も送信中は false を
-  // 返すため、素通しすると二度押しで「送れませんでした」と誤って出てしまう。
-  const busyRef = useRef(false);
-  const appendDictated = useCallback((said: string) => setText((cur) => cur + said), []);
-  const tools = usePaneInputTools(appendDictated);
-  const submit = useCallback(async () => {
-    const t = text.trim();
-    if (!t || !send || busyRef.current) return;
-    busyRef.current = true;
-    let ok = false;
-    try {
-      ok = await send(imageCommentText(label, t));
-    } finally {
-      busyRef.current = false;
-    }
-    if (ok) {
-      setText("");
-      setNotice("");
-      // 画像に直接コメントしたら、そのまま完了にしてカードを閉じる(2026-11-06 ユーザー指示)。
-      // 閉じ方は「完了」ボタンと同じ経路(onDone → 台帳)。返事は求めない(送信側で「返事不要」を明記)。
-      onDone?.();
-      onClose();
-    } else {
-      setNotice("送れませんでした(投函元スレに届いていません)");
-    }
-  }, [text, send, label, onClose, onDone]);
-  const submitPress = useCallback(() => void submit(), [submit]);
   const st = useMemo(
     () => ({
       wrap: { flex: 1, backgroundColor: "rgba(0,0,0,0.95)", paddingTop: 40 },
@@ -128,20 +93,8 @@ function ImageViewer({
       title: { color: "#fff", fontSize: 14, flex: 1 },
       close: { color: "#fff", fontSize: 22, paddingHorizontal: 8 },
       body: { flex: 1, padding: 12 },
-      notice: { color: "#ffb4a8", fontSize: 12, padding: 8 },
-      dock: { backgroundColor: colors.surface1, paddingBottom: 12 },
-      doneRow: { flexDirection: "row" as const, justifyContent: "flex-end" as const, padding: 8 },
-      done: {
-        backgroundColor: colors.accent,
-        borderRadius: 8,
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        minHeight: 44,
-        justifyContent: "center" as const,
-      },
-      doneText: { color: colors.accentForeground, fontSize: 15, fontWeight: "600" as const },
     }),
-    [colors.surface1, colors.accent, colors.accentForeground],
+    [],
   );
   return (
     <Modal visible={source != null} transparent animationType="fade" onRequestClose={onClose}>
@@ -155,33 +108,14 @@ function ImageViewer({
         <View style={st.body}>
           {source ? <ZoomableImage uri={source.uri} label={label} /> : null}
         </View>
-        {notice ? <Text style={st.notice}>{notice}</Text> : null}
-        <View style={st.dock}>
-          {onDone && send ? (
-            <View style={st.doneRow}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="このカードを完了にして閉じる"
-                style={st.done}
-                onPress={donePress}
-              >
-                <Text style={st.doneText}>完了</Text>
-              </Pressable>
-            </View>
-          ) : null}
-          <PaneComposer
-            colors={colors}
-            text={text}
-            onChangeText={setText}
-            tools={tools}
-            disabledReason={send ? null : "この画面では送れません"}
-            placeholder="この画像へのコメント"
-            maxLength={COMMENT_MAX}
-            sendable={text.trim().length > 0 && send !== null}
-            onSend={submitPress}
-            testID="ufc-image-composer"
-          />
-        </View>
+        {/* コメント欄は共通部品(どの画像ビューアでも必ず出す)。送れたら完了にして閉じる。 */}
+        <ImageCommentDock
+          label={label}
+          colors={colors}
+          send={send}
+          onDone={onDone ? donePress : null}
+          testID="ufc-image-composer"
+        />
       </View>
     </Modal>
   );

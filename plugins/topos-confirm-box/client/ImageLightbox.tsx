@@ -8,10 +8,24 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { Image, Modal, Platform, Pressable, Text, View } from "react-native";
 import { neighborIndex } from "../shared/image-nav.js";
+import type { ImageCommentColors } from "./ImageCommentDock.js";
+import { ImageCommentDock } from "./ImageCommentDock.js";
 import { isTouchDevice, ZoomableImage } from "./ZoomableImage.js";
 
 interface Source {
   uri: string;
+}
+
+/** 画像の下に出すコメント欄(無い画面では欄も出さない)。 */
+export interface ImageComment {
+  /** どの画像へのコメントか(画像名)。 */
+  label: string;
+  send: ((text: string) => Promise<boolean>) | null;
+  /** 送れたときにカードを完了にして閉じる。 */
+  onDone: (() => void) | null;
+  /** 送れない理由(あれば欄に出す)。 */
+  disabledReason?: string | null;
+  testID?: string;
 }
 
 export function ImageLightbox({
@@ -19,12 +33,18 @@ export function ImageLightbox({
   index,
   onChange,
   onClose,
+  colors,
+  comment,
 }: {
   sources: Source[];
   /** 開いている画像の番号。null なら閉じている。 */
   index: number | null;
   onChange: (index: number) => void;
   onClose: () => void;
+  /** コメント欄の色。 */
+  colors?: ImageCommentColors;
+  /** 下に出すコメント欄。2026-11-06 ユーザー指示「どの画像を開いても下にコメント欄を出す」。 */
+  comment?: ImageComment | null;
 }) {
   const touch = isTouchDevice();
   const count = sources.length;
@@ -122,6 +142,16 @@ export function ImageLightbox({
             </Pressable>
           ) : null}
         </View>
+        {comment && colors ? (
+          <ImageCommentDock
+            label={comment.label}
+            colors={colors}
+            send={comment.send}
+            onDone={comment.onDone}
+            disabledReason={comment.disabledReason}
+            testID={comment.testID ?? "lightbox-image-composer"}
+          />
+        ) : null}
       </View>
     </Modal>
   );

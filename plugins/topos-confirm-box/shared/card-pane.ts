@@ -278,6 +278,14 @@ export function isImageComment(text: string): boolean {
   return text.includes(IMAGE_COMMENT_TAG);
 }
 
+/**
+ * 画像ごとのコメント文。どの画像へのコメントかを投函元へ伝える印と、機械が見分ける固定の目印を付ける。
+ * 画面ごとに書き方がぶれないよう、ここ1か所で作る(2026-11-06)。
+ */
+export function imageCommentText(label: string, text: string): string {
+  return `${IMAGE_COMMENT_TAG}【${label}へのコメント】${text.trim()}`;
+}
+
 /** 画像への直接コメントを上位スレへ送る文に、返事が要らないことを明記する(say コマンドは付けない)。 */
 export function withNoReplyInstruction(text: string): string {
   return (

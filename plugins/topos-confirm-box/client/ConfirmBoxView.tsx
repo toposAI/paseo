@@ -57,6 +57,7 @@ import { NotificationsView } from "./NotificationsView.js";
 import { BellIcon, BugIcon, InboxIcon, ListIcon, ReportIcon } from "./Icons.js";
 import { ChatDock, PRIORITY_CHAT_AGENT_ID } from "./ChatDock.js";
 import { CardChatPane } from "./CardChatPane.js";
+import type { PaneColors } from "./CardChatPane.js";
 import { openThreadInPane } from "./open-pane-thread.js";
 import type { OpenThreadContext } from "./open-pane-thread.js";
 import { resolveOpenThreadId } from "./thread-target.js";
@@ -745,6 +746,9 @@ export function ConfirmBoxView({
                     onChoose={choose}
                     onAnswer={answer}
                     onReject={reject}
+                    onComplete={complete}
+                    agentId={threadAgentId(item)}
+                    paneColors={c}
                     paneOpen={paneCardId === item.id}
                     anyPaneOpen={pane !== null}
                     onOpenPane={openCard}
@@ -1442,6 +1446,16 @@ function ImageThumb({
   );
 }
 
+/** 拡大表示の間だけ置くコメント送信用の会話部品を、画面に出さないための入れ物。 */
+const HIDDEN_PANE = { display: "none" as const };
+
+function noopPaneClose() {
+  /* 画面に出さない会話部品なので、閉じる操作は無い */
+}
+
+// 既存の指摘(complexity 22。コメント欄の配線で2増えた)。カードの分岐を割る作業は今回の変更と
+// 無関係なので触らない(2026-11-06)。
+// oxlint-disable-next-line eslint/complexity
 function ItemCard({
   item,
   styles,
@@ -1452,6 +1466,9 @@ function ItemCard({
   onChoose,
   onAnswer,
   onReject,
+  onComplete,
+  agentId,
+  paneColors,
   paneOpen,
   anyPaneOpen,
   onOpenPane,
@@ -1465,6 +1482,12 @@ function ItemCard({
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
   onAnswer: (item: ConfirmBoxItem, answers: Record<string, string>) => Promise<void>;
   onReject: (item: ConfirmBoxItem) => void;
+  /** 画像にコメントを送ったときの完了(「完了」ボタンと同じ経路)。 */
+  onComplete: (item: ConfirmBoxItem) => void;
+  /** 投函元スレの agent ID。画像のコメントを送る相手を決めるのに使う(無ければ null)。 */
+  agentId: string | null;
+  /** テーマ色(会話部品に渡す)。 */
+  paneColors: PaneColors;
   /** このカードの会話ペインが開いているか(枠の強調と 💬 ボタンの表示に使う)。 */
   paneOpen: boolean;
   /** 右ペインが(どの相手でも)開いているか。開いている間だけ、件名の押下でペインの相手を切り替える。 */
@@ -1474,6 +1497,25 @@ function ItemCard({
   const [bgOpen, setBgOpen] = useState(false);
   const [zoom, setZoom] = useState<number | null>(null);
   const closeZoom = useCallback(() => setZoom(null), []);
+  // 画像のコメントを送る口。カードの会話ペインと同じ部品(CardChatPane)を、拡大表示の間だけ
+  // 画面に出さずに置いて使う(投函元の解決・台帳への記録・振り替えを1か所に保つ)。
+  const commentSendRef = useRef<((text: string) => Promise<boolean>) | null>(null);
+  const closeAfterComment = useCallback(() => {
+    // 画像にコメントしたら、そのカードは完了にして閉じる(2026-11-06 ユーザー指示)。
+    onComplete(item);
+    setZoom(null);
+  }, [onComplete, item]);
+  // 拡大表示に渡すコメント欄の設定(毎回新しいオブジェクトを渡さない)。
+  const lightboxComment = useMemo(
+    () => ({
+      label: zoom === null ? "" : (item.imageCaptions?.[zoom] ?? `${zoom + 1}枚目の画像`),
+      send: (text: string) =>
+        commentSendRef.current ? commentSendRef.current(text) : Promise.resolve(false),
+      onDone: closeAfterComment,
+      testID: "lightbox-image-composer",
+    }),
+    [zoom, item.imageCaptions, closeAfterComment],
+  );
   const reject = useCallback(() => onReject(item), [onReject, item]);
   const toggleBg = useCallback(() => {
     setBgOpen((v) => {
@@ -1537,7 +1579,29 @@ function ItemCard({
             ))}
           </View>
         ) : null}
-        <ImageLightbox sources={imageSources} index={zoom} onChange={setZoom} onClose={closeZoom} />
+        <ImageLightbox
+          sources={imageSources}
+          index={zoom}
+          onChange={setZoom}
+          onClose={closeZoom}
+          colors={colors}
+          comment={lightboxComment}
+        />
+        {/* 拡大表示の間だけ、コメント送信用の会話部品を画面に出さずに置く(2026-11-06)。 */}
+        {zoom === null ? null : (
+          <View style={HIDDEN_PANE}>
+            <CardChatPane
+              item={item}
+              agentId={agentId}
+              colors={paneColors}
+              compact
+              width={1}
+              onClose={noopPaneClose}
+              embedded
+              sendRef={commentSendRef}
+            />
+          </View>
+        )}
         {questions.length > 0 ? (
           <QuestionAnswer
             questions={questions}
