@@ -17,6 +17,10 @@ export interface RegistryEntry {
   parentTitle: string | null;
   /** 登録簿で `archived: true`(閉じて宛先にできない)。 */
   archived: boolean;
+  /** 登録簿の状態(`待機`/`完了` など)。題名で司令塔を引くとき、旧スレ(完了)を外すのに使う。 */
+  status?: string;
+  /** 登録簿の更新時刻(ms)。同名が複数あるときの新しい方の判定に使う。 */
+  updatedAt?: number;
 }
 
 /** 起こしデーモンの領域名 → 司令塔の agent id(`domains/<領域>/coordinator_id`)。 */
@@ -51,13 +55,41 @@ export const DOMAIN_LABEL: Readonly<Record<string, string>> = {
 /** 登録簿に無い投函元の領域推定(ノートの id・題名・legacy key に含まれる語)。判定できなければ null。 */
 const DOMAIN_HINTS: readonly (readonly [string, RegExp])[] = [
   ["f80", /f-?80/i],
-  ["topos_dev", /topos[-_ ]?dev/i],
+  ["topos_dev", /topos[-_ ]?dev|topos|家族版|家族報告|家族から/i],
   ["paseo_ui", /paseo|確認箱|サイドバー/i],
 ];
 
 export function inferDomain(hint: string): string | null {
   for (const [domain, re] of DOMAIN_HINTS) if (re.test(hint)) return domain;
   return null;
+}
+
+/**
+ * Topos製品(家族報告・家族版/個人版Topos)のカードか。
+ * 2026-11-06 ユーザー再指摘「Toposに関することは確認箱から総司令塔じゃなくて、Topos司令塔と
+ * 話せるようにして」。投函元が登録簿に無い家族報告のカードは、これまで宛先なし=総司令塔へ
+ * 振り替えられていた。題名・key がTopos製品を指すときだけ、登録簿の題名からTopos司令塔を引く。
+ */
+const TOPOS_HINT_RE = /topos|家族版|家族報告|家族から/i;
+const TOPOS_COMMANDER_TITLE = "Topos司令塔";
+
+export function isToposHint(hint: string): boolean {
+  return TOPOS_HINT_RE.test(hint);
+}
+
+/**
+ * 登録簿から題名一致の**生きている**司令塔を引く(ハードコードしない=交代しても追随する)。
+ * `archived` と状態「完了」の行は使わない。同名が複数なら更新時刻が新しい方。
+ */
+function commanderByTitle(registry: readonly RegistryEntry[], title: string): string | null {
+  let best: RegistryEntry | null = null;
+  for (const r of registry) {
+    if (r.title.trim() !== title) continue;
+    if (r.archived) continue;
+    if (["完了", "done", "closed"].includes((r.status ?? "").trim())) continue;
+    if (!best || (r.updatedAt ?? 0) >= (best.updatedAt ?? 0)) best = r;
+  }
+  return best?.agentId ?? null;
 }
 
 function matchId(candidate: string, id: string): boolean {
@@ -98,6 +130,12 @@ export function resolveCardDestination(
 
   const generalId = domains.general ?? null;
   const domainPick = (domain: string | null): string | null => {
+    // topos_dev は状態ファイルのIDが旧司令塔(退役)のまま残ることがある。題名で引き直せるなら
+    // そちらを優先する(2026-11-06 実測: domains/topos_dev/coordinator_id は旧IDのまま)。
+    if (domain === "topos_dev") {
+      const byName = commanderByTitle(registry, TOPOS_COMMANDER_TITLE);
+      if (byName) return byName;
+    }
     const id = domain ? (domains[domain] ?? null) : null;
     return id && alive(id) ? id : null;
   };
@@ -137,7 +175,20 @@ export function resolveCardDestination(
     if (self) {
       return { id: self, label: labelFor(self, null, domains), reason: "self", registered: false };
     }
-    // 投函元が分からない/登録簿に居ない: 別のスレへ流さない(fail-closed)。
+    // 投函元が分からない/登録簿に居ない。Topos製品のカード(家族報告など)だけは、登録簿の
+    // 題名からTopos司令塔を引いて届ける(2026-11-06 ユーザー再指摘)。それ以外は従来どおり
+    // 別のスレへ流さない(fail-closed)。
+    if (isToposHint(hint)) {
+      const topos = commanderByTitle(registry, TOPOS_COMMANDER_TITLE);
+      if (topos) {
+        return {
+          id: topos,
+          label: labelFor(topos, TOPOS_COMMANDER_TITLE, domains),
+          reason: "domain",
+          registered: false,
+        };
+      }
+    }
     return {
       id: null,
       label: threads.length ? "投函元不明(登録簿にありません)" : "投函元不明",

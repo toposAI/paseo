@@ -151,6 +151,8 @@ export function readRegistryEntries(dir: string): RegistryEntry[] {
           parentAgentId: str(o.parent_agent_id) || null,
           parentTitle: str(o.parent_title) || null,
           archived: o.archived === true,
+          status: str(o.status),
+          updatedAt: Number(o.updated_at) || 0,
         },
       ];
     });

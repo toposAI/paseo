@@ -63,3 +63,53 @@ test("inferDomain", () => {
   assert.equal(inferDomain("f80-foo"), "f80");
   assert.equal(inferDomain("zzz"), null);
 });
+
+// 2026-11-06 ユーザー再指摘: Topos製品のカードは総司令塔ではなくTopos司令塔と話す
+const TOPOS = "48d65c40-7aaf-403d-a33e-cc4edcc4b6ac";
+const OLD_TOPOS = "5a226b97-90e8-40f3-831b-72c251deb3d7";
+
+const toposRegistry: RegistryEntry[] = [
+  entry({ agentId: OLD_TOPOS, title: "Topos司令塔", status: "完了", updatedAt: 1 }),
+  entry({ agentId: TOPOS, title: "Topos司令塔", status: "待機", updatedAt: 2 }),
+  entry({
+    agentId: "ca3e33e5-5cda-4e30-b2d3-dcd92c01c2c1",
+    title: "Topos司令塔へのカード転送(140c)",
+  }),
+];
+
+test("投函元不明でも家族報告のカードはTopos司令塔へ(総司令塔へ流さない)", () => {
+  const c = ctx(toposRegistry);
+  const d = resolveCardDestination(
+    ["deadbeef"],
+    "j-20261106-fb-x 家族報告(要望): 会話をまとめたい",
+    c,
+  );
+  assert.equal(d.id, TOPOS); // 状態「完了」の旧司令塔は使わない
+  assert.equal(d.reason, "domain");
+  assert.equal(d.registered, false);
+});
+
+test("Topos司令塔を登録簿から引けないときだけ従来どおり宛先なし", () => {
+  const c = ctx([]);
+  const d = resolveCardDestination([], "j-fb-x 家族報告", c);
+  assert.equal(d.id, null);
+  assert.equal(d.reason, "unresolved");
+});
+
+test("Topos以外の投函元不明カードは従来どおり宛先なし", () => {
+  const c = ctx(toposRegistry);
+  for (const t of [["deadbeef"], []]) {
+    const d = resolveCardDestination(t, "j-20261025-f80-x", c);
+    assert.equal(d.id, null);
+    assert.equal(d.reason, "unresolved");
+  }
+});
+
+test("投函元がアーカイブ済みの家族報告もTopos司令塔へ", () => {
+  const c = ctx([
+    ...toposRegistry,
+    entry({ agentId: CHILD, archived: true, title: "家族報告の子スレ" }),
+  ]);
+  const d = resolveCardDestination(["c1111111"], "j-fb-x 家族版Topos", c);
+  assert.equal(d.id, TOPOS);
+});
