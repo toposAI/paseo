@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  IMAGE_COMMENT_TAG,
   isHubTarget,
   isImageComment,
   pendingLabel,
@@ -113,13 +114,33 @@ test("画像への直接コメント: 返事待ちに出ず、転送文には返
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-pane-"));
   const t0 = Date.now();
   // ペインは「【直してほしい】」を前置きしてから台帳へ書く(実際の送信と同じ形)。
-  const text = "【直してほしい】【完成版へのコメント】ここを直して";
+  const text = `【直してほしい】${IMAGE_COMMENT_TAG}【完成版へのコメント】ここを直して`;
   assert.equal(isImageComment(text), true);
   assert.equal(isImageComment("【直してほしい】普通の指摘"), false);
+  // 画像名が長い・記号を含む場合でも、固定の目印で見分けるので取りこぼさない。
+  assert.equal(isImageComment(`${IMAGE_COMMENT_TAG}【${"あ".repeat(100)}へのコメント】x`), true);
   askFromPane(dir, { id: "i1" }, text, "a", t0);
   // 催促の元・返事待ちの目印にしない(3分超でも overdue にならない)。
   assert.equal(panePending(dir, { id: "i1" }, t0 + 200_000).length, 0);
   const out = withNoReplyInstruction("本文");
   assert.match(out, /^本文\n\n【返事不要】/);
   assert.doesNotMatch(out, /confirm_box_reply\.py say/);
+});
+
+test("画像への直接コメント: 質問を取り消してもコメント自体はカードに残る(2026-11-06)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-pane-"));
+  const t0 = Date.now();
+  const text = `${IMAGE_COMMENT_TAG}【完成版へのコメント】ここを直して`;
+  // 送信側(CardChatPane)は、送った後に「返事待ち」を取り消す。取り消しが効いても
+  // コメント本文はカードの履歴に残る(投函元が直しを進められるように)。
+  const asked = askFromPane(dir, { id: "i1" }, text, "a", t0);
+  assert.equal(asked.ok, true);
+  if (!asked.replyId) throw new Error("replyId が無い");
+  cancelFromPane(dir, { id: "i1" }, asked.replyId);
+  assert.equal(panePending(dir, { id: "i1" }, t0 + 200_000).length, 0);
+  const chat = readCardChat(dir, { id: "i1" });
+  assert.equal(
+    chat.some((m) => m.text.includes(IMAGE_COMMENT_TAG)),
+    true,
+  );
 });

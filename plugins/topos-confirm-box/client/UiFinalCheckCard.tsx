@@ -11,6 +11,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Image, Modal, Pressable, Text, View } from "react-native";
 import type { ConfirmBoxItem } from "../shared/contract.js";
+import { IMAGE_COMMENT_TAG } from "../shared/card-pane.js";
 import { shotLabel, UFC_OK_ID } from "../shared/ui-final-check.js";
 import { ufcStatus } from "../shared/ufc-flow.js";
 import type { UfcCounts, UfcFlow, UfcStatus } from "../shared/ufc-flow.js";
@@ -37,9 +38,13 @@ function noop() {
   /* 埋め込みのペインには閉じる操作が無い */
 }
 
-/** 画像ごとのコメントに付ける印(どの画像へのコメントかを投函元に伝える)。 */
+/**
+ * 画像ごとのコメントに付ける印(どの画像へのコメントかを投函元に伝える)。
+ * 先頭の固定の目印(`IMAGE_COMMENT_TAG`)で、画像名の長さや記号に関係なく
+ * 「返事不要の画像コメント」と機械が見分けられる(2026-11-06 出口レビュー指摘1)。
+ */
 export function imageCommentText(label: string, text: string): string {
-  return `【${label}へのコメント】${text.trim()}`;
+  return `${IMAGE_COMMENT_TAG}【${label}へのコメント】${text.trim()}`;
 }
 
 /** カードに出す画像の1行キャプション。投函側の imageCaptions を優先し、無ければ従来の当て推量。 */
@@ -89,12 +94,21 @@ function ImageViewer({
   }, [onDone, onClose]);
   const [text, setText] = useState("");
   const [notice, setNotice] = useState("");
+  // 送信中は押し直しを黙って無視する(2026-11-06 出口レビュー指摘4)。送信側も送信中は false を
+  // 返すため、素通しすると二度押しで「送れませんでした」と誤って出てしまう。
+  const busyRef = useRef(false);
   const appendDictated = useCallback((said: string) => setText((cur) => cur + said), []);
   const tools = usePaneInputTools(appendDictated);
   const submit = useCallback(async () => {
     const t = text.trim();
-    if (!t || !send) return;
-    const ok = await send(imageCommentText(label, t));
+    if (!t || !send || busyRef.current) return;
+    busyRef.current = true;
+    let ok = false;
+    try {
+      ok = await send(imageCommentText(label, t));
+    } finally {
+      busyRef.current = false;
+    }
     if (ok) {
       setText("");
       setNotice("");

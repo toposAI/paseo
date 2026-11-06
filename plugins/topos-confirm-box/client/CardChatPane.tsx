@@ -836,6 +836,9 @@ export function CardChatPane({
                 replyId: asked.replyId,
                 cardId: item.id,
               });
+        } else if (imageComment) {
+          // スレッド連携の無い経路でも「返事は要らない」を明記する(2026-11-06 出口レビュー指摘3)。
+          outgoing = withNoReplyInstruction(outgoing);
         }
         const opts = sentImages.length
           ? {
