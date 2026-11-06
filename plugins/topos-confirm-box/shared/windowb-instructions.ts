@@ -41,6 +41,32 @@ export function summarize(data: WindowBInstructionsOutput | null): string {
   return parts.join(" / ");
 }
 
+/**
+ * PC幅のパネルの見出しに出す追加の件数。PC幅は会話の上の帯(`bandText`)が「指示 N件・赤N」を
+ * 出しているので、同じ件数をパネルの見出しでも繰り返さない(2026-11-07 指摘「同じ146件が3か所」)。
+ * 帯に無い「未登録」だけを返し、無ければ null。
+ */
+export function summarizeExtras(data: WindowBInstructionsOutput | null): string | null {
+  if (!data || data.warns <= 0) return null;
+  return `未登録 ${data.warns}`;
+}
+
+/** 見出しに出す件数。PC幅は帯と重ならないよう「未登録」だけ、狭い幅は件数と赤を出す。 */
+export function headCountText(
+  data: WindowBInstructionsOutput | null,
+  wide: boolean,
+): string | null {
+  return wide ? summarizeExtras(data) : summarize(data);
+}
+
+/** 見せ方に合わせた一覧の行(取得前は空)。 */
+export function visibleRows(
+  data: WindowBInstructionsOutput | null,
+  mode: ListMode,
+): WindowBInstruction[] {
+  return data ? filterByMode(rowOrder(data.items), mode) : [];
+}
+
 /** 一覧の並び。赤 → 判断待ち → 未登録 → その他 → 完了。同じ群の中は Python の並びのまま(安定ソート)。 */
 export function rowOrder<T extends { alert: string | null; warn: string | null; kind: string }>(
   rows: readonly T[],
@@ -75,17 +101,6 @@ export function truncationNote(data: WindowBInstructionsOutput): string | null {
 function clock(ms: number): string {
   const d = new Date(ms);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-/**
- * 「いつ時点の一覧か」。台帳の更新が止まると古い「作業中」がそのまま正常に見えるので、
- * 読み出した時刻と台帳の更新時刻を両方出す(台帳の更新時刻はミリ秒・0 は「まだ無い」)。
- */
-export function freshnessText(data: WindowBInstructionsOutput): string {
-  const at = `読み出し ${clock(data.generatedAt)}`;
-  return data.ledgerUpdatedAt > 0
-    ? `${at} / 台帳 ${clock(data.ledgerUpdatedAt)}`
-    : `${at} / 台帳の更新時刻なし`;
 }
 
 /**
@@ -183,6 +198,42 @@ export function rowTitle(item: { title: string; text: string }): string {
       .find((l) => l.trim() !== "")
       ?.trim() ?? "";
   return plainTitle(firstLine);
+}
+
+/** 語の区切りを出すための分割器(無い環境では何もしない)。 */
+interface WordSegmenter {
+  segment(input: string): Iterable<{ segment: string; isWordLike?: boolean }>;
+}
+
+const WORD_SEGMENTER: WordSegmenter | null =
+  typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new (
+        Intl as unknown as {
+          Segmenter: new (locale: string, opts: { granularity: string }) => WordSegmenter;
+        }
+      ).Segmenter("ja", { granularity: "word" })
+    : null;
+
+/** 語中の字を繋ぐ見えない字(WORD JOINER)。ここでは折れなくなる。 */
+const WORD_JOINER = "\u2060";
+
+/** 語として繋ぐ対象(かな・漢字)。英数字の語は繋がない(URL などが折れなくなるのを避ける)。 */
+const CJK_WORD = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uff66-\uff9f]/;
+
+/**
+ * 題の折り返し位置を語の区切りへ寄せる。日本語は語の間に空白が無いため、既定では
+ * 「完了ボタ／ン」のように語の途中で割れる(2026-11-07 指摘)。CSS の `word-break: auto-phrase` は
+ * この題では効かなかったので、語の中の字を WORD JOINER で繋いで語中に折り目を作らせない。
+ */
+export function joinTitleWords(text: string): string {
+  if (!WORD_SEGMENTER) return text;
+  let out = "";
+  for (const part of WORD_SEGMENTER.segment(text)) {
+    const s = part.segment;
+    out +=
+      part.isWordLike && s.length > 1 && CJK_WORD.test(s) ? Array.from(s).join(WORD_JOINER) : s;
+  }
+  return out;
 }
 
 /** 先頭に付いた台帳の整理番号(半角英数の4桁前後。例 `140c完了の確認`)。 */
