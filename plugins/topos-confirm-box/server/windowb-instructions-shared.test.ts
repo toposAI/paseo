@@ -12,6 +12,7 @@ import {
   emptyText,
   filterByMode,
   freshnessNote,
+  joinTitleWords,
   keepLastOnFailure,
   noticeLines,
   paneLocation,
@@ -207,6 +208,16 @@ test("visibleRoutes: 閉じている間は3項目まで、開くと全部。古�
   assert.equal(visibleRoutes(rs, true).shown.length, 5);
   assert.equal(visibleRoutes(rs.slice(0, 3), false).hidden, 0);
   assert.deepEqual(visibleRoutes(undefined, false), { shown: [], hidden: 0 });
+});
+
+test("題は語の途中で折れないよう語の中の字を繋ぐ", () => {
+  const raw = "完了ボタン/却下のコメント必須をやめる";
+  const joined = joinTitleWords(raw);
+  assert.equal(joined.split("\u2060").join(""), raw);
+  assert.ok(joined.includes("ボ\u2060タ\u2060ン"), joined);
+  assert.ok(!joined.includes("\u2060/") && !joined.includes("/\u2060"), joined);
+  // 英数字の語は繋がない(URL などが折れなくなるのを避ける)
+  assert.equal(joinTitleWords("https://example.com/a"), "https://example.com/a");
 });
 
 test("rowTitle: 要約があればそれ、無ければ全文の1行目", () => {

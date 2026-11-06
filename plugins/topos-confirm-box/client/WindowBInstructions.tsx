@@ -33,6 +33,7 @@ import {
   keepLastOnFailure,
   NOTICE_MAX_LINES,
   noticeLines,
+  joinTitleWords,
   paneLocation,
   plainAssignee,
   routeText,
@@ -172,9 +173,9 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
           color: c.foreground,
           fontSize: 14,
           // text-wrap: balance は行の長さをならすが、日本語は語の間に空白が無いので「ボタ/ン」の
-          // ように語の途中で割れる(2026-11-07 指摘)。Chrome の auto-phrase は語句の区切りでだけ折る。
+          // ように語の途中で割れる(2026-11-07 指摘)。語中で折らない指定は CSS では効かなかったので、
+          // 題の字を語ごとに繋いで渡す(shared の joinTitleWords)。
           textWrap: "balance" as const,
-          wordBreak: "auto-phrase" as const,
           lineBreak: "strict" as const,
         },
         default: { color: c.foreground, fontSize: 14 },
@@ -206,7 +207,7 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
           {item.alert ? ` ・ ${ALERT_SHORT[item.alert] ?? "要確認"}` : ""}
         </Text>
       </View>
-      <Text style={s.title}>{rowTitle(item)}</Text>
+      <Text style={s.title}>{joinTitleWords(rowTitle(item))}</Text>
       {open ? (
         <Text style={s.meta}>
           {plainAssignee(item.assigneeText)}

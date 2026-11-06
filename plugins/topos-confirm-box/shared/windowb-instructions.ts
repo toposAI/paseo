@@ -212,6 +212,42 @@ export function rowTitle(item: { title: string; text: string }): string {
   return plainTitle(firstLine);
 }
 
+/** 語の区切りを出すための分割器(無い環境では何もしない)。 */
+interface WordSegmenter {
+  segment(input: string): Iterable<{ segment: string; isWordLike?: boolean }>;
+}
+
+const WORD_SEGMENTER: WordSegmenter | null =
+  typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new (
+        Intl as unknown as {
+          Segmenter: new (locale: string, opts: { granularity: string }) => WordSegmenter;
+        }
+      ).Segmenter("ja", { granularity: "word" })
+    : null;
+
+/** 語中の字を繋ぐ見えない字(WORD JOINER)。ここでは折れなくなる。 */
+const WORD_JOINER = "\u2060";
+
+/** 語として繋ぐ対象(かな・漢字)。英数字の語は繋がない(URL などが折れなくなるのを避ける)。 */
+const CJK_WORD = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uff66-\uff9f]/;
+
+/**
+ * 題の折り返し位置を語の区切りへ寄せる。日本語は語の間に空白が無いため、既定では
+ * 「完了ボタ／ン」のように語の途中で割れる(2026-11-07 指摘)。CSS の `word-break: auto-phrase` は
+ * この題では効かなかったので、語の中の字を WORD JOINER で繋いで語中に折り目を作らせない。
+ */
+export function joinTitleWords(text: string): string {
+  if (!WORD_SEGMENTER) return text;
+  let out = "";
+  for (const part of WORD_SEGMENTER.segment(text)) {
+    const s = part.segment;
+    out +=
+      part.isWordLike && s.length > 1 && CJK_WORD.test(s) ? Array.from(s).join(WORD_JOINER) : s;
+  }
+  return out;
+}
+
 /** 先頭に付いた台帳の整理番号(半角英数の4桁前後。例 `140c完了の確認`)。 */
 const LEADING_CARD_ID = /^[0-9a-f]{3,8}(?=[^\s0-9a-f])/i;
 
