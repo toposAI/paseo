@@ -156,9 +156,19 @@ function routeWithoutPoster(
     const topos = toposDestination(registry, domains);
     if (topos) return topos;
   }
+  // 投函元がたどれない → 総司令塔が引き取る(窓口など別のスレへは流さない。2026-11-06 ユーザー逐語
+  // 「投稿元たどれないなら、総司令塔が引き取るってなってるでしょ」)。
+  if (generalId) {
+    return {
+      id: generalId,
+      label: `投函元不明 → ${labelFor(generalId, null, domains)}`,
+      reason: "general",
+      registered: false,
+    };
+  }
   return {
     id: null,
-    label: threads.length ? "投函元不明(登録簿にありません)" : "投函元不明",
+    label: "投函元不明(引き取る総司令塔も見つかりません)",
     reason: "unresolved",
     registered: false,
   };
@@ -175,30 +185,12 @@ export function resolveCardDestination(
 ): CardDestination {
   const { registry, domainCoordinators: domains } = ctx;
   const poster = threads.map((t) => findRegistry(registry, t)).find((r) => r !== null) ?? null;
-  const alive = (id: string): boolean => {
-    const r = registry.find((e) => e.agentId === id);
-    return !r || !r.archived; // 登録簿に居ない親(ユーザー直下スレ・司令塔)は、閉じているか分からないので生きている側に倒す(受容した残差)
-  };
-  const title = (id: string, fallback: string | null): string | null =>
-    registry.find((e) => e.agentId === id)?.title ?? fallback;
-
   const generalId = domains.general ?? null;
-  const domainPick = (domain: string | null): string | null => {
-    // topos_dev は状態ファイルのIDが旧司令塔(退役)のまま残ることがある。題名で引き直せるなら
-    // そちらを優先する(2026-11-06 実測: domains/topos_dev/coordinator_id は旧IDのまま)。
-    if (domain === "topos_dev") {
-      const byName = commanderByTitle(registry, TOPOS_COMMANDER_TITLE);
-      if (byName) return byName;
-    }
-    const id = domain ? (domains[domain] ?? null) : null;
-    return id && alive(id) ? id : null;
-  };
-
   const toposRedirect = (): CardDestination | null => toposDestination(registry, domains);
 
   if (poster) {
     // 2026-11-06: 答えるのは投函元本人(子司令塔)。登録簿の親(窓口など)へは流さない。
-    // 閉じているだけのスレは送れば再開する。アーカイブ済みのときだけ次点(親→領域→総司令塔)へ。
+    // 閉じているだけのスレは送れば再開する。アーカイブ済みのときは総司令塔が引き取る。
     if (!poster.archived) {
       // 投函元が総司令塔でも、Topos製品のカードは Topos司令塔と話す(2026-11-06 ユーザー逐語
       // 「総司令塔じゃなくて、Topos司令塔と話せるように」)。投函元が子スレ・子司令塔のときは
@@ -214,21 +206,11 @@ export function resolveCardDestination(
         registered: true,
       };
     }
-    const upper = poster.parentAgentId;
-    if (upper && alive(upper)) {
-      return {
-        id: upper,
-        label: labelFor(upper, title(upper, poster.parentTitle), domains),
-        reason: "parent",
-        registered: true,
-      };
-    }
-    // 上(または本人)が閉じている → 領域司令塔 → 総司令塔
-    const topDomain = upper ? domainOfCoordinator(domains, upper) : null;
-    const domain = topDomain ?? inferDomain(hint);
-    const d = domainPick(domain);
-    if (d) {
-      return { id: d, label: labelFor(d, null, domains), reason: "domain", registered: true };
+    // 投函元がアーカイブ済み: 登録簿の親(窓口など)・領域司令塔へは流さず、Topos製品なら Topos司令塔、
+    // それ以外は総司令塔が引き取る。
+    if (isToposHint(hint)) {
+      const topos = toposRedirect();
+      if (topos) return topos;
     }
   } else {
     return routeWithoutPoster(threads, hint, registry, domains, generalId);

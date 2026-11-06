@@ -35,21 +35,21 @@ test("親が無ければ投函元本人", () => {
   assert.equal(d.reason, "self");
 });
 
-test("投函元がアーカイブ済みなら親→領域司令塔→総司令塔", () => {
+test("投函元がアーカイブ済みなら親・領域司令塔へは流さず総司令塔が引き取る", () => {
   const c = ctx([
     entry({ agentId: PARENT_THREAD, archived: true }),
     entry({ agentId: CHILD, parentAgentId: PARENT_THREAD, archived: true }),
   ]);
-  assert.equal(resolveCardDestination(["c1111111"], "j-f80-foo", c).id, F80);
+  assert.equal(resolveCardDestination(["c1111111"], "j-f80-foo", c).id, GENERAL);
   assert.equal(resolveCardDestination(["c1111111"], "j-other", c).id, GENERAL);
 });
 
-test("未登録の投函元・投函元なしは投函元不明(別のスレへ流さない)", () => {
+test("未登録の投函元・投函元なしは総司令塔が引き取る(別のスレへ流さない)", () => {
   const c = ctx([]);
   for (const t of [["deadbeef"], []]) {
     const d = resolveCardDestination(t, "j-20261025-f80-x", c);
-    assert.equal(d.id, null);
-    assert.equal(d.reason, "unresolved");
+    assert.equal(d.id, GENERAL);
+    assert.equal(d.reason, "general");
     assert.match(d.label, /^投函元不明/);
   }
 });
@@ -89,19 +89,19 @@ test("投函元不明でも家族報告のカードはTopos司令塔へ(総司�
   assert.equal(d.registered, false);
 });
 
-test("Topos司令塔を登録簿から引けないときだけ従来どおり宛先なし", () => {
+test("Topos司令塔を登録簿から引けないときは総司令塔が引き取る", () => {
   const c = ctx([]);
   const d = resolveCardDestination([], "j-fb-x 家族報告", c);
-  assert.equal(d.id, null);
-  assert.equal(d.reason, "unresolved");
+  assert.equal(d.id, GENERAL);
+  assert.equal(d.reason, "general");
 });
 
-test("Topos以外の投函元不明カードは従来どおり宛先なし", () => {
+test("Topos以外の投函元不明カードは総司令塔が引き取る(窓口・領域司令塔へは流さない)", () => {
   const c = ctx(toposRegistry);
   for (const t of [["deadbeef"], []]) {
     const d = resolveCardDestination(t, "j-20261025-f80-x", c);
-    assert.equal(d.id, null);
-    assert.equal(d.reason, "unresolved");
+    assert.equal(d.id, GENERAL);
+    assert.match(d.label, /^投函元不明/);
   }
 });
 
@@ -156,7 +156,7 @@ test("「ToposAI」はTopos製品の合図にしない(部分一致の誤爆を�
   const c = ctx(toposRegistry);
   for (const hint of ["j-x ToposAIのデーモン", "j-x topos_ai の設定", "j-x TOPOS-AI"]) {
     const d = resolveCardDestination(["deadbeef"], hint, c);
-    assert.equal(d.id, null, hint);
-    assert.equal(d.reason, "unresolved", hint);
+    assert.equal(d.id, GENERAL, hint);
+    assert.equal(d.reason, "general", hint);
   }
 });

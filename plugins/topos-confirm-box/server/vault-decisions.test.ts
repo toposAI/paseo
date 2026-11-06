@@ -562,9 +562,9 @@ test("スレを開く宛先: threads も thread_id も無い旧ノートは thre
   assert.equal(parsed.threadId, null);
 });
 
-test("チャット宛先: threads が無いノートは投函元不明(送信先なし)", () => {
+test("チャット宛先: threads が無いノートは総司令塔が引き取る(投函元不明と明示)", () => {
   const parsed = parseDecisionNote(NOTE("j-t2", "open"), 1, ROUTING) as ConfirmBoxItem;
-  assert.equal(parsed.threadRef, null);
+  assert.equal(parsed.threadRef?.id, ROUTING.domainCoordinators.general);
   assert.match(parsed.answerLabel ?? "", /^投函元不明/);
 });
 
