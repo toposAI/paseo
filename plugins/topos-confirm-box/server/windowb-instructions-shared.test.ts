@@ -11,6 +11,7 @@ import {
   doneButtonText,
   emptyText,
   filterByMode,
+  headCountText,
   joinTitleWords,
   keepLastOnFailure,
   noticeLines,
@@ -81,6 +82,23 @@ test("上限で切ったときは何件出しているかを言う(切ったと�
     truncationNote({ ...out(60), items: Array.from({ length: 40 }, () => ({})) as never }),
     "全60件中 上位40件を表示",
   );
+});
+
+test("狭い幅で上限まで出しているときは、見出しで件数を繰り返さない(全N件中…と二重になる)", () => {
+  const cut = { ...out(154), items: Array.from({ length: 100 }, () => ({})) as never };
+  assert.equal(headCountText(cut, false), null);
+  assert.equal(headCountText(cut, true), null);
+  // 切っていなければ今までどおり件数を出す。
+  const whole = (n: number) => ({
+    ...out(n),
+    items: Array.from({ length: n }, () => ({})) as never,
+  });
+  assert.equal(headCountText(whole(37), false), "37件");
+  assert.equal(
+    headCountText({ ...whole(37), alerts: 2, warns: 1 }, false),
+    "37件 / 赤 2 / 未登録 1",
+  );
+  assert.equal(headCountText(null, false), "読み込めていません");
 });
 
 test("PC幅の見出しは帯と重ならないよう未登録だけを出す", () => {

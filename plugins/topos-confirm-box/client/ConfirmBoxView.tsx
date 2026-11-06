@@ -284,7 +284,14 @@ export function ConfirmBoxView({
         fontWeight: "600" as const,
       },
       // サブ操作(背景・💬・元スレ)は小さめ。最下行は必ず1行に収める。
-      footBtn: { paddingVertical: 4, paddingHorizontal: 4 },
+      // ただし完了・却下は押す操作なので、指で押せる高さを確保する(2026-11-07 指摘「リンクが小さい」)。
+      // 指で押せる高さを確保する(実測 34px では小さい。2026-11-07 指摘)。行の高さは 40px までに抑える。
+      footBtn: {
+        paddingVertical: 8,
+        paddingHorizontal: 6,
+        minHeight: 40,
+        justifyContent: "center" as const,
+      },
       footBtnOff: { paddingVertical: 4, paddingHorizontal: 4, opacity: 0.45 },
       created: {
         color: c.foregroundMuted,
@@ -292,7 +299,7 @@ export function ConfirmBoxView({
         marginLeft: "auto" as const,
         flexShrink: 0,
       },
-      footText: { color: c.accent, fontSize: 12 },
+      footText: { color: c.accent, fontSize: 13 },
       footRow: {
         flexDirection: "row" as const,
         flexWrap: "nowrap" as const,

@@ -74,7 +74,8 @@ export function ImageLightbox({
 
   const st = useMemo(
     () => ({
-      wrap: { flex: 1, backgroundColor: "rgba(0,0,0,0.95)" },
+      // 背景は透かさない(2026-11-07 指摘「全画面の背景が透けて後ろの一覧が読める」)。
+      wrap: { flex: 1, backgroundColor: "#000" },
       bar: {
         flexDirection: "row" as const,
         alignItems: "center" as const,
@@ -85,6 +86,11 @@ export function ImageLightbox({
       },
       title: { color: "#fff", fontSize: 14 },
       close: { color: "#fff", fontSize: 24, paddingHorizontal: 12, paddingVertical: 4 },
+      // マウスで押した後に残る緑のフォーカス枠を消す(Web だけ)。キーボードは Esc で閉じられるので操作は損なわない。
+      press: Platform.select({
+        web: { outlineWidth: 0, borderRadius: 6 },
+        default: { borderRadius: 6 },
+      }),
       body: {
         flex: 1,
         flexDirection: "row" as const,
@@ -103,14 +109,25 @@ export function ImageLightbox({
     <Modal visible={current !== null} transparent animationType="fade" onRequestClose={onClose}>
       <View style={st.wrap}>
         <View style={st.bar}>
-          <Text style={st.title}>{index === null ? "" : `${index + 1} / ${count}`}</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="閉じる" onPress={onClose}>
+          {/* カード側の「(n/m枚目)」と同じ書き方に揃える(2026-11-07 指摘「1 / 1 と (1/2枚目) が別物」)。 */}
+          <Text style={st.title}>{index === null ? "" : `(${index + 1}/${count}枚目)`}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="閉じる"
+            style={st.press}
+            onPress={onClose}
+          >
             <Text style={st.close}>✕</Text>
           </Pressable>
         </View>
         <View style={st.body}>
           {count > 1 ? (
-            <Pressable accessibilityRole="button" accessibilityLabel="前の画像" onPress={prev}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="前の画像"
+              style={st.press}
+              onPress={prev}
+            >
               <Text style={st.nav}>‹</Text>
             </Pressable>
           ) : null}
@@ -137,7 +154,12 @@ export function ImageLightbox({
             </Pressable>
           )}
           {count > 1 ? (
-            <Pressable accessibilityRole="button" accessibilityLabel="次の画像" onPress={next}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="次の画像"
+              style={st.press}
+              onPress={next}
+            >
               <Text style={st.nav}>›</Text>
             </Pressable>
           ) : null}

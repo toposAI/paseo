@@ -1,0 +1,8 @@
+{
+  "screen": "confirm_box_list",
+  "results": [
+    { "viewport": "pc", "findings": [], "shot": "final/pc_confirm_box_list.png" },
+    { "viewport": "iphone", "findings": [], "shot": "final/iphone_confirm_box_list.png" }
+  ],
+  "pairs": []
+}

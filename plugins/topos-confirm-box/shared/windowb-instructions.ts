@@ -51,12 +51,22 @@ export function summarizeExtras(data: WindowBInstructionsOutput | null): string 
   return `未登録 ${data.warns}`;
 }
 
-/** 見出しに出す件数。PC幅は帯と重ならないよう「未登録」だけ、狭い幅は件数と赤を出す。 */
+/**
+ * 見出しに出す件数。PC幅は帯と重ならないよう「未登録」だけ、狭い幅は件数と赤を出す。
+ * 狭い幅で一覧を上限で切っているときは、下の「全N件中 上位M件を表示」が件数を出すので、
+ * 見出しでは件数を繰り返さない(2026-11-07 指摘「iPhone幅で154件が2回」)。
+ */
 export function headCountText(
   data: WindowBInstructionsOutput | null,
   wide: boolean,
 ): string | null {
-  return wide ? summarizeExtras(data) : summarize(data);
+  if (!data) return summarize(null);
+  if (wide) return summarizeExtras(data);
+  const parts: string[] = [];
+  if (truncationNote(data) === null) parts.push(`${data.total}件`);
+  if (data.alerts > 0) parts.push(`赤 ${data.alerts}`);
+  if (data.warns > 0) parts.push(`未登録 ${data.warns}`);
+  return parts.length > 0 ? parts.join(" / ") : null;
 }
 
 /** 見せ方に合わせた一覧の行(取得前は空)。 */

@@ -139,9 +139,21 @@ function itemStatus(item: TimelineItemLike | undefined): string | undefined {
   return (item as { status?: string } | undefined)?.status;
 }
 
+/**
+ * 確認箱から送った文の先頭には、送信側の目印として「【確認箱カード】題(ID: …)」とカード本文が付く
+ * (`withCardHeader`)。送る文はそのままでよく、画面には本人が打った文だけを出す
+ * (2026-11-07 指摘「会話欄に内部ID・開発者向けの文言が出る」)。
+ */
+const CARD_MESSAGE_HEADER =
+  /^【確認箱カード】[^\n]*\n(?:\[カード本文\][\s\S]*?\n\n)?\[ユーザーの発言\]\n/;
+
+function withoutCardHeader(text: string): string {
+  return text.replace(CARD_MESSAGE_HEADER, "");
+}
+
 function lineFromItem(item: TimelineItemLike | undefined, id: string): ChatLine | null {
   if (!item?.text) return null;
-  if (item.type === "user_message") return { id, role: "user", text: item.text };
+  if (item.type === "user_message") return { id, role: "user", text: withoutCardHeader(item.text) };
   if (item.type === "assistant_message") return { id, role: "assistant", text: item.text };
   return null;
 }

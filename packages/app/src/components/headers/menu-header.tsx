@@ -208,10 +208,12 @@ const styles = StyleSheet.create((theme) => ({
   mobileMenuLineShort: {
     width: MOBILE_MENU_LINE_SHORT_WIDTH,
   },
+  // 件数の札はアイコンの右上へ出す(2026-11-07 指摘「要対応28がメニューアイコンに重なる」)。
+  // アイコンの線の上に重ねると、三本線が読めなくなる。
   countsRow: {
     position: "absolute",
-    right: 1,
-    bottom: 3,
+    right: -4,
+    top: -4,
     flexDirection: "row",
     gap: 2,
   },
