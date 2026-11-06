@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import {
   cardIdFromSearch,
+  deliveryTargets,
   paneTargetFromSearch,
   searchWithCard,
   searchWithPane,
@@ -130,4 +131,45 @@ test("pickDockTarget: 常駐スレが生きていればそれ、閉じていれ�
     pickDockTarget({ fixedId: "f", fixedAlive: false, coordinatorId: null }).agentId,
     null,
   );
+});
+
+// 2026-11-06 ユーザー逐語「投稿元たどれないなら、総司令塔が引き取るってなってるでしょ」
+// 「閉じていれば復元して届ける」: 配送の候補(投函元 → 総司令塔)と、どこにも届かない時の扱い。
+// 「復元」は送信そのもの(`send` がアーカイブを解除する)なので、候補は「送る順番」になる。
+test("配送: 投函元が生きていれば投函元が第一候補", () => {
+  assert.deepEqual(deliveryTargets({ originId: "o", coordinatorId: "c" }), [
+    { id: "o", via: "origin" },
+    { id: "c", via: "coordinator" },
+  ]);
+});
+
+test("配送: 投函元が閉じていても投函元を先に試す(送信が復元を兼ねる)", () => {
+  // 候補の並びは生死に依存しない。`send` が解除して届けるので、届かなければ次の候補へ進む。
+  assert.deepEqual(deliveryTargets({ originId: "o", coordinatorId: null }), [
+    { id: "o", via: "origin" },
+  ]);
+});
+
+test("配送: 復元も送信もできなかった時だけ総司令塔が使われる", () => {
+  const targets = deliveryTargets({ originId: "o", coordinatorId: "c" });
+  // 実際の送信は呼ぶ側のループ。投函元で失敗したら2番目(総司令塔)が残っていること。
+  assert.equal(targets[1]?.id, "c");
+  assert.equal(targets[1]?.via, "coordinator");
+});
+
+test("配送: 投函元が無ければ総司令塔だけ", () => {
+  assert.deepEqual(deliveryTargets({ originId: null, coordinatorId: "c" }), [
+    { id: "c", via: "coordinator" },
+  ]);
+});
+
+test("配送: 投函元と総司令塔が同じなら二重に送らない", () => {
+  assert.deepEqual(deliveryTargets({ originId: "x", coordinatorId: "x" }), [
+    { id: "x", via: "origin" },
+  ]);
+});
+
+test("配送: 投函元も総司令塔も無ければ空(呼ぶ側はカードを閉じない)", () => {
+  assert.deepEqual(deliveryTargets({ originId: null, coordinatorId: null }), []);
+  assert.deepEqual(deliveryTargets({ originId: "  ", coordinatorId: "" }), []);
 });

@@ -159,6 +159,40 @@ export function pickCoordinatorTarget(
   return unknown ? unknown.id : null;
 }
 
+// ---------------------------------------------------------------- 配送の解決順(投函元 → 復元 → 総司令塔)
+
+/** 送る候補の1つ。`via` は「投函元」か「引き取り先(総司令塔)」かの印。 */
+export interface DeliveryTarget {
+  id: string;
+  via: "origin" | "coordinator";
+}
+
+/**
+ * 確認箱のコメントを届ける候補を優先順に並べる(2026-11-06 ユーザー逐語
+ * 「投稿元たどれないなら、総司令塔が引き取るってなってるでしょ」「閉じていれば復元して届ける」)。
+ *
+ * 順番は **投函元 → 総司令塔**。窓口など別のスレへは流さない。配列が空なら**どこにも届かない**
+ * =呼ぶ側はカードを閉じずに理由を出す(「届いていないのに完了」を作らない)。
+ *
+ * 「閉じていれば復元して届ける」を専用の復元APIでやらない理由: `agents.ref(id).send()` は
+ * アーカイブ済みのスレでも解除して届ける(`client/agent-read.ts` の実測表)。`PaseoApi` に
+ * 解除だけを行うAPIは無いので、「アーカイブ済みでも投函元へ送ってみる」が復元そのものになる。
+ * 送れなかった時だけ次の候補(総司令塔)へ進む。
+ */
+export function deliveryTargets(opts: {
+  /** 投函元スレの agent id(使えないIDは呼ぶ側で null にする)。 */
+  originId: string | null;
+  /** 引き取り先(総司令塔)。 */
+  coordinatorId: string | null;
+}): DeliveryTarget[] {
+  const out: DeliveryTarget[] = [];
+  const origin = opts.originId?.trim() ?? "";
+  if (origin) out.push({ id: origin, via: "origin" });
+  const coordinator = opts.coordinatorId?.trim() ?? "";
+  if (coordinator && coordinator !== origin) out.push({ id: coordinator, via: "coordinator" });
+  return out;
+}
+
 /** 総司令塔へ送る発言の先頭にカード題名とIDを付ける(本文はそのまま後ろに残す)。 */
 export function withCardHeader(
   text: string,

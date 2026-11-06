@@ -58,6 +58,8 @@ import type { ConfirmBoxItem } from "../shared/contract.js";
 import {
   COORDINATOR_FALLBACK_NOTICE,
   coordinatorCandidates,
+  type DeliveryTarget,
+  deliveryTargets,
   isImageComment,
   pendingLabel,
   pickCoordinatorTarget,
@@ -453,8 +455,10 @@ export function CardChatPane({
   const reason = useMemo(() => {
     if (fallback) {
       if (!serverId) return "ホストに接続できません";
-      if (coordId === null) return "総司令塔が見つかりません(送信できません)";
-      if (coordClosed) return "総司令塔も閉じています(送信できません)";
+      // 投函元があるなら、閉じていても復元して届けられる(2026-11-06 ユーザー指示)。
+      // 引ける先が投函元も総司令塔も無いときだけ送信を止める。
+      if (!agentId && coordId === null) return "総司令塔が見つかりません(送信できません)";
+      if (!agentId && coordClosed) return "総司令塔も閉じています(送信できません)";
       return null;
     }
     // スレ直接(優先順位の行)はカードが無いのが正常なので、カードの有無を先に問わない。
@@ -798,7 +802,10 @@ export function CardChatPane({
     async (override?: string): Promise<boolean> => {
       const own = override === undefined;
       const t = (own ? text : override).trim();
-      if (reason || !t || !sendAgentId || !serverId || sendingRef.current) return false;
+      // カードは「投函元 → 復元 → 総司令塔」の順に届け先を決めるので、ここでは送り先の有無を問わない
+      // (2026-11-06 ユーザー指示)。決めた先が無ければ下で送らずに理由を出す。
+      if (reason || !t || !serverId || sendingRef.current) return false;
+      if (!item && !sendAgentId) return false;
       // 画像への直接コメント(UI確認カードの画像ビューア)は返事を求めない (2026-11-06 ユーザー指示)。
       const imageComment = isImageComment(t);
       sendingRef.current = true;
@@ -814,30 +821,20 @@ export function CardChatPane({
       }
       let askedId: string | null = null;
       try {
+        // 配送の順番(2026-11-06 ユーザー逐語「投稿元たどれないなら、総司令塔が引き取る」)。
+        // 投函元 → 総司令塔。投函元がアーカイブ済みでも `send` が解除して届けるので、
+        // 送れた時点で「復元して届いた」になる。全部だめなら送らず、呼び出し側は完了にしない。
+        const targets: DeliveryTarget[] = item
+          ? deliveryTargets({ originId: agentId, coordinatorId: sendAgentId })
+          : [];
+        if (!item && sendAgentId) targets.push({ id: sendAgentId, via: "origin" });
+        if (targets.length === 0) {
+          setNotice("届け先がありません(投函元も総司令塔も見つかりません)");
+          if (own && t) setText((cur) => (cur ? cur : t));
+          return false;
+        }
         // カードID付きで送る(司令塔宛のとき発言ログから回答済みを機械判定するため。judgment_answer_sweep.py)
         const tagged = messagePrefix ? `${messagePrefix}${t}` : t;
-        let outgoing = item ? withCardHeader(tagged, item) : tagged;
-        if (topic && item) {
-          // 台帳へ質問を記録し(返事待ちの目印と催促の元)、返信ID+sayコマンドを付けて上位スレへ送る。
-          const asked = await askRpc({
-            id: item.id,
-            key: item.key,
-            text: tagged,
-            target: sendAgentId,
-          });
-          if (!asked.ok || !asked.replyId) throw new Error(asked.message);
-          askedId = asked.replyId;
-          // 画像への直接コメントは、返事を書かず直しを進めるだけだと転送文に明記する(say は付けない)。
-          outgoing = imageComment
-            ? withNoReplyInstruction(outgoing)
-            : withSayInstruction(outgoing, {
-                replyId: asked.replyId,
-                cardId: item.id,
-              });
-        } else if (imageComment) {
-          // スレッド連携の無い経路でも「返事は要らない」を明記する(2026-11-06 出口レビュー指摘3)。
-          outgoing = withNoReplyInstruction(outgoing);
-        }
         const opts = sentImages.length
           ? {
               images: sentImages.map((i) => ({
@@ -846,9 +843,51 @@ export function CardChatPane({
               })),
             }
           : undefined;
-        await getPaseoClient(serverId).agents.ref(sendAgentId).send(outgoing, opts);
+        let delivered: DeliveryTarget | null = null;
+        let lastError: unknown = null;
+        for (const target of targets) {
+          const to = target.id;
+          let askedHere: string | null = null;
+          try {
+            let outgoing = item ? withCardHeader(tagged, item) : tagged;
+            if (topic && item) {
+              // 台帳へ質問を記録し(返事待ちの目印と催促の元)、返信ID+sayコマンドを付けて上位スレへ送る。
+              const asked = await askRpc({
+                id: item.id,
+                key: item.key,
+                text: tagged,
+                target: to,
+              });
+              // oxlint-disable-next-line eslint/max-depth
+              if (!asked.ok || !asked.replyId) throw new Error(asked.message);
+              askedHere = asked.replyId;
+              // 画像への直接コメントは、返事を書かず直しを進めるだけだと転送文に明記する(say は付けない)。
+              outgoing = imageComment
+                ? withNoReplyInstruction(outgoing)
+                : withSayInstruction(outgoing, {
+                    replyId: asked.replyId,
+                    cardId: item.id,
+                  });
+            } else if (imageComment) {
+              // スレッド連携の無い経路でも「返事は要らない」を明記する(2026-11-06 出口レビュー指摘3)。
+              outgoing = withNoReplyInstruction(outgoing);
+            }
+            await getPaseoClient(serverId).agents.ref(to).send(outgoing, opts);
+            delivered = target;
+            askedId = askedHere;
+            break;
+          } catch (e) {
+            lastError = e;
+            // 届かなかった先の質問記録は取り消す(届いていない質問に催促が飛ばないように)。
+            if (askedHere && item) {
+              cancelRpc({ id: item.id, key: item.key, replyId: askedHere }).catch(() => {});
+            }
+          }
+        }
+        if (!delivered) throw lastError ?? new Error("どこにも届きませんでした");
         if (topic) void refreshTopic();
-        if (fallback) setCoordSent(true);
+        // 総司令塔の出力を購読するのは、実際に総司令塔へ送った時だけ。
+        if (delivered.via === "coordinator" && delivered.id !== agentId) setCoordSent(true);
         seeActivity({ kind: "sent" });
         setNotice("");
         ok = true;
@@ -891,8 +930,8 @@ export function CardChatPane({
       text,
       reason,
       sendAgentId,
+      agentId,
       serverId,
-      fallback,
       item,
       seeActivity,
       topic,
