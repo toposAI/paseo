@@ -632,6 +632,12 @@ export function ConfirmBoxView({
     openAgent,
     onNotice: setNotice,
   });
+  // 開いた画面の「このカードを完了」。カードの完了と同じ経路(数秒は元に戻せる)で、閉じたら一覧へ戻す。
+  const paneDone = useCallback(() => {
+    if (!paneItem) return;
+    complete(paneItem);
+    closePane();
+  }, [paneItem, complete, closePane]);
   // eslint-disable-next-line eslint-plugin-react-perf/jsx-no-jsx-as-prop -- 同一レンダーの子として一度だけ置く
   const paneEl = pane ? (
     <CardChatPane
@@ -643,6 +649,7 @@ export function ConfirmBoxView({
       width={width}
       onClose={closePane}
       onOpenThread={openPaneThread}
+      onDone={paneItem?.key ? paneDone : undefined}
     />
   ) : null;
 
@@ -1499,6 +1506,7 @@ function ItemCard({
     [zoom, item.imageCaptions, closeAfterComment],
   );
   const reject = useCallback(() => onReject(item), [onReject, item]);
+  const complete = useCallback(() => onComplete(item), [onComplete, item]);
   const toggleBg = useCallback(() => {
     setBgOpen((v) => {
       if (!v) onBackground();
@@ -1609,6 +1617,16 @@ function ItemCard({
           >
             <Text style={styles.footText}>{paneOpen ? "▼会話" : "💬 会話"}</Text>
           </Pressable>
+          {item.key ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="このカードを完了にして閉じる(数秒は元に戻せる)"
+              style={styles.footBtn}
+              onPress={complete}
+            >
+              <Text style={styles.footText}>✓ 完了</Text>
+            </Pressable>
+          ) : null}
           {canRejectItem(item) ? (
             <Pressable
               accessibilityRole="button"

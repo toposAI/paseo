@@ -289,17 +289,13 @@ function composerPlaceholder(reason: string | null, fallback: boolean): string {
 }
 
 /** 入力欄の下の案内。送れない理由があるときは「送ります」と言わない(上の理由表示と矛盾しないように)。 */
-function composerHint(
-  reason: string | null,
-  fallback: boolean,
-  answerLabel: string,
-  len: number,
-): string {
+function composerHint(reason: string | null, fallback: boolean, len: number): string {
   if (reason) return `${len}/${TEXT_MAX}字`;
   if (fallback) {
     return `この欄に答えるスレ: 総司令塔 · ${COORDINATOR_FALLBACK_NOTICE}(${len}/${TEXT_MAX}字)`;
   }
-  return `この欄に答えるスレ: ${answerLabel} · ${len}/${TEXT_MAX}字(この画面の外のスレにも同じ発言が残ります)`;
+  // 宛先は入力欄の案内(「投函元スレへ送る」)で分かるので、字数だけにする(2026-11-06 ユーザー指摘で短縮)。
+  return `${len}/${TEXT_MAX}字`;
 }
 
 // 既存の指摘(complexity 57)。ペインの分割は今回の変更(状態の読み取り)と無関係なので触らない。
@@ -313,6 +309,7 @@ export function CardChatPane({
   width,
   onClose,
   onOpenThread,
+  onDone,
   embedded = false,
   onSent,
   onReply,
@@ -331,6 +328,8 @@ export function CardChatPane({
   onClose: () => void;
   /** 元スレを Paseo のスレ画面で開く(`navigation.openAgent`)。無い画面では undefined。 */
   onOpenThread?: (() => void) | undefined;
+  /** カードを完了にして閉じる。渡したときだけ見出しの下に「このカードを完了」を出す。 */
+  onDone?: (() => void) | undefined;
   /** カードの中に差し込む(見出し・カード要約・幅の調整・スライドを出さず、会話と入力欄だけ)。 */
   embedded?: boolean;
   /** 投函元へ送れた直後(UIの最終チェック: 返事待ちにして次のカードへ進める)。 */
@@ -1118,6 +1117,21 @@ export function CardChatPane({
         borderBottomColor: colors.border,
         backgroundColor: colors.surface1,
       },
+      doneBar: {
+        paddingHorizontal: 8,
+        paddingVertical: 6,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+        backgroundColor: colors.surface1,
+      },
+      doneBtn: {
+        backgroundColor: colors.accent,
+        borderRadius: 8,
+        minHeight: 44,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
+      },
+      doneBtnText: { color: colors.accentForeground, fontSize: 15, fontWeight: "600" as const },
       headerBtn: { paddingVertical: 8, paddingHorizontal: 8, minWidth: 44 },
       headerBtnText: { color: colors.accent, fontSize: 14 },
       headerTitle: {
@@ -1241,7 +1255,7 @@ export function CardChatPane({
         <Text style={st.headerBtnText}>{compact ? "‹ 戻る" : "✕"}</Text>
       </Pressable>
       {/* 履歴があると開いた直後は最下部までスクロールするので、論点はヘッダにも出す。 */}
-      <Text style={st.headerTitle} numberOfLines={1}>
+      <Text style={st.headerTitle} numberOfLines={2}>
         {item?.subject ?? title ?? "投函元スレのチャット"}
       </Text>
       {/* 同じ相手を Paseo のスレ画面(ツール実行や承認まで見える)で開きたい時の逃げ道。 */}
@@ -1257,10 +1271,24 @@ export function CardChatPane({
       ) : null}
     </View>
   );
+  // 開いた画面の完了ボタン。見出しのすぐ下に置くので、スクロールしなくても押せる(幅で位置が変わらない)。
+  const doneBar = onDone ? (
+    <View style={st.doneBar}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="このカードを完了にして閉じる"
+        style={st.doneBtn}
+        onPress={onDone}
+      >
+        <Text style={st.doneBtnText}>このカードを完了</Text>
+      </Pressable>
+    </View>
+  ) : null;
 
   const body = (
     <View style={st.pane}>
       {embedded ? null : header}
+      {embedded ? null : doneBar}
       <ScrollView
         ref={scrollRef}
         style={embedded ? st.scrollEmbedded : st.scroll}
@@ -1270,8 +1298,7 @@ export function CardChatPane({
         {reason ? <Text style={st.notice}>{reason}</Text> : null}
         {topic && topicMsgs.length === 0 && topicPending.length === 0 ? (
           <Text style={st.empty}>
-            このカードの話題の会話はまだありません。送ると上位スレに届き、そのスレが say
-            で返した返事だけがここに出ます。
+            まだ会話はありません。送ると投函元に届き、返事がここに出ます。
           </Text>
         ) : null}
         {topic
@@ -1337,9 +1364,7 @@ export function CardChatPane({
         focusSignal={focusSignal}
         testID="pane-composer"
       />
-      <Text style={st.hint}>
-        {composerHint(reason, fallback, item?.answerLabel ?? "投函元のスレ", text.length)}
-      </Text>
+      <Text style={st.hint}>{composerHint(reason, fallback, text.length)}</Text>
     </View>
   );
 

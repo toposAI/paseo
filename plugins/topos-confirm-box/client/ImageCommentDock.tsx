@@ -89,13 +89,15 @@ export function ImageCommentDock({
         paddingBottom: 12,
       },
       notice: { color: "#ffb4a8", fontSize: 12, padding: 8 },
-      doneRow: { flexDirection: "row" as const, justifyContent: "flex-end" as const, padding: 8 },
+      // 幅いっぱいに広げて中央に置く(幅によって右端へ寄ったり隠れたりしない)。
+      doneRow: { padding: 8 },
       done: {
         backgroundColor: colors.accent,
         borderRadius: 8,
         paddingHorizontal: 16,
         paddingVertical: 10,
         minHeight: 44,
+        alignItems: "center" as const,
         justifyContent: "center" as const,
       },
       doneText: { color: colors.accentForeground, fontSize: 15, fontWeight: "600" as const },
@@ -112,7 +114,7 @@ export function ImageCommentDock({
             style={st.done}
             onPress={donePress}
           >
-            <Text style={st.doneText}>完了</Text>
+            <Text style={st.doneText}>このカードを完了</Text>
           </Pressable>
         </View>
       ) : null}
