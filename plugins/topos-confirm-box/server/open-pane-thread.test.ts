@@ -8,10 +8,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  openThreadInPane,
-  showsSameThread,
-} from "../client/open-pane-thread.js";
+import { openThreadInPane, showsSameThread } from "../client/open-pane-thread.js";
 import type { AgentRead } from "../client/open-pane-thread.js";
 
 const serverId = "srv"; // readAgent を必ず注入する(実デーモンへは触らない)
@@ -48,11 +45,7 @@ test("確認箱のペインが同じスレを出しているなら、右カラ�
       folded += 1;
     },
   });
-  assert.deepEqual(
-    calls,
-    [{ agentId: "A" }],
-    "placement を渡さない(=主ペイン)"
-  );
+  assert.deepEqual(calls, [{ agentId: "A" }], "placement を渡さない(=主ペイン)");
   assert.equal(folded, 1, "確認箱のペインを外す");
 });
 
@@ -116,14 +109,11 @@ test("カードは「同じカード」ではなく「同じ相手を出して�
   assert.equal(
     showsSameThread({ kind: "card", id: "c1", answerId: "B" }, "A"),
     false,
-    "出している相手が別なら畳まない"
+    "出している相手が別なら畳まない",
   );
   // 答えるスレが分からないカードは畳まない(「分からない」を「同じ」と取り違えない。round1 F2)。
   assert.equal(showsSameThread({ kind: "card", id: "c1" }, "A"), false);
-  assert.equal(
-    showsSameThread({ kind: "card", id: "c1", answerId: null }, "A"),
-    false
-  );
+  assert.equal(showsSameThread({ kind: "card", id: "c1", answerId: null }, "A"), false);
   assert.equal(showsSameThread({ kind: "thread", id: "A" }, "A"), true);
   assert.equal(showsSameThread({ kind: "thread", id: "B" }, "A"), false);
   assert.equal(showsSameThread(null, "A"), false);
@@ -147,7 +137,7 @@ test("畳む直前に同じ相手を引き直し、引けない・閉じてい�
   assert.deepEqual(
     calls,
     [{ agentId: "A", placement: "right" }],
-    "畳まず、従来どおり右カラムに開く"
+    "畳まず、従来どおり右カラムに開く",
   );
   assert.equal(folded, 0, "読めない相手では畳まない");
 });

@@ -97,7 +97,10 @@ test("(2) 圧縮の完了は「圧縮中」だけを解除する", () => {
 
 test("(2) 実行中の再通知(running)で作業表示を消さない", () => {
   assert.equal(nextPaneActivity("working", { kind: "agent-status", status: "running" }), "working");
-  assert.equal(nextPaneActivity("thinking", { kind: "agent-status", status: "running" }), "thinking");
+  assert.equal(
+    nextPaneActivity("thinking", { kind: "agent-status", status: "running" }),
+    "thinking",
+  );
 });
 
 test("(2) 実行中に始まった作業は、スレが止まったら「実行中」を消す", () => {
