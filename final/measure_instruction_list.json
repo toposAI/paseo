@@ -1,0 +1,8 @@
+{
+  "screen": "instruction_list",
+  "results": [
+    { "viewport": "iphone", "findings": [], "shot": "final/iphone_instruction_list.png" },
+    { "viewport": "pc", "findings": [], "shot": "final/pc_instruction_list.png" }
+  ],
+  "pairs": []
+}

@@ -72,6 +72,7 @@ import {
   withSayInstruction,
 } from "../shared/card-pane.js";
 import type { ThreadAccess } from "../shared/child-threads.js";
+import { joinTitleWords } from "../shared/windowb-instructions.js";
 import {
   PANE_ACTIVITY_LABEL,
   nextPaneActivity,
@@ -139,9 +140,21 @@ function itemStatus(item: TimelineItemLike | undefined): string | undefined {
   return (item as { status?: string } | undefined)?.status;
 }
 
+/**
+ * 確認箱から送った文の先頭には、送信側の目印として「【確認箱カード】題(ID: …)」とカード本文が付く
+ * (`withCardHeader`)。送る文はそのままでよく、画面には本人が打った文だけを出す
+ * (2026-11-07 指摘「会話欄に内部ID・開発者向けの文言が出る」)。
+ */
+const CARD_MESSAGE_HEADER =
+  /^【確認箱カード】[^\n]*\n(?:\[カード本文\][\s\S]*?\n\n)?\[ユーザーの発言\]\n/;
+
+function withoutCardHeader(text: string): string {
+  return text.replace(CARD_MESSAGE_HEADER, "");
+}
+
 function lineFromItem(item: TimelineItemLike | undefined, id: string): ChatLine | null {
   if (!item?.text) return null;
-  if (item.type === "user_message") return { id, role: "user", text: item.text };
+  if (item.type === "user_message") return { id, role: "user", text: withoutCardHeader(item.text) };
   if (item.type === "assistant_message") return { id, role: "assistant", text: item.text };
   return null;
 }
@@ -251,8 +264,10 @@ function CardContext({
             {PRIORITY_LABEL[item.priority]} · {KIND_LABEL[item.kind]}
             {item.state === "approved" ? " · 決定済み" : ""}
           </Text>
-          <Text style={st.contextSubject}>{item.subject}</Text>
-          {item.background ? <Text style={st.contextBackground}>{item.background}</Text> : null}
+          <Text style={st.contextSubject}>{joinTitleWords(item.subject)}</Text>
+          {item.background ? (
+            <Text style={st.contextBackground}>{joinTitleWords(item.background)}</Text>
+          ) : null}
         </>
       ) : (
         <Text style={st.contextSubject}>{title ?? "投函元スレのチャット"}</Text>
@@ -1256,7 +1271,8 @@ export function CardChatPane({
       </Pressable>
       {/* 履歴があると開いた直後は最下部までスクロールするので、論点はヘッダにも出す。 */}
       <Text style={st.headerTitle} numberOfLines={2}>
-        {item?.subject ?? title ?? "投函元スレのチャット"}
+        {/* 語の途中で折らない(2026-11-07 指摘「…してよ／いか」)。題と同じ joinTitleWords を使う。 */}
+        {joinTitleWords(item?.subject ?? title ?? "投函元スレのチャット")}
       </Text>
       {/* 同じ相手を Paseo のスレ画面(ツール実行や承認まで見える)で開きたい時の逃げ道。 */}
       {onOpenThread ? (
@@ -1307,7 +1323,10 @@ export function CardChatPane({
               return (
                 <View key={`t${m.ts}-${m.role}-${m.by}`} style={mine ? st.msgRowMine : st.msgRow}>
                   <View style={mine ? st.bubbleMine : st.bubbleTheirs}>
-                    <Text style={mine ? st.bubbleTextMine : st.bubbleTextTheirs}>{m.text}</Text>
+                    {/* 会話の本文も語の途中で折らない(2026-11-07 指摘「入れなく／ても」)。 */}
+                    <Text style={mine ? st.bubbleTextMine : st.bubbleTextTheirs}>
+                      {joinTitleWords(m.text)}
+                    </Text>
                   </View>
                 </View>
               );
@@ -1330,7 +1349,9 @@ export function CardChatPane({
           return (
             <View key={line.id} style={mine ? st.msgRowMine : st.msgRow}>
               <View style={mine ? st.bubbleMine : st.bubbleTheirs}>
-                <Text style={mine ? st.bubbleTextMine : st.bubbleTextTheirs}>{line.text}</Text>
+                <Text style={mine ? st.bubbleTextMine : st.bubbleTextTheirs}>
+                  {joinTitleWords(line.text)}
+                </Text>
               </View>
             </View>
           );
@@ -1364,7 +1385,8 @@ export function CardChatPane({
         focusSignal={focusSignal}
         testID="pane-composer"
       />
-      <Text style={st.hint}>{composerHint(reason, fallback, text.length)}</Text>
+      {/* 案内文も語の途中で折らない(2026-11-07 指摘「付け／て送信」)。 */}
+      <Text style={st.hint}>{joinTitleWords(composerHint(reason, fallback, text.length))}</Text>
     </View>
   );
 

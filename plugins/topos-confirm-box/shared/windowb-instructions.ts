@@ -51,12 +51,22 @@ export function summarizeExtras(data: WindowBInstructionsOutput | null): string 
   return `未登録 ${data.warns}`;
 }
 
-/** 見出しに出す件数。PC幅は帯と重ならないよう「未登録」だけ、狭い幅は件数と赤を出す。 */
+/**
+ * 見出しに出す件数。PC幅は帯と重ならないよう「未登録」だけ、狭い幅は件数と赤を出す。
+ * 狭い幅で一覧を上限で切っているときは、下の「全N件中 上位M件を表示」が件数を出すので、
+ * 見出しでは件数を繰り返さない(2026-11-07 指摘「iPhone幅で154件が2回」)。
+ */
 export function headCountText(
   data: WindowBInstructionsOutput | null,
   wide: boolean,
 ): string | null {
-  return wide ? summarizeExtras(data) : summarize(data);
+  if (!data) return summarize(null);
+  if (wide) return summarizeExtras(data);
+  const parts: string[] = [];
+  if (truncationNote(data) === null) parts.push(`${data.total}件`);
+  if (data.alerts > 0) parts.push(`赤 ${data.alerts}`);
+  if (data.warns > 0) parts.push(`未登録 ${data.warns}`);
+  return parts.length > 0 ? parts.join(" / ") : null;
 }
 
 /** 見せ方に合わせた一覧の行(取得前は空)。 */
@@ -93,9 +103,13 @@ function rank(row: { alert: string | null; warn: string | null; kind: string }):
  * 注意書き全体を最大2行に収めるため、長い説明は添えず1行に収まる長さにする(並び順の説明は
  * 見出しの要約「赤 N / 未登録 M」と、赤が先頭に来ること自体で足りる)。
  */
-export function truncationNote(data: WindowBInstructionsOutput): string | null {
+export function truncationNote(data: WindowBInstructionsOutput, omitTotal = false): string | null {
   if (data.total <= data.items.length) return null;
-  return `全${data.total}件中 上位${data.items.length}件を表示`;
+  // PC幅は会話の上の帯が「指示 N件」を出しているので、件数を繰り返さない(2026-11-07 指摘
+  // 「PCの指示一覧で157件が2か所」)。狭い幅は帯が件数を出さないため、ここで全件数を出す。
+  return omitTotal
+    ? `上位${data.items.length}件を表示`
+    : `全${data.total}件中 上位${data.items.length}件を表示`;
 }
 
 function clock(ms: number): string {
@@ -220,18 +234,89 @@ const WORD_JOINER = "\u2060";
 /** 語として繋ぐ対象(かな・漢字)。英数字の語は繋がない(URL などが折れなくなるのを避ける)。 */
 const CJK_WORD = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uff66-\uff9f]/;
 
+/** ひらがなだけの語(助詞・助動詞・接尾辞)。前の語に付けて1語として扱う。 */
+const HIRAGANA_ONLY = /^[぀-ゟ]+$/;
+
+/** 行末に置いてよいが、行頭に来ると読みにくい閉じ括弧。前の語に付ける。 */
+const CLOSER = /^[）)」』】〉》]+$/;
+
+/** 行頭に来てもよいが、行末に置くと宙に浮く開き括弧。直後の語を付ける。 */
+const OPENER = /^[（(「『【〈《]+$/;
+
+/** 折り目を作ってよい最短の長さ(字)。これ未満で折ると文節が細切れに見える。 */
+const MIN_BREAK_CHARS = 5;
+
+/** 繋いだ語の上限(字)。これを超えると折り目が無くなって、はみ出す危険が出る。 */
+const MAX_JOINED_CHARS = 24;
+
+/** 1つの語(または区切り)の素性。折り目を付けてよいかを判断する材料。 */
+interface Piece {
+  text: string;
+  cjk: boolean;
+  /** 英数字の語で、その連なりに数字が入っている(「23GB」「2」)。直後の助詞・漢字語を離さない。 */
+  ascii: boolean;
+  particle: boolean;
+  open: boolean;
+  space: boolean;
+}
+
+/** 直前の語と繋ぐか(繋ぐ=その間に折り目を作らない)。 */
+function shouldGlue(piece: Piece, prev: Piece, run: number): boolean {
+  if (prev.space) return false;
+  if (piece.particle || CLOSER.test(piece.text)) return true; // 助詞・閉じ括弧は行頭に置かない
+  if (piece.cjk && prev.open) return true; // 開き括弧だけが行末に残るのを防ぐ
+  if (piece.cjk && prev.ascii) return true; // 「23GBの」「2誤り」は離さない
+  if (!piece.cjk || !prev.cjk) return false;
+  const breakHere = prev.particle && run >= MIN_BREAK_CHARS;
+  return !breakHere && run + piece.text.length <= MAX_JOINED_CHARS;
+}
+
 /**
- * 題の折り返し位置を語の区切りへ寄せる。日本語は語の間に空白が無いため、既定では
+ * 題や本文の折り返し位置を語の区切りへ寄せる。日本語は語の間に空白が無いため、既定では
  * 「完了ボタ／ン」のように語の途中で割れる(2026-11-07 指摘)。CSS の `word-break: auto-phrase` は
- * この題では効かなかったので、語の中の字を WORD JOINER で繋いで語中に折り目を作らせない。
+ * 効かなかったので、語の中の字を WORD JOINER で繋いで語中に折り目を作らせない。
+ *
+ * 語の区切り(Intl.Segmenter)は「確かめ｜て」「注意｜帯」のように活用や熟語の途中でも切れるため、
+ * **助詞・助動詞(ひらがなだけの語)の直後**だけを折り目にする。助詞の手前で折ると行頭が
+ * 「て」「の」になり、熟語の途中で折ると「注意／帯」になるため、どちらも避ける。
  */
 export function joinTitleWords(text: string): string {
   if (!WORD_SEGMENTER) return text;
   let out = "";
+  let run = 0; // 直前に繋いだ語の字数
+  let prev: Piece = {
+    text: "",
+    cjk: false,
+    ascii: false,
+    particle: false,
+    open: false,
+    space: true,
+  };
   for (const part of WORD_SEGMENTER.segment(text)) {
     const s = part.segment;
-    out +=
-      part.isWordLike && s.length > 1 && CJK_WORD.test(s) ? Array.from(s).join(WORD_JOINER) : s;
+    const word = part.isWordLike === true;
+    const cjk = word && CJK_WORD.test(s);
+    const piece: Piece = {
+      text: s,
+      cjk,
+      ascii: word && !cjk && /[0-9A-Za-z]/.test(s),
+      particle: cjk && HIRAGANA_ONLY.test(s),
+      open: !word && OPENER.test(s),
+      space: s.trim() === "",
+    };
+    const glue = shouldGlue(piece, prev, run);
+    const inside = cjk && (s.length > 1 || piece.particle) ? Array.from(s).join(WORD_JOINER) : s;
+    out += (glue ? WORD_JOINER : "") + inside;
+    if (!cjk) {
+      run = 0;
+    } else if (glue) {
+      run += s.length;
+    } else {
+      run = s.length;
+    }
+    // 「23」「GB」のように分かれて出てきても、間に空白が無ければ同じ英数字の連なりとみなす。
+    if (piece.ascii) piece.ascii = prev.ascii || /[0-9]/.test(s);
+    prev = piece;
   }
   return out;
 }

@@ -297,7 +297,7 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
   const stale = data ? staleNotice(data, now) : null;
   // PC幅は会話の上の帯が「指示 N件・赤N」を出しているので、件数はここで繰り返さない。
   const headCount = headCountText(data, wide);
-  const truncated = data ? truncationNote(data) : null;
+  const truncated = data ? truncationNote(data, wide) : null;
   let notice: React.ReactElement | null = null;
   if (error) {
     notice = (

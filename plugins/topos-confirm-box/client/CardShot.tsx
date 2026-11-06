@@ -12,6 +12,7 @@ import {
   shotRatio,
   splitShotCount,
 } from "../shared/card-title.js";
+import { joinTitleWords } from "../shared/windowb-instructions.js";
 
 const FRAME = {
   width: "100%" as const,
@@ -19,14 +20,9 @@ const FRAME = {
   overflow: "hidden" as const,
   borderRadius: 8,
 };
-const ROW = {
-  flexDirection: "row" as const,
-  alignItems: "baseline" as const,
-  gap: 6,
-  flexWrap: "nowrap" as const,
-};
-const SHRINK = { flexShrink: 1 };
-const KEEP = { flexShrink: 0 };
+// 枚数は題の下に独立して置く(2026-11-07 指摘)。横並びにすると、題が2行になったとき
+// 2行目の語の途中にバッジが挟まって見える(「(家族 (2/2枚目) 版)」)。
+const SUFFIX = { color: "#8b93a1", fontSize: 12, marginTop: 2 };
 
 export function CardShot({
   source,
@@ -78,21 +74,21 @@ export function CardTitle({
   numberOfLines?: number;
 }) {
   const { title, suffix } = splitShotCount(subject);
-  const shrinkStyle = useMemo(() => [style, SHRINK], [style]);
-  const keepStyle = useMemo(() => [style, KEEP], [style]);
+  // 題は語の途中で折らない(指示一覧と同じ joinTitleWords。2026-11-07 指摘「家族／版」)。
+  const joined = useMemo(() => joinTitleWords(title), [title]);
   if (!suffix) {
     return (
       <Text style={style} numberOfLines={numberOfLines}>
-        {subject}
+        {joined}
       </Text>
     );
   }
   return (
-    <View style={ROW}>
-      <Text style={shrinkStyle} numberOfLines={numberOfLines ?? 2}>
-        {title}
+    <View>
+      <Text style={style} numberOfLines={numberOfLines ?? 2}>
+        {joined}
       </Text>
-      <Text style={keepStyle}>{suffix}</Text>
+      <Text style={SUFFIX}>{suffix}</Text>
     </View>
   );
 }
