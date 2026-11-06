@@ -119,6 +119,8 @@ export function ImageCommentDock({
         </View>
       ) : null}
       {notice ? <Text style={st.notice}>{notice}</Text> : null}
+      {/* マイクが使えない環境で押したときの理由をここに出す(本体の composer にも案内が出る)。 */}
+      {tools.toolNotice ? <Text style={st.notice}>{tools.toolNotice}</Text> : null}
       <PaneComposer
         colors={composerColors}
         text={text}
