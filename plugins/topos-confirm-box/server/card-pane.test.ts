@@ -76,16 +76,12 @@ test("閉じている時の文言。不明(null)は「閉じています」と�
   assert.equal(threadUnavailableReason("workspace-archived", "thread"), "担当スレが閉じています");
 });
 
-test("総司令塔への振り替え: カードで参照無し/閉じている時だけ。不明・生きている・スレ直接は振り替えない", () => {
+test("総司令塔への振り替え: カードで参照無し/閉じている時。生きている・スレ直接は振り替えない", () => {
   const f = shouldFallbackToCoordinator;
+  // 投函元がたどれないカード(null)も総司令塔が引き取る(送信不可にしない)
   assert.equal(f({ hasCard: true, agentId: null, closedText: null }), true);
   assert.equal(f({ hasCard: true, agentId: "a1", closedText: "投函元が閉じています" }), true);
   assert.equal(f({ hasCard: true, agentId: "a1", closedText: null }), false);
-  assert.equal(
-    f({ hasCard: true, agentId: null, closedText: null, originUnknown: true }),
-    false,
-    "投函元不明は別のスレへ流さない",
-  );
   assert.equal(f({ hasCard: false, agentId: "a1", closedText: "担当スレが閉じています" }), false);
   assert.equal(f({ hasCard: false, agentId: null, closedText: null }), false);
 });

@@ -101,15 +101,17 @@ export const COORDINATOR_FALLBACK_NOTICE =
  * 総司令塔へ振り替えるか。**カードの時だけ**(スレ直接=優先順位の行は対象外)。
  * 投函元の参照が無い(`agentId` 無し)か、閉じていると分かった(`closedText` あり)時。
  * 不明(生死が引けない)は振り替えない(不明を「閉じている」と言い換えない)。
+ *
+ * **投函元がたどれないカードも振り替える**(=総司令塔が引き取る)。2026-11-06 ユーザー逐語
+ * 「投稿元たどれないなら、総司令塔が引き取るってなってるでしょ」。以前はここで送信不可に
+ * していたが、引き取り先があるのに箱の中で閉じる結果になっていた。
  */
 export function shouldFallbackToCoordinator(opts: {
   hasCard: boolean;
   agentId: string | null;
   closedText: string | null;
-  /** サーバが「投函元不明」と判定したカード。別のスレへ流さず送信不可にする(fail-closed)。 */
-  originUnknown?: boolean;
 }): boolean {
-  if (!opts.hasCard || opts.originUnknown) return false;
+  if (!opts.hasCard) return false;
   return !opts.agentId || opts.closedText !== null;
 }
 

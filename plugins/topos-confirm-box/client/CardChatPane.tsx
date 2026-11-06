@@ -404,13 +404,12 @@ export function CardChatPane({
 
   const access = toAccess(liveness);
   const closedText = threadUnavailableReason(access, item ? "card" : "thread");
-  // 投函元が無い/閉じているカードは総司令塔へ振り替える(スレ直接=item無しは対象外)。
-  const originUnknown = item?.answerLabel?.startsWith("投函元不明") === true;
+  // 投函元が無い/閉じている/たどれないカードは総司令塔が引き取る
+  // (スレ直接=item無しは対象外。2026-11-06 ユーザー逐語「投稿元たどれないなら、総司令塔が引き取る」)。
   const fallback = shouldFallbackToCoordinator({
     hasCard: item !== null,
     agentId,
     closedText,
-    originUnknown,
   });
   const sendAgentId = fallback ? (coordId ?? null) : agentId;
   const hubPending = item !== null && hubIds === undefined && !fallback;
@@ -461,12 +460,11 @@ export function CardChatPane({
     // スレ直接(優先順位の行)はカードが無いのが正常なので、カードの有無を先に問わない。
     if (!agentId) {
       if (!item) return "このカードは一覧にありません(決定済みか、URLのカードIDが違います)";
-      if (originUnknown) return "投函元不明のため送信できません(別のスレへは送りません)";
       return "投函元スレがありません(投函に thread_ref が付いていません)";
     }
     if (!serverId) return "ホストに接続できません";
     return closedText;
-  }, [fallback, coordId, coordClosed, item, agentId, serverId, closedText, originUnknown]);
+  }, [fallback, coordId, coordClosed, item, agentId, serverId, closedText]);
 
   // 元スレの履歴 + 購読。カードを切り替えると前のスレの応答が後から届くので、
   // 生きている間だけ反映する(alive フラグ)うえで、履歴は読み直す。
