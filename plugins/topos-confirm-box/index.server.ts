@@ -843,7 +843,8 @@ export default function contribute(server: PluginServerContext) {
     const shownPresentable =
       presentable === null || shownTotal === null ? presentable : Math.min(presentable, shownTotal);
     return {
-      open: open.length,
+      // 確認箱タブの数もサイドバーと同じく返事待ちを引く(画面内で数が食い違わないように)。
+      open: Math.max(0, open.length - awaitingReply),
       openKnown,
       presentable: shownPresentable,
       presentableTotal: shownTotal,
