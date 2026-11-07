@@ -402,9 +402,11 @@ export function ConfirmBoxView({
       },
       // 判断一覧の入れ物。幅は onLayout で測る(左右の余白は body の padding が持つ)。
       // 1列のときもカード同士のすき間を gap で入れる(従来の body の gap は外の兄弟にしか効かない)。
-      // PC幅でも1列。広い画面ではカード幅に上限を付けて中央に寄せる(狭い幅は上限に届かず全幅)。
-      listBox: {
-        gap: LIST_GRID_GAP,
+      listBox: { gap: LIST_GRID_GAP },
+      // 判断一覧タブ全体(絞り込み行・件数行・カード)の列。PC幅でも1列で、広い画面では
+      // 幅に上限を付けて中央に寄せる(狭い幅は上限に届かず全幅。body の gap と揃える)。
+      listColumn: {
+        gap: 8,
         width: "100%" as const,
         maxWidth: LIST_MAX_WIDTH,
         alignSelf: "center" as const,
@@ -690,7 +692,7 @@ export function ConfirmBoxView({
     content = <ReportsView theme={theme} />;
   } else {
     content = (
-      <>
+      <View style={s.listColumn}>
         <Pressable accessibilityRole="button" style={s.filterLine} onPress={toggleFilter}>
           <Text style={s.text}>{filterSummary}</Text>
           <Text style={s.muted}>{filterOpen ? "▲" : "▼"}</Text>
@@ -786,7 +788,7 @@ export function ConfirmBoxView({
             );
           })}
         </View>
-      </>
+      </View>
     );
   }
 
