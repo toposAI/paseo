@@ -262,6 +262,9 @@ export function ConfirmBoxView({
       // 返事の目印。UIの最終チェックカードの状態チップ(UiFinalCheckCard)と同じ見た目に揃える。
       replyChip: {
         color: c.accent,
+        // 枠線で「札」に見せる。背景なしの文字だけだと左の余白ぶん上の行より右へずれて見える。
+        borderWidth: 1,
+        borderColor: c.accent,
         fontSize: 11,
         fontWeight: "600" as const,
         borderRadius: 10,
