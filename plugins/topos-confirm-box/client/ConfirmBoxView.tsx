@@ -161,6 +161,9 @@ export function ConfirmBoxView({
     return () => clearInterval(timer);
   }, [reload]);
 
+  // カードのチャット送信などで箱が変わったら一覧も取り直す(返事待ち・返事の印をすぐ反映する)。
+  useEffect(() => onBoxChanged(() => void reload()), [reload]);
+
   // 手動の更新。取れた時だけバッジ(件数)も取り直す(カードとバッジが同じ時点になる)
   const manualReload = useCallback(async () => {
     const ok = await reload();
@@ -256,6 +259,28 @@ export function ConfirmBoxView({
       muted: { color: c.foregroundMuted, fontSize: 12 },
       text: { color: c.foreground, fontSize: 13 },
       badge: { color: c.accent, fontSize: 11 },
+      // 返事の目印。UIの最終チェックカードの状態チップ(UiFinalCheckCard)と同じ見た目に揃える。
+      replyChip: {
+        color: c.accent,
+        fontSize: 11,
+        fontWeight: "600" as const,
+        borderRadius: 10,
+        paddingHorizontal: 8,
+        paddingVertical: 1,
+        alignSelf: "flex-start" as const,
+        overflow: "hidden" as const,
+      },
+      replyChipUnread: {
+        color: c.accentForeground,
+        backgroundColor: c.accent,
+        fontSize: 11,
+        fontWeight: "600" as const,
+        borderRadius: 10,
+        paddingHorizontal: 8,
+        paddingVertical: 1,
+        alignSelf: "flex-start" as const,
+        overflow: "hidden" as const,
+      },
       link: {
         color: c.accent,
         fontSize: 13,
@@ -592,6 +617,18 @@ export function ConfirmBoxView({
   // 返事を読んだ(=そのカードの会話を開いた)ときだけ「見た」と台帳へ書く。
   // 画面に並んでいるだけでは既読にしない: 再読み込み・絞り込み切替で印が消えてしまうため(2026-11-05)。
   const seenRpc = useRpc(cardChatSeenRpc);
+  // 通常カードの会話を開いたら「見た」と台帳へ書く(返事の目印を消す。開いただけで書き、並べただけでは書かない)。
+  const replyPaneItem = paneCardId ? (data?.items.find((v) => v.id === paneCardId) ?? null) : null;
+  const paneUnread = paneCardId ? data?.cardMarks?.[paneCardId]?.unread === true : false;
+  const paneItemKey = replyPaneItem?.key ?? null;
+  useEffect(() => {
+    if (!paneCardId || !paneUnread) return;
+    void seenRpc({ id: paneCardId, key: paneItemKey })
+      .then(() => reload())
+      .catch(() => {
+        // 書けなくても印が残るだけ(次の周期でもう一度送る)。
+      });
+  }, [paneCardId, paneUnread, paneItemKey, seenRpc, reload]);
   const markSeen = useCallback(
     (id: string) => {
       const target = ufcItems.find((v) => v.id === id);
@@ -780,6 +817,7 @@ export function ConfirmBoxView({
                     agentId={threadAgentId(item)}
                     paneColors={c}
                     paneOpen={paneCardId === item.id}
+                    replyMark={data?.cardMarks?.[item.id]}
                     anyPaneOpen={pane !== null}
                     onOpenPane={openCard}
                   />
@@ -1487,7 +1525,10 @@ function ItemCard({
   paneOpen,
   anyPaneOpen,
   onOpenPane,
+  replyMark,
 }: {
+  /** 送信後の返事待ち / 返事が届いた印(台帳から作ったもの)。無ければ出さない。 */
+  replyMark?: { waiting: boolean; unread: boolean };
   item: ConfirmBoxItem;
   styles: Styles;
   colors: QuestionAnswerColors;
@@ -1570,6 +1611,14 @@ function ItemCard({
             {item.state === "approved" ? " · 決定済み" : ""}
             {item.onHold ? ` · ${item.onHold}(窓口では出ません)` : ""}
           </Text>
+          {replyMark?.unread || replyMark?.waiting ? (
+            <Text
+              style={replyMark.unread ? styles.replyChipUnread : styles.replyChip}
+              testID={replyMark.unread ? "card-reply-unread" : "card-reply-waiting"}
+            >
+              {replyMark.unread ? "💬 返事が届きました" : "返事待ち"}
+            </Text>
+          ) : null}
           <CardTitle subject={item.subject} style={styles.subject} />
           {open || questions.length > 0 ? null : (
             <Text style={styles.muted} numberOfLines={2}>

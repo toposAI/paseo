@@ -81,6 +81,7 @@ import {
 import type { PaneActivityEvent, PaneActivityState } from "../shared/pane-activity.js";
 import { readAgentState, readAgentStateOn } from "./agent-read.js";
 import { PaneComposer } from "./PaneComposer.js";
+import { notifyBoxChanged } from "./events.js";
 import { usePaneInputTools } from "./usePaneInputTools.js";
 import type { PaneImage } from "./usePaneInputTools.js";
 //  "./usePaneInputTools.js";
@@ -933,7 +934,11 @@ export function CardChatPane({
         sendingRef.current = false;
         setSending(false);
       }
-      if (ok) onSent?.();
+      if (ok) {
+        onSent?.();
+        // 送ったカードをバッジの数から外す(返事が来れば台帳から戻る)。
+        notifyBoxChanged();
+      }
       return ok;
     },
     [

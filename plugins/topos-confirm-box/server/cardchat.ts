@@ -316,6 +316,55 @@ export function cardChatMarks(
   return { waiting, unread, replies, lastReplyAt };
 }
 
+/**
+ * そのカードが「ユーザーの送信後、まだ返事が来ていない」状態か。サイドバーのバッジの数から外す判定
+ * (2026-11-08 ユーザー「カードのチャット欄で送信したら一度バッジを消して、返信来たらまた出して」)。
+ * いちばん新しい質問(取消済み・画像への直接コメント・7日超は除く)が、いちばん新しい返事
+ * (受領 ack は返事に数えない)より新しければ返事待ち。返事が来れば自然に false へ戻る。
+ */
+export function isAwaitingReply(
+  rows: Record<string, unknown>[],
+  mine: (row: Record<string, unknown>) => boolean,
+  now: number,
+): boolean {
+  const cancelled = new Set<string>();
+  for (const r of rows) if (r.t === "chat_cancel") cancelled.add(field(r, "re"));
+  let lastAsk = 0;
+  for (const r of rows) {
+    if (r.t !== "chat" || typeof r.ts !== "number" || !mine(r)) continue;
+    if (r.ts < now - PANE_MAX_AGE_MS || isImageComment(field(r, "question"))) continue;
+    if (cancelled.has(field(r, "client_message_id"))) continue;
+    lastAsk = Math.max(lastAsk, r.ts);
+  }
+  if (lastAsk === 0) return false;
+  const { lastReplyAt } = replyStats(rows, mine, now);
+  return lastReplyAt === null || lastReplyAt < lastAsk;
+}
+
+export interface CardReplyMarks {
+  /** 送ったが返事がまだ(バッジの数から外す)。 */
+  waiting: boolean;
+  /** 返事が届いていて、まだ画面で見ていない(カードに目印を出す)。 */
+  unread: boolean;
+}
+
+/** 通常カード向けの印。台帳から毎回作る(`cardChatMarks` はペイン発だけを見るので別に持つ)。 */
+export function cardReplyMarks(
+  dir: string,
+  target: CardChatTarget,
+  now: number = Date.now(),
+  preRead?: Record<string, unknown>[],
+): CardReplyMarks {
+  const rows = preRead ?? boxRows(dir);
+  const mine = cardMatcher(targetKeys(target));
+  const waiting = isAwaitingReply(rows, mine, now);
+  const { lastReplyAt } = replyStats(rows, mine, now);
+  return {
+    waiting,
+    unread: !waiting && lastReplyAt !== null && lastReplyAt > lastSeenAt(rows, mine),
+  };
+}
+
 type RowMatcher = (row: Record<string, unknown>) => boolean;
 
 /** この項目から出したペイン質問のID(返事の `re` 照合用)。 */

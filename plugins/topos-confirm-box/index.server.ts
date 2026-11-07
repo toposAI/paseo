@@ -209,6 +209,8 @@ import {
   boxRows,
   cancelFromPane,
   cardChatMarks,
+  cardReplyMarks,
+  isAwaitingReply,
   cardExists,
   markSeen,
   panePending,
@@ -429,12 +431,24 @@ export default function contribute(server: PluginServerContext) {
         // 印なしで続ける(applyMarks は載っていない id を画面側の値のまま残す)
       }
     }
+    // 通常カード(UFC以外)の返事待ち・未読。印が立つカードだけ載せる。
+    const cardMarks: Record<string, { waiting: boolean; unread: boolean }> = {};
+    for (const item of all) {
+      if (isUiFinalCheck(item) && item.kind === "box") continue;
+      try {
+        const m = cardReplyMarks(dir, { id: item.id, key: item.key }, now, boxRowsForMarks);
+        if (m.waiting || m.unread) cardMarks[item.id] = m;
+      } catch {
+        // 印なしで続ける
+      }
+    }
     return {
       items: all,
       sources: [...sources, permitSource],
       dir: readDir,
       generatedAt: now,
       ufcMarks,
+      cardMarks,
     };
   }
 
@@ -810,12 +824,31 @@ export default function contribute(server: PluginServerContext) {
       total: presentableTotal,
       consulting: presentableConsulting,
     } = await computeBadge(vaultSourceEnabled(), badgeCounter);
+    // 送信済みで返事待ちのカードは数から外す(返事が来れば台帳から自然に戻る)。
+    let awaitingReply = 0;
+    try {
+      const rows = boxRows(resolveConfirmBoxDir());
+      const nowMs = Date.now();
+      for (const item of open) {
+        const keys = new Set([item.id, item.key ?? ""].filter((v) => v.length > 0));
+        const mine = (r: Record<string, unknown>) =>
+          keys.has(String(r.id ?? "")) || (!!r.key && keys.has(String(r.key)));
+        if (isAwaitingReply(rows, mine, nowMs)) awaitingReply += 1;
+      }
+    } catch {
+      awaitingReply = 0;
+    }
+    const shownTotal =
+      presentableTotal === null ? null : Math.max(0, presentableTotal - awaitingReply);
+    const shownPresentable =
+      presentable === null || shownTotal === null ? presentable : Math.min(presentable, shownTotal);
     return {
       open: open.length,
       openKnown,
-      presentable,
-      presentableTotal,
+      presentable: shownPresentable,
+      presentableTotal: shownTotal,
       presentableConsulting,
+      awaitingReply,
       blocking: open.filter((i) => i.priority === "blocking").length,
       permits: open.filter((i) => i.kind === "permit").length,
       failedSources: sources.filter((src) => !src.ok).length,
