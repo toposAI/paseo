@@ -212,11 +212,21 @@ function useBugBadge(): number | undefined {
   const [n, setN] = useState<number | null>(null);
   useEffect(() => {
     let alive = true;
-    const tick = () =>
-      count({})
-        .then((r) => alive && setN(bugBadgeCount(r)))
-        // 一時的な失敗では前回の件数を残す(`BoxTabLink` と同じ)。
-        .catch(() => {});
+    const tick = () => {
+      // ホストの接続が差し替わると RPC は**同期的に** throw しうる。効果の中で投げると、
+      // 行単位のエラー境界(`sidebar-items/index.tsx` の `renderError`)がこの行だけを
+      // 無言で消す(2026-11-07 本番で「バグ報告」が消えた)。同期例外も握りつぶす。
+      try {
+        return (
+          count({})
+            .then((r) => alive && setN(bugBadgeCount(r)))
+            // 一時的な失敗では前回の件数を残す(`BoxTabLink` と同じ)。
+            .catch(() => {})
+        );
+      } catch {
+        return Promise.resolve();
+      }
+    };
     void tick();
     const timer = setInterval(tick, COUNT_MS);
     const off = onBoxChanged(() => void tick());
@@ -260,8 +270,10 @@ function SidebarWithHeaderButton({
     let alive = true;
     for (const host of hosts) {
       if (host.status !== "online") continue;
-      getPaseoClient(host.serverId)
-        .workspaces.list()
+      // `getPaseoClient` は接続が差し替わった直後に**同期的に** throw する。効果の中で投げると
+      // 行単位のエラー境界がこの「バグ報告」行だけを無言で消すので、取得全体を promise に包む。
+      void Promise.resolve()
+        .then(() => getPaseoClient(host.serverId).workspaces.list())
         .then((res) => {
           if (!alive) return null;
           for (const ws of res.entries ?? []) {
@@ -287,7 +299,12 @@ function SidebarWithHeaderButton({
     }
     // オンラインのホストが一覧に揃ってから窓口Bのワークスペースを探す(揃う前に探すと、後から来た
     // ホストを次の10秒の巡回まで見ない)。`hosts`・`registered` は取得のたびに変わる(=取り直し)。
-    if (hosts.some((host) => host.status === "online")) void refreshWindowBWorkspace(hosts);
+    // ここも接続差し替え直後は同期的に throw しうる(効果内の例外はこの行だけを消す)。
+    try {
+      if (hosts.some((host) => host.status === "online")) void refreshWindowBWorkspace(hosts);
+    } catch {
+      /* 次の tick で取り直す */
+    }
     return () => {
       alive = false;
     };
