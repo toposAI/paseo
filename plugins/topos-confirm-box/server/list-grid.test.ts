@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   CARD_MIN_WIDTH,
-  LIST_GRID_GAP,
+  LIST_MAX_WIDTH,
   MAX_COLUMNS,
   listCellWidth,
   listColumns,
@@ -15,34 +15,20 @@ test("iPhone幅(wide=false)は常に1列", () => {
   }
 });
 
-test("PC幅: 幅が広いほど列が増え、3列で頭打ち", () => {
-  assert.equal(listColumns(1400, true), MAX_COLUMNS);
-  assert.equal(listColumns(2000, true), MAX_COLUMNS);
+test("PC幅でも常に1列(2026-11-07 ユーザー決定)", () => {
+  assert.equal(MAX_COLUMNS, 1);
+  for (const w of [720, 1006, 1400, 2000]) {
+    assert.equal(listColumns(w, true), 1, `width=${w}`);
+    assert.equal(listCellWidth(w, 1), undefined);
+  }
+});
+
+test("1列のカード幅に上限がある", () => {
+  assert.ok(LIST_MAX_WIDTH >= CARD_MIN_WIDTH && LIST_MAX_WIDTH <= 900);
 });
 
 test("PC幅: 幅が読めない・0以下は1列(潰れたカードを出さない)", () => {
   for (const w of [0, -100, Number.NaN]) {
     assert.equal(listColumns(w, true), 1, `width=${w}`);
-  }
-});
-
-test("列が減ると2列以下になる(右ペインが開いて一覧が狭くなったとき)", () => {
-  assert.equal(listColumns(CARD_MIN_WIDTH * 2 + LIST_GRID_GAP, true), 2);
-  assert.equal(listColumns(CARD_MIN_WIDTH + LIST_GRID_GAP - 1, true), 1);
-});
-
-test("3列になるのは幅 1006px から(330*3 + 8*2)", () => {
-  assert.equal(listColumns(1005, true), 2);
-  assert.equal(listColumns(1006, true), 3);
-});
-
-test("1枚の幅: 列数ぶん+すき間が一覧幅に収まる(端数で折り返さない)", () => {
-  // 実測幅は端数つきで来る(呼び出し側で Math.floor 済み)。切り上げで3枚目がはみ出さないこと。
-  for (const total of [800, 975, 976, 998, 999, 1030, 1400, 2000]) {
-    const cols = listColumns(total, true);
-    const cell = listCellWidth(total, cols);
-    assert.ok(cell !== undefined, `total=${total}`);
-    assert.ok(cols * cell + LIST_GRID_GAP * (cols - 1) <= total, `total=${total}`);
-    assert.ok(cell >= CARD_MIN_WIDTH, `total=${total} cell=${cell}`);
   }
 });

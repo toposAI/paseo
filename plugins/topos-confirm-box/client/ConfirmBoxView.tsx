@@ -44,6 +44,7 @@ import {
 import {
   LIST_GRID_GAP,
   LIST_GRID_PADDING,
+  LIST_MAX_WIDTH,
   listCellWidth,
   listColumns,
 } from "../shared/list-grid.js";
@@ -401,7 +402,13 @@ export function ConfirmBoxView({
       },
       // 判断一覧の入れ物。幅は onLayout で測る(左右の余白は body の padding が持つ)。
       // 1列のときもカード同士のすき間を gap で入れる(従来の body の gap は外の兄弟にしか効かない)。
-      listBox: { gap: LIST_GRID_GAP },
+      // PC幅でも1列。広い画面ではカード幅に上限を付けて中央に寄せる(狭い幅は上限に届かず全幅)。
+      listBox: {
+        gap: LIST_GRID_GAP,
+        width: "100%" as const,
+        maxWidth: LIST_MAX_WIDTH,
+        alignSelf: "center" as const,
+      },
       // 判断一覧の並べ(PC幅は複数列。1枚ごとの幅は listCellWidth で決める)。
       grid: {
         flexDirection: "row" as const,
