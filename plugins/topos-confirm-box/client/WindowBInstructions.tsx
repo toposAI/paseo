@@ -47,6 +47,13 @@ import {
   WIDE_MIN_WIDTH,
 } from "../shared/windowb-instructions.js";
 
+/** 末尾の「(29分前)」だけが次の行へ落ちて数文字で残らないよう、括弧の中を1語に繋ぐ(U+2060)。 */
+function keepAgoTogether(line: string): string {
+  const i = line.lastIndexOf("(");
+  if (i < 0 || !line.endsWith(")")) return line;
+  return line.slice(0, i) + "\u2060" + Array.from(line.slice(i)).join("\u2060");
+}
+
 export const WINDOWB_PANEL_ID = "window-b-instructions";
 export const WINDOWB_PANEL_TITLE = "指示一覧";
 export const WINDOWB_BUTTON_ID = "windowb-instructions";
@@ -228,7 +235,7 @@ function Row({
       </View>
       <Text style={s.title}>{joinTitleWords(rowTitle(item))}</Text>
       <Text style={s.meta} testID={`windowb-owner-${item.key}`}>
-        {ownerLine(item, now)}
+        {keepAgoTogether(ownerLine(item, now))}
       </Text>
       {open && item.detail ? <Text style={s.meta}>{item.detail}</Text> : null}
       {open
