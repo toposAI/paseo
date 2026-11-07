@@ -78,9 +78,9 @@ export function visibleRows(
 }
 
 /** 一覧の並び。赤 → 判断待ち → 未登録 → その他 → 完了。同じ群の中は Python の並びのまま(安定ソート)。 */
-export function rowOrder<T extends { alert: string | null; warn: string | null; kind: string }>(
-  rows: readonly T[],
-): T[] {
+export function rowOrder<
+  T extends { alert: string | null; warn: string | null; kind: string; stalled?: boolean },
+>(rows: readonly T[]): T[] {
   return rows
     .map((r, i) => ({ r, i }))
     .sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i)
@@ -88,9 +88,16 @@ export function rowOrder<T extends { alert: string | null; warn: string | null; 
 }
 
 /** 並びの群(小さいほど上)。 */
-function rank(row: { alert: string | null; warn: string | null; kind: string }): number {
+function rank(row: {
+  alert: string | null;
+  warn: string | null;
+  kind: string;
+  stalled?: boolean;
+}): number {
   if (row.alert) return 0;
   if (row.kind === WINDOW_B_KIND.judgment) return 1;
+  // 止まっている(長く動きがない進行中)は、普通の作業中より上。完了は止まりに数えない。
+  if (row.stalled && row.kind !== WINDOW_B_KIND.done) return 2;
   // 「届いたか」そのものが知りたいことなので、届いたか不明・返事なしは状態の順で後ろへ回さない。
   if (row.kind === WINDOW_B_KIND.unknown || row.kind === WINDOW_B_KIND.noReply) return 2;
   if (row.warn) return 3;
@@ -201,6 +208,38 @@ export function visibleRoutes(
   const all = routes ?? [];
   if (open || all.length <= ROUTES_COLLAPSED) return { shown: [...all], hidden: 0 };
   return { shown: all.slice(0, ROUTES_COLLAPSED), hidden: all.length - ROUTES_COLLAPSED };
+}
+
+/** 「N分前 / N時間前 / N日前」。未来や不正な値は空。 */
+export function agoText(lastAtSec: number | undefined, nowMs: number): string {
+  if (lastAtSec === undefined) return "";
+  const diff = Math.floor((nowMs - lastAtSec * 1000) / 60_000);
+  if (diff < 0) return "";
+  if (diff < 60) return `${Math.max(diff, 1)}分前`;
+  if (diff < 60 * 24) return `${Math.floor(diff / 60)}時間前`;
+  return `${Math.floor(diff / (60 * 24))}日前`;
+}
+
+/** カードの段階名。古いサーバ(stage 無し)は状態の語のまま。 */
+export function stageText(item: { stage?: string; kind: string }): string {
+  return item.stage ?? item.kind;
+}
+
+/** 担当と最後に動いた時刻の1行(閉じたカードにも出す)。例: `担当: 家族版出荷13 ・ 最後の動き 11/07 16:32(16時間前)`。 */
+export function ownerLine(
+  item: { assigneeText: string; lastText?: string; lastAt?: number },
+  nowMs: number,
+): string {
+  const who = `担当: ${plainAssignee(item.assigneeText.replace(/^\(担当未定\)$/, ""))}`;
+  if (!item.lastText) return who;
+  const ago = agoText(item.lastAt, nowMs);
+  return `${who} ・ 最後の動き ${item.lastText}${ago ? `(${ago})` : ""}`;
+}
+
+/** 隠した自動送信の短い一言。0件なら null。 */
+export function hiddenAutoText(data: WindowBInstructionsOutput | null): string | null {
+  const n = data?.hiddenAuto?.count ?? 0;
+  return n > 0 ? `自動送信・スレ間の連絡${n}件は非表示` : null;
 }
 
 /** 閉じたカードのタイトル。要約(title)が空なら全文の1行目。逐語でない要約は作らない。 */

@@ -29,12 +29,14 @@ import {
   doneButtonText,
   emptyText,
   type ListMode,
+  hiddenAutoText,
   keepLastOnFailure,
   NOTICE_MAX_LINES,
+  ownerLine,
+  stageText,
   noticeLines,
   joinTitleWords,
   paneLocation,
-  plainAssignee,
   routeText,
   rowTitle,
   visibleRoutes,
@@ -134,13 +136,27 @@ function kindColor(c: PluginTheme["colors"], kind: string, urgent: boolean, warn
   return c.foreground;
 }
 
+/** 枠の色: 赤(要対応) > 橙(止まっている) > 通常。 */
+function borderOf(c: PluginTheme["colors"], urgent: boolean, stalled: boolean): string {
+  if (urgent) return c.statusDanger;
+  return stalled ? c.statusWarning : c.border;
+}
+
 /** 知っている語か(Python が語を足したら、読めなくするのではなく橙で出す)。 */
 function isKnownKind(kind: string): boolean {
   return (Object.values(WINDOW_B_KIND) as string[]).includes(kind);
 }
 
 /** 1行。赤=返事なし/担当未定、橙=台帳に載っていない。それ以外は状態の文字で見せる。 */
-function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginTheme["colors"] }) {
+function Row({
+  item,
+  colors: c,
+  now,
+}: {
+  item: WindowBInstruction;
+  colors: PluginTheme["colors"];
+  now: number;
+}) {
   // 既定は日付とタイトル(1行)だけ。押すと全文・振り先と進み具合・赤の理由が開き、もう一度押すと閉じる。
   // 開閉はカードごとの状態で、30秒ごとの引き直しでは閉じない(key=item.key で同じカードを引き継ぐ)。
   const [open, setOpen] = useState(false);
@@ -149,14 +165,17 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
   const routes = useMemo(() => visibleRoutes(item.routes, open), [item.routes, open]);
   const urgent = item.alert !== null;
   const warn = item.warn !== null || !isKnownKind(item.kind);
-  const accent = kindColor(c, item.kind, urgent, warn);
+  // 止まっている(進行中で長く動きがない)は橙の太枠で目立たせる。完了は止まりに数えない。
+  const stalled = item.stalled === true && item.kind !== WINDOW_B_KIND.done;
+  const accent =
+    stalled && !urgent && !warn ? c.statusWarning : kindColor(c, item.kind, urgent, warn);
   const s = useMemo(
     () => ({
       card: {
         backgroundColor: c.surface1,
-        borderColor: urgent ? c.statusDanger : c.border,
+        borderColor: borderOf(c, urgent, stalled),
         borderLeftColor: accent,
-        borderWidth: urgent || warn ? 2 : 1,
+        borderWidth: urgent || warn || stalled ? 2 : 1,
         borderLeftWidth: 4,
         borderRadius: 8,
         padding: 8,
@@ -189,7 +208,7 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
         paddingTop: 4,
       },
     }),
-    [c, accent, urgent, warn],
+    [c, accent, urgent, warn, stalled],
   );
   return (
     <Pressable
@@ -202,17 +221,16 @@ function Row({ item, colors: c }: { item: WindowBInstruction; colors: PluginThem
       <View style={s.head}>
         <Text style={s.time}>{item.atText}</Text>
         <Text style={s.kind}>
-          {item.kind}
+          {stageText(item)}
           {item.alert ? ` ・ ${ALERT_SHORT[item.alert] ?? "要確認"}` : ""}
+          {stalled ? " ・ 止まっている" : ""}
         </Text>
       </View>
       <Text style={s.title}>{joinTitleWords(rowTitle(item))}</Text>
-      {open ? (
-        <Text style={s.meta}>
-          {plainAssignee(item.assigneeText)}
-          {item.detail ? ` ・ ${item.detail}` : ""}
-        </Text>
-      ) : null}
+      <Text style={s.meta} testID={`windowb-owner-${item.key}`}>
+        {ownerLine(item, now)}
+      </Text>
+      {open && item.detail ? <Text style={s.meta}>{item.detail}</Text> : null}
       {open
         ? routes.shown.map((r) => (
             <Text
@@ -318,6 +336,7 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
       </View>
     );
   }
+  const hiddenAuto = hiddenAutoText(data);
   const truncate = truncated ? <Text style={s.muted}>{truncated}</Text> : null;
   return (
     <View style={s.root} testID="windowb-instructions">
@@ -346,6 +365,11 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
         >
           <Text style={s.toggleText}>{doneButtonText(mode, doneCount)}</Text>
         </Pressable>
+        {hiddenAuto ? (
+          <Text style={s.muted} testID="windowb-hidden-auto">
+            {hiddenAuto}
+          </Text>
+        ) : null}
         {truncate}
         {notice}
       </View>
@@ -353,7 +377,7 @@ export function WindowBInstructionsPanel({ theme }: { theme: PluginTheme }) {
         {!data && !error ? <Text style={s.muted}>読み込み中…</Text> : null}
         {data && rows.length === 0 ? <Text style={s.muted}>{emptyText(mode)}</Text> : null}
         {rows.map((item) => (
-          <Row key={item.key} item={item} colors={c} />
+          <Row key={item.key} item={item} colors={c} now={now} />
         ))}
       </ScrollView>
     </View>

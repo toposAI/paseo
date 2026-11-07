@@ -8,6 +8,10 @@ import type { WindowBInstructionsOutput } from "../shared/contract.js";
 import {
   STALE_AFTER_MS,
   WIDE_MIN_WIDTH,
+  agoText,
+  hiddenAutoText,
+  ownerLine,
+  stageText,
   doneButtonText,
   emptyText,
   filterByMode,
@@ -289,4 +293,34 @@ test("noticeLines: 切り詰めの注記と合わせて2行に収めるときは
   assert.deepEqual(noticeLines(notices, 1), ["同じ依頼35件は1つにまとめて表示 ほか2件"]);
   // 0 以下でも行は消さない(1行は必ず出す)
   assert.deepEqual(noticeLines(["知らない注意"], 0), ["知らない注意"]);
+});
+
+test("止まっている進行中は普通の作業中より上、完了は下", () => {
+  const base = { alert: null, warn: null };
+  const rows = [
+    { ...base, kind: "完了", stalled: true, id: "done" },
+    { ...base, kind: "作業中", stalled: false, id: "fresh" },
+    { ...base, kind: "作業中", stalled: true, id: "stuck" },
+  ];
+  assert.deepEqual(
+    rowOrder(rows).map((r) => r.id),
+    ["stuck", "fresh", "done"],
+  );
+});
+
+test("段階名・担当と最後の動き・隠した自動送信の一言", () => {
+  assert.equal(stageText({ stage: "本番に出た", kind: "完了報告待ち" }), "本番に出た");
+  assert.equal(stageText({ kind: "作業中" }), "作業中");
+  const now = Date.UTC(2026, 10, 8, 3, 0, 0);
+  const at = (now - 16 * 3_600_000) / 1000;
+  assert.equal(agoText(at, now), "16時間前");
+  assert.equal(agoText((now - 30_000) / 1000, now), "1分前");
+  assert.equal(agoText((now - 3 * 86_400_000) / 1000, now), "3日前");
+  assert.equal(agoText(undefined, now), "");
+  assert.equal(
+    ownerLine({ assigneeText: "家族版出荷13", lastText: "11/07 16:32", lastAt: at }, now),
+    "担当: 家族版出荷13 ・ 最後の動き 11/07 16:32(16時間前)",
+  );
+  assert.equal(ownerLine({ assigneeText: "(担当未定)" }, now), "担当: 担当未定");
+  assert.equal(hiddenAutoText(null), null);
 });

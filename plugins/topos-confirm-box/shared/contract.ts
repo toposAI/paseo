@@ -835,6 +835,13 @@ export const windowBInstructionsRpc = defineRpc({
         ),
         assigneeText: z.string(),
         kind: z.string(),
+        /** 平易な段階名(受け付けた / 作業中 / 本番に出た / ユーザー確認待ち / 完了)。古いサーバは欄ごと無い(状態の語で出す)。 */
+        stage: z.string().optional(),
+        /** 最後に動いた時刻(epoch秒)と表示用の文字。古いサーバは欄ごと無い。 */
+        lastAt: z.number().optional(),
+        lastText: z.string().optional(),
+        /** 進行中なのに長く動きがない(目立たせる)。 */
+        stalled: z.boolean().optional(),
         detail: z.string(),
         /** 赤にしてよい理由(no_reply=10分返事なし / unassigned=1時間担当未定)。 */
         alert: z.enum(["no_reply", "unassigned"]).nullable(),
@@ -868,6 +875,15 @@ export const windowBInstructionsRpc = defineRpc({
     counts: z.record(z.string(), z.number()),
     alerts: z.number().int(),
     warns: z.number().int(),
+    /** 止まっている(進行中で長く動きがない)件数。 */
+    stalled: z.number().int().optional(),
+    /** 自動送信・スレ間の連絡として一覧から隠した件(記録は消さない)。 */
+    hiddenAuto: z
+      .object({
+        count: z.number().int(),
+        items: z.array(z.object({ key: z.string(), title: z.string(), reason: z.string() })),
+      })
+      .optional(),
     /** 読み出せなかった台帳などの知らせ(空を「大丈夫」と読ませない)。 */
     notices: z.array(z.string()),
   }),
