@@ -45,6 +45,8 @@ export function ImageCommentDock({
 }) {
   const [text, setText] = useState("");
   const [notice, setNotice] = useState("");
+  // 送れた知らせを警告色(赤系)で出さないための区別(2026-11-08 出口レビュー指摘5)。
+  const [noticeOk, setNoticeOk] = useState(false);
   // 送信中は押し直しを黙って無視する(2026-11-06 出口レビュー指摘4)。送信側も送信中は false を
   // 返すため、素通しすると二度押しで「送れませんでした」と誤って出てしまう。
   const busyRef = useRef(false);
@@ -61,10 +63,12 @@ export function ImageCommentDock({
       busyRef.current = false;
     }
     if (!ok) {
+      setNoticeOk(false);
       setNotice("送れませんでした(投函元スレに届いていません)");
       return;
     }
     setText("");
+    setNoticeOk(true);
     setNotice("コメントを送りました");
   }, [text, send, label]);
   const submitPress = useCallback(() => void submit(), [submit]);
@@ -82,12 +86,13 @@ export function ImageCommentDock({
         paddingBottom: 12,
       },
       notice: { color: "#ffb4a8", fontSize: 12, padding: 8 },
+      noticeOk: { color: "#9fd6a8", fontSize: 12, padding: 8 },
     }),
     [colors.surface0, colors.surface1],
   );
   return (
     <View style={st.dock}>
-      {notice ? <Text style={st.notice}>{notice}</Text> : null}
+      {notice ? <Text style={noticeOk ? st.noticeOk : st.notice}>{notice}</Text> : null}
       {/* マイクが使えない環境で押したときの理由をここに出す(本体の composer にも案内が出る)。 */}
       {tools.toolNotice ? <Text style={st.notice}>{tools.toolNotice}</Text> : null}
       <PaneComposer

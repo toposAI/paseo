@@ -1515,22 +1515,18 @@ function ItemCard({
   // 画像のコメントを送る口。カードの会話ペインと同じ部品(CardChatPane)を、拡大表示の間だけ
   // 画面に出さずに置いて使う(投函元の解決・台帳への記録・振り替えを1か所に保つ)。
   const commentSendRef = useRef<((text: string) => Promise<boolean>) | null>(null);
-  const closeAfterComment = useCallback(() => {
-    // 画像へのコメントではカードを閉じない(2026-11-08 ユーザー逐語「1枚の画像にコメントした直後に
-    // その確認箱終了にするのやめて、僕が全部の画像を確認した後に僕が手動で完了ボタンを押します」)。
-    // 閉じるのはカードの「完了」ボタンだけ。ここでは拡大表示だけを閉じる。
-    setZoom(null);
-  }, []);
+  // 画像へのコメントではカードを閉じない(2026-11-08 ユーザー逐語「1枚の画像にコメントした直後に
+  // その確認箱終了にするのやめて、僕が全部の画像を確認した後に僕が手動で完了ボタンを押します」)。
+  // 閉じるのはカードの「完了」ボタンだけ。拡大表示を閉じるのは closeZoom。
   // 拡大表示に渡すコメント欄の設定(毎回新しいオブジェクトを渡さない)。
   const lightboxComment = useMemo(
     () => ({
       label: zoom === null ? "" : (item.imageCaptions?.[zoom] ?? `${zoom + 1}枚目の画像`),
       send: (text: string) =>
         commentSendRef.current ? commentSendRef.current(text) : Promise.resolve(false),
-      onDone: closeAfterComment,
       testID: "lightbox-image-composer",
     }),
-    [zoom, item.imageCaptions, closeAfterComment],
+    [zoom, item.imageCaptions],
   );
   const reject = useCallback(() => onReject(item), [onReject, item]);
   const complete = useCallback(() => onComplete(item), [onComplete, item]);

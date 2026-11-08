@@ -153,7 +153,7 @@ export function UiFinalCheckCard({
   visited: boolean;
   nextExists: boolean;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
-  /** 完了にして閉じる(数秒は元に戻せる)。コメントを送った後に閉じるための操作。 */
+  /** 完了にして閉じる(数秒は元に戻せる)。カードの「完了」ボタン専用。画像コメントでは呼ばない。 */
   onDone: (item: ConfirmBoxItem) => void;
   onToggle: (id: string) => void;
   onSent: (id: string) => void;

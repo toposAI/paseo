@@ -906,7 +906,7 @@ export function CardChatPane({
         sentOnce.current = true;
         if (imageComment && askedId && item) {
           // 画像への直接コメントは返事を求めない。催促・「返事待ち」の対象から外す
-          // (2026-11-06 ユーザー指示。カードを閉じるのは呼び出し側=同じ完了の経路)。
+          // (2026-11-06 ユーザー指示。カードは閉じない。閉じるのはユーザーの「完了」ボタンだけ=2026-11-08)。
           try {
             await cancelRpc({ id: item.id, key: item.key, replyId: askedId });
             if (topic) void refreshTopic();
@@ -933,7 +933,8 @@ export function CardChatPane({
         sendingRef.current = false;
         setSending(false);
       }
-      if (ok) onSent?.();
+      // 画像へのコメントでは次へ進めない(カードを閉じない・切り替えない。2026-11-08 ユーザー指示)。
+      if (ok && !imageComment) onSent?.();
       return ok;
     },
     [
