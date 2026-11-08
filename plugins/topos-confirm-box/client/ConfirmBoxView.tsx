@@ -260,6 +260,14 @@ export function ConfirmBoxView({
       text: { color: c.foreground, fontSize: 13 },
       badge: { color: c.accent, fontSize: 11 },
       // 返事の目印。UIの最終チェックカードの状態チップ(UiFinalCheckCard)と同じ見た目に揃える。
+      // 返事の札は題名と同じ行の右端に置く(1行を食わない。2026-11-08 指摘)。
+      titleRow: {
+        flexDirection: "row" as const,
+        alignItems: "flex-start" as const,
+        justifyContent: "space-between" as const,
+        gap: 8,
+      },
+      titleCell: { flex: 1, minWidth: 0 },
       replyChip: {
         color: c.accent,
         // 枠線で「札」に見せる。背景なしの文字だけだと左の余白ぶん上の行より右へずれて見える。
@@ -270,7 +278,7 @@ export function ConfirmBoxView({
         borderRadius: 10,
         paddingHorizontal: 8,
         paddingVertical: 1,
-        alignSelf: "flex-start" as const,
+        flexShrink: 0,
         overflow: "hidden" as const,
       },
       replyChipUnread: {
@@ -281,7 +289,7 @@ export function ConfirmBoxView({
         borderRadius: 10,
         paddingHorizontal: 8,
         paddingVertical: 1,
-        alignSelf: "flex-start" as const,
+        flexShrink: 0,
         overflow: "hidden" as const,
       },
       link: {
@@ -1614,15 +1622,19 @@ function ItemCard({
             {item.state === "approved" ? " · 決定済み" : ""}
             {item.onHold ? ` · ${item.onHold}(窓口では出ません)` : ""}
           </Text>
-          {replyMark?.unread || replyMark?.waiting ? (
-            <Text
-              style={replyMark.unread ? styles.replyChipUnread : styles.replyChip}
-              testID={replyMark.unread ? "card-reply-unread" : "card-reply-waiting"}
-            >
-              {replyMark.unread ? "💬 返事が届きました" : "返事待ち"}
-            </Text>
-          ) : null}
-          <CardTitle subject={item.subject} style={styles.subject} />
+          <View style={styles.titleRow}>
+            <View style={styles.titleCell}>
+              <CardTitle subject={item.subject} style={styles.subject} />
+            </View>
+            {replyMark?.unread || replyMark?.waiting ? (
+              <Text
+                style={replyMark.unread ? styles.replyChipUnread : styles.replyChip}
+                testID={replyMark.unread ? "card-reply-unread" : "card-reply-waiting"}
+              >
+                {replyMark.unread ? "💬 返事が届きました" : "返事待ち"}
+              </Text>
+            ) : null}
+          </View>
           {open || questions.length > 0 ? null : (
             <Text style={styles.muted} numberOfLines={2}>
               {/* 本文も語の途中で折らない(2026-11-07 指摘「見えて／いる」)。 */}
