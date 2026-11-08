@@ -5,7 +5,9 @@
  * - 入力欄は1つ。右ペインと同じ会話部品(CardChatPane の embedded + PaneComposer)をカードの中に常に出す。
  *   送ると投函元へ届き、そのカードは「返事待ち」で残して次の未回答カードへ進む(画像への直接コメントは
  *   返事を求めないので進めず、そのカードのまま留まる。2026-11-08)。
- * - 画像を開くと、画像ごとにコメントを付けて投函元へ送れる(送る文の先頭に画像名の印を付ける)。
+ * - 画像を開くと、画像ごとにコメントを付けられる(送る文の先頭に画像名の印を付ける)。コメントはその場では
+ *   送らず、カード側に溜めて「完了」で1通にまとめて投函元へ送る(2026-11-08 ユーザー逐語「全ての画像に
+ *   コメントして完了ボタンを押したときに全部まとめて飛ばせばよくない？」)。送れたら完了にして閉じる。
  * - 今見ていないカードは1行に畳む(返事待ち・未読の返事あり・未回答)。畳んでも入力欄は載せたまま保つ。
  * 見ているカードの切り替え・件数は `useUfcFlow` / `shared/ufc-flow.ts`。
  */
@@ -54,7 +56,34 @@ function showsImages(currentId: string | null, item: { id: string; state: string
   return currentId === item.id || item.state === "approved";
 }
 
-/** 画像ビューア: 大きく見て、この画像へのコメントを投函元へ送る(入力欄は他と同じ部品)。 */
+/**
+ * 溜めた画像コメントを1通にまとめて送る(空なら送るものが無いので成功扱い)。
+ * 送れなければ false を返し、呼び出し側は溜めた内容を残して閉じない。
+ */
+async function flushImageComments(
+  pending: string[],
+  send: ((text: string) => Promise<boolean>) | null,
+): Promise<boolean> {
+  if (pending.length === 0) return true;
+  if (!send) return false;
+  return send(pending.join("\n\n"));
+}
+
+/** 完了ボタンの文字。まとめ送信中は押せないことが分かるよう「送信中…」にする。 */
+function doneText(flushing: boolean): string {
+  return flushing ? "送信中…" : "完了";
+}
+
+/** 完了ボタンの下に出す1行(溜めた件数、またはまとめ送信の失敗)。出すものが無ければ null。 */
+function pendingNote(failed: boolean, count: number): string | null {
+  if (failed) {
+    return "まとめて送れませんでした(溜めたコメントは残っています。もう一度「完了」で送ります)";
+  }
+  if (count > 0) return `コメント${count}件をまとめて送ります`;
+  return null;
+}
+
+/** 画像ビューア: 大きく見て、この画像へのコメントを溜める(入力欄は他と同じ部品)。 */
 function ImageViewer({
   source,
   label,
@@ -90,7 +119,7 @@ function ImageViewer({
         <View style={st.body}>
           {source ? <ZoomableImage uri={source.uri} label={label} /> : null}
         </View>
-        {/* コメント欄は共通部品(どの画像ビューアでも必ず出す)。送ってもカードは閉じない(2026-11-08)。 */}
+        {/* コメント欄は共通部品(どの画像ビューアでも必ず出す)。溜めるだけでカードは閉じない(2026-11-08)。 */}
         <ImageCommentDock label={label} colors={colors} send={send} testID="ufc-image-composer" />
       </View>
     </Modal>
@@ -169,6 +198,14 @@ export function UiFinalCheckCard({
   const [focusN, setFocusN] = useState(0);
   const okRef = useRef(false);
   const sendRef = useRef<((text: string) => Promise<boolean>) | null>(null);
+  // 画像ごとのコメントはその場で送らず、ここに溜めて「完了」で1通にまとめる(2026-11-08 ユーザー指示)。
+  // 溜めた件数は画面にも出すので、ref とは別に件数だけ state でも持つ。
+  const pendingRef = useRef<string[]>([]);
+  const [pendingN, setPendingN] = useState(0);
+  // まとめ送信中は「完了」の押し直しを無視する(二重送信を防ぐ)。
+  const [flushing, setFlushing] = useState(false);
+  const flushingRef = useRef(false);
+  const [flushFailed, setFlushFailed] = useState(false);
   // 1画像=1カード(2026-11-06 ユーザー指示)。完成版/変更前で絞らず、そのカードの画像を全部出す。
   // 畳んだカードは画像を出さないので取りに行かない(開いたときに取る)。
   const sources = useItemImageSources(item, showsImages(flow.current, item));
@@ -188,7 +225,28 @@ export function UiFinalCheckCard({
     setFocusN((n) => n + 1);
   }, [onSeen, item.id]);
   const closeZoom = useCallback(() => setZoom(null), []);
-  const done = useCallback(() => onDone(item), [onDone, item]);
+  const done = useCallback(async () => {
+    if (flushingRef.current) return;
+    // 送信中は押し直しを無視する(溜めたコメントを二重に送らない)。
+    flushingRef.current = true;
+    setFlushing(true);
+    let sent = false;
+    try {
+      sent = await flushImageComments(pendingRef.current, sendRef.current);
+    } finally {
+      flushingRef.current = false;
+      setFlushing(false);
+    }
+    // 送れなかったら閉じない(溜めた内容は残して、もう一度「完了」で送り直せる)。
+    if (!sent) {
+      setFlushFailed(true);
+      return;
+    }
+    pendingRef.current = [];
+    setPendingN(0);
+    setFlushFailed(false);
+    onDone(item);
+  }, [onDone, item]);
   const header = useCallback(() => onToggle(item.id), [onToggle, item.id]);
   const select = useCallback(() => {
     onSelect(item.id);
@@ -202,12 +260,17 @@ export function UiFinalCheckCard({
     onReply(item.id);
     if (isOpenCard) onSeen(item.id);
   }, [isOpenCard, onReply, onSeen, item.id]);
+  // 画像コメントは送らずに溜めるだけ(印は ImageCommentDock 側で各コメントの先頭に付いている)。
+  // true を返すのは、入力欄を空にして「控えました」を出させるため。
   const sendImageComment = useCallback(async (text: string) => {
-    const f = sendRef.current;
-    return f ? f(text) : false;
+    pendingRef.current = [...pendingRef.current, text];
+    setPendingN(pendingRef.current.length);
+    setFlushFailed(false);
+    return true;
   }, []);
   const approved = item.state === "approved";
   const isCurrent = flow.current === item.id;
+  const note = pendingNote(flushFailed, pendingN);
   const status = ufcStatus(flow, item.id);
   const zoomSource = zoom === null ? null : (sources[zoom] ?? null);
   const fixes = useMemo(
@@ -341,10 +404,11 @@ export function UiFinalCheckCard({
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="このカードを完了にして閉じる"
+                    disabled={flushing}
                     style={styles.btn}
                     onPress={done}
                   >
-                    <Text style={styles.btnText}>完了</Text>
+                    <Text style={styles.btnText}>{doneText(flushing)}</Text>
                   </Pressable>
                   {nextExists ? (
                     <Pressable accessibilityRole="button" style={styles.btn} onPress={onSkip}>
@@ -352,6 +416,8 @@ export function UiFinalCheckCard({
                     </Pressable>
                   ) : null}
                 </View>
+                {/* 溜めた画像コメントの件数と、まとめ送信に失敗したことだけを1行で添える。 */}
+                {note ? <Text style={styles.muted}>{note}</Text> : null}
                 {/* 投函元のスレがもう無いカードでも「返事待ち」は消さない(返事は総司令塔へ振り替わる)。
                     そのことが分かるよう、印の意味だけ1行で添える。 */}
                 {status === "waiting" && agentId === null ? (
