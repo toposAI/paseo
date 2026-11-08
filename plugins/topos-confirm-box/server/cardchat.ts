@@ -12,6 +12,8 @@
  * **PWAから聞くと返事が見えなかった**=旧コメントの残差は解消済み)。
  *
  * - 質問: `{t:"chat", id, key, ts, question, client_message_id}`
+ * - 受け箱へ溜めた印: `{t:"chat_queued", id, key, ts, re}`(`re` = 質問の client_message_id。
+ *   溜めに**成功した後**にだけ追記する。質問行には立てない=失敗して直接送った質問を催促の対象から外さない)
  * - 返事: `{t:"reply", id, key, ts, re, by, text}`(`re` = 質問の client_message_id)
  *   `by` = ack(受領) | origin_thread(元スレ) | hub_thread(上位スレのsay) | worker(応答ワーカー) | fallback(詰み)
  *
@@ -204,6 +206,36 @@ export function askFromPane(
     },
   ]);
   return { ok: true, message: "記録しました", replyId };
+}
+
+/**
+ * ペイン発の質問を**受け箱(通知まとめ)へ溜められた後**に、その事実を台帳へ追記する。
+ *
+ * 質問行(`askFromPane`)の時点で `queued` を立ててはいけない: 溜めに失敗して直接送信へ倒れた
+ * 質問まで Python 側の催促(`nudge_due`)・詫び(`give_up_pane_questions`)の対象から外れ、
+ * **催促も詫びも出ない質問**ができる(2026-11-08 出口レビュー指摘1)。溜まった時にだけ呼ぶ。
+ * 追記順は箱の1本の列のまま(行は消さない)。読む側(Python `confirm_box_reply.pane_status`)が
+ * `re` ごとに折り畳んで `queued` として扱う(`t:"chat_queued"` は未知の `t` として他の読み手は無視する)。
+ */
+export function markQueuedFromPane(
+  dir: string,
+  target: CardChatTarget,
+  replyId: string,
+  now: number = Date.now(),
+): boolean {
+  const id = (target.id ?? "").trim().slice(0, ID_MAX);
+  const re = (replyId ?? "").trim().slice(0, REPLY_ID_MAX);
+  if (!id || !re.startsWith("cbui-")) return false;
+  appendLines(dir, chatsFile(), [
+    {
+      t: "chat_queued",
+      id,
+      key: (target.key ?? "").trim().slice(0, ID_MAX) || null,
+      ts: now,
+      re,
+    },
+  ]);
+  return true;
 }
 
 /** 送信(上位スレへの転送)に失敗したペイン発の質問を取り消す。催促・待ち表示・集計から外れる。 */

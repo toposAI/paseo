@@ -11,10 +11,18 @@ import {
   isImageComment,
   pendingLabel,
   shouldSubmitOnEnter,
+  withCardHeader,
   withNoReplyInstruction,
   withSayInstruction,
+  withSayInstructionUpFront,
 } from "../shared/card-pane.js";
-import { askFromPane, cancelFromPane, panePending, readCardChat } from "./cardchat.js";
+import {
+  askFromPane,
+  cancelFromPane,
+  markQueuedFromPane,
+  panePending,
+  readCardChat,
+} from "./cardchat.js";
 
 function eventsFile(dir: string): string {
   const d = new Date();
@@ -49,6 +57,33 @@ test("返信IDと say コマンドが完成形で付く(クォート込み)", ()
     withSayInstruction("a", { replyId: "r", cardId: "c" }),
     withSayInstruction("a", { replyId: "r", cardId: "c" }),
   );
+});
+
+test("溜める本文は say 指示がカード見出しの直後(600字で切られても返事の書き方が残る)", () => {
+  const card = {
+    id: "ui-1",
+    subject: "写真の許可",
+    background: "背".repeat(1200),
+  };
+  const out = withSayInstructionUpFront("この件は完了で", card, {
+    replyId: "cbui-ui-1-100",
+    cardId: "ui-1",
+  });
+  assert.match(
+    out,
+    /^【確認箱カード】写真の許可\(ID: ui-1\)\n\n【確認箱ペインの質問・返信ID cbui-ui-1-100】/,
+  );
+  // 切られる位置(600字)より前に say コマンドが入っている=長い背景でも返事の書き方が消えない。
+  const cut = out.slice(0, 600);
+  assert.match(cut, /confirm_box_reply\.py say --id 'ui-1' --re 'cbui-ui-1-100'/);
+  assert.ok(out.includes("[ユーザーの発言]\nこの件は完了で"));
+  // 直接送る経路の文面は従来どおり(末尾に say 指示)。
+  const direct = withSayInstruction(withCardHeader("この件は完了で", card), {
+    replyId: "cbui-ui-1-100",
+    cardId: "ui-1",
+  });
+  assert.match(direct, /^【確認箱カード】写真の許可\(ID: ui-1\)\n\[カード本文\]/);
+  assert.match(direct, /この件は完了で\n\n【確認箱ペインの質問・返信ID cbui-ui-1-100】/);
 });
 
 test("返事待ちの目印", () => {
@@ -112,6 +147,29 @@ test("溜めた質問(queued): 台帳に印が残り、返事待ちには従来�
     .map((l) => JSON.parse(l))
     .filter((e) => e.t === "chat");
   assert.equal(rows.at(-1)?.queued, undefined);
+});
+
+test("溜まった後の印(t:chat_queued): 台帳に追記され、返事待ちの数え方は変えない", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-pane-"));
+  const t0 = Date.now();
+  const r = askFromPane(dir, { id: "i1" }, "どう?", "agent-hub-1", t0);
+  const re = r.replyId as string;
+  // 質問行の時点では queued を立てない(溜めに失敗して直接送る質問を催促の対象から外さない)。
+  assert.equal(markQueuedFromPane(dir, { id: "i1" }, re, t0 + 5), true);
+  const rows = fs
+    .readFileSync(eventsFile(dir), "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l));
+  const chat = rows.findLast((e) => e.t === "chat");
+  const mark = rows.findLast((e) => e.t === "chat_queued");
+  assert.equal(chat.queued, undefined);
+  assert.equal(mark.re, re);
+  assert.equal(mark.id, "i1");
+  // 未知の t は既存の読み手が無視する(返事待ちの数え方は従来どおり)。
+  assert.equal(panePending(dir, { id: "i1" }, t0 + 1000)[0]?.state, "waiting");
+  // ペイン発でない(手書きの)返信IDには印を付けない(誤爆を防ぐ)。
+  assert.equal(markQueuedFromPane(dir, { id: "i1" }, "hand-made", t0 + 6), false);
 });
 
 test("返信IDは200字以内(長いカードIDでも)", () => {

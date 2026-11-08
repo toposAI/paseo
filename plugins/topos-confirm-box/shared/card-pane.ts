@@ -214,15 +214,27 @@ export function deliveryTargets(opts: {
   return out;
 }
 
+/**
+ * カードの見出しと本文。見出しの文言と「[ユーザーの発言]」区切りは機械が読む目印
+ * (antigravity/utils/judgment_answer_sweep.py が司令塔スレの発言ログから原文を切り出す)なので、
+ * 溜める経路(`withSayInstructionUpFront`)と直接送る経路(`withCardHeader`)で同じものを使う。
+ */
+function cardHeader(card: { id: string; subject: string; background?: string | null }): {
+  head: string;
+  body: string;
+} {
+  return {
+    head: `【確認箱カード】${card.subject}(ID: ${card.id})`,
+    body: card.background ? `\n[カード本文]\n${card.background}` : "",
+  };
+}
+
 /** 総司令塔へ送る発言の先頭にカード題名とIDを付ける(本文はそのまま後ろに残す)。 */
 export function withCardHeader(
   text: string,
   card: { id: string; subject: string; background?: string | null },
 ): string {
-  const head = `【確認箱カード】${card.subject}(ID: ${card.id})`;
-  const body = card.background ? `\n[カード本文]\n${card.background}` : "";
-  // 「[ユーザーの発言]」区切りは機械が原文を切り出す目印(antigravity/utils/judgment_answer_sweep.py が
-  // 司令塔スレの発言ログから読み、回答済みにする)。文言を変えるなら両方を揃えること。
+  const { head, body } = cardHeader(card);
   return `${head}${body}\n\n[ユーザーの発言]\n${text}`;
 }
 
@@ -306,18 +318,39 @@ export function isHubTarget(opts: {
   return opts.agentId !== null && opts.hubIds.includes(opts.agentId);
 }
 
-/** 上位スレへ送る文に、返信IDと say コマンド(完成形)を付ける。 */
-export function withSayInstruction(
-  text: string,
-  opts: { replyId: string; cardId: string },
-): string {
+/** 返信IDと say コマンド(完成形)。付ける位置だけ経路で変える(中身は変えない)。 */
+function sayInstructionBlock(opts: { replyId: string; cardId: string }): string {
   const eof = sayEof();
   return (
-    `${text}\n\n` +
     `【確認箱ペインの質問・返信ID ${opts.replyId}】返事は普通の発言ではペインに出ません。次で書いてください:\n` +
     `python3 ${SAY_SCRIPT} say --id ${shellQuote(opts.cardId)} --re ${shellQuote(opts.replyId)}` +
     ` --by hub_thread --text-file - <<'${eof}'\n(返事)\n${eof}`
   );
+}
+
+/** 上位スレへ**直接**送る文に、返信IDと say コマンド(完成形)を末尾へ付ける。 */
+export function withSayInstruction(
+  text: string,
+  opts: { replyId: string; cardId: string },
+): string {
+  return `${text}\n\n${sayInstructionBlock(opts)}`;
+}
+
+/**
+ * 受け箱(通知まとめ)へ**溜める**経路の文面。say 指示をカード見出しの**直後**(長い背景より前)へ置く。
+ *
+ * 溜めた束は `notify_digest.digest_message` が1項目600字(`digest_inline_item_chars`)で切って載せる。
+ * 背景付きのカードでは、ユーザーが何も書いていなくても本文が600字を超え、末尾の say 指示が
+ * 切られていた(704件中156件。直接送信時代は全文が届いていた後退)。前に置けば、切られても
+ * 返事の書き方が残る。直接送る経路(`withSayInstruction`)の文面は変えない。
+ */
+export function withSayInstructionUpFront(
+  text: string,
+  card: { id: string; subject: string; background?: string | null },
+  opts: { replyId: string; cardId: string },
+): string {
+  const { head, body } = cardHeader(card);
+  return `${head}\n\n${sayInstructionBlock(opts)}${body}\n\n[ユーザーの発言]\n${text}`;
 }
 
 /**

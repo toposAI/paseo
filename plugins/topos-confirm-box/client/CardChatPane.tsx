@@ -71,6 +71,7 @@ import {
   withCardHeader,
   withNoReplyInstruction,
   withSayInstruction,
+  withSayInstructionUpFront,
 } from "../shared/card-pane.js";
 import type { ThreadAccess } from "../shared/child-threads.js";
 import { joinTitleWords } from "../shared/windowb-instructions.js";
@@ -232,9 +233,11 @@ function canSend(
 interface Liveness {
   archivedAt: string | null;
   workspaceLive: boolean | null;
+  /** 生死を**実際に読めた**か(既定の `archivedAt:null` と「読んだ結果アーカイブされていない」を区別する)。 */
+  known: boolean;
 }
 
-const UNKNOWN_LIVENESS: Liveness = { archivedAt: null, workspaceLive: null };
+const UNKNOWN_LIVENESS: Liveness = { archivedAt: null, workspaceLive: null, known: false };
 
 function toAccess(l: Liveness): ThreadAccess | null {
   if (l.archivedAt != null) return "thread-archived";
@@ -403,6 +406,9 @@ export function CardChatPane({
   const cancelRpc = useRpc(cardChatCancelRpc);
   const listRpc = useRpc(cardChatListRpc);
   const [coordClosed, setCoordClosed] = useState(false);
+  // 振り替え先(総司令塔)の生死。true=生きていると確認できた、false=閉じている、null=不明。
+  // `coordClosed` は「選べなかった」だけなので、溜めてよいかの判定には使わない(不明を生存と数えない)。
+  const [coordLive, setCoordLive] = useState<boolean | null>(null);
   const [liveness, setLiveness] = useState<Liveness>(UNKNOWN_LIVENESS);
   // 同じ描画フレーム内の二度押しで同じ文を2件送らない。
   const sendingRef = useRef(false);
@@ -680,6 +686,7 @@ export function CardChatPane({
     if (!fallback || !serverId) return undefined;
     let alive = true;
     setCoordClosed(false);
+    setCoordLive(null);
     coordinatorRpc({})
       .then(async (res) => {
         if (!alive) return null;
@@ -703,6 +710,9 @@ export function CardChatPane({
         // 選べなかった時も先頭IDを残す(「見つかりません」と「閉じています」を取り違えない)。
         setCoordId(picked ?? ids[0] ?? null);
         setCoordClosed(picked === null);
+        // 選んだ先の生死。`pickCoordinatorTarget` は「不明(null)」も選ぶので、
+        // 「生きていると確認できた(true)」と「不明」を分けて持つ(溜めてよいかの判定に使う)。
+        setCoordLive(picked ? (states.find((s) => s.id === picked)?.live ?? null) : false);
         return null;
       })
       .catch(() => {
@@ -762,7 +772,8 @@ export function CardChatPane({
         update.kind === "upsert"
           ? ((update.agent as { archivedAt?: string | null }).archivedAt ?? null)
           : "removed"; // remove = 一覧から消えた(アーカイブ/削除)。どちらも閉じた扱い。
-      setLiveness((l) => ({ ...l, archivedAt }));
+      // 一覧の更新で分かった=読めた(生死を積極的に確認できた)扱い。
+      setLiveness((l) => ({ ...l, archivedAt, known: true }));
       if (update.kind === "upsert") {
         seeActivity({
           kind: "agent-status",
@@ -786,6 +797,8 @@ export function CardChatPane({
           archivedAt: state ? state.archivedAt : l.archivedAt,
           // 一覧が引けなかった時(null)は既知の印を保つ(振り替え先が60秒ごとに揺れない)。
           workspaceLive: workspaceLive ?? l.workspaceLive,
+          // 状態が読めた時だけ「読めた」にする(読めなかった時に生存と決めつけない)。
+          known: l.known || state != null,
         }));
       } catch {
         // 取れないだけ。印は付けずに会話は続けられる。
@@ -814,14 +827,20 @@ export function CardChatPane({
   }, [lastKey]);
 
   // 受け箱(通知まとめ)へ溜めてよい宛先か。死んだ宛先へ溜めると、まとめ送りが永久に届かない
-  // (enqueue は宛先の生死を見ない)。判定はペインが既に持っている宛先解決の材料だけを使う:
-  // 総司令塔 = coordClosed(`pickCoordinatorTarget` が null を返した時だけ「閉じている」)、
-  // 投函元 = liveness(`readAgentState` のアーカイブ印。未取得は不明=生きている扱い)。
-  // 死んでいれば溜めず、従来どおり直接送る(アーカイブ済みでも send が解除して届ける)。
+  // (enqueue は宛先の生死を見ない)。**生存が積極的に確認できた時だけ**溜める(保守側)。
+  // 未取得(null=不明)を「生きている」と数えると、死んだ宛先に溜めて従来の
+  // 「投函元→総司令塔」フォールバックも催促・詫びも効かなくなる(2026-11-08 出口レビュー指摘2)。
+  // 判定はペインが既に持っている宛先解決の材料だけを使う:
+  // 総司令塔 = coordLive(`pickCoordinatorTarget` が「生きている」と確認して選んだ時だけ true)、
+  // 投函元 = liveness(`readAgentState` が読めて、アーカイブされておらず、所属ワークスペースも
+  // 閉じていないと分かった時)。不明なら溜めず、従来どおり直接送る
+  // (アーカイブ済みでも send が解除して届ける)。
   const targetLive = useCallback(
     (target: DeliveryTarget): boolean =>
-      target.via === "coordinator" ? !coordClosed : liveness.archivedAt == null,
-    [coordClosed, liveness],
+      target.via === "coordinator"
+        ? coordLive === true
+        : liveness.known && liveness.archivedAt == null && liveness.workspaceLive !== false,
+    [coordLive, liveness],
   );
 
   // oxlint-disable-next-line eslint/complexity
@@ -883,35 +902,52 @@ export function CardChatPane({
             !!topic && !!item && !sentImages.length && !imageComment && targetLive(target);
           try {
             let outgoing = item ? withCardHeader(tagged, item) : tagged;
+            // 溜める経路の本文(直接送る本文とは say 指示の位置だけが違う。下の注記)。
+            let queuedText = outgoing;
             if (topic && item) {
               // 台帳へ質問を記録し(返事待ちの目印と催促の元)、返信ID+sayコマンドを付けて上位スレへ送る。
-              // 溜める質問は queued を立てる: 行は残す(画面の「返事待ち」と say/decide は従来どおり)
-              // が、Python 側は3分の催促・詫びの起点にしない(溜めた直後の直接催促はまとめと二重になる)。
+              // `queued` は**ここでは立てない**: 溜めに失敗して直接送信へ倒れた質問まで催促・詫びの
+              // 対象から外れるため(2026-11-08 出口レビュー指摘1)。溜まった時だけ enqueue 側で立てる。
               const asked = await askRpc({
                 id: item.id,
                 key: item.key,
                 text: tagged,
                 target: to,
-                queued: queueable,
               });
               if (!asked.ok || !asked.replyId) throw new Error(asked.message);
               askedHere = asked.replyId;
-              // 画像への直接コメントは、返事を書かず直しを進めるだけだと転送文に明記する(say は付けない)。
-              outgoing = imageComment
-                ? withNoReplyInstruction(outgoing)
-                : withSayInstruction(outgoing, {
-                    replyId: asked.replyId,
-                    cardId: item.id,
-                  });
+              if (imageComment) {
+                // 画像への直接コメントは、返事を書かず直しを進めるだけだと転送文に明記する(say は付けない)。
+                outgoing = withNoReplyInstruction(outgoing);
+                queuedText = outgoing;
+              } else {
+                outgoing = withSayInstruction(outgoing, {
+                  replyId: asked.replyId,
+                  cardId: item.id,
+                });
+                // 溜めた束は1項目600字で切られる。say 指示をカード見出しの直後へ置き、
+                // 切られても返事の書き方が残るようにする(直接送る本文は従来どおり末尾)。
+                queuedText = withSayInstructionUpFront(tagged, item, {
+                  replyId: asked.replyId,
+                  cardId: item.id,
+                });
+              }
             } else if (imageComment) {
               // スレッド連携の無い経路でも「返事は要らない」を明記する(2026-11-06 出口レビュー指摘3)。
               outgoing = withNoReplyInstruction(outgoing);
+              queuedText = outgoing;
             }
             // 溜められるなら溜めて送らない(投函元へは既存のまとめ通知で数分おきに届く)。
             // 2026-11-08 ユーザー逐語「これも一箇所に貯めておいて5分おきに確認するシステムに入れればいいじゃん」。
             // 溜められない(ok:false・例外)ときは下の直接送信へ進む=届かない経路を作らない。
             if (queueable) {
-              const queued = await enqueueRpc({ dest: to, text: outgoing }).catch(() => ({
+              const queued = await enqueueRpc({
+                dest: to,
+                text: queuedText,
+                ...(item && askedHere
+                  ? { id: item.id, key: item.key ?? undefined, replyId: askedHere }
+                  : {}),
+              }).catch(() => ({
                 ok: false,
               }));
               if (queued.ok) {

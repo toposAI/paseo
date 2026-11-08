@@ -625,10 +625,20 @@ export const cardChatAskRpc = defineRpc({
 
 /** ペインの発言を受け箱(notify_digest)へ溜める。2026-11-08 ユーザー逐語「これも一箇所に貯めておいて
  * 5分おきに確認するシステムに入れればいいじゃん」。`ok:true` なら送らずに溜まった(投函元へはまとめ通知で届く)。
- * `ok:false` は溜められない環境・故障なので、呼び手は従来どおり今すぐ送る。 */
+ * `ok:false` は溜められない環境・故障なので、呼び手は従来どおり今すぐ送る。
+ *
+ * `id`/`key`/`replyId` を渡すと、**溜まった時だけ**台帳へ `queued`(受け箱へ溜めた質問)を追記する。
+ * 溜まる前に立てると、溜めに失敗して直接送信へ倒れた質問が催促・詫びの対象から永久に外れる
+ * (2026-11-08 出口レビュー指摘1)。 */
 export const cardChatEnqueueRpc = defineRpc({
   name: "topos.confirmbox.cardchat.enqueue",
-  input: z.object({ dest: z.string(), text: z.string() }),
+  input: z.object({
+    dest: z.string(),
+    text: z.string(),
+    id: z.string().optional(),
+    key: z.string().nullable().optional(),
+    replyId: z.string().optional(),
+  }),
   output: z.object({ ok: z.boolean() }),
 });
 

@@ -211,6 +211,7 @@ import {
   cancelFromPane,
   cardChatMarks,
   cardExists,
+  markQueuedFromPane,
   markSeen,
   panePending,
   readCardChat,
@@ -1737,9 +1738,19 @@ export default function contribute(server: PluginServerContext) {
 
   // カードからのユーザー発言は、投函元へすぐ送らず受け箱(通知まとめ)へ溜める(2026-11-08 ユーザー指示)。
   // 溜められないときは ok:false を返し、画面は従来どおり今すぐ送る。
-  server.handle(cardChatEnqueueRpc, async (input) => ({
-    ok: await enqueueFromPane({ dest: input.dest, text: input.text }),
-  }));
+  // **溜まった時だけ**台帳へ `queued` を追記する(先に立てると、直接送信へ倒れた質問が
+  // 催促・詫びの対象から永久に外れる。2026-11-08 出口レビュー指摘1)。
+  server.handle(cardChatEnqueueRpc, async (input) => {
+    const ok = await enqueueFromPane({ dest: input.dest, text: input.text });
+    if (ok && input.replyId && input.id) {
+      try {
+        markQueuedFromPane(resolveConfirmBoxDir(), { id: input.id, key: input.key }, input.replyId);
+      } catch {
+        // 印を残せなくても溜まっている。催促が1回多く飛ぶ側に倒れるだけで、届かない経路は作らない。
+      }
+    }
+    return { ok };
+  });
 
   server.handle(cardChatCancelRpc, async (input) => {
     try {
