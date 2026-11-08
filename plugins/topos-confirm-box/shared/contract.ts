@@ -195,6 +195,12 @@ export const confirmBoxListRpc = defineRpc({
         }),
       )
       .default({}),
+    /**
+     * 通常カードの返事待ち・未読の印(項目id → 印)。印が立つカードだけ載る。サーバの台帳から毎回作る。
+     */
+    cardMarks: z
+      .record(z.string(), z.object({ waiting: z.boolean(), unread: z.boolean() }))
+      .default({}),
   }),
 });
 export type ConfirmBoxListOutput = z.infer<typeof confirmBoxListRpc.output>;
@@ -269,6 +275,11 @@ export const confirmBoxCountRpc = defineRpc({
      * 確認箱の中の1行(いま聞ける N・裏方が書き直し中 N・残り N)に使う。null=数えられない。
      */
     presentableConsulting: z.number().int().nullable().default(null),
+    /**
+     * 数えた open のうち「ユーザーがカードのチャットで送って、返事待ち」の件数。`presentableTotal` /
+     * `presentable` はこの分を引いた後の値(2026-11-08 ユーザー「送信したらバッジを消して、返事が来たらまた出す」)。
+     */
+    awaitingReply: z.number().int().default(0),
     /** うち priority=blocking。 */
     blocking: z.number().int(),
     /** うち Paseo の承認待ち。 */

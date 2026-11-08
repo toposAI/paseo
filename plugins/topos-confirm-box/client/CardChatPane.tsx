@@ -83,6 +83,7 @@ import {
 import type { PaneActivityEvent, PaneActivityState } from "../shared/pane-activity.js";
 import { readAgentState, readAgentStateOn } from "./agent-read.js";
 import { PaneComposer } from "./PaneComposer.js";
+import { notifyBoxChanged } from "./events.js";
 import { usePaneInputTools } from "./usePaneInputTools.js";
 import type { PaneImage } from "./usePaneInputTools.js";
 //  "./usePaneInputTools.js";
@@ -1014,6 +1015,8 @@ export function CardChatPane({
       }
       // 画像へのコメントでは次へ進めない(カードを閉じない・切り替えない。2026-11-08 ユーザー指示)。
       if (ok && !imageComment) onSent?.();
+      // 送ったカードをバッジの数から外す(返事が来れば台帳から戻る)。画像コメントでも送信自体は通ったので外す。
+      if (ok) notifyBoxChanged();
       return ok;
     },
     [
