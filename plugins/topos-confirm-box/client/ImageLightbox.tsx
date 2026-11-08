@@ -21,8 +21,6 @@ export interface ImageComment {
   /** どの画像へのコメントか(画像名)。 */
   label: string;
   send: ((text: string) => Promise<boolean>) | null;
-  /** 送れたときにカードを完了にして閉じる。 */
-  onDone: (() => void) | null;
   /** 送れない理由(あれば欄に出す)。 */
   disabledReason?: string | null;
   testID?: string;
@@ -169,7 +167,6 @@ export function ImageLightbox({
             label={comment.label}
             colors={colors}
             send={comment.send}
-            onDone={comment.onDone}
             disabledReason={comment.disabledReason}
             testID={comment.testID ?? "lightbox-image-composer"}
           />

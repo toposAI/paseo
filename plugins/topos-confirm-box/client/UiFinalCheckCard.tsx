@@ -59,21 +59,14 @@ function ImageViewer({
   label,
   colors,
   send,
-  onDone,
   onClose,
 }: {
   source: { uri: string } | null;
   label: string;
   colors: PaneColors;
   send: ((text: string) => Promise<boolean>) | null;
-  /** カードを完了にして閉じる(コメントを送った後でも、送らずにでも押せる)。無ければボタンを出さない。 */
-  onDone: (() => void) | null;
   onClose: () => void;
 }) {
-  const donePress = useCallback(() => {
-    onDone?.();
-    onClose();
-  }, [onDone, onClose]);
   const st = useMemo(
     () => ({
       wrap: { flex: 1, backgroundColor: "rgba(0,0,0,0.95)", paddingTop: 40 },
@@ -96,14 +89,8 @@ function ImageViewer({
         <View style={st.body}>
           {source ? <ZoomableImage uri={source.uri} label={label} /> : null}
         </View>
-        {/* コメント欄は共通部品(どの画像ビューアでも必ず出す)。送れたら完了にして閉じる。 */}
-        <ImageCommentDock
-          label={label}
-          colors={colors}
-          send={send}
-          onDone={onDone ? donePress : null}
-          testID="ufc-image-composer"
-        />
+        {/* コメント欄は共通部品(どの画像ビューアでも必ず出す)。送ってもカードは閉じない(2026-11-08)。 */}
+        <ImageCommentDock label={label} colors={colors} send={send} testID="ufc-image-composer" />
       </View>
     </Modal>
   );
@@ -383,7 +370,6 @@ export function UiFinalCheckCard({
           label={zoom === null ? "" : shotCaption(item, zoom)}
           colors={colors}
           send={approved ? null : sendImageComment}
-          onDone={done}
           onClose={closeZoom}
         />
       )}

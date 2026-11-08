@@ -1497,7 +1497,7 @@ function ItemCard({
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
   onAnswer: (item: ConfirmBoxItem, answers: Record<string, string>) => Promise<void>;
   onReject: (item: ConfirmBoxItem) => void;
-  /** 画像にコメントを送ったときの完了(「完了」ボタンと同じ経路)。 */
+  /** カードを完了にして閉じる(「完了」ボタン。画像コメントでは閉じない)。 */
   onComplete: (item: ConfirmBoxItem) => void;
   /** 投函元スレの agent ID。画像のコメントを送る相手を決めるのに使う(無ければ null)。 */
   agentId: string | null;
@@ -1516,10 +1516,11 @@ function ItemCard({
   // 画面に出さずに置いて使う(投函元の解決・台帳への記録・振り替えを1か所に保つ)。
   const commentSendRef = useRef<((text: string) => Promise<boolean>) | null>(null);
   const closeAfterComment = useCallback(() => {
-    // 画像にコメントしたら、そのカードは完了にして閉じる(2026-11-06 ユーザー指示)。
-    onComplete(item);
+    // 画像へのコメントではカードを閉じない(2026-11-08 ユーザー逐語「1枚の画像にコメントした直後に
+    // その確認箱終了にするのやめて、僕が全部の画像を確認した後に僕が手動で完了ボタンを押します」)。
+    // 閉じるのはカードの「完了」ボタンだけ。ここでは拡大表示だけを閉じる。
     setZoom(null);
-  }, [onComplete, item]);
+  }, []);
   // 拡大表示に渡すコメント欄の設定(毎回新しいオブジェクトを渡さない)。
   const lightboxComment = useMemo(
     () => ({

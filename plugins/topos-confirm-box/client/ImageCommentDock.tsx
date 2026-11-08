@@ -2,14 +2,13 @@
  * 画像を開いたときの下のコメント欄。**どの画像ビューアでも必ず出す**
  * (2026-11-06 ユーザー指示「確認箱、画像開くと下にコメント欄が出るやつとでないやつがある。コメント欄だして」)。
  *
- * 送信に成功したら、その場でカードを完了にして閉じる(同じ指示「コメント送信したらそのカードそのまま完了にして」)。
- * 閉じ方はカードの「完了」ボタンと同じ経路(onDone)に任せる。返事は求めない(送信側で「返事不要」を明記)。
- * **閉じるのは「届いたと確認できたとき」だけ**(2026-11-06 ユーザー逐語「投稿元たどれないなら、総司令塔が
- * 引き取るってなってるでしょ」)。宛先の解決は送信側の順(投函元 → 閉じていれば復元 → 総司令塔)に任せ、
- * `send` が false を返したら(=どこにも届かなかった)カードは閉じずに残して理由を出す。
+ * コメントを送ってもカードは閉じない(2026-11-08 ユーザー逐語「1枚の画像にコメントした直後にその確認箱
+ * 終了にするのやめて、僕が全部の画像を確認した後に僕が手動で完了ボタンを押します」)。閉じるのはカードの
+ * 「完了」ボタンだけ。返事は求めない(送信側で「返事不要」を明記)。`send` が false を返したら
+ * (=どこにも届かなかった)入力は残して理由を出す。
  */
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { imageCommentText } from "../shared/card-pane.js";
 import { PaneComposer } from "./PaneComposer.js";
 import { usePaneInputTools } from "./usePaneInputTools.js";
@@ -32,7 +31,6 @@ export function ImageCommentDock({
   label,
   colors,
   send,
-  onDone,
   disabledReason,
   testID,
 }: {
@@ -41,8 +39,6 @@ export function ImageCommentDock({
   colors: ImageCommentColors;
   /** 1通送る。送れなければ false(入力は残す)。 */
   send: ((text: string) => Promise<boolean>) | null;
-  /** カードを完了にして閉じる。無ければ「完了」ボタンを出さない。 */
-  onDone: (() => void) | null;
   /** 送れない理由(あれば入力欄の代わりに出す)。 */
   disabledReason?: string | null;
   testID?: string;
@@ -54,7 +50,6 @@ export function ImageCommentDock({
   const busyRef = useRef(false);
   const appendDictated = useCallback((said: string) => setText((cur) => cur + said), []);
   const tools = usePaneInputTools(appendDictated);
-  const donePress = useCallback(() => onDone?.(), [onDone]);
   const submit = useCallback(async () => {
     const t = text.trim();
     if (!t || !send || busyRef.current) return;
@@ -70,10 +65,8 @@ export function ImageCommentDock({
       return;
     }
     setText("");
-    setNotice("");
-    // 送れたらそのカードは完了(2026-11-06 ユーザー指示)。閉じるのは呼び出し側の onDone。
-    onDone?.();
-  }, [text, send, label, onDone]);
+    setNotice("コメントを送りました");
+  }, [text, send, label]);
   const submitPress = useCallback(() => void submit(), [submit]);
   // 入力欄の部品は surface1 を必須で取る。一般カードの色には無いので surface0 で埋める。
   const composerColors = useMemo(
@@ -89,35 +82,11 @@ export function ImageCommentDock({
         paddingBottom: 12,
       },
       notice: { color: "#ffb4a8", fontSize: 12, padding: 8 },
-      // 幅いっぱいに広げて中央に置く(幅によって右端へ寄ったり隠れたりしない)。
-      doneRow: { padding: 8 },
-      done: {
-        backgroundColor: colors.accent,
-        borderRadius: 8,
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        minHeight: 44,
-        alignItems: "center" as const,
-        justifyContent: "center" as const,
-      },
-      doneText: { color: colors.accentForeground, fontSize: 15, fontWeight: "600" as const },
     }),
-    [colors.surface0, colors.surface1, colors.accent, colors.accentForeground],
+    [colors.surface0, colors.surface1],
   );
   return (
     <View style={st.dock}>
-      {onDone ? (
-        <View style={st.doneRow}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="このカードを完了にして閉じる"
-            style={st.done}
-            onPress={donePress}
-          >
-            <Text style={st.doneText}>このカードを完了</Text>
-          </Pressable>
-        </View>
-      ) : null}
       {notice ? <Text style={st.notice}>{notice}</Text> : null}
       {/* マイクが使えない環境で押したときの理由をここに出す(本体の composer にも案内が出る)。 */}
       {tools.toolNotice ? <Text style={st.notice}>{tools.toolNotice}</Text> : null}
