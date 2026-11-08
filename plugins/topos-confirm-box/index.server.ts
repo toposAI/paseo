@@ -31,7 +31,6 @@ import {
   coordinatorTargetRpc,
   cardChatAskRpc,
   cardChatCancelRpc,
-  cardChatEnqueueRpc,
   cardChatSayRpc,
   cardChatSeenRpc,
   reportsAckAllRpc,
@@ -244,7 +243,6 @@ import type { PermitAgentLike } from "./server/permits.js";
 import { isUiFinalCheck } from "./shared/ui-final-check.js";
 import {
   answerCard,
-  enqueueFromPane,
   holdCard,
   judgmentStateDir,
   readRowState,
@@ -1732,12 +1730,6 @@ export default function contribute(server: PluginServerContext) {
       return { ok: false, message: sendErrorNotice(error) };
     }
   });
-
-  // カードからのユーザー発言は、投函元へすぐ送らず受け箱(通知まとめ)へ溜める(2026-11-08 ユーザー指示)。
-  // 溜められないときは ok:false を返し、画面は従来どおり今すぐ送る。
-  server.handle(cardChatEnqueueRpc, async (input) => ({
-    ok: await enqueueFromPane({ dest: input.dest, text: input.text }),
-  }));
 
   server.handle(cardChatCancelRpc, async (input) => {
     try {

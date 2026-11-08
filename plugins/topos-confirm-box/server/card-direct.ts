@@ -140,48 +140,6 @@ function runJudgmentExit(
   });
 }
 
-// ---------------------------------------------------------------- 受け箱(通知まとめ)へ溜める
-
-/** 溜める1回の上限。溜めるだけなので短く切る(遅いときは今すぐ送る側へ倒す)。 */
-const ENQUEUE_TIMEOUT_MS = 15_000;
-
-/** 受け箱へ溜める入口の CLI を解決する(無ければ null = 溜めずに今すぐ送る)。 */
-export function resolveEnqueueCli(env: NodeJS.ProcessEnv = process.env): JudgmentCli | null {
-  const dir = env.TOPOS_CONFIRM_BOX_JUDGMENT_CLI_DIR?.trim() || DEFAULT_CLI_DIR;
-  const script = path.join(path.resolve(dir), "scripts", "notify_digest_enqueue.py");
-  if (!fs.existsSync(script)) return null;
-  return { python: env.TOPOS_CONFIRM_BOX_JUDGMENT_PYTHON?.trim() || DEFAULT_PYTHON, script };
-}
-
-/**
- * 確認箱のカードからユーザーが書いた発言を、投函元へすぐ送らず受け箱(通知まとめ)へ溜める。
- * 2026-11-08 ユーザー逐語「あと確認箱を確認すると直後に子司令塔スレに飛ぶけどこれも一箇所に
- * 貯めておいて5分おきに確認するシステムに入れればいいじゃん」。
- *
- * 溜まった(true)ら呼び手は送らない(投函元へは既存のまとめ送りで届く)。**溜められない**
- * (受け箱が無効・故障・時間切れ。スクリプトはそのとき終了1を返す)なら false を返し、
- * 呼び手は従来どおり paseo で今すぐ送る=「溜めたのに届かない」経路を作らない。
- */
-export function enqueueFromPane(
-  input: { dest: string; text: string },
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<boolean> {
-  const dest = input.dest.trim();
-  if (!dest || !input.text.trim()) return Promise.resolve(false);
-  const cli = resolveEnqueueCli(env);
-  if (!cli) return Promise.resolve(false);
-  return new Promise((resolve) => {
-    // 終了コードだけで判定する(標準出力は使わない)。非0・起動失敗・時間切れはすべて false。
-    const child = execFile(
-      cli.python,
-      [cli.script, "--dest", dest, "--caller", "confirm_box_chat", "-"],
-      { cwd: path.dirname(cli.script), timeout: ENQUEUE_TIMEOUT_MS, killSignal: "SIGKILL" },
-      (error) => resolve(!error),
-    );
-    if (child.stdin) child.stdin.end(input.text);
-  });
-}
-
 // ---------------------------------------------------------------- 行の状態(二重記録よけ)
 
 interface AgentRowState {
@@ -801,8 +759,6 @@ async function cardlessOutcome(
 }
 
 /** `next` の返り値をそのまま行にする(出さないときは理由だけ)。 */
-// 分岐が多く複雑度が21(既定の上限20)。門の条件を1か所に並べてあるだけで、分けると読みにくい。
-// oxlint-disable-next-line eslint/complexity
 async function showFromNext(
   deps: ShowDeps,
   target: string,

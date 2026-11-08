@@ -616,15 +616,6 @@ export const cardChatAskRpc = defineRpc({
   }),
 });
 
-/** ペインの発言を受け箱(notify_digest)へ溜める。2026-11-08 ユーザー逐語「これも一箇所に貯めておいて
- * 5分おきに確認するシステムに入れればいいじゃん」。`ok:true` なら送らずに溜まった(投函元へはまとめ通知で届く)。
- * `ok:false` は溜められない環境・故障なので、呼び手は従来どおり今すぐ送る。 */
-export const cardChatEnqueueRpc = defineRpc({
-  name: "topos.confirmbox.cardchat.enqueue",
-  input: z.object({ dest: z.string(), text: z.string() }),
-  output: z.object({ ok: z.boolean() }),
-});
-
 /** ペインの送信が失敗した質問を取り消す(待ち表示・催促・集計から外す)。 */
 export const cardChatCancelRpc = defineRpc({
   name: "topos.confirmbox.cardchat.cancel",
