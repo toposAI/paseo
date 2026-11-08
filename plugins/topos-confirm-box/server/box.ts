@@ -39,7 +39,9 @@ import {
 const EVENTS_FILE = /^events-\d{6}\.jsonl$/;
 export const PENDING_FILE = "pending_user_decisions.jsonl";
 
-/** イベントファイルの署名(size+mtime)。読めないファイルがあれば毎回変わる値を混ぜてキャッシュを外す。 */
+/** イベントファイルの署名(size+mtime)。読めないファイルがあれば毎回変わる値を混ぜてキャッシュを外す
+ * (消えた・外れたファイルの内容を、前に読んだ写しのまま出し続けない)。 */
+let signatureMiss = 0;
 function eventsSignature(dir: string, files: readonly string[]): string {
   return files
     .map((name) => {
@@ -47,7 +49,8 @@ function eventsSignature(dir: string, files: readonly string[]): string {
         const st = fs.statSync(path.join(dir, name));
         return `${name}:${st.size}:${st.mtimeMs}`;
       } catch {
-        return `${name}:miss`;
+        signatureMiss += 1;
+        return `${name}:miss:${signatureMiss}`;
       }
     })
     .join("|");

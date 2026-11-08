@@ -900,10 +900,10 @@ export function CardChatPane({
           let askedHere: string | null = null;
           // 溜められるか。判断の中身は shared 側(shouldQueueCardChat)に置く
           // (画面の関数が複雑になりすぎないよう・試験で同じ判断を直接確かめられるように)。
+          // 渡すのは見出しを付ける前の本文(見出しの件名で即時判定が誤爆しないように)。
           const queueable = shouldQueueCardChat({
             hasItem: !!item,
             attachedImages: sentImages.length,
-            imageComment,
             text: tagged,
             targetLive: targetLive(target),
           });

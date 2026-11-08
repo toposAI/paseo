@@ -84,7 +84,7 @@ import type {
 } from "../shared/contract.js";
 
 const REFRESH_MS = 30_000;
-/** 一覧の取得に失敗したときの次の試行まで。30秒待つと、その間ずっと画面が古いままになる。 */
+/** 一覧の取得に失敗したときの最初の待ち。30秒待つと、その間ずっと画面が古いままになる。失敗が続くと倍々で30秒まで伸ばす。 */
 const RETRY_MS = 5_000;
 
 // oxlint-disable-next-line eslint/complexity
@@ -157,15 +157,19 @@ export function ConfirmBoxView({
     }
   }, [list]);
 
-  // 失敗したら次は5秒後に試す(30秒待つと、その間ずっと画面が古いまま=新しいカードが出ない)。
+  // 失敗したら短く待って試し直す(30秒待つと、その間ずっと画面が古いまま=新しいカードが出ない)。
+  // ただし落ちているサーバを撃ち続けないよう、失敗が続くほど間隔を伸ばす(5→10→20→30秒で頭打ち)。
   // 成功したら従来どおり30秒。アンマウント時はタイマーを止める。
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
     const tick = async () => {
       const ok = await reload();
       if (!alive) return;
-      timer = setTimeout(() => void tick(), ok ? REFRESH_MS : RETRY_MS);
+      failures = ok ? 0 : failures + 1;
+      const wait = ok ? REFRESH_MS : Math.min(RETRY_MS * 2 ** (failures - 1), REFRESH_MS);
+      timer = setTimeout(() => void tick(), wait);
     };
     void tick();
     return () => {

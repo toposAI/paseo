@@ -116,3 +116,66 @@ test("rerank(並べ替え)も使い回しで失われない", () => {
   assert.equal(second.reranks.get("m7")?.priority, "blocking");
   assert.equal(second.reranks.get("m7")?.subrank, -2);
 });
+
+// 出口レビュー指摘(2026-11-08): item と hide だけでは、他の追記種別で読み直すかを確かめていない。
+test("使い回した後でも、ack(既読・承認)の追記は次の読み込みに効く", () => {
+  const dir = tmpDir();
+  putItem(dir, "n1");
+  assert.equal(readConfirmBox(dir).items.find((i) => i.id === "n1")?.state, "new");
+
+  append(dir, { t: "ack", id: "n1", action: "approve" });
+
+  assert.equal(
+    readConfirmBox(dir).items.find((i) => i.id === "n1")?.state,
+    "approved",
+    "ack を追記したのに読み直していない",
+  );
+});
+
+test("使い回した後でも、judgment(判断印)の追記は次の読み込みに効く", () => {
+  const dir = tmpDir();
+  putItem(dir, "n2");
+  assert.equal(readConfirmBox(dir).items.find((i) => i.id === "n2")?.judgment, false);
+
+  append(dir, { t: "judgment", id: "n2" });
+
+  assert.equal(
+    readConfirmBox(dir).items.find((i) => i.id === "n2")?.judgment,
+    true,
+    "judgment を追記したのに読み直していない",
+  );
+});
+
+test("使い回した後でも、unhide で隠した項目が戻る", () => {
+  const dir = tmpDir();
+  putItem(dir, "n3");
+  append(dir, { t: "hide", id: "n3" });
+  assert.equal(
+    readConfirmBox(dir).items.some((i) => i.id === "n3"),
+    false,
+  );
+
+  append(dir, { t: "unhide", id: "n3" });
+
+  assert.equal(
+    readConfirmBox(dir).items.some((i) => i.id === "n3"),
+    true,
+    "unhide を追記したのに戻っていない",
+  );
+});
+
+test("別のディレクトリの記録を誤って使い回さない", () => {
+  const a = tmpDir();
+  const b = tmpDir();
+  putItem(a, "only-a");
+
+  assert.equal(
+    readConfirmBox(a).items.some((i) => i.id === "only-a"),
+    true,
+  );
+  assert.equal(
+    readConfirmBox(b).items.some((i) => i.id === "only-a"),
+    false,
+    "別ディレクトリの項目が出ている(署名に dir が入っていない)",
+  );
+});
