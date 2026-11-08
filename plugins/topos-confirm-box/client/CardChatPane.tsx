@@ -51,6 +51,7 @@ import {
   PRIORITY_LABEL,
   cardChatAskRpc,
   cardChatCancelRpc,
+  cardChatEnqueueRpc,
   cardChatListRpc,
   coordinatorTargetRpc,
 } from "../shared/contract.js";
@@ -398,6 +399,7 @@ export function CardChatPane({
   // 話題の履歴を1回読めたか。読む前の空表示を「返事なし」の基準にしない(誤判定の防止)。
   const [topicReady, setTopicReady] = useState(false);
   const askRpc = useRpc(cardChatAskRpc);
+  const enqueueRpc = useRpc(cardChatEnqueueRpc);
   const cancelRpc = useRpc(cardChatCancelRpc);
   const listRpc = useRpc(cardChatListRpc);
   const [coordClosed, setCoordClosed] = useState(false);
@@ -811,6 +813,17 @@ export function CardChatPane({
     };
   }, [lastKey]);
 
+  // 受け箱(通知まとめ)へ溜めてよい宛先か。死んだ宛先へ溜めると、まとめ送りが永久に届かない
+  // (enqueue は宛先の生死を見ない)。判定はペインが既に持っている宛先解決の材料だけを使う:
+  // 総司令塔 = coordClosed(`pickCoordinatorTarget` が null を返した時だけ「閉じている」)、
+  // 投函元 = liveness(`readAgentState` のアーカイブ印。未取得は不明=生きている扱い)。
+  // 死んでいれば溜めず、従来どおり直接送る(アーカイブ済みでも send が解除して届ける)。
+  const targetLive = useCallback(
+    (target: DeliveryTarget): boolean =>
+      target.via === "coordinator" ? !coordClosed : liveness.archivedAt == null,
+    [coordClosed, liveness],
+  );
+
   // oxlint-disable-next-line eslint/complexity
   const send = useCallback(
     // oxlint-disable-next-line eslint/complexity
@@ -859,18 +872,27 @@ export function CardChatPane({
             }
           : undefined;
         // 候補を順に試し、最初に届いた所で確定する(投函元でだめなら総司令塔)。
+        // 受け箱へ溜めた宛先(送ったかとは別に、画面の1行を変える)。
+        let queuedVia: DeliveryTarget["via"] | null = null;
         const outcome = await attemptDelivery(targets, async (target) => {
           const to = target.id;
           let askedHere: string | null = null;
+          // 溜められるか。画像は受け箱が運べないので直接送る。画像への直接コメントは即時に送る。
+          // 宛先が死んでいれば溜めない(溜めるとまとめ送りが永久に届かない=従来の直接送信へ倒す)。
+          const queueable =
+            !!topic && !!item && !sentImages.length && !imageComment && targetLive(target);
           try {
             let outgoing = item ? withCardHeader(tagged, item) : tagged;
             if (topic && item) {
               // 台帳へ質問を記録し(返事待ちの目印と催促の元)、返信ID+sayコマンドを付けて上位スレへ送る。
+              // 溜める質問は queued を立てる: 行は残す(画面の「返事待ち」と say/decide は従来どおり)
+              // が、Python 側は3分の催促・詫びの起点にしない(溜めた直後の直接催促はまとめと二重になる)。
               const asked = await askRpc({
                 id: item.id,
                 key: item.key,
                 text: tagged,
                 target: to,
+                queued: queueable,
               });
               if (!asked.ok || !asked.replyId) throw new Error(asked.message);
               askedHere = asked.replyId;
@@ -884,6 +906,19 @@ export function CardChatPane({
             } else if (imageComment) {
               // スレッド連携の無い経路でも「返事は要らない」を明記する(2026-11-06 出口レビュー指摘3)。
               outgoing = withNoReplyInstruction(outgoing);
+            }
+            // 溜められるなら溜めて送らない(投函元へは既存のまとめ通知で数分おきに届く)。
+            // 2026-11-08 ユーザー逐語「これも一箇所に貯めておいて5分おきに確認するシステムに入れればいいじゃん」。
+            // 溜められない(ok:false・例外)ときは下の直接送信へ進む=届かない経路を作らない。
+            if (queueable) {
+              const queued = await enqueueRpc({ dest: to, text: outgoing }).catch(() => ({
+                ok: false,
+              }));
+              if (queued.ok) {
+                askedId = askedHere;
+                queuedVia = target.via;
+                return;
+              }
             }
             await getPaseoClient(serverId).agents.ref(to).send(outgoing, opts);
             askedId = askedHere;
@@ -901,7 +936,15 @@ export function CardChatPane({
         // 総司令塔の出力を購読するのは、実際に総司令塔へ送った時だけ。
         if (delivered.via === "coordinator" && delivered.id !== agentId) setCoordSent(true);
         seeActivity({ kind: "sent" });
-        setNotice("");
+        // 溜めた先が総司令塔なら「投函元へは」とは書かない(総司令塔宛に投函元へ届くとは読めない)。
+        let sentNotice = "";
+        if (queuedVia) {
+          sentNotice =
+            delivered.via === "coordinator"
+              ? "送りました(まとめて届きます)"
+              : "送りました(投函元へはまとめて届きます)";
+        }
+        setNotice(sentNotice);
         ok = true;
         sentOnce.current = true;
         if (imageComment && askedId && item) {
@@ -949,11 +992,14 @@ export function CardChatPane({
       seeActivity,
       topic,
       askRpc,
+      enqueueRpc,
       cancelRpc,
       refreshTopic,
       toolImages,
       clearImages,
       restoreImages,
+      // 溜めてよいかの判定(生死)に使う。変わったら送り方を決め直す。
+      targetLive,
     ],
   );
   const sendPress = useCallback(() => void send(), [send]);

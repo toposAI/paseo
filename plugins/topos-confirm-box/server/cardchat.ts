@@ -171,6 +171,9 @@ export const SAY_WAIT_MS = 180_000;
 /**
  * ペインからの質問を台帳へ書く(方式a)。ackは書かない=返事は上位スレのsayだけ。
  * `target` = 送り先スレ(催促ワーカーの宛先)。返信ID(`replyId`)を返す。
+ * `queued` = 受け箱(通知まとめ)へ溜めた質問。宛先へはダイジェストで届くので、`queued:true` を
+ * 行に残して Python 側の3分催促・詫びの対象から外す(2026-11-08。行は残すので画面の
+ * 「返事待ち」と say/decide は従来どおり効く)。
  */
 export function askFromPane(
   dir: string,
@@ -178,6 +181,7 @@ export function askFromPane(
   text: string,
   agentId: string,
   now: number = Date.now(),
+  queued = false,
 ): { ok: boolean; message: string; replyId?: string } {
   const id = (target.id ?? "").trim().slice(0, ID_MAX);
   const key = (target.key ?? "").trim().slice(0, ID_MAX) || null;
@@ -196,6 +200,7 @@ export function askFromPane(
       client_message_id: replyId,
       source: "pane",
       target: agentId.trim(),
+      ...(queued ? { queued: true } : {}),
     },
   ]);
   return { ok: true, message: "記録しました", replyId };

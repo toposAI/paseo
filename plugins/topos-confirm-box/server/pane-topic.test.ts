@@ -88,6 +88,32 @@ test("ペイン発の質問: ackなし。sayが付くまで pending、ackは話�
   assert.equal(readCardChat(dir, { id: "i1" }, { topic: true }).at(-1)?.text, "答え");
 });
 
+test("溜めた質問(queued): 台帳に印が残り、返事待ちには従来どおり数える(2026-11-08)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-pane-"));
+  const t0 = Date.now();
+  // 受け箱へ溜めた質問は queued を立てる(Python 側は3分の催促・詫びの起点にしない)。
+  const r = askFromPane(dir, { id: "i1" }, "どう?", "agent-hub-1", t0, true);
+  assert.equal(r.ok, true);
+  const row = fs
+    .readFileSync(eventsFile(dir), "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l))
+    .find((e) => e.t === "chat");
+  assert.equal(row.queued, true);
+  // 「返事待ち」は台帳の chat 行を見るので、溜めた質問も従来どおり出る(画面の待ちが消えない)。
+  assert.equal(panePending(dir, { id: "i1" }, t0 + 1000)[0]?.state, "waiting");
+  // 溜めていない質問は印を付けない(従来どおり催促の対象)。
+  askFromPane(dir, { id: "i2" }, "どう?", "agent-hub-1", t0);
+  const rows = fs
+    .readFileSync(eventsFile(dir), "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l))
+    .filter((e) => e.t === "chat");
+  assert.equal(rows.at(-1)?.queued, undefined);
+});
+
 test("返信IDは200字以内(長いカードIDでも)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cb-pane-"));
   const r = askFromPane(dir, { id: "x".repeat(300) }, "q", "a", 1_700_000_000_000);

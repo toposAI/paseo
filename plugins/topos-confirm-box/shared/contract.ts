@@ -605,15 +605,31 @@ export const coordinatorTargetRpc = defineRpc({
 });
 
 /** ペインからの質問。台帳へ `t:"chat"`(source:"pane", target=宛先スレ)を書き、返信IDを返す。
- * 返事は上位スレが `confirm_box_reply.py say --re <返信ID>` で書く(方式a)。 */
+ * 返事は上位スレが `confirm_box_reply.py say --re <返信ID>` で書く(方式a)。
+ * `queued:true` は受け箱(通知まとめ)へ溜める質問。宛先へはダイジェストで届くので、
+ * 3分の催促・詫びの起点にしない(2026-11-08。Python 側 `pane_status` が queued を外す)。 */
 export const cardChatAskRpc = defineRpc({
   name: "topos.confirmbox.cardchat.ask",
-  input: z.object({ ...cardChatTarget, text: z.string(), target: z.string() }),
+  input: z.object({
+    ...cardChatTarget,
+    text: z.string(),
+    target: z.string(),
+    queued: z.boolean().optional(),
+  }),
   output: z.object({
     ok: z.boolean(),
     message: z.string(),
     replyId: z.string().optional(),
   }),
+});
+
+/** ペインの発言を受け箱(notify_digest)へ溜める。2026-11-08 ユーザー逐語「これも一箇所に貯めておいて
+ * 5分おきに確認するシステムに入れればいいじゃん」。`ok:true` なら送らずに溜まった(投函元へはまとめ通知で届く)。
+ * `ok:false` は溜められない環境・故障なので、呼び手は従来どおり今すぐ送る。 */
+export const cardChatEnqueueRpc = defineRpc({
+  name: "topos.confirmbox.cardchat.enqueue",
+  input: z.object({ dest: z.string(), text: z.string() }),
+  output: z.object({ ok: z.boolean() }),
 });
 
 /** ペインの送信が失敗した質問を取り消す(待ち表示・催促・集計から外す)。 */
