@@ -85,6 +85,14 @@ test("半角の「!」も文の終わりとして扱い、絵文字は割らな�
   assert.ok(!/[\uD800-\uDBFF]$/.test(e.slice(0, -1)), "絵文字が途中で割れていない");
 });
 
+test("読点も助詞も無い題は畳めず、歯止め(HEADING_MAX)まで残る", () => {
+  // カタカナだけの題には「、」も助詞(はがをにでともへやの)も無い
+  const t = "アイウエオカキクケコ".repeat(6); // 60字
+  const h = headingText(t);
+  assert.equal(h, t, "畳めない題はそのまま(80字の歯止めには届かない)");
+  assert.ok(h.length > HEADING_SOFT && h.length <= HEADING_MAX, `${h.length}`);
+});
+
 test("読点が無い題は助詞の直後で畳む", () => {
   const t =
     "確認箱のカードの題名が長すぎるので最初の質問だけを出して残りは背景で読ませる案を今日から試して見てもらう";
