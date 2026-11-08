@@ -84,6 +84,8 @@ import type {
 } from "../shared/contract.js";
 
 const REFRESH_MS = 30_000;
+/** 一覧の取得に失敗したときの次の試行まで。30秒待つと、その間ずっと画面が古いままになる。 */
+const RETRY_MS = 5_000;
 
 // oxlint-disable-next-line eslint/complexity
 export function ConfirmBoxView({
@@ -155,10 +157,21 @@ export function ConfirmBoxView({
     }
   }, [list]);
 
+  // 失敗したら次は5秒後に試す(30秒待つと、その間ずっと画面が古いまま=新しいカードが出ない)。
+  // 成功したら従来どおり30秒。アンマウント時はタイマーを止める。
   useEffect(() => {
-    void reload();
-    const timer = setInterval(() => void reload(), REFRESH_MS);
-    return () => clearInterval(timer);
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      const ok = await reload();
+      if (!alive) return;
+      timer = setTimeout(() => void tick(), ok ? REFRESH_MS : RETRY_MS);
+    };
+    void tick();
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
   }, [reload]);
 
   // 一覧から居なくなったカードの溜め(画像コメント)を捨てる。片付いたカードの溜めが永久に残ると、

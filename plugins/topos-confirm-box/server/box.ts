@@ -39,6 +39,32 @@ import {
 const EVENTS_FILE = /^events-\d{6}\.jsonl$/;
 export const PENDING_FILE = "pending_user_decisions.jsonl";
 
+/** イベントファイルの署名(size+mtime)。読めないファイルがあれば毎回変わる値を混ぜてキャッシュを外す。 */
+function eventsSignature(dir: string, files: readonly string[]): string {
+  return files
+    .map((name) => {
+      try {
+        const st = fs.statSync(path.join(dir, name));
+        return `${name}:${st.size}:${st.mtimeMs}`;
+      } catch {
+        return `${name}:miss`;
+      }
+    })
+    .join("|");
+}
+
+/**
+ * `readConfirmBox` の重い部分(数十MBの `events-*.jsonl` のパースと畳み込み)を署名で覚える。
+ * 一覧は画面ごとに30秒周期で呼ばれ、イベントは画像のbase64で数十MBになる。毎回パースし直すと
+ * 1回で数百ms〜秒かかり、同時に複数走るとホストの30秒タイムアウトに届く。タイムアウトすると画面は
+ * 前回の一覧を持ったまま更新されない=投函した新しいカードが出ない(2026-11-08)。署名が変われば必ず読み直す。
+ */
+let eventsMemo: {
+  key: string;
+  items: ConfirmBoxItem[];
+  reranks: Map<string, RerankOverride>;
+} | null = null;
+
 /** `TOPOS_CONFIRM_BOX_DIR` があればそれ、無ければ `~/.local/state/toposai/confirm_box`。
  *  store.ts の `resolveConfirmBoxDir()` と同じ規則(`~` 展開つき)。 */
 export function resolveConfirmBoxDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -388,11 +414,24 @@ export function readConfirmBox(dir: string = resolveConfirmBoxDir()): ReadConfir
     boxDetail = "events-*.jsonl なし(まだ投函されていない)";
   } else {
     try {
-      const records = files.flatMap((name) =>
-        parseJsonl(fs.readFileSync(path.join(dir, name), "utf8")),
-      );
-      boxItems = [...foldBoxEvents(records).values()];
-      for (const [k, v] of parseReranks(records)) reranks.set(k, { ...reranks.get(k), ...v });
+      const key = `${dir}|${eventsSignature(dir, files)}`;
+      const cached = eventsMemo && eventsMemo.key === key ? eventsMemo : null;
+      if (cached) {
+        // 呼び手が項目を書き換えても記録を汚さないよう、浅い写しを返す。
+        boxItems = cached.items.map((item) => ({ ...item }));
+        for (const [k, v] of cached.reranks) reranks.set(k, { ...reranks.get(k), ...v });
+      } else {
+        const records = files.flatMap((name) =>
+          parseJsonl(fs.readFileSync(path.join(dir, name), "utf8")),
+        );
+        boxItems = [...foldBoxEvents(records).values()];
+        for (const [k, v] of parseReranks(records)) reranks.set(k, { ...reranks.get(k), ...v });
+        eventsMemo = {
+          key,
+          items: boxItems.map((item) => ({ ...item })),
+          reranks: new Map(reranks),
+        };
+      }
       boxDetail = `${files.join(", ")}`;
     } catch (error) {
       boxOk = false;
