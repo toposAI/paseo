@@ -21,6 +21,7 @@ import {
   noticeLines,
   paneLocation,
   plainAssignee,
+  ASSIGNEE_MAX_CHARS,
   rowOrder,
   routeText,
   visibleRoutes,
@@ -269,6 +270,15 @@ test("plainAssignee: 英数のIDだけの担当は「担当のスレ」と言い
   assert.equal(plainAssignee("7ace1dd7"), "担当のスレ");
   assert.equal(plainAssignee("雑務係"), "雑務係");
   assert.equal(plainAssignee("  "), "担当未定");
+  // 上流の穴埋め語(英語の none 等)は画面の言葉に直す
+  assert.equal(plainAssignee("none"), "担当未定");
+  assert.equal(plainAssignee("null"), "担当未定");
+  // 空の題名を「・」で繋いだ名残りと、題名の切れ端(})は先頭・末尾から落とす
+  assert.equal(plainAssignee("・家族版出荷・"), "家族版出荷");
+  assert.equal(plainAssignee("}・家族版出荷"), "家族版出荷");
+  // 折りたたみ行では長すぎる担当は末尾を省略する(開いたときの詳細で読める)
+  const long = "あ".repeat(ASSIGNEE_MAX_CHARS + 5);
+  assert.equal(plainAssignee(long), `${"あ".repeat(ASSIGNEE_MAX_CHARS)}…`);
 });
 
 test("noticeLines: 技術的な注意書きを短い行(最大2行)に直す", () => {
@@ -319,7 +329,8 @@ test("段階名・担当と最後の動き・隠した自動送信の一言", ()
   assert.equal(agoText(undefined, now), "");
   assert.equal(
     ownerLine({ assigneeText: "家族版出荷13", lastText: "11/07 16:32", lastAt: at }, now),
-    "担当: 家族版出荷13 ・ 最後の動き 11/07 16:32(16時間前)",
+    // 「最後の動き」は語の途中で折れないよう、全体を U+2060 で繋ぐ。
+    "担当: 家族版出荷13 ⁠・⁠最⁠後⁠の⁠動⁠き 11/07 16:32(16時間前)",
   );
   assert.equal(ownerLine({ assigneeText: "(担当未定)" }, now), "担当: 担当未定");
   assert.equal(hiddenAutoText(null), null);

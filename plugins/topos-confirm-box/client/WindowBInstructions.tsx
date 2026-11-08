@@ -47,10 +47,25 @@ import {
   WIDE_MIN_WIDTH,
 } from "../shared/windowb-instructions.js";
 
-/** 末尾の「(29分前)」だけが次の行へ落ちて数文字で残らないよう、括弧の中を1語に繋ぐ(U+2060)。 */
+/**
+ * 末尾の「11/07 16:32(16時間前)」が、日付と時刻の間や括弧の前で折れて数文字だけ次の行に
+ * 残らないよう、日時の部分ごと1語に繋ぐ(U+2060)。日時が無い行は括弧の中だけを繋ぐ。
+ */
 function keepAgoTogether(line: string): string {
-  const i = line.lastIndexOf("(");
-  if (i < 0 || !line.endsWith(")")) return line;
+  // \u672b\u5c3e\u306b\u7a7a\u767d\u304c\u4ed8\u304f\u884c\u3067\u3082\u540c\u3058\u3088\u3046\u306b\u6271\u3046(\u672b\u5c3e\u7a7a\u767d\u3067\u5224\u5b9a\u3092\u5916\u3059\u3068\u3001\u65e5\u4ed8\u3068\u6642\u523b\u306e\u9593\u304c
+  // \u305d\u306e\u307e\u307e\u6298\u308c\u3066\u300c11/08\u300d/\u300c09:13(19\u5206\u524d)\u300d\u306b\u5272\u308c\u308b\u884c\u304c\u6b8b\u308b)\u3002
+  const dated = line.match(/(\d{1,2}\/\d{1,2})\s+(\d{1,2}:\d{2}(?:\([^)]*\))?)\s*$/);
+  if (dated) {
+    const start = line.length - dated[0].length;
+    const head = line.slice(0, start);
+    // \u533a\u5207\u308a\u306f U+00A0(NBSP)\u306b\u3059\u308b\u3002\u3053\u306e\u884c\u306f white-space: pre-wrap \u306a\u306e\u3067\u3001\u666e\u901a\u306e\u7a7a\u767d\u3060\u3068
+    // U+2060 \u3092\u631f\u3093\u3067\u3082\u7a7a\u767d\u306e\u76f4\u5f8c\u3067\u6539\u884c\u3067\u304d\u3066\u3057\u307e\u3046(\u5b9f\u6e2c: \u534a\u89d2\u30b9\u30da\u30fc\u30b9\u306e\u5f8c\u308d\u3067\u5272\u308c\u305f)\u3002
+    const chunk = `${dated[1]}\u00a0${dated[2]}`;
+    return head + Array.from(chunk).join("\u2060");
+  }
+  // \u65e5\u6642\u304c\u7121\u3044\u884c(\u62ec\u5f27\u3060\u3051)\u306f\u3001\u62ec\u5f27\u306e\u4e2d\u3092\u7e4b\u3044\u3067\u9589\u3058\u62ec\u5f27\u3060\u3051\u6b21\u884c\u306b\u843d\u3061\u306a\u3044\u3088\u3046\u306b\u3059\u308b\u3002
+  const i = line.trimEnd().lastIndexOf("(");
+  if (i < 0 || !line.trimEnd().endsWith(")")) return line;
   return line.slice(0, i) + "\u2060" + Array.from(line.slice(i)).join("\u2060");
 }
 

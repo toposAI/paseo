@@ -233,7 +233,9 @@ export function ownerLine(
   const who = `担当: ${plainAssignee(item.assigneeText.replace(/^\(担当未定\)$/, ""))}`;
   if (!item.lastText) return who;
   const ago = agoText(item.lastAt, nowMs);
-  return `${who} ・ 最後の動き ${item.lastText}${ago ? `(${ago})` : ""}`;
+  // 「最｜後の動き」のように語の途中で折れないよう、この語は全体を繋ぐ(U+2060)。
+  // 区切りの「・」も語側に繋ぎ、折り返すときは担当の後ろで切る(行末に「・」だけ残さない)。
+  return `${who} ⁠・⁠最⁠後⁠の⁠動⁠き ${item.lastText}${ago ? `(${ago})` : ""}`;
 }
 
 /** 隠した自動送信の短い一言。0件なら null。 */
@@ -381,11 +383,22 @@ export function plainTitle(raw: string): string {
   return cut !== "" ? cut : s;
 }
 
-/** 担当の列に出す語。中身が英数のIDだけなら、そのまま出さず「担当のスレ」と言い換える。 */
+/** 担当の列に出す語の上限(字)。上流は題名を繋ぐので、折りたたみ行では長すぎると読めない。 */
+export const ASSIGNEE_MAX_CHARS = 40;
+
+/**
+ * 担当の列に出す語。中身が英数のIDだけなら、そのまま出さず「担当のスレ」と言い換える。
+ * 空・上流の穴埋め語(none 等)は「担当未定」。上流は空の題名を「・」で繋ぐため、
+ * 先頭・末尾に残る区切りや題名の切れ端(「}」)は落とし、長すぎる語は末尾を省略する。
+ */
 export function plainAssignee(raw: string): string {
-  const s = raw.trim();
-  if (s === "") return "担当未定";
-  return /^[0-9a-f]{6,}$/i.test(s) ? "担当のスレ" : s;
+  const s = raw
+    .trim()
+    .replace(/^[・}\s]+/, "")
+    .replace(/[・\s]+$/, "");
+  if (s === "" || /^(none|null|undefined|n\/a|-)$/i.test(s)) return "担当未定";
+  const one = /^[0-9a-f]{6,}$/i.test(s) ? "担当のスレ" : s;
+  return one.length > ASSIGNEE_MAX_CHARS ? `${one.slice(0, ASSIGNEE_MAX_CHARS)}…` : one;
 }
 
 /** 一覧の上に出す注意書きの最大行数(2026-11-06 指摘「PC3行/iPhone4行ある。短く」)。 */
