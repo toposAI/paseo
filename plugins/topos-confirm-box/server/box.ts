@@ -620,8 +620,11 @@ export function readConfirmBox(dir: string = resolveConfirmBoxDir()): ReadConfir
       pendingDetail = `読めません: ${(error as Error).message}`;
     }
   }
-  for (const item of boxItems) {
-    if (item.key && decidedKeys.has(item.key)) item.state = "approved";
+  // 増分読みは item の実体を次の一覧にも使い回す。ここで直接書き換えると、決定行が消えても
+  // approved のまま残る(2026-11-09 レビュー指摘)。差し替えで対応する。
+  for (let i = 0; i < boxItems.length; i += 1) {
+    const item = boxItems[i];
+    if (item.key && decidedKeys.has(item.key)) boxItems[i] = { ...item, state: "approved" };
   }
 
   sources.push({

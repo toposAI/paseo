@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
-import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import type { LayoutChangeEvent } from "react-native";
 import { ImageLightbox } from "./ImageLightbox.js";
 import { CardShot, CardTitle } from "./CardShot.js";
@@ -402,6 +402,8 @@ export function ConfirmBoxView({
         justifyContent: "center" as const,
       },
       footBtnOff: { paddingVertical: 4, paddingHorizontal: 4, opacity: 0.45 },
+      // 押せない間の見た目。押した直後の「受け取りました」の間だけ薄くする(押せたか分からない、を防ぐ)。
+      off: { opacity: 0.45 },
       created: {
         color: c.foregroundMuted,
         fontSize: 12,
@@ -601,6 +603,12 @@ export function ConfirmBoxView({
         setNotice("この項目は閉じられません(key なし)");
         return;
       }
+      // 押した瞬間に「受け取りました」を出す(完了・却下も他のボタンと同じ扱い)。
+      // 二重押しは ackedRef で弾く(猶予が切れる前に2回目が走ると二重に書いてしまう)。
+      const what = kind === "reject" ? "却下" : "完了";
+      if (ackedRef.current.has(item.id)) return;
+      ackedRef.current.add(item.id);
+      setAcks((cur) => ({ ...cur, [item.id]: { label: what, status: "sending" } }));
       try {
         const r = await decide({
           key: item.key,
@@ -611,13 +619,13 @@ export function ConfirmBoxView({
           source: "paseo-plugin",
         });
         if (r.ok === false) throw new Error(r.message);
-        const what = kind === "reject" ? "却下" : "完了";
         setAcks((cur) => ({ ...cur, [item.id]: { label: what, status: "ok" } }));
         setNotice(r.message);
         fadeOut(item.id);
       } catch (e) {
         // 失敗したら世に出さず、カードを一覧に残す(「完了にしました」の行きっぱなしを作らない)。
-        const what = kind === "reject" ? "却下" : "完了";
+        // 押し直せるよう、二重押しの印は外す(表示は「送れませんでした・もう一度」のまま)。
+        ackedRef.current.delete(item.id);
         setAcks((cur) => ({ ...cur, [item.id]: { label: what, status: "failed" } }));
         setNotice(
           `送れませんでした。もう一度押してください(${e instanceof Error ? e.message : String(e)})`,
@@ -661,6 +669,8 @@ export function ConfirmBoxView({
         setNotice("この項目は回答を送れません");
         return;
       }
+      if (ackedRef.current.has(item.id)) return;
+      ackedRef.current.add(item.id);
       setAcks((cur) => ({ ...cur, [item.id]: { label: "回答", status: "sending" } }));
       try {
         const r = await permit({
@@ -674,6 +684,7 @@ export function ConfirmBoxView({
         setNotice(r.message);
         fadeOut(item.id);
       } catch (e) {
+        ackedRef.current.delete(item.id);
         setAcks((cur) => ({ ...cur, [item.id]: { label: "回答", status: "failed" } }));
         setNotice(
           `送れませんでした。もう一度送ってください(${e instanceof Error ? e.message : String(e)})`,
@@ -1527,16 +1538,21 @@ function OptionButton({
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
 }) {
   const rec = option.id === item.recommended;
+  const base = rec ? styles.btnRec : styles.btn;
+  const baseText = rec ? styles.btnRecText : styles.btnText;
   const press = useCallback(() => void onChoose(item, option.id), [onChoose, item, option.id]);
+  // 押せないことが見た目でも分かるようにする(押した直後の「受け取りました」の間だけ薄くする)。
+  const btnStyle = disabled ? StyleSheet.flatten([base, styles.off]) : base;
+  const textStyle = disabled ? StyleSheet.flatten([baseText, styles.off]) : baseText;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={symbol ? `${symbol}: ${option.label}` : undefined}
       disabled={disabled}
-      style={rec ? styles.btnRec : styles.btn}
+      style={btnStyle}
       onPress={press}
     >
-      <Text style={rec ? styles.btnRecText : styles.btnText}>
+      <Text style={textStyle}>
         {/* 語の途中で折らない(2026-11-07 指摘「(推／奨)」)。題と同じ joinTitleWords を使う。
             「(推奨)」も語の途中で折れないよう、印を付けてから joinTitleWords に渡す。 */}
         {symbol ?? joinTitleWords(withRecommended(option.label, rec))}
@@ -1695,6 +1711,10 @@ function ItemCard({
   onOpenPane: (item: ConfirmBoxItem) => void;
 }) {
   const [bgOpen, setBgOpen] = useState(false);
+  // 送信中・受け取り済みの間だけ押せなくする。失敗表示のあとは押し直せるよう戻す
+  // (「送れませんでした・もう一度」と言いながら押せない、を防ぐ)。
+  const busy = ack !== undefined && ack.status !== "failed";
+  const footBtnStyle = busy ? StyleSheet.flatten([styles.footBtn, styles.off]) : styles.footBtn;
   const [zoom, setZoom] = useState<number | null>(null);
   const closeZoom = useCallback(() => setZoom(null), []);
   // 画像のコメントを送る口。カードの会話ペインと同じ部品(CardChatPane)を、拡大表示の間だけ
@@ -1823,17 +1843,12 @@ function ItemCard({
           <QuestionAnswer
             questions={questions}
             colors={colors}
-            disabled={ack !== undefined}
+            disabled={busy}
             onAnswer={answer}
             onDeny={deny}
           />
         ) : (
-          <PlainOptions
-            item={item}
-            styles={styles}
-            disabled={ack !== undefined}
-            onChoose={onChoose}
-          />
+          <PlainOptions item={item} styles={styles} disabled={busy} onChoose={onChoose} />
         )}
         {open && questions.length === 0 ? (
           <Text style={styles.text}>{joinTitleWords(item.summary)}</Text>
@@ -1862,8 +1877,8 @@ function ItemCard({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="このカードを完了にして閉じる(数秒は元に戻せる)"
-              disabled={ack !== undefined}
-              style={styles.footBtn}
+              disabled={busy}
+              style={footBtnStyle}
               onPress={complete}
             >
               <Text style={styles.footText}>✓ 完了</Text>
@@ -1873,8 +1888,8 @@ function ItemCard({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="この判断を却下する(コメント不要・数秒は元に戻せる)"
-              disabled={ack !== undefined}
-              style={styles.footBtn}
+              disabled={busy}
+              style={footBtnStyle}
               onPress={reject}
             >
               <Text style={styles.footText}>✕ 却下</Text>
