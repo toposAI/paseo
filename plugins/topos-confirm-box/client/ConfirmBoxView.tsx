@@ -84,6 +84,23 @@ import type {
 } from "../shared/contract.js";
 
 const REFRESH_MS = 30_000;
+/** 押した直後、「受け取りました」を見せてからカードを一覧から畳むまでの最短時間。
+ *  サーバーの返事や次の一覧取得(最大30秒)は待たない(2026-11-09 ユーザー指示
+ *  「せめて判断を受け取りましたは表示して。ボタン押せたかもわからん」)。 */
+const ACK_VISIBLE_MS = 450;
+
+/** 押した直後の「受け取りました」の状態。sending=送信中 / ok=受け取った / failed=送れなかった。 */
+interface AckState {
+  label: string;
+  status: "sending" | "ok" | "failed";
+}
+
+/** 受け取り表示の文言。失敗だけは残して押し直させる(黙って消えない)。 */
+function ackText(ack: AckState): string {
+  if (ack.status === "failed") return `送れませんでした・もう一度(${ack.label})`;
+  if (ack.status === "sending") return `受け取りました…(${ack.label})`;
+  return `受け取りました(${ack.label})`;
+}
 
 // oxlint-disable-next-line eslint/complexity
 export function ConfirmBoxView({
@@ -129,7 +146,18 @@ export function ConfirmBoxView({
   const [openId, setOpenId] = useState<string | null>(null);
   const [depth, setDepth] = useState<ConfirmBoxDepth>("list");
   const [notice, setNotice] = useState<string>("");
+  // 押した直後の「受け取りました」。サーバーの返事を待たずに出す。
+  const [acks, setAcks] = useState<Record<string, AckState>>({});
+  // 受け取った直後に一覧から畳む id。次の一覧取得(最大30秒後)を待たずに消す。
+  const [fadedOut, setFadedOut] = useState<string[]>([]);
+  // 二重押しの抑止。state の反映を待たずに弾くので ref で持つ。
+  const ackedRef = useRef<Set<string>>(new Set());
   const counts = useBadgeCounts();
+  // 画面に出す項目。受け取り済みで畳んだものは除く(サーバーの一覧が追いつくまで)。
+  const items = useMemo(
+    () => (data?.items ?? []).filter((v) => !fadedOut.includes(v.id)),
+    [data, fadedOut],
+  );
   const [prio, setPrio] = useState<string>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortNew, setSortNew] = useState(false);
@@ -167,6 +195,23 @@ export function ConfirmBoxView({
   useEffect(() => {
     if (!data) return;
     prunePending(data.items.map((v) => v.id));
+  }, [data]);
+
+  // 一覧から居なくなった項目の「受け取りました」と畳み印を捨てる(同じ id が再投函されたとき残らないように)。
+  useEffect(() => {
+    if (!data) return;
+    const ids = new Set(data.items.map((v) => v.id));
+    setFadedOut((cur) => (cur.some((id) => !ids.has(id)) ? cur.filter((id) => ids.has(id)) : cur));
+    setAcks((cur) => {
+      const gone = Object.keys(cur).filter((id) => !ids.has(id));
+      if (gone.length === 0) return cur;
+      const next = { ...cur };
+      for (const id of gone) {
+        delete next[id];
+        ackedRef.current.delete(id);
+      }
+      return next;
+    });
   }, [data]);
 
   // カードのチャット送信などで箱が変わったら一覧も取り直す(返事待ち・返事の印をすぐ反映する)。
@@ -226,7 +271,7 @@ export function ConfirmBoxView({
     threadNotice,
     openCard: openPaneFor,
     openThread,
-  } = useConfirmBoxPane({ items: data?.items, pane, openPane });
+  } = useConfirmBoxPane({ items, pane, openPane });
   const openCard = useCallback(
     (item: ConfirmBoxItem) => {
       setDepth("chat");
@@ -427,6 +472,9 @@ export function ConfirmBoxView({
       btnText: { color: c.foreground, fontSize: 13 },
       btnRecText: { color: c.accentForeground, fontSize: 13 },
       warn: { color: c.statusWarning, fontSize: 12 },
+      // 押した直後の「受け取りました」。押せたことが一目で分かるよう、本文より目立たせる。
+      ack: { color: c.accent, fontSize: 13, fontWeight: "600" as const },
+      ackFail: { color: c.statusWarning, fontSize: 13, fontWeight: "600" as const },
       rejectBox: {
         borderColor: c.statusWarning,
         borderWidth: 1,
@@ -470,19 +518,34 @@ export function ConfirmBoxView({
     setDepth("expanded");
   }, []);
   const openBackground = useCallback(() => setDepth("background"), []);
+  /**
+   * 「受け取りました」を最低 ACK_VISIBLE_MS 見せてから、一覧から畳む。
+   * サーバーの一覧を取り直す(=重い)のを待たずに消すので、押した手応えがすぐ返る。
+   */
+  const fadeOut = useCallback((id: string) => {
+    setTimeout(() => {
+      setFadedOut((cur) => (cur.includes(id) ? cur : [...cur, id]));
+    }, ACK_VISIBLE_MS);
+  }, []);
+
   const choose = useCallback(
     async (item: ConfirmBoxItem, optionId: string) => {
+      // 押せた瞬間に無効化する(state の反映を待たずに弾く)。
+      if (ackedRef.current.has(item.id)) return;
+      ackedRef.current.add(item.id);
+      const label = item.options.find((o) => o.id === optionId)?.label ?? optionId;
+      setAcks((cur) => ({ ...cur, [item.id]: { label, status: "sending" } }));
       try {
+        let r: { message: string } & { ok?: boolean };
         if (item.kind === "permit" && item.agentId) {
           const requestId = item.id.split(":").slice(2).join(":");
-          const r = await permit({
+          r = await permit({
             agentId: item.agentId,
             requestId,
             actionId: optionId,
           });
-          setNotice(r.message);
         } else if (item.key) {
-          const r = await decide({
+          r = await decide({
             key: item.key,
             chosen: optionId,
             recommended: item.recommended,
@@ -490,17 +553,24 @@ export function ConfirmBoxView({
             reason: "",
             source: "paseo-plugin",
           });
-          setNotice(r.message);
         } else {
-          setNotice("この項目は決定を記録できません(key なし)");
+          throw new Error("この項目は決定を記録できません(key なし)");
         }
+        if (r.ok === false) throw new Error(r.message);
+        setAcks((cur) => ({ ...cur, [item.id]: { label, status: "ok" } }));
+        setNotice(r.message);
+        fadeOut(item.id);
       } catch (e) {
-        setNotice(e instanceof Error ? e.message : String(e));
+        ackedRef.current.delete(item.id);
+        const msg = e instanceof Error ? e.message : String(e);
+        setAcks((cur) => ({ ...cur, [item.id]: { label, status: "failed" } }));
+        setNotice(`送れませんでした。もう一度押してください(${msg})`);
+        return; // 一覧は取り直さない(押し直せる状態のまま)
       }
       void reload();
       notifyBoxChanged();
     },
-    [decide, permit, depth, reload],
+    [decide, permit, depth, fadeOut, reload],
   );
 
   /**
@@ -522,14 +592,24 @@ export function ConfirmBoxView({
           reason: kind === "reject" ? REJECT_NO_COMMENT_REASON : DONE_REASON,
           source: "paseo-plugin",
         });
+        if (r.ok === false) throw new Error(r.message);
+        const what = kind === "reject" ? "却下" : "完了";
+        setAcks((cur) => ({ ...cur, [item.id]: { label: what, status: "ok" } }));
         setNotice(r.message);
+        fadeOut(item.id);
       } catch (e) {
-        setNotice(e instanceof Error ? e.message : String(e));
+        // 失敗したら世に出さず、カードを一覧に残す(「完了にしました」の行きっぱなしを作らない)。
+        const what = kind === "reject" ? "却下" : "完了";
+        setAcks((cur) => ({ ...cur, [item.id]: { label: what, status: "failed" } }));
+        setNotice(
+          `送れませんでした。もう一度押してください(${e instanceof Error ? e.message : String(e)})`,
+        );
+        return;
       }
       void reload();
       notifyBoxChanged();
     },
-    [decide, depth, reload],
+    [decide, depth, fadeOut, reload],
   );
   const commitRef = useRef(commitClose);
   commitRef.current = commitClose;
@@ -563,6 +643,7 @@ export function ConfirmBoxView({
         setNotice("この項目は回答を送れません");
         return;
       }
+      setAcks((cur) => ({ ...cur, [item.id]: { label: "回答", status: "sending" } }));
       try {
         const r = await permit({
           agentId: item.agentId,
@@ -570,27 +651,34 @@ export function ConfirmBoxView({
           actionId: null,
           answers,
         });
+        if (r.ok === false) throw new Error(r.message);
+        setAcks((cur) => ({ ...cur, [item.id]: { label: "回答", status: "ok" } }));
         setNotice(r.message);
+        fadeOut(item.id);
       } catch (e) {
-        setNotice(e instanceof Error ? e.message : String(e));
+        setAcks((cur) => ({ ...cur, [item.id]: { label: "回答", status: "failed" } }));
+        setNotice(
+          `送れませんでした。もう一度送ってください(${e instanceof Error ? e.message : String(e)})`,
+        );
+        return;
       }
       void reload();
       notifyBoxChanged();
     },
-    [permit, reload],
+    [permit, fadeOut, reload],
   );
 
   // 判断タブは判断印のある項目と Paseo 承認待ちだけ。通知・バグ報告・完了報告は専用タブにだけ出す。
   // 印の無い旧形式(選択肢つき)は「印なし(旧形式)」を押した時だけ加える。
   const visible = useMemo(
     () =>
-      judgmentTabRows(data?.items ?? [], {
+      judgmentTabRows(items, {
         showDone,
         prio: prio === "all" ? null : (prio as ConfirmBoxPriority),
         newestFirst: sortNew,
         legacy: !legacyOff,
       }),
-    [data, showDone, prio, sortNew, legacyOff],
+    [items, showDone, prio, sortNew, legacyOff],
   );
 
   // 「UIの最終チェック」を順に片付ける状態(見ているカード・返事待ち・未読の印)。
@@ -601,7 +689,7 @@ export function ConfirmBoxView({
   // 完了を押して「元に戻す」猶予中のカードは、もう片付いたものとして数えない(次のカードへ進める)。
   const ufcAllIds = useMemo(
     () =>
-      (data?.items ?? [])
+      items
         .filter(
           (v) =>
             isUiFinalCheck(v) &&
@@ -610,7 +698,7 @@ export function ConfirmBoxView({
             !closing.includes(v.id),
         )
         .map((v) => v.id),
-    [data, closing],
+    [items, closing],
   );
   const ufcItems = useMemo(
     () =>
@@ -833,6 +921,7 @@ export function ConfirmBoxView({
                     onAnswer={answer}
                     onReject={reject}
                     onComplete={complete}
+                    ack={acks[item.id]}
                     agentId={threadAgentId(item)}
                     paneColors={c}
                     paneOpen={paneCardId === item.id}
@@ -1407,6 +1496,7 @@ function OptionButton({
   option,
   symbol,
   styles,
+  disabled,
   onChoose,
 }: {
   item: ConfirmBoxItem;
@@ -1414,6 +1504,8 @@ function OptionButton({
   /** 指定時は記号だけのボタンにする(文章は別途、平文で全文を出す)。 */
   symbol?: string;
   styles: Styles;
+  /** 受け取り表示の間は押せなくする(押せたか分からない・二度押しを防ぐ)。 */
+  disabled?: boolean;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
 }) {
   const rec = option.id === item.recommended;
@@ -1422,6 +1514,7 @@ function OptionButton({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={symbol ? `${symbol}: ${option.label}` : undefined}
+      disabled={disabled}
       style={rec ? styles.btnRec : styles.btn}
       onPress={press}
     >
@@ -1439,17 +1532,27 @@ function OptionButton({
 function PlainOptions({
   item,
   styles,
+  disabled,
   onChoose,
 }: {
   item: ConfirmBoxItem;
   styles: Styles;
+  /** 受け取り表示の間は押せなくする。 */
+  disabled?: boolean;
   onChoose: (item: ConfirmBoxItem, optionId: string) => Promise<void>;
 }) {
   if (item.kind === "permit") {
     return (
       <View style={styles.row}>
         {item.options.map((o) => (
-          <OptionButton key={o.id} item={item} option={o} styles={styles} onChoose={onChoose} />
+          <OptionButton
+            key={o.id}
+            item={item}
+            option={o}
+            styles={styles}
+            disabled={disabled}
+            onChoose={onChoose}
+          />
         ))}
       </View>
     );
@@ -1474,6 +1577,7 @@ function PlainOptions({
             option={o}
             symbol={optionSymbol(o, i)}
             styles={styles}
+            disabled={disabled}
             onChoose={onChoose}
           />
         ))}
@@ -1539,6 +1643,7 @@ function ItemCard({
   onAnswer,
   onReject,
   onComplete,
+  ack,
   agentId,
   paneColors,
   paneOpen,
@@ -1546,6 +1651,8 @@ function ItemCard({
   onOpenPane,
   replyMark,
 }: {
+  /** 押した直後の「受け取りました」。押せた瞬間に立てる(サーバーの返事は待たない)。 */
+  ack?: AckState;
   /** 送信後の返事待ち / 返事が届いた印(台帳から作ったもの)。無ければ出さない。 */
   replyMark?: { waiting: boolean; unread: boolean };
   item: ConfirmBoxItem;
@@ -1647,6 +1754,16 @@ function ItemCard({
             </Text>
           )}
         </Pressable>
+        {/* 押した直後の受け取り表示(2026-11-09 ユーザー指示)。サーバーの返事を待たずに出す。
+            成功したら少し見せてから一覧から畳む。失敗したら残して押し直せるようにする。 */}
+        {ack ? (
+          <Text
+            style={ack.status === "failed" ? styles.ackFail : styles.ack}
+            testID={ack.status === "failed" ? "card-ack-failed" : "card-ack"}
+          >
+            {ackText(ack)}
+          </Text>
+        ) : null}
         {imageSources.length > 0 ? (
           <View style={styles.imageRow}>
             {imageSources.map((source, i) => (
@@ -1688,12 +1805,17 @@ function ItemCard({
           <QuestionAnswer
             questions={questions}
             colors={colors}
-            disabled={false}
+            disabled={ack !== undefined}
             onAnswer={answer}
             onDeny={deny}
           />
         ) : (
-          <PlainOptions item={item} styles={styles} onChoose={onChoose} />
+          <PlainOptions
+            item={item}
+            styles={styles}
+            disabled={ack !== undefined}
+            onChoose={onChoose}
+          />
         )}
         {open && questions.length === 0 ? (
           <Text style={styles.text}>{joinTitleWords(item.summary)}</Text>
@@ -1722,6 +1844,7 @@ function ItemCard({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="このカードを完了にして閉じる(数秒は元に戻せる)"
+              disabled={ack !== undefined}
               style={styles.footBtn}
               onPress={complete}
             >
@@ -1732,6 +1855,7 @@ function ItemCard({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="この判断を却下する(コメント不要・数秒は元に戻せる)"
+              disabled={ack !== undefined}
               style={styles.footBtn}
               onPress={reject}
             >

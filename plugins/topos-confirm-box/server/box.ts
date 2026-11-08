@@ -51,16 +51,30 @@ export function resolveConfirmBoxDir(env: NodeJS.ProcessEnv = process.env): stri
 
 // ---------------------------------------------------------------- 箱(events-*.jsonl)
 
-/** `events-*.jsonl` の行を1つの Map へ畳む(store.ts `ConfirmBoxStore` と同じ規則)。 */
-export function foldBoxEvents(
-  records: readonly Record<string, unknown>[],
-): Map<string, ConfirmBoxItem> {
-  const items = new Map<string, ConfirmBoxItem>();
+/**
+ * `events-*.jsonl` を**少しずつ**畳むための状態(2026-11-09)。
+ * 追記専用なので、前回の位置から伸びたぶんだけを足せば同じ結果になる。
+ * 当月のファイルが 41MB まで育ち、毎回の全読みが 0.4〜1秒かかっていた。
+ */
+export interface BoxEventFold {
+  items: Map<string, ConfirmBoxItem>;
   // `key` だけで付いた判断印(中間形式の行へ付けたもの)。同じ key の item が**後から**
   // 箱へ流れてきても印が失われないよう、畳んだ後に1回だけ当てる。
-  const keyMarks = new Set<string>();
+  keyMarks: Set<string>;
   // `hide` イベントで隠された id(`unhide` で戻せる。追記順で後勝ち)。item 行は書き換えない。
-  const hidden = new Set<string>();
+  hidden: Set<string>;
+}
+
+export function newBoxEventFold(): BoxEventFold {
+  return { items: new Map(), keyMarks: new Set(), hidden: new Set() };
+}
+
+/** 追記された行を畳み込む。**同じ行を二度入れると結果が変わる**(呼ぶ側が読んだ位置を持つ)。 */
+export function foldBoxEventsInto(
+  fold: BoxEventFold,
+  records: readonly Record<string, unknown>[],
+): void {
+  const { items, keyMarks, hidden } = fold;
   for (const e of records) {
     switch (e.t) {
       case "item":
@@ -91,13 +105,30 @@ export function foldBoxEvents(
         break;
     }
   }
-  if (keyMarks.size > 0) {
-    for (const item of items.values()) {
-      if (item.key && keyMarks.has(item.key)) item.judgment = true;
-    }
+}
+
+/** 畳んだ状態から表示用の Map を作る。**状態は壊さない**(次の差分読みで使い回す)。 */
+export function finishBoxEventFold(fold: BoxEventFold): Map<string, ConfirmBoxItem> {
+  const out = new Map<string, ConfirmBoxItem>();
+  for (const [id, item] of fold.items) {
+    if (fold.hidden.has(id)) continue;
+    out.set(
+      id,
+      item.key && !item.judgment && fold.keyMarks.has(item.key)
+        ? { ...item, judgment: true }
+        : item,
+    );
   }
-  for (const id of hidden) items.delete(id);
-  return items;
+  return out;
+}
+
+/** `events-*.jsonl` の行を1つの Map へ畳む(store.ts `ConfirmBoxStore` と同じ規則)。 */
+export function foldBoxEvents(
+  records: readonly Record<string, unknown>[],
+): Map<string, ConfirmBoxItem> {
+  const fold = newBoxEventFold();
+  foldBoxEventsInto(fold, records);
+  return finishBoxEventFold(fold);
 }
 
 function applyItem(items: Map<string, ConfirmBoxItem>, e: Record<string, unknown>): void {
@@ -174,6 +205,15 @@ export function parseReranks(
   records: readonly Record<string, unknown>[],
 ): Map<string, RerankOverride> {
   const out = new Map<string, RerankOverride>();
+  mergeReranksInto(out, records);
+  return out;
+}
+
+/** 追記された行の rerank を、既にある Map へ**足す**(後勝ち。差分読み用)。 */
+export function mergeReranksInto(
+  out: Map<string, RerankOverride>,
+  records: readonly Record<string, unknown>[],
+): void {
   for (const e of records) {
     if (e.t !== "rerank") continue;
     const target = typeof e.id === "string" && e.id ? e.id : normalizeKey(e.key);
@@ -185,7 +225,6 @@ export function parseReranks(
     }
     if (next.subrank !== undefined || next.priority !== undefined) out.set(target, next);
   }
-  return out;
 }
 
 export function applyReranks(
@@ -365,6 +404,155 @@ export function mergeBoxAndPending(
   return merged.sort(compareConfirmBoxItems);
 }
 
+// ---------------------------------------------------------------- events の差分読み
+
+/** 前回どこまで読んだか(ファイルごと)。 */
+interface EventsTail {
+  /** 次に読み始めるバイト位置(必ず行の先頭に合わせる)。 */
+  offset: number;
+  /** 最後に見たサイズ・mtime(書き換えの検出用)。 */
+  size: number;
+  mtimeMs: number;
+}
+
+const eventsCache = {
+  value: null as null | {
+    dir: string;
+    files: Map<string, EventsTail>;
+    fold: BoxEventFold;
+    reranks: Map<string, RerankOverride>;
+  },
+};
+
+/** テスト用: 差分読みの控えを捨てる(次の読みを全読みにする)。 */
+export function resetEventsCache(): void {
+  eventsCache.value = null;
+}
+
+function statOrNull(full: string): fs.Stats | null {
+  try {
+    return fs.statSync(full);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `file` の `from` 以降を読み、**行の切れ目まで**だけ畳める形で返す。
+ * 最後の行が書き込み途中(改行が無い)なら、その手前までにして次回へ回す。
+ */
+function readRecordsFrom(
+  file: string,
+  from: number,
+): { records: Record<string, unknown>[]; next: number; size: number; mtimeMs: number } {
+  const st = fs.statSync(file);
+  if (st.size <= from) return { records: [], next: from, size: st.size, mtimeMs: st.mtimeMs };
+  const len = st.size - from;
+  const fd = fs.openSync(file, "r");
+  try {
+    const buf = Buffer.allocUnsafe(len);
+    let read = 0;
+    while (read < len) {
+      const n = fs.readSync(fd, buf, read, len - read, from + read);
+      if (n <= 0) break;
+      read += n;
+    }
+    const chunk = buf.subarray(0, read);
+    const nl = chunk.lastIndexOf(0x0a); // 改行(0x0a)まで
+    if (nl < 0) return { records: [], next: from, size: st.size, mtimeMs: st.mtimeMs };
+    return {
+      records: parseJsonl(chunk.subarray(0, nl + 1).toString("utf8")),
+      next: from + nl + 1,
+      size: st.size,
+      mtimeMs: st.mtimeMs,
+    };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * `events-*.jsonl` を読む。**前回から伸びたぶんだけ**を畳み込む(2026-11-09)。
+ *
+ * 当月のファイルが 41MB まで育ち、30秒ごとの一覧取得とボタンを押すたびの取り直しで
+ * 毎回その全行を読んでいた(実測: 一覧1回あたり 0.4〜1.0 秒)。これが確認箱の
+ * 「表示が遅い・押してもカードが消えるのが遅い」の主因。追記専用のファイルなので、
+ * 前回読んだバイト位置から先だけ読めば同じ結果になる。
+ *
+ * ファイルが消えた/縮んだ/同じサイズで書き換えられた場合は、控えを捨てて全読みする(安全側)。
+ */
+function readEvents(dir: string): {
+  items: ConfirmBoxItem[];
+  reranks: Map<string, RerankOverride>;
+  ok: boolean;
+  detail: string;
+} {
+  const files = listEventFiles(dir);
+  if (files.length === 0) {
+    return {
+      items: [],
+      reranks: new Map(),
+      ok: true,
+      detail: "events-*.jsonl なし(まだ投函されていない)",
+    };
+  }
+  let cache = eventsCache.value && eventsCache.value.dir === dir ? eventsCache.value : null;
+  if (cache) {
+    const vanished = [...cache.files.keys()].some((n) => !files.includes(n));
+    let rewritten = false;
+    if (!vanished) {
+      for (const name of files) {
+        const prev = cache.files.get(name);
+        if (!prev) continue; // 新しいファイルは 0 から読めばよい
+        const st = statOrNull(path.join(dir, name));
+        if (
+          !st ||
+          st.size < prev.offset ||
+          (st.size === prev.size && st.mtimeMs !== prev.mtimeMs)
+        ) {
+          rewritten = true;
+          break;
+        }
+      }
+    }
+    if (vanished || rewritten) cache = null;
+  }
+  const fullRead = cache === null;
+  const next = cache ?? {
+    dir,
+    files: new Map<string, EventsTail>(),
+    fold: newBoxEventFold(),
+    reranks: new Map(),
+  };
+  try {
+    for (const name of files) {
+      const prev = next.files.get(name);
+      const read = readRecordsFrom(path.join(dir, name), prev ? prev.offset : 0);
+      if (read.records.length > 0) {
+        foldBoxEventsInto(next.fold, read.records);
+        mergeReranksInto(next.reranks, read.records);
+      }
+      next.files.set(name, { offset: read.next, size: read.size, mtimeMs: read.mtimeMs });
+    }
+    eventsCache.value = next;
+    return {
+      items: [...finishBoxEventFold(next.fold).values()],
+      reranks: next.reranks,
+      ok: true,
+      detail: `${files.join(", ")}${fullRead ? "" : "(追記ぶんだけ読み直し)"}`,
+    };
+  } catch (error) {
+    // 途中で失敗したら控えを捨てる(半端な位置を残さず、次は全読みする)。
+    eventsCache.value = null;
+    return {
+      items: [],
+      reranks: new Map(),
+      ok: false,
+      detail: `読めません: ${(error as Error).message}`,
+    };
+  }
+}
+
 export interface ReadConfirmBoxResult {
   items: ConfirmBoxItem[];
   /** 並べ替えイベント(rerank)。Vault判断カード等、後から足す項目にも `applyReranks` で当てる。 */
@@ -378,41 +566,29 @@ export function readConfirmBox(dir: string = resolveConfirmBoxDir()): ReadConfir
   const sources: ConfirmBoxSourceStatus[] = [];
   const reranks = new Map<string, RerankOverride>();
 
-  // --- 箱
-  let boxItems: ConfirmBoxItem[] = [];
-  let boxDetail = "";
-  let boxOk = true;
-  const files = listEventFiles(dir);
-  if (files.length === 0) {
-    boxOk = true;
-    boxDetail = "events-*.jsonl なし(まだ投函されていない)";
-  } else {
-    try {
-      const records = files.flatMap((name) =>
-        parseJsonl(fs.readFileSync(path.join(dir, name), "utf8")),
-      );
-      boxItems = [...foldBoxEvents(records).values()];
-      for (const [k, v] of parseReranks(records)) reranks.set(k, { ...reranks.get(k), ...v });
-      boxDetail = `${files.join(", ")}`;
-    } catch (error) {
-      boxOk = false;
-      boxDetail = `読めません: ${(error as Error).message}`;
-    }
-  }
+  // --- 箱(前回から伸びたぶんだけ読む)
+  const boxRead = readEvents(dir);
+  const boxItems: ConfirmBoxItem[] = boxRead.items;
+  const boxDetail = boxRead.detail;
+  const boxOk = boxRead.ok;
+  for (const [k, v] of boxRead.reranks) reranks.set(k, { ...reranks.get(k), ...v });
 
   // --- 中間形式
   let pendingItems: ConfirmBoxItem[] = [];
   let pendingOverrides = new Map<string, boolean>();
   let pendingDetail = "";
   let pendingOk = true;
+  // 決定済み key(中間形式の決定行 + 箱側の項目を外すのに使う)。
+  let decidedKeys = new Set<string>();
   const pendingPath = path.join(dir, PENDING_FILE);
   if (!fs.existsSync(pendingPath)) {
     pendingDetail = `${PENDING_FILE} なし`;
   } else {
     try {
-      const pendingRecords = parseJsonl(fs.readFileSync(pendingPath, "utf8"));
-      const parsed = parsePendingRecords(pendingRecords);
+      // 同じファイルを2回読まない(以前は decidedKeys のために全読みしていた。2026-11-09)。
+      const parsed = parsePendingRecords(parseJsonl(fs.readFileSync(pendingPath, "utf8")));
       pendingOverrides = parsed.overrides;
+      decidedKeys = parsed.decidedKeys;
       // 決定済みの key を外す(投函側が箱へ流す前でも、決めたものが残らないように)
       pendingItems = parsed.items.filter((i) => !(i.key && parsed.decidedKeys.has(i.key)));
       pendingDetail =
@@ -423,19 +599,6 @@ export function readConfirmBox(dir: string = resolveConfirmBoxDir()): ReadConfir
       pendingOk = false;
       pendingDetail = `読めません: ${(error as Error).message}`;
     }
-  }
-
-  // 決定行(decision)が1つでもある key は、箱側の項目も決定済みとして外す
-  // (ingest 済みの項目は箱に入っているため、中間形式の除外だけでは未決一覧に残る)。
-  let decidedKeys = new Set<string>();
-  try {
-    if (fs.existsSync(pendingPath)) {
-      decidedKeys = parsePendingRecords(
-        parseJsonl(fs.readFileSync(pendingPath, "utf8")),
-      ).decidedKeys;
-    }
-  } catch {
-    // 読めない場合は上の pendingDetail に出ているのでここでは何もしない
   }
   for (const item of boxItems) {
     if (item.key && decidedKeys.has(item.key)) item.state = "approved";
