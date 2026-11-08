@@ -35,6 +35,7 @@ export function ImageCommentDock({
   send,
   disabledReason,
   testID,
+  sentNotice,
 }: {
   /** どの画像へのコメントか(画像名)。文の先頭に付けて投函元へ伝える。 */
   label: string;
@@ -44,6 +45,8 @@ export function ImageCommentDock({
   /** 送れない理由(あれば入力欄の代わりに出す)。 */
   disabledReason?: string | null;
   testID?: string;
+  /** 受け取れたときの文言。溜める呼び出し側(UI最終チェックの「完了」で送る)は言い換える。 */
+  sentNotice?: string;
 }) {
   const [text, setText] = useState("");
   const [notice, setNotice] = useState("");
@@ -71,8 +74,8 @@ export function ImageCommentDock({
     }
     setText("");
     setNoticeOk(true);
-    setNotice("コメントを控えました(完了でまとめて送ります)");
-  }, [text, send, label]);
+    setNotice(sentNotice ?? "コメントを送りました");
+  }, [text, send, label, sentNotice]);
   const submitPress = useCallback(() => void submit(), [submit]);
   // 入力欄の部品は surface1 を必須で取る。一般カードの色には無いので surface0 で埋める。
   const composerColors = useMemo(

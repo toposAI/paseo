@@ -120,7 +120,13 @@ function ImageViewer({
           {source ? <ZoomableImage uri={source.uri} label={label} /> : null}
         </View>
         {/* コメント欄は共通部品(どの画像ビューアでも必ず出す)。溜めるだけでカードは閉じない(2026-11-08)。 */}
-        <ImageCommentDock label={label} colors={colors} send={send} testID="ufc-image-composer" />
+        <ImageCommentDock
+          label={label}
+          colors={colors}
+          send={send}
+          testID="ufc-image-composer"
+          sentNotice="コメントを控えました(完了でまとめて送ります)"
+        />
       </View>
     </Modal>
   );
