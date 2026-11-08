@@ -71,7 +71,7 @@ import { isUsableAgentId, shouldSwitchPaneOnCardPress } from "../shared/card-pan
 import { useCardPaneRoute } from "./useCardPaneRoute.js";
 import { useConfirmBoxPane } from "./useConfirmBoxPane.js";
 import { QuestionAnswer } from "./QuestionAnswer.js";
-import { UfcBar, UiFinalCheckCard } from "./UiFinalCheckCard.js";
+import { UfcBar, UiFinalCheckCard, prunePending } from "./UiFinalCheckCard.js";
 import { useUfcFlow } from "./useUfcFlow.js";
 import { nextOpen } from "../shared/ufc-flow.js";
 import { isUiFinalCheck } from "../shared/ui-final-check.js";
@@ -160,6 +160,14 @@ export function ConfirmBoxView({
     const timer = setInterval(() => void reload(), REFRESH_MS);
     return () => clearInterval(timer);
   }, [reload]);
+
+  // 一覧から居なくなったカードの溜め(画像コメント)を捨てる。片付いたカードの溜めが永久に残ると、
+  // 同じ id が再び来たときに古いコメントが混ざる(2026-11-08 出口レビュー2巡目 低1)。送信中の id は残す。
+  // まだ一覧を取れていない(null)ときは何もしない(取れていないだけで溜めを消さない)。
+  useEffect(() => {
+    if (!data) return;
+    prunePending(data.items.map((v) => v.id));
+  }, [data]);
 
   // 手動の更新。取れた時だけバッジ(件数)も取り直す(カードとバッジが同じ時点になる)
   const manualReload = useCallback(async () => {

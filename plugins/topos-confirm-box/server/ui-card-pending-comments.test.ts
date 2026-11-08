@@ -22,15 +22,17 @@ function block(source: string, startMarker: string, endMarker: string): string {
   return source.slice(start, end);
 }
 
+// 整形や改名で落ちないよう、`if (!(await flushPending())) return;` の完全一致では見ない。
+// 「flushPending( が after より前に出る」出現順と、「その間に return がある(送れなければ止める)」で見る。
 function assertFlushesFirst(handler: string, after: string): void {
-  const flush = handler.indexOf("flushPending()");
+  const flush = handler.indexOf("flushPending(");
   assert.ok(flush >= 0, "共通の送信関数 flushPending を通っていない");
   const proceed = handler.indexOf(after);
   assert.ok(proceed >= 0, `${after} が見つからない`);
   assert.ok(flush < proceed, `${after} より前にまとめ送信を行う(溜めを取りこぼさない)`);
   assert.match(
-    handler,
-    /if \(!\(await flushPending\(\)\)\) return;/,
+    handler.slice(flush, proceed),
+    /flushPending\(\)[\s\S]*\breturn\b/,
     "送れなければ元の動作をせず止める",
   );
 }
@@ -47,6 +49,49 @@ test("次へ も溜めた画像コメントを先に送り、成功してから�
   const handler = block(card, "const next = useCallback(", "const discardAndDone = useCallback");
   assertFlushesFirst(handler, "onSkip(");
   assert.match(card, /onPress=\{next\}/, "次へボタンがこの処理を呼ぶ");
+});
+
+// 出口レビュー2巡目 低2: 完了(done)も flushPending を通ることを見ていなかった
+// (ui-card-manual-done.test.ts は onPress={done} の存在しか見ていない)。
+test("完了も溜めた画像コメントを先に送り、成功してから閉じる", () => {
+  const card = read("UiFinalCheckCard.tsx");
+  const handler = block(card, "const done = useCallback(", "const header = useCallback");
+  assertFlushesFirst(handler, "onDone(");
+  assert.match(card, /onPress=\{done\}/, "完了ボタンがこの処理を呼ぶ");
+});
+
+test("まとめ送信の成功時は送った分だけ消し、送信中に足したコメントを残す", () => {
+  const card = read("UiFinalCheckCard.tsx");
+  const handler = block(card, "const flushPending = useCallback(", "const ok = useCallback");
+  // キーごと全消しすると、送信中に足した分まで消える(2巡目 中1)。
+  assert.doesNotMatch(handler, /clearPending\(/, "成功時に溜めを丸ごと消さない");
+  assert.match(
+    handler,
+    /const snapshot = \[\.\.\.pendingOf\(item\.id\)\];/,
+    "送る配列のスナップショットを取る",
+  );
+  assert.match(
+    handler,
+    /dropPending\(item\.id, snapshot\.length\)/,
+    "スナップショットの分だけを溜めから取り除く",
+  );
+  assert.match(
+    handler,
+    /setPendingN\(left\)|setPendingN\(pendingOf\(item\.id\)\.length\)/,
+    "件数表示を残数へ更新する",
+  );
+});
+
+test("一覧から消えたカードの溜めは掃除し、送信中の id は残す", () => {
+  const card = read("UiFinalCheckCard.tsx");
+  assert.match(
+    card,
+    /export function prunePending\(keepIds: readonly string\[\]\): void/,
+    "prunePending を公開する",
+  );
+  assert.match(card, /flushingItems\.has\(id\)/, "送信中の id は掃除しない");
+  const view = read("ConfirmBoxView.tsx");
+  assert.match(view, /prunePending\(/, "一覧を取ったら溜めを掃除する");
 });
 
 test("送れないときだけ「コメントを送らずに完了」の逃げ道を出し、押すと onDone で閉じる", () => {

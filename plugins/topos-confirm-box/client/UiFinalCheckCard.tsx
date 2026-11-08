@@ -78,6 +78,12 @@ async function flushImageComments(
  */
 const pendingByItem = new Map<string, string[]>();
 
+/**
+ * いままとめ送信中のカード。溜めの掃除(`prunePending`)から外すために持つ。
+ * 送信中に掃除すると、送信結果の反映先(件数)が消えるため(2026-11-08 出口レビュー2巡目 低1)。
+ */
+const flushingItems = new Set<string>();
+
 /** そのカードに溜まっている画像コメント(無ければ空配列)。 */
 function pendingOf(id: string): string[] {
   return pendingByItem.get(id) ?? [];
@@ -91,6 +97,51 @@ function addPending(id: string, text: string): void {
 /** 送れた(または捨てると決めた)カードの溜めを消す。 */
 function clearPending(id: string): void {
   pendingByItem.delete(id);
+}
+
+/**
+ * 送った分(先頭から count 件)だけを溜めから取り除き、残りを残す。
+ * まとめ送信中に足されたコメントを黙って消さないため(2026-11-08 出口レビュー2巡目 中1)。残り件数を返す。
+ */
+function dropPending(id: string, count: number): number {
+  const left = pendingOf(id).slice(count);
+  if (left.length === 0) {
+    clearPending(id);
+    return 0;
+  }
+  pendingByItem.set(id, left);
+  return left.length;
+}
+
+/**
+ * 一覧に居ないカードの溜めを捨てる(カードが片付いて二度と戻らないのに溜めだけ残るのを防ぐ)。
+ * 送信中の id は落とさない(送信結果の反映先が消えないように)。一覧を取り直すたびに呼ぶ。
+ */
+export function prunePending(keepIds: readonly string[]): void {
+  const keep = new Set(keepIds);
+  // Map の反復中に delete してよい(消した項目は以降に現れない)。
+  for (const id of pendingByItem.keys()) {
+    if (keep.has(id) || flushingItems.has(id)) continue;
+    pendingByItem.delete(id);
+  }
+}
+
+/** 完了(OK)ボタンを押せないか。まとめ送信中も押せない(押しても黙って何も起きない状態を作らない)。 */
+function okDisabled(sending: boolean, flushing: boolean): boolean {
+  return sending || flushing;
+}
+
+/**
+ * 画像コメントを受け付ける送信口。OK済みとまとめ送信中のときは null(入力欄を閉じる)。
+ * 分岐をカード本体へ書かずに済ませるため、ここへ出してある。
+ */
+function commentSend(
+  approved: boolean,
+  flushing: boolean,
+  send: (text: string) => Promise<boolean>,
+): ((text: string) => Promise<boolean>) | null {
+  if (approved || flushing) return null;
+  return send;
 }
 
 /** 完了ボタンの文字。まとめ送信中は押せないことが分かるよう「送信中…」にする。 */
@@ -147,12 +198,15 @@ function ImageViewer({
   label,
   colors,
   send,
+  disabledReason,
   onClose,
 }: {
   source: { uri: string } | null;
   label: string;
   colors: PaneColors;
   send: ((text: string) => Promise<boolean>) | null;
+  /** 送れない理由(まとめ送信中など)。入力欄の代わりに出す。 */
+  disabledReason?: string | null;
   onClose: () => void;
 }) {
   const st = useMemo(
@@ -182,6 +236,7 @@ function ImageViewer({
           label={label}
           colors={colors}
           send={send}
+          disabledReason={disabledReason}
           testID="ufc-image-composer"
           sentNotice="コメントを控えました(完了でまとめて送ります)"
         />
@@ -278,14 +333,19 @@ export function UiFinalCheckCard({
    */
   const flushPending = useCallback(async (): Promise<boolean> => {
     if (flushingRef.current) return false;
-    if (pendingOf(item.id).length === 0) return true;
+    // 送る配列はここで確定させる(送信中に足されたコメントを巻き込まない)。コピーなので、
+    // 送信の間に溜めへ足されても、この配列が書き換わることはない。
+    const snapshot = [...pendingOf(item.id)];
+    if (snapshot.length === 0) return true;
     flushingRef.current = true;
+    flushingItems.add(item.id);
     setFlushing(true);
     let sent = false;
     try {
-      sent = await flushImageComments(pendingOf(item.id), sendRef.current);
+      sent = await flushImageComments(snapshot, sendRef.current);
     } finally {
       flushingRef.current = false;
+      flushingItems.delete(item.id);
       setFlushing(false);
     }
     // 送れなかったら溜めた内容は残す(もう一度ボタンを押せば送り直せる)。
@@ -293,8 +353,9 @@ export function UiFinalCheckCard({
       setFlushFailed(true);
       return false;
     }
-    clearPending(item.id);
-    setPendingN(0);
+    // 送れた分だけ消す。送信中に足されたコメントは残し、件数表示も残数へ更新する(中1)。
+    const left = dropPending(item.id, snapshot.length);
+    setPendingN(left);
     setFlushFailed(false);
     return true;
   }, [item.id]);
@@ -478,9 +539,10 @@ export function UiFinalCheckCard({
             ) : (
               <>
                 <View style={rowWrap}>
+                  {/* まとめ送信中も押せない(押しても黙って何も起きない状態を作らない)。 */}
                   <Pressable
                     accessibilityRole="button"
-                    disabled={sending}
+                    disabled={okDisabled(sending, flushing)}
                     style={styles.btnRec}
                     onPress={ok}
                   >
@@ -535,7 +597,9 @@ export function UiFinalCheckCard({
           source={zoomSource}
           label={zoom === null ? "" : shotCaption(item, zoom)}
           colors={colors}
-          send={approved ? null : sendImageComment}
+          // まとめ送信中はコメントを足せない(足しても送った配列に入らず、残りとして次回に回るため)。
+          send={commentSend(approved, flushing, sendImageComment)}
+          disabledReason={flushing ? "まとめて送信中です(終わると足せます)" : null}
           onClose={closeZoom}
         />
       )}
