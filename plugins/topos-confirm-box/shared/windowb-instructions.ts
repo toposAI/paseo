@@ -302,13 +302,13 @@ interface Piece {
 }
 
 /** 直前の語と繋ぐか(繋ぐ=その間に折り目を作らない)。 */
-function shouldGlue(piece: Piece, prev: Piece, run: number): boolean {
+function shouldGlue(piece: Piece, prev: Piece, run: number, minBreak: number): boolean {
   if (prev.space) return false;
   if (piece.particle || CLOSER.test(piece.text)) return true; // 助詞・閉じ括弧は行頭に置かない
   if (piece.cjk && prev.open) return true; // 開き括弧だけが行末に残るのを防ぐ
   if (piece.cjk && prev.ascii) return true; // 「23GBの」「2誤り」は離さない
   if (!piece.cjk || !prev.cjk) return false;
-  const breakHere = prev.particle && run >= MIN_BREAK_CHARS;
+  const breakHere = prev.particle && run >= minBreak;
   return !breakHere && run + piece.text.length <= MAX_JOINED_CHARS;
 }
 
@@ -321,7 +321,7 @@ function shouldGlue(piece: Piece, prev: Piece, run: number): boolean {
  * **助詞・助動詞(ひらがなだけの語)の直後**だけを折り目にする。助詞の手前で折ると行頭が
  * 「て」「の」になり、熟語の途中で折ると「注意／帯」になるため、どちらも避ける。
  */
-export function joinTitleWords(text: string): string {
+export function joinTitleWords(text: string, minBreak: number = MIN_BREAK_CHARS): string {
   if (!WORD_SEGMENTER) return text;
   let out = "";
   let run = 0; // 直前に繋いだ語の字数
@@ -345,7 +345,7 @@ export function joinTitleWords(text: string): string {
       open: !word && OPENER.test(s),
       space: s.trim() === "",
     };
-    const glue = shouldGlue(piece, prev, run);
+    const glue = shouldGlue(piece, prev, run, minBreak);
     const inside = cjk && (s.length > 1 || piece.particle) ? Array.from(s).join(WORD_JOINER) : s;
     out += (glue ? WORD_JOINER : "") + inside;
     if (!cjk) {
