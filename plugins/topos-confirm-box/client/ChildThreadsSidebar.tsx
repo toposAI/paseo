@@ -68,6 +68,8 @@ import type { StatusKind } from "../shared/thread-status-label.js";
 import { pickReadableText } from "../shared/contrast.js";
 import { menuCanArchive } from "../shared/thread-menu.js";
 import type { ThreadMenuIntent } from "../shared/thread-menu.js";
+import { childThreadsHandoffCloseRpc, handoffTargets } from "../shared/handoff-close.js";
+import type { HandoffTarget } from "../shared/handoff-close.js";
 import { ConceptNotesList, useSidebarNotes } from "./ConceptNotes.js";
 import { SharedProjectsList } from "./SharedProjects.js";
 import { StatusBadge } from "./sidebar-badge.js";
@@ -118,7 +120,12 @@ const EDGE_PADDING = 8;
 const GAP = 4;
 /** 対象が無いときのプレースホルダ(JSX に毎回新しい空オブジェクトを渡さないため)。 */
 const EMPTY_MENU_ACTION: {
-  target?: { thread: ChildThread; title: string; canArchive: boolean };
+  target?: {
+    thread: ChildThread;
+    title: string;
+    canArchive: boolean;
+    handoffTargets: HandoffTarget[];
+  };
   onAction?: (intent: ThreadMenuIntent) => void;
 } = {};
 export const CHILD_THREADS_SCREEN_ID = "child-threads";
@@ -195,6 +202,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   const signalTimes = useRpc(boxSignalRpc);
   const setOrder = useRpc(childThreadsSetOrderRpc);
   const archive = useRpc(childThreadsArchiveRpc);
+  const handoffClose = useRpc(childThreadsHandoffCloseRpc);
   const pin = useRpc(childThreadsPinRpc);
   const setSide = useRpc(childThreadsSideRpc);
   // ドラッグ中は取得結果で一覧を差し替えない(ノート側の取得でも同じゲートを使う)。
@@ -533,10 +541,13 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
   // スマホ幅かはホストの `layout.compact` に合わせる(ホストのボトムシートへ切り替わる境目と同じ)。
   const compact = props.layout.compact;
   const [menuAgentId, setMenuAgentId] = useState<string | null>(null);
-  // メニューを出した時点の対象(押した行の題名・アーカイブ可否・スレ)。開いた瞬間に確定させる。
-  const menuTargetRef = useRef<{ thread: ChildThread; title: string; canArchive: boolean } | null>(
-    null,
-  );
+  // メニューを出した時点の対象(押した行の題名・アーカイブ可否・スレ・引き継ぎ先)。開いた瞬間に確定させる。
+  const menuTargetRef = useRef<{
+    thread: ChildThread;
+    title: string;
+    canArchive: boolean;
+    handoffTargets: HandoffTarget[];
+  } | null>(null);
   // 押した行の位置(root 基準。PC 幅でメニューをその帯の直下/直上に置くために測る)。
   const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null);
   // メニュー(絶対配置)の置き場所。行の位置を測る基準でもある。
@@ -573,6 +584,31 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
     return { target, onAction: menuAction };
     // 対象は開き直すたびに `menuAgentId` と一緒に差し替わるので、id も依存に入れて作り直す。
   }, [applyMenuIntent, menuAgentId]); // oxlint-disable-line react-hooks/exhaustive-deps
+  // 「引き継いで閉じる」で選ばれた引き継ぎ先へ、そのスレ宛てに1通だけ送る。
+  // **ここでアーカイブしない**(閉じるのはスレ自身。スキルが受領確認のあとで自分を閉じる)。
+  const onHandoffClose = useCallback(
+    (t: ChildThread, targetAgentId: string) => {
+      setNotice("引き継ぎを送っています…");
+      void handoffClose({ agentId: t.agentId, targetAgentId })
+        .then((r) => {
+          setNotice(r.message ?? (r.ok ? "引き継ぎを送りました" : "引き継ぎを送れませんでした"));
+          return null;
+        })
+        .catch((error: unknown) => {
+          setNotice(`引き継ぎを送れません: ${(error as Error).message}`);
+        });
+    },
+    [handoffClose],
+  );
+  // メニューへ渡す形(スレは開いた時点の対象から取る)。JSX に新しい関数を渡さない(react-perf)。
+  const onMenuHandoffClose = useCallback(
+    (targetAgentId: string) => {
+      const t = menuTargetRef.current?.thread;
+      if (t) onHandoffClose(t, targetAgentId);
+    },
+    [onHandoffClose],
+  );
+
   // 本体の描画。状態(確認待ち)は `ThreadMenu` の中に持つので、ここは開いた時点の対象を渡すだけ。
   const renderMenuPopover = useCallback(
     (popover: PluginPopoverProps) => {
@@ -587,6 +623,8 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
           // 司令塔(子を持つ行)はアーカイブさせない(誤って親を畳まない安全側。2026-10-24 子司令塔決定)。
           // ピンは残す。規則は純粋関数が正。
           canArchive={target.canArchive}
+          handoffTargets={target.handoffTargets}
+          onHandoffClose={onMenuHandoffClose}
           colors={popover.theme.colors}
           compact={popover.layout.compact}
           onAction={onAction}
@@ -595,7 +633,7 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
         />
       );
     },
-    [menuActionProps, registerMenuClose],
+    [menuActionProps, onMenuHandoffClose, registerMenuClose],
   );
   // ホストは「渡された部品」を state に持つので、毎回新しい部品にすると開き直しが効かない。
   // 中身は ref 経由で最新にする(古い props を掴んだまま表示しない)。
@@ -629,6 +667,8 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
         // 題名は**行に出ている題名**(ノートがあればノートの題名)。スレ側の題名は古いことがある。
         title: row.title,
         canArchive: menuCanArchive(t, parentIds),
+        // 引き継ぎ先は既存スレだけ(既定=親が先頭)。新しい壁打ちは作らない。
+        handoffTargets: handoffTargets(t, threads),
       };
       setMenuAgentId(t.agentId);
       // 自分で描ける行はホストへ渡さない(サイドバーの外にはみ出さない)。
@@ -659,13 +699,24 @@ export function ChildThreadsSidebar(input: PluginSidebarItemProps) {
         thread={target.thread}
         title={target.title}
         canArchive={target.canArchive}
+        handoffTargets={target.handoffTargets}
+        onHandoffClose={onMenuHandoffClose}
         colors={colors}
         onAction={onAction}
         onClose={closeMenu}
         registerClose={registerMenuClose}
       />
     );
-  }, [closeMenu, colors, compact, menuActionProps, menuAgentId, menuAnchor, registerMenuClose]);
+  }, [
+    closeMenu,
+    colors,
+    compact,
+    menuActionProps,
+    menuAgentId,
+    menuAnchor,
+    onMenuHandoffClose,
+    registerMenuClose,
+  ]);
 
   // タブを切り替えたら開いているメニューは閉じる(隠れた一覧の行のメニューが残らない)。
   // 幅の種別(PC↔スマホ)が変わったときも閉じる: 描き手が自分→ホストのシート(またはその逆)に

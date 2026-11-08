@@ -124,6 +124,11 @@ import {
 } from "./shared/child-threads.js";
 import type { ThreadAccess } from "./shared/child-threads.js";
 import {
+  childThreadsHandoffCloseRpc,
+  externalCloseRefusal,
+  handoffClosePrompt,
+} from "./shared/handoff-close.js";
+import {
   applyChildThreadOrder,
   childThreadPinsReadError,
   readChildThreadOrder,
@@ -675,6 +680,17 @@ export default function contribute(server: PluginServerContext) {
         message: "司令塔のスレはアーカイブできません(畳むとその領域の起こし通知が止まります)",
       };
     }
+    // 壁打ち(子司令塔)の行は、外からのアーカイブでは閉じない(2026-11-09 ユーザー決定)。
+    // 閉じる唯一の正規路はスキル(`handoff-and-close`)で、それは**スレ自身の中でだけ**走る。
+    // 外から閉じてよいのは、ユーザーがその行の「引き継いで閉じる」を押したときだけ。
+    // ここはその入口以外(行メニューのアーカイブ)を機械で塞ぐ門。
+    const registryDir = resolveConfirmBoxDir();
+    const refusal = externalCloseRefusal({
+      agentId: input.agentId,
+      rows: readChildThreads(registryDir),
+      sideOf: (id) => readChildThreadSides(registryDir).get(id),
+    });
+    if (refusal) return { ok: false, message: refusal };
     const ref = ctx.paseo.agents.ref(input.agentId);
     try {
       await ref.refresh();
@@ -752,6 +768,63 @@ export default function contribute(server: PluginServerContext) {
         message: `スレはアーカイブしましたが、ワークスペースを閉じられません: ${(error as Error).message}`,
       };
     }
+  });
+
+  /**
+   * ユーザーが「引き継いで閉じる」を押した(2026-11-09)。
+   *
+   * **ここでアーカイブしない**。このRPCはスレへ1通だけ「自分でスキルを走らせて閉じて」と送る。
+   * 閉じるのはスレ自身(スキルは受領確認→子スレの付け替え→自分のアーカイブの順に進む)。
+   * 外からアーカイブを代行すると、引き継ぎ文が届かないまま文脈が消える(事故の再発)。
+   * 送り先は押した時点の指定1つだけ。スレIDの取り違えはここで閉じる側のIDと突き合わせて防ぐ。
+   */
+  server.handle(childThreadsHandoffCloseRpc, async (input, ctx) => {
+    if (input.agentId === input.targetAgentId) {
+      return { ok: false, message: "引き継ぎ先が同じスレです" };
+    }
+    const self = ctx.paseo.agents.ref(input.agentId);
+    const target = ctx.paseo.agents.ref(input.targetAgentId);
+    try {
+      await Promise.all([self.refresh(), target.refresh()]);
+    } catch (error) {
+      return { ok: false, message: `スレの状態を取得できません: ${(error as Error).message}` };
+    }
+    const source = self.current();
+    if (!source) return { ok: false, message: "閉じたいスレが見つかりません" };
+    if (source.archivedAt != null) {
+      return { ok: false, message: "そのスレは既に閉じています" };
+    }
+    const dst = target.current();
+    if (!dst || dst.archivedAt != null) {
+      return { ok: false, message: "引き継ぎ先が見つかりません(閉じたスレは指定できません)" };
+    }
+    const targetTitle = String((dst as { title?: string }).title ?? input.targetAgentId);
+    // 引き継ぎ文の置き場はスキルと同じ所(`~/.local/state/toposai/handoff_and_close`)。
+    const handoffDir = path.join(os.homedir(), ".local", "state", "toposai", "handoff_and_close");
+    try {
+      fs.mkdirSync(handoffDir, { recursive: true });
+    } catch (error) {
+      return { ok: false, message: `置き場を作れません: ${(error as Error).message}` };
+    }
+    const handoffPath = path.join(
+      handoffDir,
+      `handoff-${input.agentId.slice(0, 8)}-${input.targetAgentId.slice(0, 8)}-${Date.now()}.md`,
+    );
+    const text = handoffClosePrompt({
+      sourceAgentId: input.agentId,
+      targetAgentId: input.targetAgentId,
+      targetTitle,
+      handoffPath,
+    });
+    try {
+      await self.send(text);
+    } catch (error) {
+      return { ok: false, message: `スレに送れません: ${(error as Error).message}` };
+    }
+    return {
+      ok: true,
+      message: `「${targetTitle}」へ引き継いで閉じるよう、スレに1通送りました`,
+    };
   });
 
   // ピン止めの切り替え。保存先は `child_threads_pins.json` だけで、登録簿(`child_threads.json`)は触らない。

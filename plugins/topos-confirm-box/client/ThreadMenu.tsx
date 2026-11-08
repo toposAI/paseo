@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { ChildThread } from "../shared/child-threads.js";
+import type { HandoffTarget } from "../shared/handoff-close.js";
 import {
   OPEN_MENU,
   archiveMenuLabel,
@@ -32,6 +33,11 @@ type SidebarColors = PluginSidebarItemProps["theme"]["colors"];
 /** 項目の高さ。スマホ(タッチ)では指で押しやすい高さにする(PC は純正メニュー寄りの詰まった行)。 */
 const ITEM_HEIGHT = { wide: 32, compact: 44 };
 
+/** 引き継ぎ先が無いときの既定(毎回新しい配列を作らない)。 */
+const NO_TARGETS: readonly HandoffTarget[] = [];
+/** 空振りの押下(候補が消えた行を押したとき)。何もしない。 */
+const NOOP = () => {};
+
 export interface ThreadMenuProps {
   thread: ChildThread;
   /** 行に出ている題名(ノートがあればノートの題名)。読み上げ文言に使う。 */
@@ -41,6 +47,13 @@ export interface ThreadMenuProps {
    * 2026-10-24 子司令塔の決定)。項目ごと出さないので、確認の2回目にも届かない。
    */
   canArchive?: boolean;
+  /**
+   * 「引き継いで閉じる」の引き継ぎ先(既存スレのみ。既定=親が先頭)。空なら項目を出さない。
+   * 押すと**この一覧**を出し、選んだ1つだけを親へ返す(スレIDの取り違えを画面側でも作らない)。
+   */
+  handoffTargets?: readonly HandoffTarget[];
+  /** 引き継ぎ先が選ばれた。実際に送るのは親(サイドバー)。 */
+  onHandoffClose?: (targetAgentId: string) => void;
   colors: SidebarColors;
   /** スマホ幅(タッチ)か。項目の高さを変える。 */
   compact?: boolean;
@@ -60,6 +73,8 @@ export function ThreadMenu({
   thread,
   title,
   canArchive = true,
+  handoffTargets = NO_TARGETS,
+  onHandoffClose,
   colors,
   compact = false,
   onAction,
@@ -67,6 +82,8 @@ export function ThreadMenu({
   registerClose,
 }: ThreadMenuProps) {
   const [state, setState] = useState<ThreadMenuState>(OPEN_MENU);
+  // 引き継ぎ先を選んでいる最中か(項目を押しただけでは送らない。選んで初めて送る)。
+  const [pickingTarget, setPickingTarget] = useState(false);
 
   // 親(サイドバー)から閉じられるようにする。外側タップ/Esc でホストが閉じたときは
   // アンマウントになるので、ここで解除される(古い close を掴んだままにしない)。
@@ -107,6 +124,15 @@ export function ThreadMenu({
   const toggleSide = useCallback(() => run("toggle-side"), [run]);
   const archive = useCallback(() => run("archive"), [run]);
   const openThread = useCallback(() => run("open-thread"), [run]);
+  // 引き継ぎ先の選択。**選んだ1つだけ**を親へ返し、送信は親(サイドバーのRPC)が行う。
+  const startHandoff = useCallback(() => setPickingTarget(true), []);
+  const pickHandoff = useCallback(
+    (targetAgentId: string) => {
+      onClose();
+      onHandoffClose?.(targetAgentId);
+    },
+    [onClose, onHandoffClose],
+  );
 
   const itemStyle = useMemo(
     () => [styles.item, { minHeight: compact ? ITEM_HEIGHT.compact : ITEM_HEIGHT.wide }],
@@ -146,6 +172,72 @@ export function ThreadMenu({
     [state.confirmingArchive, textStyle],
   );
 
+  // 引き継ぎ先の選択肢(2026-11-09 ユーザー決定)。閉じるのは**スレ自身**で、ここは合図を送るだけ。
+  // 押した直後には送らず、引き継ぎ先を選んでから送る(既定=親。新しいスレは作らない)。
+  // 項目ごとの `onPress` はここで作り、JSX に新しい関数を渡さない(react-perf)。
+  const cancelHandoff = useCallback(() => setPickingTarget(false), []);
+  const pickHandlers = useMemo(() => {
+    const map = new Map<string, () => void>();
+    for (const target of handoffTargets) {
+      map.set(target.agentId, () => pickHandoff(target.agentId));
+    }
+    return map;
+  }, [handoffTargets, pickHandoff]);
+  const handoffSection = useMemo(() => {
+    if (handoffTargets.length === 0) return null;
+    if (!pickingTarget) {
+      return (
+        <MenuItem
+          testID={`child-thread-menu-handoff-${thread.agentId}`}
+          label="引き継いで閉じる"
+          accessibilityLabel={`${title}を引き継いで閉じる`}
+          style={itemStyle}
+          pressedStyle={pressedItemStyle}
+          textStyle={textStyle}
+          onPress={startHandoff}
+        />
+      );
+    }
+    return (
+      <View testID={`child-thread-menu-handoff-picker-${thread.agentId}`}>
+        <Text style={noteStyle}>だれに引き継ぎますか</Text>
+        {handoffTargets.map((target) => (
+          <MenuItem
+            key={target.agentId}
+            testID={`child-thread-menu-handoff-to-${thread.agentId}-${target.agentId}`}
+            label={target.isParent ? `${target.title}(親)` : target.title}
+            accessibilityLabel={`${title}を${target.title}へ引き継いで閉じる`}
+            style={itemStyle}
+            pressedStyle={pressedItemStyle}
+            textStyle={textStyle}
+            onPress={pickHandlers.get(target.agentId) ?? NOOP}
+          />
+        ))}
+        <MenuItem
+          testID={`child-thread-menu-handoff-cancel-${thread.agentId}`}
+          label="やめる"
+          accessibilityLabel="引き継ぎをやめる"
+          style={itemStyle}
+          pressedStyle={pressedItemStyle}
+          textStyle={textStyle}
+          onPress={cancelHandoff}
+        />
+      </View>
+    );
+  }, [
+    cancelHandoff,
+    handoffTargets,
+    itemStyle,
+    noteStyle,
+    pickHandlers,
+    pickingTarget,
+    pressedItemStyle,
+    startHandoff,
+    textStyle,
+    thread.agentId,
+    title,
+  ]);
+
   return (
     <View testID={`child-thread-menu-${thread.agentId}`} style={styles.menu}>
       {/* どのスレへの操作かを見出しで示す。スマホはボトムシートの一番上に来るので、
@@ -180,6 +272,7 @@ export function ThreadMenu({
           onPress={toggleSide}
         />
       ) : null}
+      {handoffSection}
       {canArchive ? (
         <MenuItem
           testID={`child-thread-menu-archive-${thread.agentId}`}
