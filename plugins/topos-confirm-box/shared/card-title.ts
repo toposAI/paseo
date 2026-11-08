@@ -36,29 +36,39 @@ export const HEADING_MAX = 80;
 
 /**
  * iPhone幅(1行およそ20字)で2行に収まる目安の字数。これを超えたら読点で畳む。
- * 3行に伸ばすと、語の区切り(CJK は助詞の直後しか折れない)の都合で行の右端が
- * 280/171/319 のようにギザギザになり「変なところで改行」に見えた
- * (2026-11-08 ui-visual-check の差し戻し)。
+ * 畳んだ結果は「…」込みで最長 44 字なので、幅の狭い端末では3行になり得る
+ * (描画側の numberOfLines=3 で受ける)。行数任せにすると、語の区切り(CJK は助詞の直後しか
+ * 折れない)の都合で行の右端が 280/171/319 のようにギザギザになり「変なところで改行」に
+ * 見えたため、字数で畳んでから描かせる(2026-11-08 ui-visual-check の差し戻し)。
  */
 export const HEADING_SOFT = 42;
 
+/** 見出しとして意味を持つ最小の長さ。これ未満では切らない。 */
+const MIN_HEAD_CHARS = 12;
+
 /**
  * カードの見出し用に題を短くする(2026-11-08 ユーザー指摘「確認箱のカードの題名が長過ぎない？」)。
- * 投函側は複数の質問を「 / 」でつないで1つの題にすることがあり、そのまま出すと見出しが
- * 画面の大半を占めて末尾も途中で切れる。最初の1問だけを出し、文の切れ目で止める。
- * それでも2行に収まらない長さは読点(なければ語の切れ目)で畳み、末尾に「…」を付ける。
- * 全文は背景・会話で読める。
+ * 投函側(confirm_box_askq.py)は複数の質問を「 / 」(前後に空白)でつないで1つの題にすることが
+ * あり、そのまま出すと見出しが画面の大半を占めて末尾も途中で切れる。最初の1問だけを出し、
+ * 文の切れ目で止める。それでも2行に収まらない長さは読点(なければ語の切れ目)で畳み、
+ * 末尾に「…」を付ける。2問目以降はカードのチャット欄・背景・通知・優先度画面で読める。
  */
 export function headingText(raw: string): string {
   const s = splitShotCount(raw).title.trim();
   if (s === "") return s;
   // 「 / 」で複数の質問がつながっているときは最初の1問だけを出す。
-  let head = s.split(/\s+\/\s+/)[0].trim();
-  // 最初の文の終わり(。？！)までを1つの見出しとみなす。短すぎる文なら次の文も含める。
-  const m = /[。？！?]/.exec(head);
-  if (m && m.index >= 12) head = head.slice(0, m.index + 1);
+  // ただし最初の1問が短すぎるときは切らない(「PC / iPhone の表示幅をそろえる案」が
+  // 「PC」だけになる。区切りの「 / 」は質問の区切りとは限らない)。
+  const parts = s.split(/\s+\/\s+/);
+  let head = parts.length > 1 && parts[0].trim().length >= MIN_HEAD_CHARS ? parts[0].trim() : s;
+  // 最初の文の終わり(。？！!)までを1つの見出しとみなす。12字目より前で終わる文なら
+  // 切らずに題をそのまま残す(長さは後段の畳みで抑える)。
+  const m = /[。？！?!]/.exec(head);
+  if (m && m.index >= MIN_HEAD_CHARS) head = head.slice(0, m.index + 1);
   if (head.length > HEADING_SOFT) head = foldAtClause(head, HEADING_SOFT);
-  if (head.length > HEADING_MAX) head = head.slice(0, HEADING_MAX - 1).trimEnd() + "…";
+  // 絵文字が半分に割れないよう、コード単位ではなく文字単位で切る。
+  const chars = Array.from(head);
+  if (chars.length > HEADING_MAX) head = chars.slice(0, HEADING_MAX - 1).join("").trimEnd() + "…";
   return head;
 }
 
@@ -70,11 +80,11 @@ export function headingText(raw: string): string {
 function foldAtClause(s: string, limit: number): string {
   const cut = s.slice(0, limit + 1);
   const comma = cut.lastIndexOf("、");
-  if (comma >= 12) return s.slice(0, comma + 1).trimEnd() + "…";
+  if (comma >= MIN_HEAD_CHARS) return s.slice(0, comma + 1).trimEnd() + "…";
   // 読点が無い題は、助詞の直後(語の切れ目)で畳む。分節は joinTitleWords と同じ考え方。
   let last = -1;
-  for (let i = 12; i < cut.length; i++) if (PARTICLE_AFTER.has(cut[i])) last = i;
-  if (last >= 12) return s.slice(0, last + 1).trimEnd() + "…";
+  for (let i = MIN_HEAD_CHARS; i < cut.length; i++) if (PARTICLE_AFTER.has(cut[i])) last = i;
+  if (last >= MIN_HEAD_CHARS) return s.slice(0, last + 1).trimEnd() + "…";
   return s;
 }
 

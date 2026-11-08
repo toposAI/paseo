@@ -60,3 +60,36 @@ test("見出しは長い題を最初の1問に切り、2行に収まらない分
     "失効するAPIクレジットを何に使うか",
   );
 });
+
+test("区切りの「 / 」は質問の区切りとは限らない(1問目が短ければ切らない)", () => {
+  // 「PC」だけの見出しになるのを防ぐ(2026-11-09 出口レビューの指摘)
+  const t = "PC / iPhone の表示幅をそろえる案";
+  assert.equal(headingText(t), t);
+  // 1問目が十分長ければ従来どおり切る
+  assert.equal(
+    headingText("家族版を出荷してよいですか？ / 旧画面を消してよいですか？"),
+    "家族版を出荷してよいですか？",
+  );
+});
+
+test("半角の「!」も文の終わりとして扱い、絵文字は割らない", () => {
+  assert.equal(
+    headingText("共有の置き場を家族版へ移してよいですか! 移すと元に戻せません"),
+    "共有の置き場を家族版へ移してよいですか!",
+  );
+  // サロゲートペアを半分に切らない(文字数で歯止めを掛ける)
+  const emoji = "🎉".repeat(HEADING_MAX + 10);
+  const e = headingText(emoji);
+  assert.ok(e.endsWith("…"), e);
+  assert.equal(Array.from(e).length, HEADING_MAX, `${Array.from(e).length}`);
+  assert.ok(!/[\uD800-\uDBFF]$/.test(e.slice(0, -1)), "絵文字が途中で割れていない");
+});
+
+test("読点が無い題は助詞の直後で畳む", () => {
+  const t =
+    "確認箱のカードの題名が長すぎるので最初の質問だけを出して残りは背景で読ませる案を今日から試して見てもらう";
+  const h = headingText(t);
+  assert.ok(h.endsWith("…"), h);
+  assert.ok(h.length <= HEADING_SOFT + 2, `${h.length}`);
+  assert.ok(t.startsWith(h.slice(0, -1)), h);
+});
