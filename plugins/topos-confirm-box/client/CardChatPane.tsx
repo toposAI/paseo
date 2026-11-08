@@ -51,6 +51,7 @@ import {
   PRIORITY_LABEL,
   cardChatAskRpc,
   cardChatCancelRpc,
+  cardChatEnqueueRpc,
   cardChatListRpc,
   coordinatorTargetRpc,
 } from "../shared/contract.js";
@@ -398,6 +399,7 @@ export function CardChatPane({
   // 話題の履歴を1回読めたか。読む前の空表示を「返事なし」の基準にしない(誤判定の防止)。
   const [topicReady, setTopicReady] = useState(false);
   const askRpc = useRpc(cardChatAskRpc);
+  const enqueueRpc = useRpc(cardChatEnqueueRpc);
   const cancelRpc = useRpc(cardChatCancelRpc);
   const listRpc = useRpc(cardChatListRpc);
   const [coordClosed, setCoordClosed] = useState(false);
@@ -859,6 +861,8 @@ export function CardChatPane({
             }
           : undefined;
         // 候補を順に試し、最初に届いた所で確定する(投函元でだめなら総司令塔)。
+        // 受け箱へ溜まったか(送ったかとは別に、画面の1行を変える)。
+        let queuedHere = false;
         const outcome = await attemptDelivery(targets, async (target) => {
           const to = target.id;
           let askedHere: string | null = null;
@@ -885,6 +889,20 @@ export function CardChatPane({
               // スレッド連携の無い経路でも「返事は要らない」を明記する(2026-11-06 出口レビュー指摘3)。
               outgoing = withNoReplyInstruction(outgoing);
             }
+            // 溜められるなら溜めて送らない(投函元へは既存のまとめ通知で数分おきに届く)。
+            // 2026-11-08 ユーザー逐語「これも一箇所に貯めておいて5分おきに確認するシステムに入れればいいじゃん」。
+            // ただし画像は受け箱が運べないので直接送る。画像への直接コメントは今までどおり即時に送る。
+            // 溜められない(ok:false・例外)ときは下の直接送信へ進む=届かない経路を作らない。
+            if (!sentImages.length && !imageComment) {
+              const queued = await enqueueRpc({ dest: to, text: outgoing }).catch(() => ({
+                ok: false,
+              }));
+              if (queued.ok) {
+                askedId = askedHere;
+                queuedHere = true;
+                return;
+              }
+            }
             await getPaseoClient(serverId).agents.ref(to).send(outgoing, opts);
             askedId = askedHere;
           } catch (e) {
@@ -901,7 +919,7 @@ export function CardChatPane({
         // 総司令塔の出力を購読するのは、実際に総司令塔へ送った時だけ。
         if (delivered.via === "coordinator" && delivered.id !== agentId) setCoordSent(true);
         seeActivity({ kind: "sent" });
-        setNotice("");
+        setNotice(queuedHere ? "送りました(投函元へはまとめて届きます)" : "");
         ok = true;
         sentOnce.current = true;
         if (imageComment && askedId && item) {
@@ -949,6 +967,7 @@ export function CardChatPane({
       seeActivity,
       topic,
       askRpc,
+      enqueueRpc,
       cancelRpc,
       refreshTopic,
       toolImages,
