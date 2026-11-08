@@ -39,6 +39,10 @@ import {
 const EVENTS_FILE = /^events-\d{6}\.jsonl$/;
 export const PENDING_FILE = "pending_user_decisions.jsonl";
 
+// 一覧の再パースを避ける仕組みは、下の「events の差分読み」(readEvents)が担う。
+// 2026-11-09 に、署名つきの全読み控え(eventsMemo)から、前回の位置から伸びたぶんだけ読む
+// 差分読みへ置き換えた(数十MBの events-*.jsonl を毎回パースすると1回0.4〜1秒かかっていた)。
+
 /** `TOPOS_CONFIRM_BOX_DIR` があればそれ、無ければ `~/.local/state/toposai/confirm_box`。
  *  store.ts の `resolveConfirmBoxDir()` と同じ規則(`~` 展開つき)。 */
 export function resolveConfirmBoxDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -481,6 +485,20 @@ function readRecordsFrom(
  *
  * ファイルが消えた/縮んだ/同じサイズで書き換えられた場合は、控えを捨てて全読みする(安全側)。
  */
+/** 表示用の写し。控え(eventsCache)の中のオブジェクトをそのまま渡すと、呼び手の書き換えが次の読みへ漏れる。 */
+function copyItems(items: Map<string, ConfirmBoxItem>): ConfirmBoxItem[] {
+  const out: ConfirmBoxItem[] = [];
+  for (const item of items.values()) out.push({ ...item });
+  return out;
+}
+
+/** rerank の写し(同上)。 */
+function copyReranks(reranks: Map<string, RerankOverride>): Map<string, RerankOverride> {
+  const out = new Map<string, RerankOverride>();
+  for (const [k, v] of reranks) out.set(k, { ...v });
+  return out;
+}
+
 function readEvents(dir: string): {
   items: ConfirmBoxItem[];
   reranks: Map<string, RerankOverride>;
@@ -536,8 +554,10 @@ function readEvents(dir: string): {
     }
     eventsCache.value = next;
     return {
-      items: [...finishBoxEventFold(next.fold).values()],
-      reranks: next.reranks,
+      // 控えの中のオブジェクトをそのまま渡すと、呼び手が書き換えたときに次の読み(使い回しの道)へ
+      // 漏れる(2026-11-09 マージで発覚)。表示用の写しを渡す。rerank も同様に写す。
+      items: copyItems(finishBoxEventFold(next.fold)),
+      reranks: copyReranks(next.reranks),
       ok: true,
       detail: `${files.join(", ")}${fullRead ? "" : "(追記ぶんだけ読み直し)"}`,
     };

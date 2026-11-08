@@ -63,6 +63,7 @@ import {
   attemptDelivery,
   deliveryTargets,
   isImageComment,
+  shouldQueueCardChat,
   pendingLabel,
   pickCoordinatorTarget,
   shouldFallbackToCoordinator,
@@ -897,10 +898,15 @@ export function CardChatPane({
         const outcome = await attemptDelivery(targets, async (target) => {
           const to = target.id;
           let askedHere: string | null = null;
-          // 溜められるか。画像は受け箱が運べないので直接送る。画像への直接コメントは即時に送る。
-          // 宛先が死んでいれば溜めない(溜めるとまとめ送りが永久に届かない=従来の直接送信へ倒す)。
-          const queueable =
-            !!topic && !!item && !sentImages.length && !imageComment && targetLive(target);
+          // 溜められるか。判断の中身は shared 側(shouldQueueCardChat)に置く
+          // (画面の関数が複雑になりすぎないよう・試験で同じ判断を直接確かめられるように)。
+          // 渡すのは見出しを付ける前の本文(見出しの件名で即時判定が誤爆しないように)。
+          const queueable = shouldQueueCardChat({
+            hasItem: !!item,
+            attachedImages: sentImages.length,
+            text: tagged,
+            targetLive: targetLive(target),
+          });
           try {
             let outgoing = item ? withCardHeader(tagged, item) : tagged;
             // 溜める経路の本文(直接送る本文とは say 指示の位置だけが違う。下の注記)。

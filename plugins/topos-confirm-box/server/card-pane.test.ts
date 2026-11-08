@@ -12,6 +12,8 @@ import {
   threadIdFromSearch,
   threadUnavailableReason,
   withCardHeader,
+  isUrgentCardChat,
+  URGENT_CARD_CHAT_MARKERS,
 } from "../shared/card-pane.js";
 
 test("card パラメータを読み出す(先頭の?の有無どちらも)", () => {
@@ -211,4 +213,28 @@ test("配送: 候補が空なら試さずに null", async () => {
   });
   assert.equal(out.delivered, null);
   assert.equal(calls, 0);
+});
+
+// 画像コメントも受け箱へ溜める(2026-11-08 ユーザー指示)が、5分待つと損をする報告だけは即時に送る。
+test("すぐ届けるべき語: 故障・本番入れ替えなどは即時", () => {
+  assert.equal(isUrgentCardChat("写真の1枚目、ボタンが動かない"), true);
+  assert.equal(isUrgentCardChat("本番入れ替えの手順を先に決めたい"), true);
+  assert.equal(isUrgentCardChat("データ消失の恐れがある"), true);
+  assert.equal(isUrgentCardChat("ここは異常に見える"), true);
+});
+
+test("すぐ届けるべき語: ふつうの見た目の指摘は溜めてよい(即時にしない)", () => {
+  assert.equal(isUrgentCardChat("余白が広すぎる"), false);
+  assert.equal(isUrgentCardChat("文字が小さいので大きくしてほしい"), false);
+  assert.equal(isUrgentCardChat(""), false);
+});
+
+test("即時判定の語に『確認箱』『判断待ち』を入れない(カードの見出しで必ず当たってしまう)", () => {
+  assert.equal(isUrgentCardChat("確認箱の見た目について"), false);
+  assert.equal(isUrgentCardChat("判断待ちの表示が変"), false);
+  const marks: readonly string[] = URGENT_CARD_CHAT_MARKERS;
+  assert.equal(
+    marks.some((m) => m === "確認箱" || m === "判断待ち"),
+    false,
+  );
 });

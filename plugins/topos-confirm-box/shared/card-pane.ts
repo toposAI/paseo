@@ -368,6 +368,63 @@ export function isImageComment(text: string): boolean {
 }
 
 /**
+ * カードからの発言のうち**すぐ届けるべき**語。カードからの発言は受け箱に溜める(2026-11-08 ユーザー指示
+ * 「一箇所に貯めておいて5分おきに確認するシステムに入れればいいじゃん」)が、故障・本番入れ替えの
+ * ように5分待つと損をする報告だけは従来どおり即時に送る。
+ * Python `notify_digest.py` の `inbox_immediate_markers` のうち、確認箱の文脈で誤検知しない語だけを持つ
+ * (「確認箱」「判断待ち」はカードの見出しに必ず入るので入れない)。
+ * 安全網(L0)・出口レビュー(Critique)のような「止まったら損」の語も入れる(2026-11-08 出口レビュー指摘)。
+ */
+export const URGENT_CARD_CHAT_MARKERS = [
+  "故障",
+  "異常",
+  "壊れ",
+  "動かない",
+  "復旧",
+  "再起動依頼",
+  "本番入れ替え",
+  "本番入替",
+  "安全網",
+  "データ消失",
+  "消えた",
+  "L0",
+  "Critique",
+  "collect-auditor",
+  "検知",
+] as const;
+
+/** 発言の本文(見出しを付ける前)が「5分待たずに届けるべき」か。 */
+export function isUrgentCardChat(text: string): boolean {
+  return URGENT_CARD_CHAT_MARKERS.some((m) => text.includes(m));
+}
+
+/**
+ * カードからの発言を「受け箱へ溜める」か(溜めずに今すぐ送るなら false)。
+ *
+ * - カードの項目が無い発言(雑談)は溜めない=従来どおり今すぐ送る。
+ *   `hasItem=false` は「カードが無い」=topic も無い状態を兼ねる(topic は item から導出されるため)
+ * - 画像ファイルの添付は受け箱が本文しか運べないので直接送る
+ * - 故障・本番入れ替えなど5分待つと損をする語を含む発言は、画像コメントかどうかに関わらず即時に送る
+ * - それ以外は溜める(画像への直接コメントも溜める。2026-11-08 ユーザー指示)
+ * - 宛先が死んでいれば溜めない(溜めるとまとめ送りが永久に届かない)
+ */
+export function shouldQueueCardChat(input: {
+  hasItem: boolean;
+  attachedImages: number;
+  /**
+   * 宛先へ送る本文。**カードIDの見出しを付ける前**の文を渡す(見出しには件名が入り、
+   * 件名の「故障」「異常」で全部が即時になってしまうため)。
+   */
+  text: string;
+  targetLive: boolean;
+}): boolean {
+  if (!input.hasItem) return false;
+  if (input.attachedImages > 0) return false;
+  if (isUrgentCardChat(input.text)) return false;
+  return input.targetLive;
+}
+
+/**
  * 画像ごとのコメント文。どの画像へのコメントかを投函元へ伝える印と、機械が見分ける固定の目印を付ける。
  * 画面ごとに書き方がぶれないよう、ここ1か所で作る(2026-11-06)。
  */

@@ -9,6 +9,7 @@ import type { ImageLoadEventData, NativeSyntheticEvent } from "react-native";
 import {
   SHOT_FALLBACK_RATIO,
   SHOT_MAX_HEIGHT,
+  headingText,
   shotRatio,
   splitShotCount,
 } from "../shared/card-title.js";
@@ -75,17 +76,20 @@ export function CardTitle({
 }) {
   const { title, suffix } = splitShotCount(subject);
   // 題は語の途中で折らない(指示一覧と同じ joinTitleWords。2026-11-07 指摘「家族／版」)。
-  const joined = useMemo(() => joinTitleWords(title), [title]);
+  // 長い題は最初の1問だけに切る(2026-11-08 指摘「題名が長過ぎ」)。
+  // 折り目は一覧より細かく取る(minBreak=3): 既定の5字だと「確認箱で画像カードを」が
+  // 1つの塊になり、iPhone幅で行の右端が 280/171/319 と揃わない(同日 ui-visual-check の差し戻し)。
+  const joined = useMemo(() => joinTitleWords(headingText(title), 3), [title]);
   if (!suffix) {
     return (
-      <Text style={style} numberOfLines={numberOfLines}>
+      <Text style={style} numberOfLines={numberOfLines ?? 3}>
         {joined}
       </Text>
     );
   }
   return (
     <View>
-      <Text style={style} numberOfLines={numberOfLines ?? 2}>
+      <Text style={style} numberOfLines={numberOfLines ?? 3}>
         {joined}
       </Text>
       <Text style={SUFFIX}>{suffix}</Text>
